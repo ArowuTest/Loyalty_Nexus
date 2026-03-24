@@ -3,18 +3,23 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
+	"loyalty-nexus/internal/application/services"
+	"loyalty-nexus/internal/application/usecases"
+	"loyalty-nexus/internal/infrastructure/config"
+	"loyalty-nexus/internal/infrastructure/persistence"
 	"loyalty-nexus/internal/infrastructure/queue"
 )
 
 func main() {
-	// 1. Initialize Infrastructure
 	db, err := sql.Open("postgres", os.Getenv("DATABASE_URL"))
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
@@ -24,35 +29,56 @@ func main() {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: os.Getenv("REDIS_URL"),
 	})
+
+	// Repositories
+	userRepo := persistence.NewPostgresUserRepository(db)
+	txRepo := persistence.NewPostgresTransactionRepository(db)
+
+	// Infrastructure
 	eq := queue.NewEventQueue(rdb, "recharge_stream")
+	cfg := config.NewConfigManager(db)
+	cfg.Refresh(context.Background())
 
-	// 2. HTTP Handlers
+	// Services & UseCases
+	userUC := usecases.NewUserUseCase(userRepo)
+	spinSvc := services.NewSpinService(userRepo, txRepo, cfg, db)
+
+	// --- ROUTES ---
+
+	// Ingestor (MTN Gateway Endpoint)
 	http.HandleFunc("/api/v1/recharge/ingest", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		// Mock Ingestor: In production, this receives pings from MTN Gateway
 		msisdn := r.URL.Query().Get("msisdn")
-		amount := r.URL.Query().Get("amount") // simplified for demo
+		amount := 100000 // mock N1000
+		event := queue.RechargeEvent{MSISDN: msisdn, Amount: int64(amount), Ref: "MTN-" + time.Now().Format("150405")}
+		eq.PushRecharge(r.Context(), event)
+		w.WriteHeader(202)
+		fmt.Fprintf(w, "Accepted")
+	})
 
-		event := queue.RechargeEvent{
-			MSISDN: msisdn,
-			Amount: 100000, // mock N1000
-			Ref:    "MTN-REF-123",
-		}
-
-		if err := eq.PushRecharge(context.Background(), event); err != nil {
-			http.Error(w, "Failed to queue event", 500)
+	// User Profile
+	http.HandleFunc("/api/v1/user/profile", func(w http.ResponseWriter, r *http.Request) {
+		msisdn := r.URL.Query().Get("msisdn") // In production, get from JWT
+		user, err := userUC.GetProfile(r.Context(), msisdn)
+		if err != nil {
+			http.Error(w, "User not found", 404)
 			return
 		}
+		json.NewEncoder(w).Encode(user)
+	})
 
-		fmt.Fprintf(w, "OK: Queued recharge for %s", msisdn)
+	// Spin Wheel
+	http.HandleFunc("/api/v1/spin/play", func(w http.ResponseWriter, r *http.Request) {
+		msisdn := r.URL.Query().Get("msisdn")
+		tx, err := spinSvc.PlaySpin(r.Context(), msisdn)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		json.NewEncoder(w).Encode(tx)
 	})
 
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
-	log.Printf("Loyalty Nexus Ingestor listening on port %s", port)
-	http.ListenAndServe(":"+port, nil)
+	log.Printf("Loyalty Nexus API listening on port %s", port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
