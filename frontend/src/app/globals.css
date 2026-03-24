@@ -1,1 +1,23 @@
 @import "tailwindcss";
+
+@theme {
+  --color-brand-gold: #FFCC00;
+  --color-brand-obsidian: #0A0A0A;
+  --color-brand-surface: #1A1A1A;
+  --color-brand-glass: rgba(255, 255, 255, 0.05);
+}
+
+@layer base {
+  body {
+    @apply bg-brand-obsidian text-slate-200;
+  }
+}
+
+/* Luxury Glassmorphism */
+.glass {
+  @apply bg-brand-glass backdrop-blur-xl border border-white/10;
+}
+
+.gold-gradient {
+  background: linear-gradient(135deg, #FFCC00 0%, #FFAA00 100%);
+}
