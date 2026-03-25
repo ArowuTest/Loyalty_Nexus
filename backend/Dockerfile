@@ -1,5 +1,10 @@
 # Loyalty Nexus Backend — Multi-stage Dockerfile
 # Stage: builder → api → worker
+#
+# RENDER DEPLOYMENT NOTE:
+#   Build context is the `backend/` directory (rootDir in render.yaml).
+#   database/migrations/ lives at the repo root and is NOT in this build context.
+#   Run migrations separately via Render Shell or a pre-deploy job (see DEPLOYMENT.md §2).
 
 # ─── Stage 1: Builder ───────────────────────────────────────────
 FROM golang:1.22-alpine AS builder
@@ -12,11 +17,15 @@ RUN go mod download
 
 COPY . .
 
-# Build both binaries
+# Build API binary
+# NOTE: `git describe` is removed — it requires .git which is not in the build context
+# on Render (rootDir: backend). Pass VERSION as a build-arg or embed a static value.
+ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-w -s -X main.version=$(git describe --tags --always)" \
+    go build -ldflags="-w -s -X main.version=${VERSION}" \
     -o /bin/api ./cmd/api
 
+# Build worker binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags="-w -s" \
     -o /bin/worker ./cmd/worker

@@ -1,0 +1,217 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  LOYALTY NEXUS — Render.com Infrastructure Definition
+#  Docs: https://render.com/docs/yaml-spec
+# ═══════════════════════════════════════════════════════════════════════════
+# IMPORTANT: Update the `repo` field to your actual GitHub repository URL
+#            before connecting this file to Render's Blueprint.
+
+services:
+
+  # ─── API Web Service (Docker) ─────────────────────────────────────────────
+  - type: web
+    name: loyalty-nexus-api
+    runtime: docker
+    repo: https://github.com/ArowuTest/Loyalty_Nexus   # ← update to real repo
+    branch: main
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerBuildTarget: api           # targets the `api` stage (not `worker`, the last stage)
+    # Render builds the `api` target automatically from the multi-stage Dockerfile.
+    # The distroless image exposes /api binary on port 8080.
+    healthCheckPath: /api/v1/health
+    plan: free                       # upgrade to starter ($7/mo) before real users
+    autoDeploy: true
+    envVars:
+      # ── Server ───────────────────────────────────────────────────────────
+      - key: GO_ENV
+        value: production
+      - key: ENVIRONMENT
+        value: production
+      - key: PORT
+        value: 8080
+      - key: OPERATION_MODE
+        value: independent            # independent | pilot | national
+
+      # ── Database & Cache ─────────────────────────────────────────────────
+      - key: DATABASE_URL
+        fromDatabase:
+          name: loyalty-nexus-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: loyalty-nexus-redis
+          property: connectionString
+
+      # ── Security (set manually in Render Dashboard → Environment) ────────
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRY_HOURS
+        value: "24"
+      - key: ADMIN_JWT_EXPIRY_HOURS
+        value: "8"
+      - key: AES_256_KEY
+        sync: false                   # 64 hex chars (256-bit)
+
+      # ── AI / LLM Providers ───────────────────────────────────────────────
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+      - key: HF_IMAGE_MODEL
+        value: black-forest-labs/FLUX.1-schnell
+      - key: FAL_API_KEY
+        sync: false
+      - key: POLLINATIONS_SECRET_KEY
+        sync: false
+      - key: ASSEMBLY_AI_KEY
+        sync: false
+
+      # ── Voice / TTS ──────────────────────────────────────────────────────
+      - key: GOOGLE_CLOUD_TTS_KEY
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_VOICE_ID
+        value: 21m00Tcm4TlvDq8ikWAM
+
+      # ── Translation ──────────────────────────────────────────────────────
+      - key: GOOGLE_TRANSLATE_API_KEY
+        sync: false
+
+      # ── Asset Storage (S3 / Cloudflare R2 / MinIO) ───────────────────────
+      - key: STORAGE_BACKEND
+        sync: false                   # s3 | gcs | local
+      - key: STORAGE_CDN_BASE_URL
+        sync: false
+      - key: AWS_S3_BUCKET
+        sync: false
+      - key: AWS_REGION
+        value: us-east-1
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_S3_ENDPOINT
+        sync: false                   # leave blank for AWS; set for R2/MinIO
+
+      # ── Background Removal ───────────────────────────────────────────────
+      - key: REMBG_SERVICE_URL
+        sync: false                   # e.g. https://rembg.your-domain.com
+      - key: REMOVEBG_API_KEY
+        sync: false
+
+      # ── SMS / Telco ──────────────────────────────────────────────────────
+      - key: TERMII_API_KEY
+        sync: false
+      - key: TERMII_SENDER_ID
+        value: Nexus
+
+      # ── Payments ─────────────────────────────────────────────────────────
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_WEBHOOK_SECRET
+        sync: false
+      - key: VTPASS_API_KEY
+        sync: false
+      - key: VTPASS_PUBLIC_KEY
+        sync: false
+      - key: VTPASS_SECRET_KEY
+        sync: false
+      - key: VTPASS_BASE_URL
+        value: https://vtpass.com/api
+      - key: VTPASS_ENV
+        value: sandbox                # change to production when ready
+      - key: MTN_MOMO_BASE_URL
+        value: https://sandbox.momodeveloper.mtn.com
+      - key: MTN_MOMO_SUBSCRIPTION_KEY
+        sync: false
+      - key: MTN_MOMO_API_USER
+        sync: false
+      - key: MTN_MOMO_API_KEY
+        sync: false
+      - key: MTN_MOMO_ENVIRONMENT
+        value: sandbox
+      - key: MOMO_CALLBACK_URL
+        sync: false                   # https://<render-url>/api/v1/momo/callback
+
+      # ── CORS / Frontend URLs ─────────────────────────────────────────────
+      - key: FRONTEND_URL
+        sync: false                   # e.g. https://loyalty-nexus.vercel.app
+      - key: ADMIN_URL
+        sync: false                   # e.g. https://loyalty-nexus-admin.vercel.app
+      - key: CORS_ORIGINS
+        sync: false                   # comma-separated list of allowed origins
+
+      # ── Fraud Guard Thresholds ───────────────────────────────────────────
+      - key: FRAUD_MAX_RECHARGE_24H
+        value: "20"
+      - key: FRAUD_MAX_SPIN_24H
+        value: "10"
+      - key: FRAUD_MIN_RECHARGE_NAIRA
+        value: "100"
+
+      # ── Feature Flags ────────────────────────────────────────────────────
+      - key: REGIONAL_WARS_PRIZE_POOL_NAIRA
+        value: "500000"
+      - key: MONTHLY_DRAW_PRIZE_NAIRA
+        value: "1000000"
+
+  # ─── Background Worker (Docker) ───────────────────────────────────────────
+  - type: worker
+    name: loyalty-nexus-worker
+    runtime: docker
+    repo: https://github.com/ArowuTest/Loyalty_Nexus   # ← same repo
+    branch: main
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerBuildTarget: worker        # targets the `worker` stage explicitly
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: loyalty-nexus-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: loyalty-nexus-redis
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: AES_256_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+      - key: TERMII_API_KEY
+        sync: false
+      - key: TERMII_SENDER_ID
+        value: Nexus
+      - key: OPERATION_MODE
+        value: independent
+
+  # ─── Redis ────────────────────────────────────────────────────────────────
+  - type: redis
+    name: loyalty-nexus-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+
+databases:
+  # ─── PostgreSQL ───────────────────────────────────────────────────────────
+  - name: loyalty-nexus-db
+    plan: free                        # 1 GB storage; expires 90 days — upgrade for prod
+    databaseName: nexus
+    user: nexus
+    # NOTE: Render free DBs expire after 90 days. Run migrations immediately after
+    # first provision using the shell tab (see DEPLOYMENT.md § Running DB Migrations).

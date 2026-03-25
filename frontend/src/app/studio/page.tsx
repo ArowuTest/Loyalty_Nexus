@@ -12,7 +12,7 @@ import {
   Mic, FileText, Music, Globe, ChevronRight, Sparkles,
   AlertTriangle, CheckCircle2, Clock, ExternalLink, RefreshCw,
   Brain, Video, X, Info, Play, LayoutGrid, MessageSquare, History,
-  Code2, Copy, Check,
+  Code2, Copy, Check, Download, RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -40,7 +40,54 @@ interface Generation {
   status: "pending" | "processing" | "completed" | "failed";
   output_url?: string;
   output_text?: string;
+  prompt?: string;
   created_at: string;
+  point_cost?: number;
+}
+
+// ─── Tool Meta ─────────────────────────────────────────────────────────────────
+const TOOL_META: Record<string, { time: string; output: string; tip: string }> = {
+  "ai-chat":            { time: "instant",  output: "Conversational reply",          tip: "Ask follow-ups to go deeper" },
+  "web-search-ai":      { time: "~5 sec",   output: "Live internet answer",          tip: "Include 'today' or a date for current info" },
+  "ai-photo":           { time: "~8 sec",   output: "1024×1024 image",               tip: "Add style words: 'photorealistic', 'vibrant', 'cinematic'" },
+  "ai-photo-pro":       { time: "~12 sec",  output: "Premium 1024×1024 image",       tip: "Describe lighting, mood, and camera angle" },
+  "ai-photo-max":       { time: "~20 sec",  output: "Max quality image",             tip: "Be very detailed — every word affects the result" },
+  "ai-photo-dream":     { time: "~10 sec",  output: "Creative stylized image",       tip: "Try 'Afrofuturist', 'anime', 'oil painting' styles" },
+  "photo-editor":       { time: "~15 sec",  output: "Edited photo",                  tip: "Be specific: 'remove background and replace with beach sunset'" },
+  "image-analyser":     { time: "~4 sec",   output: "Detailed description",          tip: "Works with any public image URL" },
+  "ask-my-photo":       { time: "~5 sec",   output: "AI answer about image",         tip: "Ask 'What is the brand logo in this image?'" },
+  "bg-remover":         { time: "~5 sec",   output: "Transparent PNG",               tip: "Works best with clear subject vs background" },
+  "animate-photo":      { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
+  "video-cinematic":    { time: "~90 sec",  output: "Cinematic 5s video",            tip: "Describe motion: 'slow zoom in', 'camera pan left'" },
+  "video-premium":      { time: "~2 min",   output: "HD video clip",                 tip: "More detail in prompt = better camera movement" },
+  "video-veo":          { time: "~3 min",   output: "Google Veo video",              tip: "Describe the scene like a film director would" },
+  "narrate":            { time: "~4 sec",   output: "MP3 audio file",                tip: "Keep text under 500 words for best quality" },
+  "narrate-pro":        { time: "~5 sec",   output: "MP3 with premium voice",        tip: "Try 'coral' for warm tone, 'onyx' for deep voice" },
+  "transcribe":         { time: "~6 sec",   output: "Text transcript",               tip: "Paste a direct link to an MP3 or WAV file" },
+  "transcribe-african": { time: "~8 sec",   output: "African language transcript",   tip: "Select language BEFORE submitting for accuracy" },
+  "translate":          { time: "~3 sec",   output: "Translated text",               tip: "Format: type your text, select target language" },
+  "bg-music":           { time: "~30 sec",  output: "15-second music clip",          tip: "Describe mood: 'calm', 'energetic', 'corporate'" },
+  "jingle":             { time: "~25 sec",  output: "AI music jingle",               tip: "Add brand name and target emotion in prompt" },
+  "song-creator":       { time: "~2 min",   output: "Full AI song with vocals",      tip: "Afrobeats, Gospel, Amapiano — be specific about genre" },
+  "instrumental":       { time: "~2 min",   output: "Instrumental music track",      tip: "Describe instruments: 'piano, strings, light percussion'" },
+  "code-helper":        { time: "~5 sec",   output: "Code + explanation",            tip: "Mention the programming language in your prompt" },
+  "study-guide":        { time: "~8 sec",   output: "Structured study guide",        tip: "Add 'for WAEC' or 'for university level' for focus" },
+  "quiz":               { time: "~6 sec",   output: "10 multiple-choice questions",  tip: "Specify difficulty: 'easy', 'intermediate', 'expert'" },
+  "mindmap":            { time: "~5 sec",   output: "Interactive mind map",          tip: "One topic at a time gives the best results" },
+  "research-brief":     { time: "~10 sec",  output: "Structured research report",    tip: "Be specific about industry or location context" },
+  "bizplan":            { time: "~12 sec",  output: "Nigerian market business plan", tip: "Include target city and startup budget for relevance" },
+  "slide-deck":         { time: "~10 sec",  output: "10-slide presentation outline", tip: "Add audience type: 'investors', 'students', 'clients'" },
+  "infographic":        { time: "~8 sec",   output: "Data layout structure",         tip: "Include statistics or data points in your prompt" },
+  "podcast":            { time: "~90 sec",  output: "2-host AI podcast audio",       tip: "Give a clear topic — the AI writes the full script" },
+};
+
+// ─── Output type label helper ─────────────────────────────────────────────────
+function getOutputLabel(slug: string): string {
+  if (VIDEO_SLUGS.has(slug))  return "🎬 Video MP4";
+  if (AUDIO_SLUGS.has(slug))  return "🎵 Audio MP3";
+  if (IMAGE_SLUGS.has(slug))  return "🖼️ Image file";
+  if (CODE_SLUGS.has(slug))   return "💻 Code output";
+  return "📄 Text output";
 }
 
 // ─── Category config ──────────────────────────────────────────────────────────
@@ -80,7 +127,6 @@ const CAT = {
     badge: "bg-red-500/20 text-red-300 border border-red-500/30",
     dot: "bg-red-400",
   },
-  // ── New categories ──
   "Vision": {
     icon: <Brain size={15} />, color: "from-violet-500/20 to-violet-600/10",
     badge: "bg-violet-500/20 text-violet-300 border border-violet-500/30",
@@ -135,6 +181,7 @@ const VIDEO_SLUGS  = new Set(["animate-photo","video-premium","video-cinematic",
 const CODE_SLUGS   = new Set(["code-helper"]);
 const VISION_SLUGS = new Set(["image-analyser","ask-my-photo"]);
 const WEB_SLUGS    = new Set(["web-search-ai"]);
+const JSON_SLUGS   = new Set(["quiz","mindmap","slide-deck"]);
 
 // ─── Placeholders ─────────────────────────────────────────────────────────────
 const PLACEHOLDERS: Record<string, string> = {
@@ -152,7 +199,6 @@ const PLACEHOLDERS: Record<string, string> = {
   "infographic":        "Steps to open a small business in Nigeria — visual format…",
   "animate-photo":      "URL of your image to animate with subtle motion…",
   "bg-remover":         "URL of product image to remove background from…",
-  // ── New ──
   "web-search-ai":      "Ask anything — e.g. 'What is the current price of Bitcoin?' or 'Latest Nigeria news today'…",
   "image-analyser":     "Paste an image URL to analyse…",
   "ask-my-photo":       "Paste your image URL here…",
@@ -190,7 +236,7 @@ function catCfg(category: string) {
 }
 
 // ─── Copy-code button ─────────────────────────────────────────────────────────
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, label = "Copy Code" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
     try {
@@ -208,8 +254,41 @@ function CopyButton({ text }: { text: string }) {
                  bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-all"
     >
       {copied ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
-      {copied ? "Copied!" : "Copy Code"}
+      {copied ? "Copied!" : label}
     </button>
+  );
+}
+
+// ─── Intro / How It Works banner ─────────────────────────────────────────────
+function HowItWorksBanner({ onDismiss }: { onDismiss: () => void }) {
+  const steps = [
+    { icon: "🔍", label: "Choose a tool" },
+    { icon: "✏️", label: "Describe what you want" },
+    { icon: "⚡", label: "Nexus AI creates it" },
+    { icon: "⬇", label: "Download or copy" },
+  ];
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="nexus-card p-4 border border-nexus-500/20 bg-gradient-to-r from-nexus-600/10 to-purple-600/10"
+    >
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <p className="text-white/80 text-xs font-semibold uppercase tracking-wider">How It Works</p>
+        <button onClick={onDismiss} className="text-white/30 hover:text-white/70 transition-colors">
+          <X size={14} />
+        </button>
+      </div>
+      <div className="grid grid-cols-4 gap-2">
+        {steps.map((s, i) => (
+          <div key={i} className="flex flex-col items-center gap-1 text-center">
+            <span className="text-xl">{s.icon}</span>
+            <p className="text-white/50 text-[10px] leading-tight">{s.label}</p>
+          </div>
+        ))}
+      </div>
+    </motion.div>
   );
 }
 
@@ -341,10 +420,11 @@ function ChatBubble({ msg }: { msg: Message }) {
 
 // ─── Tool Card ────────────────────────────────────────────────────────────────
 function ToolCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
-  const cfg    = catCfg(tool.category);
-  const isFree = tool.point_cost === 0;
+  const cfg       = catCfg(tool.category);
+  const isFree    = tool.point_cost === 0;
   const isPremium = tool.point_cost >= 20;
-  const isNew  = NEW_TOOL_SLUGS.has(tool.slug);
+  const isNew     = NEW_TOOL_SLUGS.has(tool.slug);
+  const meta      = TOOL_META[tool.slug];
 
   return (
     <motion.button
@@ -364,7 +444,10 @@ function ToolCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
             </span>
           )}
         </div>
-        <p className="text-white/45 text-xs mt-0.5 line-clamp-2 leading-relaxed">{tool.description}</p>
+        <p className="text-white/45 text-xs mt-0.5 line-clamp-1 leading-relaxed">{tool.description}</p>
+        {meta && (
+          <p className="text-white/30 text-[10px] mt-0.5 leading-none">{meta.output}</p>
+        )}
       </div>
       <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
         <span className={cn(
@@ -377,6 +460,12 @@ function ToolCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
         )}>
           {isFree ? "Free" : isPremium ? `⭐ ${tool.point_cost} pts` : `${tool.point_cost} pts`}
         </span>
+        {meta && (
+          <span className="text-[9px] text-white/30 flex items-center gap-0.5 font-medium">
+            <Clock size={9} />
+            {meta.time}
+          </span>
+        )}
         <ChevronRight size={13} className="text-white/25 group-hover:text-white/60 transition-colors" />
       </div>
     </motion.button>
@@ -384,16 +473,54 @@ function ToolCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
 }
 
 // ─── Generation status card ───────────────────────────────────────────────────
-function GenerationCard({ gen }: { gen: Generation }) {
+function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?: (gen: Generation) => void }) {
   const isImage  = IMAGE_SLUGS.has(gen.tool_slug);
   const isAudio  = AUDIO_SLUGS.has(gen.tool_slug);
   const isVideo  = VIDEO_SLUGS.has(gen.tool_slug);
   const isCode   = CODE_SLUGS.has(gen.tool_slug);
   const isVision = VISION_SLUGS.has(gen.tool_slug);
   const isWeb    = WEB_SLUGS.has(gen.tool_slug);
+  const isJson   = JSON_SLUGS.has(gen.tool_slug);
+  const meta     = TOOL_META[gen.tool_slug];
+
+  // ── Quiz card renderer ──
+  function renderQuiz(text: string) {
+    let parsed: { question?: string; options?: string[]; answer?: string }[] | null = null;
+    try {
+      const raw = JSON.parse(text);
+      if (Array.isArray(raw)) parsed = raw;
+    } catch { /* not valid JSON */ }
+    if (!parsed) {
+      return <p className="text-white/70 text-sm leading-relaxed whitespace-pre-wrap">{text}</p>;
+    }
+    return (
+      <div className="space-y-3">
+        {parsed.map((q, i) => (
+          <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-2">
+            <p className="text-white/90 text-sm font-medium">{i + 1}. {q.question}</p>
+            {Array.isArray(q.options) && (
+              <ul className="space-y-1">
+                {q.options.map((opt: string, oi: number) => (
+                  <li key={oi} className={cn(
+                    "text-xs px-3 py-1.5 rounded-lg border",
+                    q.answer === opt || q.answer === String(oi)
+                      ? "border-green-500/40 bg-green-500/10 text-green-300"
+                      : "border-white/10 text-white/55"
+                  )}>
+                    {opt}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="nexus-card p-4 space-y-3">
+      {/* Header row */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-white text-sm font-semibold truncate">{gen.tool_name}</span>
@@ -405,21 +532,120 @@ function GenerationCard({ gen }: { gen: Generation }) {
         <StatusPill status={gen.status} />
       </div>
 
+      {/* ── Processing state — animated skeleton ── */}
+      {gen.status === "processing" && (
+        <div className="space-y-3">
+          {/* Indeterminate progress bar */}
+          <div className="h-1 w-full rounded-full bg-white/10 overflow-hidden">
+            <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-nexus-500 to-purple-500 animate-[progress_1.6s_ease-in-out_infinite]" />
+          </div>
+          {/* Skeleton lines */}
+          <div className="space-y-2">
+            <div className="h-3 rounded-lg bg-white/10 animate-pulse w-3/4" />
+            <div className="h-3 rounded-lg bg-white/8 animate-pulse w-1/2" />
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-nexus-400 text-xs">
+              <Loader2 size={12} className="animate-spin" />
+              <span>Creating your {gen.tool_name}…</span>
+            </div>
+            {meta && (
+              <span className="text-white/30 text-[10px] flex items-center gap-1">
+                <Clock size={9} /> ~{meta.time}
+              </span>
+            )}
+          </div>
+          {meta && (
+            <div className="flex items-start gap-1.5 bg-amber-500/5 border border-amber-500/15 rounded-xl px-3 py-2">
+              <span className="text-amber-400 text-xs">💡</span>
+              <p className="text-amber-200/60 text-[11px] leading-relaxed">Did you know? {meta.tip}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Completed: URL outputs ── */}
       {gen.status === "completed" && gen.output_url && (
-        <div className="rounded-xl overflow-hidden">
+        <div className="space-y-2 rounded-xl overflow-hidden">
           {isImage && !isVideo && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={gen.output_url} alt={gen.tool_name} className="w-full rounded-xl object-cover max-h-48" />
+            <div className="space-y-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={gen.output_url} alt={gen.tool_name} className="w-full rounded-xl object-cover" />
+              {gen.prompt && (
+                <p className="text-white/30 text-[10px] italic px-1 line-clamp-2">"{gen.prompt}"</p>
+              )}
+              <div className="flex gap-2">
+                <a
+                  href={gen.output_url}
+                  download
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                >
+                  <Download size={11} /> Download Image
+                </a>
+                {onRegenerate && (
+                  <button
+                    onClick={() => onRegenerate(gen)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                  >
+                    <RotateCcw size={11} /> Regenerate
+                  </button>
+                )}
+              </div>
+            </div>
           )}
           {isAudio && !isVideo && (
-            <audio controls className="w-full mt-1" src={gen.output_url}>
-              Your browser does not support audio.
-            </audio>
+            <div className="space-y-2">
+              <audio controls className="w-full mt-1" src={gen.output_url}>
+                Your browser does not support audio.
+              </audio>
+              <div className="flex gap-2">
+                <a
+                  href={gen.output_url}
+                  download
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                >
+                  <Download size={11} /> Download Audio
+                </a>
+                {onRegenerate && (
+                  <button
+                    onClick={() => onRegenerate(gen)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                  >
+                    <RotateCcw size={11} /> Regenerate
+                  </button>
+                )}
+              </div>
+            </div>
           )}
           {isVideo && (
-            <video controls className="w-full rounded-xl max-h-64" src={gen.output_url}>
-              Your browser does not support video.
-            </video>
+            <div className="space-y-2">
+              <video controls className="w-full rounded-xl max-h-64" src={gen.output_url}>
+                Your browser does not support video.
+              </video>
+              <div className="flex gap-2">
+                <a
+                  href={gen.output_url}
+                  download
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                >
+                  <Download size={11} /> Download Video
+                </a>
+                {onRegenerate && (
+                  <button
+                    onClick={() => onRegenerate(gen)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                  >
+                    <RotateCcw size={11} /> Regenerate
+                  </button>
+                )}
+              </div>
+            </div>
           )}
           {!isImage && !isAudio && !isVideo && (
             <a href={gen.output_url} target="_blank" rel="noreferrer"
@@ -430,20 +656,21 @@ function GenerationCard({ gen }: { gen: Generation }) {
         </div>
       )}
 
+      {/* ── Completed: text outputs ── */}
       {gen.status === "completed" && gen.output_text && !gen.output_url && (
-        <>
+        <div className="space-y-2">
           {isWeb && (
             <div className="space-y-2">
               <div className="flex items-center gap-1.5 text-cyan-300 text-xs font-semibold">
                 <Globe size={12} /> 🔍 Live Web Result
               </div>
-              <p className="text-white/70 text-sm bg-white/5 rounded-xl p-3 leading-relaxed">
+              <p className="text-white/70 text-sm bg-white/5 rounded-xl p-3 leading-relaxed whitespace-pre-wrap">
                 {gen.output_text}
               </p>
             </div>
           )}
           {isVision && (
-            <p className="text-white/80 text-sm bg-violet-500/5 border border-violet-500/10 rounded-xl p-3 leading-loose">
+            <p className="text-white/80 text-sm bg-violet-500/5 border border-violet-500/10 rounded-xl p-3 leading-loose whitespace-pre-wrap">
               {gen.output_text}
             </p>
           )}
@@ -458,18 +685,57 @@ function GenerationCard({ gen }: { gen: Generation }) {
               </pre>
             </div>
           )}
-          {!isWeb && !isVision && !isCode && (
-            <p className="text-white/70 text-sm bg-white/5 rounded-xl p-3 leading-relaxed line-clamp-4">
-              {gen.output_text}
-            </p>
+          {isJson && !isCode && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-white/50 text-xs font-medium uppercase tracking-wider">Result</span>
+                <CopyButton text={gen.output_text} label="📋 Copy JSON" />
+              </div>
+              {gen.tool_slug === "quiz" ? renderQuiz(gen.output_text) : (
+                <pre className="bg-gray-950 text-white/60 text-xs font-mono p-3 rounded-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
+                  {gen.output_text}
+                </pre>
+              )}
+              {onRegenerate && (
+                <button
+                  onClick={() => onRegenerate(gen)}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                >
+                  <RotateCcw size={11} /> Regenerate
+                </button>
+              )}
+            </div>
           )}
-        </>
+          {!isWeb && !isVision && !isCode && !isJson && (
+            <div className="space-y-2">
+              <p className="text-white/70 text-sm bg-white/5 rounded-xl p-3 leading-relaxed whitespace-pre-wrap">
+                {gen.output_text}
+              </p>
+              <div className="flex gap-2">
+                <CopyButton text={gen.output_text} label="📋 Copy Text" />
+                {onRegenerate && (
+                  <button
+                    onClick={() => onRegenerate(gen)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                  >
+                    <RotateCcw size={11} /> Regenerate
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
-      {gen.status === "processing" && (
-        <div className="flex items-center gap-2 text-nexus-400 text-xs">
-          <Loader2 size={12} className="animate-spin" />
-          <span>AI is working on this… check back shortly</span>
+      {/* ── Footer badge row ── */}
+      {gen.status === "completed" && (
+        <div className="flex items-center justify-between pt-1 border-t border-white/5">
+          <span className="text-white/25 text-[10px]">Generated by Nexus AI</span>
+          {gen.point_cost !== undefined && (
+            <span className="text-white/25 text-[10px]">
+              {gen.point_cost === 0 ? "✓ Free" : `Used ${gen.point_cost} pts`}
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -502,16 +768,18 @@ function ToolDrawer({
   const [selectedLang, setSelectedLang] = useState<string>("en");
   const [showConfirm,  setShowConfirm]  = useState(false);
   const [generating,   setGenerating]   = useState(false);
-  const cfg = catCfg(tool.category);
+  const cfg  = catCfg(tool.category);
   const slug = tool.slug;
+  const meta = TOOL_META[slug];
 
-  const isDual  = DUAL_INPUT_TOOLS.has(slug);
-  const isURL   = URL_INPUT_TOOLS.has(slug);
-  const isVoice = VOICE_TOOLS.has(slug);
-  const isLang  = LANG_TOOLS.has(slug);
-  const isFree  = tool.point_cost === 0;
+  const isDual    = DUAL_INPUT_TOOLS.has(slug);
+  const isURL     = URL_INPUT_TOOLS.has(slug);
+  const isVoice   = VOICE_TOOLS.has(slug);
+  const isLang    = LANG_TOOLS.has(slug);
+  const isFree    = tool.point_cost === 0;
   const isPremium = tool.point_cost >= 20;
-  const isNew   = NEW_TOOL_SLUGS.has(slug);
+  const isNew     = NEW_TOOL_SLUGS.has(slug);
+  const canAfford = userPoints >= tool.point_cost;
 
   // Build final prompt from composed fields
   function buildPrompt(): string {
@@ -525,7 +793,6 @@ function ToolDrawer({
 
   const finalPrompt = buildPrompt();
 
-  // Validation: all required fields must be filled
   function isValid(): boolean {
     if (!prompt.trim() || prompt.trim().length < 3) return false;
     if (isDual && !secondInput.trim()) return false;
@@ -588,6 +855,16 @@ function ToolDrawer({
                 <X size={18} />
               </button>
             </div>
+
+            {/* ── Tip box ── */}
+            {meta?.tip && (
+              <div className="flex items-start gap-2 border border-amber-500/25 bg-amber-500/8 rounded-xl px-3 py-2.5">
+                <span className="text-amber-400 text-sm flex-shrink-0">💡</span>
+                <p className="text-amber-200/75 text-xs leading-relaxed">
+                  <span className="font-semibold">Tip: </span>{meta.tip}
+                </p>
+              </div>
+            )}
 
             {/* ── Language pills (transcribe-african) ── */}
             {isLang && (
@@ -724,6 +1001,29 @@ function ToolDrawer({
               </div>
             )}
 
+            {/* ── Point cost confirmation row ── */}
+            <div className={cn(
+              "flex items-center gap-2 rounded-xl px-3 py-2 border text-xs",
+              isFree
+                ? "border-green-500/25 bg-green-500/8 text-green-300"
+                : canAfford
+                  ? "border-white/10 bg-white/5 text-white/55"
+                  : "border-red-500/30 bg-red-500/8 text-red-400"
+            )}>
+              {isFree ? (
+                <><CheckCircle2 size={13} className="flex-shrink-0" /> ✓ Free — no points needed</>
+              ) : canAfford ? (
+                <><Sparkles size={13} className="flex-shrink-0 text-nexus-400" />
+                  This will use <span className="font-bold text-white mx-1">{tool.point_cost}</span> Pulse Points from your{" "}
+                  <span className="font-bold text-nexus-300 ml-1">{userPoints.toLocaleString()} available</span>
+                </>
+              ) : (
+                <><AlertTriangle size={13} className="flex-shrink-0" />
+                  You need <span className="font-bold mx-1">{(tool.point_cost - userPoints).toLocaleString()}</span> more points — recharge to continue
+                </>
+              )}
+            </div>
+
             {/* ── CTA button ── */}
             <button
               onClick={() => setShowConfirm(true)}
@@ -738,6 +1038,16 @@ function ToolDrawer({
               <Sparkles size={15} />
               {isFree ? "Generate for free" : `Review & use ${tool.point_cost} pts`}
             </button>
+
+            {/* ── Generation time + output type row ── */}
+            {meta && (
+              <div className="flex items-center justify-between px-1">
+                <span className="text-white/30 text-[11px] flex items-center gap-1">
+                  <Clock size={10} /> Usually ready in {meta.time}
+                </span>
+                <span className="text-white/30 text-[11px]">{getOutputLabel(slug)}</span>
+              </div>
+            )}
           </div>
         </div>
       </motion.div>
@@ -765,8 +1075,8 @@ export default function StudioPage() {
   const { data: galleryData, mutate: mutateGallery }  = useSWR("/studio/gallery", fetchGallery, {
     refreshInterval: 8000,
   });
-  const user   = useStore((s) => s.user);
-  const wallet = useStore((s) => s.wallet);
+  const user       = useStore((s) => s.user);
+  const wallet     = useStore((s) => s.wallet);
   const userPoints = wallet?.pulse_points ?? 0;
 
   const tools   = toolsData?.tools   ?? [];
@@ -785,8 +1095,24 @@ export default function StudioPage() {
   const [selectedTool,    setSelectedTool]    = useState<Tool | null>(null);
   const [searchQuery,     setSearchQuery]     = useState("");
   const [activeCategory,  setActiveCategory]  = useState<string | null>(null);
+  const [introDismissed,  setIntroDismissed]  = useState<boolean>(true); // start true, check localStorage
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef       = useRef<HTMLInputElement>(null);
+
+  // Check localStorage for intro banner
+  useEffect(() => {
+    try {
+      const dismissed = localStorage.getItem("nexus_studio_intro_dismissed");
+      setIntroDismissed(dismissed === "true");
+    } catch { /* localStorage may not be available */ }
+  }, []);
+
+  const handleDismissIntro = useCallback(() => {
+    setIntroDismissed(true);
+    try {
+      localStorage.setItem("nexus_studio_intro_dismissed", "true");
+    } catch { /* ignore */ }
+  }, []);
 
   const categories    = [...new Set(tools.map((t) => t.category))];
   const filteredTools = tools.filter((t) => {
@@ -826,6 +1152,14 @@ export default function StudioPage() {
     }
   }, [input, sending, sessionId]);
 
+  const handleClearChat = useCallback(() => {
+    setMessages([{
+      role: "assistant",
+      content: "Hey! 👋 I'm Nexus AI — your personal AI assistant. I can help with business ideas, explain anything, draft content, and more. What's on your mind?",
+      ts: Date.now(),
+    }]);
+  }, []);
+
   const pendingCount = gallery.filter((g) => ["pending","processing"].includes(g.status)).length;
 
   return (
@@ -856,6 +1190,13 @@ export default function StudioPage() {
             <span className="text-white/35 text-[10px] uppercase tracking-wider">Pulse pts</span>
           </div>
         </div>
+
+        {/* ── How It Works banner (first visit only) ── */}
+        <AnimatePresence>
+          {!introDismissed && (
+            <HowItWorksBanner onDismiss={handleDismissIntro} />
+          )}
+        </AnimatePresence>
 
         {/* ── Tab bar ── */}
         <div className="nexus-card p-1 flex gap-1">
@@ -933,9 +1274,17 @@ export default function StudioPage() {
                   {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                 </button>
               </div>
-              <p className="text-center text-white/25 text-[10px] mt-2">
-                💬 Nexus AI Chat is always free · No points used
-              </p>
+              <div className="flex items-center justify-between mt-2 px-0.5">
+                <p className="text-white/25 text-[10px]">
+                  💬 Nexus AI Chat is always free · No points used
+                </p>
+                <button
+                  onClick={handleClearChat}
+                  className="text-white/25 hover:text-white/55 text-[10px] flex items-center gap-1 transition-colors"
+                >
+                  <RotateCcw size={9} /> Clear chat
+                </button>
+              </div>
             </motion.div>
           )}
 
@@ -986,10 +1335,34 @@ export default function StudioPage() {
                     <div key={i} className="nexus-card h-16 animate-pulse opacity-50" />
                   ))}
                 </div>
+              ) : tools.length === 0 ? (
+                /* ── Empty state: no tools loaded at all ── */
+                <div className="text-center py-16 nexus-card space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-nexus-600/20 to-purple-600/20 border border-white/10 flex items-center justify-center mx-auto">
+                    <Sparkles size={28} className="text-nexus-400" />
+                  </div>
+                  <div>
+                    <p className="text-white/60 text-base font-semibold">No tools available yet</p>
+                    <p className="text-white/30 text-sm mt-1">AI tools will appear here once they&apos;re activated</p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab("chat")}
+                    className="nexus-btn-primary text-sm px-5 py-2.5 mx-auto flex items-center gap-1.5"
+                  >
+                    <MessageSquare size={14} /> Try AI Chat instead
+                  </button>
+                </div>
               ) : Object.keys(groupedTools).length === 0 ? (
-                <div className="text-center py-12 text-white/30">
+                /* ── Empty state: search / filter returns nothing ── */
+                <div className="text-center py-12 text-white/30 nexus-card space-y-3">
                   <Wand2 size={32} className="mx-auto mb-3 opacity-40" />
-                  <p>No tools match your search</p>
+                  <p className="text-sm font-medium">No tools match your search</p>
+                  <button
+                    onClick={() => { setSearchQuery(""); setActiveCategory(null); }}
+                    className="text-nexus-400 text-xs hover:text-nexus-300 transition-colors underline underline-offset-2"
+                  >
+                    Clear filters
+                  </button>
                 </div>
               ) : (
                 Object.entries(groupedTools).map(([cat, catTools]) => {
@@ -1000,6 +1373,7 @@ export default function StudioPage() {
                         <span className={cn("flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full", cfg.badge)}>
                           {cfg.icon} {cat}
                         </span>
+                        <span className="text-white/20 text-[10px]">{catTools.length} tool{catTools.length !== 1 ? "s" : ""}</span>
                       </div>
                       <div className="space-y-1.5">
                         {catTools.map((tool) => (
@@ -1032,9 +1406,11 @@ export default function StudioPage() {
 
               {recentGens.length === 0 ? (
                 <div className="text-center py-14 nexus-card space-y-3">
-                  <Play size={32} className="mx-auto text-white/20" />
-                  <p className="text-white/40 text-sm">No generations yet</p>
-                  <p className="text-white/25 text-xs">Use a tool above to create something</p>
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-nexus-600/20 to-purple-600/20 border border-white/10 flex items-center justify-center mx-auto">
+                    <Play size={24} className="text-white/30" />
+                  </div>
+                  <p className="text-white/40 text-sm font-medium">No generations yet</p>
+                  <p className="text-white/25 text-xs">Use a tool above to create something amazing</p>
                   <button
                     onClick={() => setActiveTab("tools")}
                     className="nexus-btn-primary text-sm px-5 py-2.5 mx-auto flex items-center gap-1.5"
