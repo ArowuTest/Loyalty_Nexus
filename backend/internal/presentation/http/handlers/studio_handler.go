@@ -55,11 +55,62 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (h *StudioHandler) ListTools(w http.ResponseWriter, r *http.Request) {
-	tools, err := h.studioService.ListActiveTools(r.Context())
-	if err != nil {
-		http.Error(w, "Failed to load tools", http.StatusInternalServerError)
+func (h *StudioHandler) GenerateImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	json.NewEncoder(w).Encode(tools)
+
+	var reqBody struct {
+		UserID string    `json:"user_id"`
+		ToolID uuid.UUID `json:"tool_id"`
+		Prompt string    `json:"prompt"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	uid, _ := uuid.Parse(reqBody.UserID)
+
+	// 1. Initial Request (Atomic Point Deduction)
+	gen, err := h.studioService.RequestGeneration(r.Context(), uid, reqBody.ToolID, reqBody.Prompt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusPaymentRequired)
+		return
+	}
+
+	// 2. Determine Provider & Tool ID
+	tool, _ := h.studioService.FindToolByID(r.Context(), reqBody.ToolID)
+	
+	// 3. Dispatch to External Generator (Mocking the sync call)
+	// In production, this would use h.imageGenerator.Generate(...)
+	outputURL := fmt.Sprintf("https://cdn.loyalty-nexus.ai/generated/%s.webp", gen.ID.String())
+	
+	// Simulation of success
+	if err := h.studioService.CompleteGeneration(r.Context(), gen.ID, outputURL); err != nil {
+		h.studioService.FailGeneration(r.Context(), gen.ID, "Storage failure")
+		http.Error(w, "Processing failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"output_url": outputURL})
+}
+
+func (h *StudioHandler) GetGallery(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	uid, _ := uuid.Parse(userID)
+	
+	gallery, err := h.studioService.GetUserGallery(r.Context(), uid)
+	if err != nil {
+		http.Error(w, "Failed to load gallery", http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(gallery)
+}
+
+func (h *StudioHandler) FindToolByID(w http.ResponseWriter, r *http.Request) {
+	// ... stub ...
 }

@@ -31,7 +31,57 @@ func (s *StudioService) ListActiveTools(ctx context.Context) ([]entities.StudioT
 	return s.studioRepo.ListActiveTools(ctx)
 }
 
-// RequestGeneration handles the atomic point deduction and creation of a generation record
+func (s *StudioService) FindToolByID(ctx context.Context, id uuid.UUID) (*entities.StudioTool, error) {
+	return s.studioRepo.FindToolByID(ctx, id)
+}
+
+func (s *StudioService) GetUserGallery(ctx context.Context, userID uuid.UUID) ([]entities.AIGeneration, error) {
+	return s.studioRepo.GetUserGallery(ctx, userID)
+}
+
+func (s *StudioService) CompleteGeneration(ctx context.Context, genID uuid.UUID, outputURL string) error {
+	return s.studioRepo.UpdateStatus(ctx, genID, "completed", outputURL, "")
+}
+
+func (s *StudioService) FailGeneration(ctx context.Context, genID uuid.UUID, errMsg string) error {
+	// 1. Mark generation as failed
+	if err := s.studioRepo.UpdateStatus(ctx, genID, "failed", "", errMsg); err != nil {
+		return err
+	}
+
+	// 2. COMPENSATING TRANSACTION: Refund Points
+	gen, err := s.studioRepo.FindGenerationByID(ctx, genID)
+	if err != nil {
+		return err
+	}
+
+	user, err := s.userRepo.FindByID(ctx, gen.UserID)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	refundTx := &entities.Transaction{
+		ID:          uuid.New(),
+		UserID:      gen.UserID,
+		MSISDN:      user.MSISDN,
+		Type:        entities.TxTypeBonus, // Refund type
+		PointsDelta: gen.PointsDeducted,
+		CreatedAt:   time.Now(),
+		Metadata:    map[string]any{"reason": "Studio Refund", "gen_id": genID.String()},
+	}
+
+	if err := s.txRepo.SaveTx(ctx, tx, refundTx); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
 func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID, toolID uuid.UUID, prompt string) (*entities.AIGeneration, error) {
 	tool, err := s.studioRepo.FindToolByID(ctx, toolID)
 	if err != nil {

@@ -76,6 +76,8 @@ export default function StudioLanding() {
   const handleSelectTool = (tool: StudioTool) => {
     if (tool.id === '1') {
       router.push('/studio/chat');
+    } else if (tool.id === '2') {
+      router.push('/studio/my-ai-photo');
     } else {
       console.log('Selected:', tool.name);
     }

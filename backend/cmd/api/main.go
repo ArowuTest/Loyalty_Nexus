@@ -97,6 +97,8 @@ func main() {
 	// Studio Routes
 	http.HandleFunc("/api/v1/studio/tools", studioHandler.ListTools)
 	http.HandleFunc("/api/v1/studio/chat", studioHandler.Chat)
+	http.HandleFunc("/api/v1/studio/generate/image", studioHandler.GenerateImage)
+	http.HandleFunc("/api/v1/studio/gallery", studioHandler.GetGallery)
 
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
