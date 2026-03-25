@@ -18,6 +18,7 @@ import (
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/infrastructure/persistence"
 	"loyalty-nexus/internal/infrastructure/queue"
+	"loyalty-nexus/internal/infrastructure/external"
 )
 
 func main() {
@@ -36,6 +37,11 @@ func main() {
 	hlrRepo := persistence.NewPostgresHLRRepository(db)
 	fraudGuard := services.NewFraudGuard(db)
 	hlrSvc := services.NewHLRService(hlrRepo)
+	
+	// Passport Sync Integration (Strategic Innovation Section 3)
+	walletAdapter := &external.RebitesWalletAdapter{} 
+	passportSvc := services.NewPassportService(walletAdapter) 
+
 	cfg := config.NewConfigManager(db)
 	cfg.Refresh(context.Background())
 
@@ -79,14 +85,14 @@ func main() {
 					hlrSvc.DetectNetwork(ctx, event.MSISDN, nil)
 				}
 
-				processRecharge(ctx, event, userRepo, txRepo, cfg, db)
+				processRecharge(ctx, event, userRepo, txRepo, cfg, db, passportSvc)
 				rdb.XAck(ctx, streamName, groupName, msg.ID)
 			}
 		}
 	}
 }
 
-func processRecharge(ctx context.Context, event queue.RechargeEvent, ur repositories.UserRepository, tr repositories.TransactionRepository, cfg *config.ConfigManager, db *gorm.DB) {
+func processRecharge(ctx context.Context, event queue.RechargeEvent, ur repositories.UserRepository, tr repositories.TransactionRepository, cfg *config.ConfigManager, db *gorm.DB, ps *services.PassportService) {
 	user, err := ur.FindByMSISDN(ctx, event.MSISDN)
 	if err != nil {
 		user = &entities.User{
@@ -150,6 +156,10 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	}
 
 	ur.Update(ctx, user)
+
+	// 3. Sync Wallet Passport (Near Real-Time Update)
+	// (Passing mock data balance for now)
+	ps.SyncWallet(ctx, user.ID.String(), user.TotalPoints, user.StreakCount, 500) 
 
 	tx := &entities.Transaction{
 		ID:          uuid.New(),
