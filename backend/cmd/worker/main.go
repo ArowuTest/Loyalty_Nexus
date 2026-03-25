@@ -149,10 +149,12 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	user.TotalPoints += pointsEarned
 	user.TotalRechargeAmount += event.Amount
 
-	// Check Spin Credit Threshold
+	// Check Spin Credit Threshold (REQ-2.3)
 	spinThreshold := int64(cfg.GetInt("recharge_to_spin_naira", 1000) * 100)
 	if user.TotalRechargeAmount >= spinThreshold {
 		user.TotalRechargeAmount -= spinThreshold
+		user.SpinCredits++ // Award 1 Spin Credit
+		log.Printf("[Worker] Awarded 1 Spin Credit to %s", user.MSISDN)
 	}
 
 	ur.Update(ctx, user)

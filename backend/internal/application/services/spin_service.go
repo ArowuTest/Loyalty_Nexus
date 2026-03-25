@@ -34,46 +34,80 @@ func NewSpinService(ur repositories.UserRepository, tr repositories.TransactionR
 }
 
 func (s *SpinService) PlaySpin(ctx context.Context, msisdn string) (*entities.Transaction, error) {
-	// ... (Existing limit and eligibility checks) ...
+	// 1. Daily Spin Limit (REQ-3.6)
+	spinCount, _ := s.getDailySpinCount(ctx, msisdn)
+	if spinCount >= 3 {
+		return nil, fmt.Errorf("daily spin limit reached (max 3)")
+	}
 
-	// 2. Select Prize (CSPRNG Probability)
+	// 2. Check Daily Liability Cap (REQ-3.5)
+	dailyCap := int64(s.cfg.GetInt("daily_prize_liability_cap_naira", 500000) * 100)
+	currentLiability, _ := s.getCurrentDailyLiability(ctx)
+	forceLowValue := currentLiability >= dailyCap
+
+	// 3. Check Eligibility (Spin Credits) - REQ-3.1
+	user, err := s.userRepo.FindByMSISDN(ctx, msisdn)
+	if err != nil {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	if user.SpinCredits < 1 {
+		return nil, fmt.Errorf("insufficient spin credits: recharge ₦1,000 to earn one")
+	}
+
+	// 4. Select Prize (CSPRNG Probability) - REQ-3.2
 	prize, err := s.selectPrize(ctx, forceLowValue)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. Record Transaction
-	tx := &entities.Transaction{
-		ID:          uuid.New(),
-		UserID:      user.ID,
-		MSISDN:      msisdn,
-		Type:        entities.TxTypeBonus,
-		PointsDelta: 0, // Delta depends on prize type
-		CreatedAt:   time.Now(),
-	}
-
-	if prize.Name == "Bonus Points" {
-		tx.PointsDelta = prize.Value
-	}
-
-	if err := s.txRepo.Save(ctx, tx); err != nil {
-		return nil, err
-	}
-
-	// 4. Create Prize Claim & Trigger Fulfillment
-	if prize.Name != "Try Again" {
-		claim := &entities.PrizeClaim{
-			UserID:        user.ID,
-			TransactionID: tx.ID,
-			PrizeType:     prize.Type, // need to add Type to prizeRow
-			PrizeValue:    float64(prize.Value),
-			Status:        entities.StatusPendingFulfillment,
+	// 5. Atomic deduction of 1 Spin Credit + Record Prize (Transaction)
+	var finalTx *entities.Transaction
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// Deduct Credit
+		user.SpinCredits--
+		if err := s.userRepo.Update(ctx, user); err != nil {
+			return err
 		}
-		s.prizeRepo.CreateClaim(ctx, claim)
-		go s.fulfillmentSvc.Fulfill(context.Background(), claim)
-	}
 
-	return tx, nil
+		// Record Transaction
+		ledgerTx := &entities.Transaction{
+			ID:          uuid.New(),
+			UserID:      user.ID,
+			MSISDN:      msisdn,
+			Type:        entities.TxTypeBonus,
+			PointsDelta: 0,
+			CreatedAt:   time.Now(),
+			Metadata:    map[string]any{"prize_name": prize.Name, "type": "spin_win"},
+		}
+		if prize.Name == "Bonus Points" {
+			ledgerTx.PointsDelta = prize.Value
+		}
+
+		if err := s.txRepo.SaveTx(ctx, tx, ledgerTx); err != nil {
+			return err
+		}
+
+		// Create Claim
+		if prize.Name != "Try Again" {
+			claim := &entities.PrizeClaim{
+				UserID:        user.ID,
+				TransactionID: ledgerTx.ID,
+				PrizeType:     prize.Type,
+				PrizeValue:    float64(prize.Value),
+				Status:        entities.StatusPendingFulfillment,
+			}
+			if err := s.prizeRepo.CreateClaim(ctx, claim); err != nil {
+				return err
+			}
+			go s.fulfillmentSvc.Fulfill(context.Background(), claim)
+		}
+
+		finalTx = ledgerTx
+		return nil
+	})
+
+	return finalTx, err
 }
 
 func (s *SpinService) getDailySpinCount(ctx context.Context, msisdn string) (int, error) {

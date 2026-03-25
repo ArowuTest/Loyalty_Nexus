@@ -19,6 +19,7 @@ type User struct {
 	MoMoNumber          string    `json:"momo_number"`
 	MoMoVerified        bool      `json:"momo_verified"`
 	MoMoVerifiedAt      time.Time `json:"momo_verified_at"`
+	SpinCredits         int       `json:"spin_credits"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
