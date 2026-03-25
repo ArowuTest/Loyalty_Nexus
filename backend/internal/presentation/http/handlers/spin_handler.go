@@ -43,5 +43,16 @@ func (h *SpinHandler) Play(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SpinHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, []interface{}{})
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, err := uuid.Parse(uid)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid user"})
+		return
+	}
+	results, err := h.spinSvc.GetSpinHistory(r.Context(), userID, 20, 0)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load history"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"history": results})
 }

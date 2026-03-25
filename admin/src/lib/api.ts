@@ -24,9 +24,21 @@ class AdminAPI {
   getConfig()      { return this.req<{ configs: ConfigEntry[] }>("GET", "/admin/config"); }
   updateConfig(key: string, value: string) { return this.req("PUT", `/admin/config/${encodeURIComponent(key)}`, { value }); }
   getPrizePool()   { return this.req<{ prizes: Prize[] }>("GET", "/admin/prize-pool"); }
+  updatePrize(id: string, payload: Partial<Prize>) { return this.req("PUT", `/admin/prizes/${id}`, payload); }
+  createPrize(payload: Omit<Prize,"id">) { return this.req("POST", "/admin/prizes", payload); }
+  deletePrize(id: string) { return this.req("DELETE", `/admin/prizes/${id}`, {}); }
   getStudioTools() { return this.req<{ tools: StudioTool[] }>("GET", "/admin/studio-tools"); }
+  updateStudioTool(id: string, payload: { point_cost?: number; is_active?: boolean }) {
+    return this.req("PUT", `/admin/studio-tools/${id}`, payload);
+  }
   getUsers(page = 0) { return this.req<{ users: User[] }>("GET", `/admin/users?offset=${page * 50}`); }
+  getUser(id: string) { return this.req<User>("GET", `/admin/users/${id}`); }
   suspendUser(id: string) { return this.req("PUT", `/admin/users/${id}/suspend`, {}); }
+  adjustPoints(userId: string, delta: number, reason: string) {
+    return this.req("POST", "/admin/points/adjust", { user_id: userId, delta, reason });
+  }
+  getPointsStats() { return this.req<PointsStats>("GET", "/admin/points/stats"); }
+  getPointsHistory(page = 0) { return this.req<{ items: PointsHistoryItem[] }>("GET", `/admin/points/history?page=${page}`); }
   getFraudEvents() { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud-events"); }
   getRegionalWars(){ return this.req<{ leaderboard: RegionalStat[] }>("GET", "/admin/regional-wars"); }
   // Notifications & Broadcasts
@@ -136,4 +148,18 @@ export interface AIHealthReport {
   recent_switches: ProviderSwitchEvent[];
   studio_tools: StudioToolHealth[];
   checked_at: string;
+}
+export interface PointsStats {
+  total_points_issued: number;
+  total_points_spent: number;
+  points_in_circulation: number;
+  active_wallets: number;
+}
+export interface PointsHistoryItem {
+  id: string;
+  user_id: string;
+  phone_number: string;
+  type: string;
+  points_delta: number;
+  created_at: string;
 }

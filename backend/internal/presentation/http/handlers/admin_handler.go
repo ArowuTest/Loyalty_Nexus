@@ -468,63 +468,63 @@ func (h *AdminHandler) ExportDrawEntries(w http.ResponseWriter, r *http.Request)
 // ─── Studio Tools ─────────────────────────────────────────────────────────
 
 func (h *AdminHandler) GetStudioTools(w http.ResponseWriter, r *http.Request) {
-	// Return all studio tool configs from network_configs
-	tools := []map[string]string{
-		{"key": "ai_chat_enabled", "label": "Ask Nexus (Chat)"},
-		{"key": "ai_translate_cost_points", "label": "Translate"},
-		{"key": "ai_study_guide_cost_points", "label": "Study Guide"},
-		{"key": "ai_quiz_cost_points", "label": "Quiz"},
-		{"key": "ai_mindmap_cost_points", "label": "Mind Map"},
-		{"key": "ai_image_cost_points", "label": "AI Photo"},
-		{"key": "ai_video_basic_cost_points", "label": "Animate Photo (Basic)"},
-		{"key": "ai_audio_cost_points", "label": "Marketing Jingle"},
-		{"key": "ai_narrate_cost_points", "label": "Narrate Text"},
-		{"key": "ai_transcribe_cost_points", "label": "Transcribe Voice"},
-		{"key": "ai_bgremover_cost_points", "label": "Background Remover"},
-		{"key": "ai_podcast_cost_points", "label": "Podcast"},
-		{"key": "ai_slidedeck_cost_points", "label": "Slide Deck"},
-		{"key": "ai_infographic_cost_points", "label": "Infographic"},
-		{"key": "ai_research_brief_cost_points", "label": "Deep Research Brief"},
-		{"key": "ai_bgmusic_cost_points", "label": "Background Music"},
-		{"key": "ai_bizplan_cost_points", "label": "Business Plan"},
+	// Query the real studio_tools table (seeded with all tools by migrations)
+	type toolRow struct {
+		ID          string `gorm:"column:id"          json:"id"`
+		Slug        string `gorm:"column:slug"        json:"slug"`
+		Name        string `gorm:"column:name"        json:"name"`
+		Category    string `gorm:"column:category"    json:"category"`
+		Provider    string `gorm:"column:provider"    json:"provider"`
+		PointCost   int64  `gorm:"column:point_cost"  json:"point_cost"`
+		IsActive    bool   `gorm:"column:is_active"   json:"is_active"`
+		Description string `gorm:"column:description" json:"description"`
+		UsageCount  int64  `json:"usage_count"`
 	}
+	var rows []toolRow
+	h.db.WithContext(r.Context()).
+		Raw(`SELECT t.id, t.slug, t.name, t.category, t.provider, t.point_cost, t.is_active, t.description,
+		     COUNT(g.id) AS usage_count
+		     FROM studio_tools t
+		     LEFT JOIN studio_generations g ON g.tool_id = t.id
+		     GROUP BY t.id
+		     ORDER BY t.category, t.name`).
+		Scan(&rows)
 
-	type configRow struct {
-		Key   string `gorm:"column:key"`
-		Value string `gorm:"column:value"`
-	}
-	var configs []configRow
-	h.db.WithContext(r.Context()).Table("network_configs").
-		Where("key LIKE 'ai_%'").Find(&configs)
-
-	cfgMap := make(map[string]string)
-	for _, c := range configs {
-		cfgMap[c.Key] = c.Value
-	}
-
-	result := make([]map[string]interface{}, 0, len(tools))
-	for _, t := range tools {
-		result = append(result, map[string]interface{}{
-			"key":   t["key"],
-			"label": t["label"],
-			"value": cfgMap[t["key"]],
-		})
-	}
-	jsonOK(w, result)
+	jsonOK(w, map[string]interface{}{"tools": rows})
 }
 
 func (h *AdminHandler) UpdateStudioTool(w http.ResponseWriter, r *http.Request) {
-	key := r.PathValue("key")
-	var body struct {
-		Value string `json:"value"`
+	// Support both /{id} and /{key} (legacy) path params
+	id := r.PathValue("id")
+	if id == "" {
+		id = r.PathValue("key")
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || key == "" {
-		jsonError(w, "key and value required", http.StatusBadRequest)
+	var body struct {
+		PointCost int64 `json:"point_cost"`
+		IsActive  *bool `json:"is_active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || id == "" {
+		jsonError(w, "id/key and body required", http.StatusBadRequest)
 		return
 	}
-	h.db.WithContext(r.Context()).Exec(
-		"UPDATE network_configs SET value = ?, updated_at = NOW() WHERE key = ?", body.Value, key)
-	jsonOK(w, map[string]string{"status": "ok", "key": key, "value": body.Value})
+	// Build dynamic update
+	updates := map[string]interface{}{"updated_at": time.Now()}
+	if body.PointCost >= 0 {
+		updates["point_cost"] = body.PointCost
+	}
+	if body.IsActive != nil {
+		updates["is_active"] = *body.IsActive
+	}
+	// Try by UUID first, fall back to slug
+	result := h.db.WithContext(r.Context()).
+		Table("studio_tools").
+		Where("id = ? OR slug = ?", id, id).
+		Updates(updates)
+	if result.Error != nil {
+		jsonError(w, "update failed: "+result.Error.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]string{"status": "ok"})
 }
 
 // ─── Points config / ledger audit ────────────────────────────────────────

@@ -758,9 +758,9 @@ function StatusPill({ status }: { status: Generation["status"] }) {
 
 // ─── Tool prompt drawer ───────────────────────────────────────────────────────
 function ToolDrawer({
-  tool, onClose, userPoints,
+  tool, onClose, userPoints, onGenerated,
 }: {
-  tool: Tool; onClose: () => void; userPoints: number;
+  tool: Tool; onClose: () => void; userPoints: number; onGenerated?: () => void;
 }) {
   const [prompt,       setPrompt]       = useState("");
   const [secondInput,  setSecondInput]  = useState("");
@@ -803,9 +803,33 @@ function ToolDrawer({
     if (!isValid()) return;
     setGenerating(true);
     try {
-      await api.generateTool(tool.id, finalPrompt);
-      toast.success("✅ Generation started! Check your gallery when ready.");
+      const res = await api.generateTool(tool.id, finalPrompt) as { generation_id: string; status: string };
+      toast.success("⚡ Generating… check Gallery tab for result.");
       onClose();
+      // Poll for result until complete (max 90 sec)
+      if (res?.generation_id) {
+        const genId = res.generation_id;
+        let attempts = 0;
+        const poll = setInterval(async () => {
+          attempts++;
+          if (attempts > 45) { clearInterval(poll); return; }
+          try {
+            const status = await api.getGenerationStatus(genId) as { status: string };
+            if (status?.status === "completed" || status?.status === "failed") {
+              clearInterval(poll);
+              onGenerated?.();
+              if (status.status === "completed") {
+                toast.success(`✅ ${tool.name} ready! Check Gallery.`, { duration: 5000 });
+              } else {
+                toast.error(`${tool.name} generation failed. Please try again.`);
+              }
+            }
+          } catch { clearInterval(poll); }
+        }, 2000);
+      } else {
+        // No generation_id returned — just refresh gallery after 5 sec
+        setTimeout(() => onGenerated?.(), 5000);
+      }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to start generation");
     } finally {
@@ -1440,6 +1464,7 @@ export default function StudioPage() {
             tool={selectedTool}
             onClose={() => setSelectedTool(null)}
             userPoints={userPoints}
+            onGenerated={() => { mutateGallery(); setActiveTab("gallery"); }}
           />
         )}
       </AnimatePresence>

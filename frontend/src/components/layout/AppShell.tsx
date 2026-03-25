@@ -6,14 +6,14 @@ import Link from "next/link";
 import { useStore } from "@/store/useStore";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Zap, Wand2, Globe, Gift, Settings, LogOut
+  LayoutDashboard, Zap, Wand2, Globe, Gift, Ticket, Settings, LogOut
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/dashboard",  icon: LayoutDashboard, label: "Home" },
   { href: "/spin",       icon: Zap,             label: "Spin" },
   { href: "/studio",     icon: Wand2,           label: "Studio" },
-  { href: "/wars",       icon: Globe,           label: "Wars" },
+  { href: "/draws",      icon: Ticket,          label: "Draws" },
   { href: "/prizes",     icon: Gift,            label: "Prizes" },
 ];
 

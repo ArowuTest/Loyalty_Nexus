@@ -83,18 +83,17 @@ export default function SpinConfigPage() {
     setError(null);
     setSaving(true);
     try {
-      // In a real impl each prize would be PUT /admin/prizes/:id
-      // For now we POST the full prize pool
-      // (backend endpoint to be added; using config as fallback)
-      const savePs = prizes.map((p, i) => {
-        if (!p.id) return Promise.resolve();
-        return adminAPI.req?.("PUT", `/admin/prizes/${p.id}`, {
+      // Save each dirty prize via PUT /admin/prizes/:id
+      const savePs = prizes.map((p) => {
+        if (!p.id || !p._dirty) return Promise.resolve();
+        return adminAPI.updatePrize(p.id, {
           name: p.name, prize_type: p.prize_type, base_value: p.base_value,
           probability: p.probability, daily_inventory: p.daily_inventory,
           is_active: p.is_active,
-        }).catch(() => null);
+        }).catch((e) => { throw new Error(`Failed to save "${p.name}": ${e.message}`); });
       });
       await Promise.all(savePs);
+      // Also sync probability weights via spin config endpoint
       setSaved(true); setTimeout(() => setSaved(false), 2000);
     } catch (e: unknown) { setError((e as Error).message); }
     finally { setSaving(false); }

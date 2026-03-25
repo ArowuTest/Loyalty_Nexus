@@ -92,9 +92,16 @@ class APIClient {
     );
   }
   getGenerationStatus(id: string) {
-    return this.request("GET", `/studio/generate/${id}/status`);
+    return this.request("GET", `/studio/generate/${id}`);
   }
   getGallery() { return this.request("GET", "/studio/gallery"); }
+
+  // Draws (user-facing)
+  getDraws() { return this.request("GET", "/draws"); }
+  getDrawWinners(id: string) { return this.request("GET", `/draws/${id}/winners`); }
+
+  // Chat usage quota
+  getChatUsage() { return this.request("GET", "/studio/chat/usage"); }
 }
 
 export const api = new APIClient();
