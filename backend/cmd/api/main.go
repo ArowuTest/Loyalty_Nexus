@@ -160,9 +160,14 @@ func main() {
 	mux.Handle("GET  /api/v1/wars/leaderboard",  auth(http.HandlerFunc(warsH.GetLeaderboard)))
 	mux.Handle("GET  /api/v1/wars/my-rank",      auth(http.HandlerFunc(warsH.GetMyRank)))
 
-	// Passport routes
-	mux.Handle("GET  /api/v1/passport",          auth(http.HandlerFunc(passportH.GetPassport)))
-	mux.Handle("GET  /api/v1/passport/badges",   auth(http.HandlerFunc(passportH.GetBadges)))
+	// Passport routes (spec §6)
+	mux.Handle("GET  /api/v1/passport",              auth(http.HandlerFunc(passportH.GetPassport)))
+	mux.Handle("GET  /api/v1/passport/badges",       auth(http.HandlerFunc(passportH.GetBadges)))
+	mux.Handle("GET  /api/v1/passport/qr",           auth(http.HandlerFunc(passportH.GetQR)))
+	mux.Handle("POST /api/v1/passport/qr/verify",    auth(http.HandlerFunc(passportH.VerifyQR)))
+	mux.Handle("GET  /api/v1/passport/pkpass",       auth(http.HandlerFunc(passportH.DownloadPKPass)))
+	mux.Handle("GET  /api/v1/passport/events",       auth(http.HandlerFunc(passportH.GetEvents)))
+	mux.Handle("GET  /api/v1/passport/share",        auth(http.HandlerFunc(passportH.GetShareCard)))
 
 	// Draws (public results)
 	mux.Handle("GET  /api/v1/draws",             auth(http.HandlerFunc(drawH.ListUpcoming)))
