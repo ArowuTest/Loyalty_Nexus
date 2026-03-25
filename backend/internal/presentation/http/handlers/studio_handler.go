@@ -156,6 +156,45 @@ func (h *StudioHandler) GetGallery(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(gallery)
 }
 
-func (h *StudioHandler) FindToolByID(w http.ResponseWriter, r *http.Request) {
-	// ... stub ...
+func (h *StudioHandler) GenerateBuild(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var reqBody struct {
+		UserID      string    `json:"user_id"`
+		ToolID      uuid.UUID `json:"tool_id"`
+		Description string    `json:"description"`
+		AudioURL    string    `json:"audio_url,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	uid, _ := uuid.Parse(reqBody.UserID)
+
+	// 1. Point Deduction
+	gen, err := h.studioService.RequestGeneration(r.Context(), uid, reqBody.ToolID, reqBody.Description)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusPaymentRequired)
+		return
+	}
+
+	// 2. Handle Build Pipeline (Sync for now, can be moved to async worker)
+	var outputURL string
+	// Mocking tool logic based on catalogue
+	// In production, we check tool.Name or tool.ProviderToolID
+	outputURL = fmt.Sprintf("https://cdn.loyalty-nexus.ai/build/%s.pdf", gen.ID.String())
+
+	if err := h.studioService.CompleteGeneration(r.Context(), gen.ID, outputURL); err != nil {
+		h.studioService.FailGeneration(r.Context(), gen.ID, "Document gen failed")
+		http.Error(w, "Build failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"output_url": outputURL})
 }

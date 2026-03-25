@@ -104,6 +104,7 @@ func main() {
 	http.HandleFunc("/api/v1/studio/chat", studioHandler.Chat)
 	http.HandleFunc("/api/v1/studio/generate/image", studioHandler.GenerateImage)
 	http.HandleFunc("/api/v1/studio/generate/knowledge", studioHandler.GenerateKnowledge)
+	http.HandleFunc("/api/v1/studio/generate/build", studioHandler.GenerateBuild)
 	http.HandleFunc("/api/v1/studio/gallery", studioHandler.GetGallery)
 
 	port := os.Getenv("PORT")
