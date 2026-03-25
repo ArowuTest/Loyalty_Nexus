@@ -2,17 +2,17 @@ package services
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"time"
+	"gorm.io/gorm"
 )
 
 type LifecycleWorker struct {
-	db        *sql.DB
+	db        *gorm.DB
 	notifySvc *NotificationService
 }
 
-func NewLifecycleWorker(db *sql.DB, ns *NotificationService) *LifecycleWorker {
+func NewLifecycleWorker(db *gorm.DB, ns *NotificationService) *LifecycleWorker {
 	return &LifecycleWorker{db: db, notifySvc: ns}
 }
 
@@ -31,15 +31,12 @@ func (w *LifecycleWorker) Run(ctx context.Context) {
 
 func (w *LifecycleWorker) processExpirations(ctx context.Context) {
 	// Delete assets older than 30 days
-	query := "DELETE FROM ai_generations WHERE expires_at < now()"
-	res, err := w.db.ExecContext(ctx, query)
+	err := w.db.WithContext(ctx).Table("ai_generations").Where("expires_at < now()").Delete(nil).Error
 	if err == nil {
-		rows, _ := res.RowsAffected()
-		log.Printf("[Lifecycle] Expired %d AI assets", rows)
+		log.Printf("[Lifecycle] Expired AI assets processed")
 	}
 }
 
 func (w *LifecycleWorker) sendExpiryNudges(ctx context.Context) {
-	// Nudge users 48h before expiration
-	// In production: SELECT generations where expires_at is in 48h and nudge not sent
+	// Implementation...
 }

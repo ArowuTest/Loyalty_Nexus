@@ -2,20 +2,20 @@ package config
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"sync"
 	"time"
+	"gorm.io/gorm"
 )
 
 type ConfigManager struct {
-	db         *sql.DB
+	db         *gorm.DB
 	cache      map[string]any
 	mu         sync.RWMutex
 	lastUpdate time.Time
 }
 
-func NewConfigManager(db *sql.DB) *ConfigManager {
+func NewConfigManager(db *gorm.DB) *ConfigManager {
 	return &ConfigManager{
 		db:    db,
 		cache: make(map[string]any),
@@ -23,22 +23,20 @@ func NewConfigManager(db *sql.DB) *ConfigManager {
 }
 
 func (m *ConfigManager) Refresh(ctx context.Context) error {
-	rows, err := m.db.QueryContext(ctx, "SELECT config_key, config_value FROM program_configs")
-	if err != nil {
+	type configRow struct {
+		ConfigKey   string
+		ConfigValue json.RawMessage
+	}
+	var rows []configRow
+	if err := m.db.WithContext(ctx).Table("program_configs").Select("config_key, config_value").Find(&rows).Error; err != nil {
 		return err
 	}
-	defer rows.Close()
 
 	newCache := make(map[string]any)
-	for rows.Next() {
-		var key string
-		var valRaw []byte
-		if err := rows.Scan(&key, &valRaw); err != nil {
-			return err
-		}
+	for _, r := range rows {
 		var val any
-		json.Unmarshal(valRaw, &val)
-		newCache[key] = val
+		json.Unmarshal(r.ConfigValue, &val)
+		newCache[r.ConfigKey] = val
 	}
 
 	m.mu.Lock()
@@ -54,6 +52,17 @@ func (m *ConfigManager) GetInt(key string, fallback int) int {
 	if v, ok := m.cache[key]; ok {
 		if f, ok := v.(float64); ok {
 			return int(f)
+		}
+	}
+	return fallback
+}
+
+func (m *ConfigManager) GetFloat(key string, fallback float64) float64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if v, ok := m.cache[key]; ok {
+		if f, ok := v.(float64); ok {
+			return f
 		}
 	}
 	return fallback

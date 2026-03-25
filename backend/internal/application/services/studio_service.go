@@ -2,13 +2,13 @@ package services
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type StudioService struct {
@@ -16,10 +16,10 @@ type StudioService struct {
 	userRepo   repositories.UserRepository
 	txRepo     repositories.TransactionRepository
 	notifySvc  *NotificationService
-	db         *sql.DB
+	db         *gorm.DB
 }
 
-func NewStudioService(sr repositories.StudioRepository, ur repositories.UserRepository, tr repositories.TransactionRepository, ns *NotificationService, db *sql.DB) *StudioService {
+func NewStudioService(sr repositories.StudioRepository, ur repositories.UserRepository, tr repositories.TransactionRepository, ns *NotificationService, db *gorm.DB) *StudioService {
 	return &StudioService{
 		studioRepo: sr,
 		userRepo:   ur,
@@ -76,28 +76,24 @@ func (s *StudioService) FailGeneration(ctx context.Context, genID uuid.UUID, err
 		return err
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		refundTx := &entities.Transaction{
+			ID:          uuid.New(),
+			UserID:      gen.UserID,
+			MSISDN:      user.MSISDN,
+			Type:        entities.TxTypeBonus,
+			PointsDelta: gen.PointsDeducted,
+			CreatedAt:   time.Now(),
+			Metadata:    map[string]any{"reason": "Studio Refund", "gen_id": genID.String()},
+		}
 
-	refundTx := &entities.Transaction{
-		ID:          uuid.New(),
-		UserID:      gen.UserID,
-		MSISDN:      user.MSISDN,
-		Type:        entities.TxTypeBonus, // Refund type
-		PointsDelta: gen.PointsDeducted,
-		CreatedAt:   time.Now(),
-		Metadata:    map[string]any{"reason": "Studio Refund", "gen_id": genID.String()},
-	}
-
-	if err := s.txRepo.SaveTx(ctx, tx, refundTx); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+		if err := s.txRepo.SaveTx(ctx, tx, refundTx); err != nil {
+			return err
+		}
+		return nil
+	})
 }
+
 func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID, toolID uuid.UUID, prompt string) (*entities.AIGeneration, error) {
 	tool, err := s.studioRepo.FindToolByID(ctx, toolID)
 	if err != nil {
@@ -113,13 +109,6 @@ func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID,
 		return nil, fmt.Errorf("insufficient points: need %d, have %d", tool.PointCost, user.TotalPoints)
 	}
 
-	// Atomic Point Deduction + Generation Record
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	gen := &entities.AIGeneration{
 		ID:             uuid.New(),
 		UserID:         userID,
@@ -131,27 +120,31 @@ func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID,
 		ExpiresAt:      time.Now().AddDate(0, 0, 30), // 30-day retention
 	}
 
-	// 1. Create Transaction (Audit Log)
-	ledgerTx := &entities.Transaction{
-		ID:          uuid.New(),
-		UserID:      userID,
-		MSISDN:      user.MSISDN,
-		Type:        entities.TxTypeStudioSpend, // Assuming spend type in entities
-		PointsDelta: -tool.PointCost,
-		CreatedAt:   time.Now(),
-		Metadata:    map[string]any{"tool": tool.Name, "gen_id": gen.ID.String()},
-	}
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// 1. Create Transaction (Audit Log)
+		ledgerTx := &entities.Transaction{
+			ID:          uuid.New(),
+			UserID:      userID,
+			MSISDN:      user.MSISDN,
+			Type:        entities.TxTypeStudioSpend,
+			PointsDelta: -tool.PointCost,
+			CreatedAt:   time.Now(),
+			Metadata:    map[string]any{"tool": tool.Name, "gen_id": gen.ID.String()},
+		}
 
-	if err := s.txRepo.SaveTx(ctx, tx, ledgerTx); err != nil {
-		return nil, err
-	}
+		if err := s.txRepo.SaveTx(ctx, tx, ledgerTx); err != nil {
+			return err
+		}
 
-	// 2. Create Generation Record
-	if err := s.studioRepo.CreateGenerationTx(ctx, tx, gen); err != nil {
-		return nil, err
-	}
+		// 2. Create Generation Record
+		if err := s.studioRepo.CreateGenerationTx(ctx, tx, gen); err != nil {
+			return err
+		}
 
-	if err := tx.Commit(); err != nil {
+		return nil
+	})
+
+	if err != nil {
 		return nil, err
 	}
 

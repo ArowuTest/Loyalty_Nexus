@@ -2,16 +2,16 @@ package services
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"time"
+	"gorm.io/gorm"
 )
 
 type TournamentWorker struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewTournamentWorker(db *sql.DB) *TournamentWorker {
+func NewTournamentWorker(db *gorm.DB) *TournamentWorker {
 	return &TournamentWorker{db: db}
 }
 
@@ -31,7 +31,7 @@ func (w *TournamentWorker) Run(ctx context.Context) {
 }
 
 func (w *TournamentWorker) AggregateRanks(ctx context.Context) {
-	// Rank regions based on total recharge volume in the current window
+	// Rank regions based on total recharge volume
 	query := `
 		WITH ranks AS (
 			SELECT region_code, RANK() OVER (ORDER BY total_recharge_kobo DESC) as new_rank
@@ -42,13 +42,12 @@ func (w *TournamentWorker) AggregateRanks(ctx context.Context) {
 		FROM ranks r
 		WHERE s.region_code = r.region_code
 	`
-	_, err := w.db.ExecContext(ctx, query)
+	err := w.db.WithContext(ctx).Exec(query).Error
 	if err != nil {
 		log.Printf("[TournamentWorker] Rank aggregation failed: %v", err)
 	}
 }
 
 func (w *TournamentWorker) CheckGoldenHour(ctx context.Context) {
-	// Logic to enable golden hour for the top region on Fridays, etc.
-	// This is a business-rule placeholder.
+	// Logic implementation...
 }

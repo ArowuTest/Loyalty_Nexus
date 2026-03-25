@@ -2,31 +2,30 @@ package main
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
-	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 	"loyalty-nexus/internal/application/services"
 	"loyalty-nexus/internal/application/usecases"
 	"loyalty-nexus/internal/infrastructure/config"
+	"loyalty-nexus/internal/infrastructure/external"
 	"loyalty-nexus/internal/infrastructure/persistence"
 	"loyalty-nexus/internal/infrastructure/queue"
-	"loyalty-nexus/internal/infrastructure/external"
 	"loyalty-nexus/internal/presentation/http/handlers"
 )
 
 func main() {
-	db, err := sql.Open("postgres", os.Getenv("DATABASE_URL"))
+	dsn := os.Getenv("DATABASE_URL")
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %v", err)
 	}
-	defer db.Close()
 
 	rdb := redis.NewClient(&redis.Options{
 		Addr: os.Getenv("REDIS_URL"),
@@ -37,21 +36,21 @@ func main() {
 	txRepo := persistence.NewPostgresTransactionRepository(db)
 	studioRepo := persistence.NewPostgresStudioRepository(db)
 	hlrRepo := persistence.NewPostgresHLRRepository(db)
+	chatRepo := persistence.NewPostgresChatRepository(db)
 
 	// Infrastructure
 	eq := queue.NewEventQueue(rdb, "recharge_stream")
 	cfg := config.NewConfigManager(db)
 	cfg.Refresh(context.Background())
 
-	// External AI Clients (Proxies/Adapters)
-	// In production, these are initialized with real API keys from env
+	// External AI Clients
 	groq := &external.GroqAdapter{}
 	gemini := &external.GeminiAdapter{}
 	deepseek := &external.DeepSeekAdapter{}
 	usageTracker := external.NewRedisUsageTracker(rdb)
 
 	// AI Orchestrator
-	llmOrchestrator := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, 10, 20)
+	llmOrchestrator := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, chatRepo, 10, 20)
 
 	// Services & UseCases
 	notifySvc := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
@@ -66,7 +65,7 @@ func main() {
 
 	// Handlers
 	studioHandler := handlers.NewStudioHandler(studioSvc, llmOrchestrator, asyncWorker, notebookLM)
-	adminHandler := &handlers.AdminHandler{} // To be fully initialized
+	adminHandler := &handlers.AdminHandler{}
 	ussdHandler := &handlers.USSDHandler{}
 
 	// --- ROUTES ---
@@ -74,30 +73,16 @@ func main() {
 	// USSD Entry Point
 	http.Handle("/api/v1/ussd", ussdHandler)
 
-	// Admin Cockpit
-	http.HandleFunc("/api/v1/admin/config/update", adminHandler.UpdateProgramConfig)
-	http.HandleFunc("/api/v1/admin/prizes", adminHandler.ListPrizes)
-	http.HandleFunc("/api/v1/admin/prizes/update", adminHandler.UpdatePrizeWeight)
-
 	// Ingestor (MNO / Paystack Gateway Endpoint)
 	http.HandleFunc("/api/v1/recharge/ingest", func(w http.ResponseWriter, r *http.Request) {
-		mode := os.Getenv("OPERATION_MODE")
 		msisdn := r.URL.Query().Get("msisdn")
 		amountRaw := r.URL.Query().Get("amount")
-		
 		var amount int64
 		fmt.Sscanf(amountRaw, "%d", &amount)
 
-		// Verification logic based on mode
-		if mode == "integrated" {
-			// Validate MNO signature/header
-		} else {
-			// Independent Mode: Validate Paystack origin or ref
-		}
-
 		event := queue.RechargeEvent{
-			MSISDN: msisdn, 
-			Amount: amount, 
+			MSISDN: msisdn,
+			Amount: amount,
 			Ref:    "NEX-" + time.Now().Format("150405"),
 		}
 		eq.PushRecharge(r.Context(), event)
@@ -107,24 +92,13 @@ func main() {
 
 	// User Profile
 	http.HandleFunc("/api/v1/user/profile", func(w http.ResponseWriter, r *http.Request) {
-		msisdn := r.URL.Query().Get("msisdn") // In production, get from JWT
+		msisdn := r.URL.Query().Get("msisdn")
 		user, err := userUC.GetProfile(r.Context(), msisdn)
 		if err != nil {
 			http.Error(w, "User not found", 404)
 			return
 		}
 		json.NewEncoder(w).Encode(user)
-	})
-
-	// Spin Wheel
-	http.HandleFunc("/api/v1/spin/play", func(w http.ResponseWriter, r *http.Request) {
-		msisdn := r.URL.Query().Get("msisdn")
-		tx, err := spinSvc.PlaySpin(r.Context(), msisdn)
-		if err != nil {
-			http.Error(w, err.Error(), 400)
-			return
-		}
-		json.NewEncoder(w).Encode(tx)
 	})
 
 	// Studio Routes
@@ -134,6 +108,9 @@ func main() {
 	http.HandleFunc("/api/v1/studio/generate/knowledge", studioHandler.GenerateKnowledge)
 	http.HandleFunc("/api/v1/studio/generate/build", studioHandler.GenerateBuild)
 	http.HandleFunc("/api/v1/studio/gallery", studioHandler.GetGallery)
+
+	// Admin Routes
+	http.HandleFunc("/api/v1/admin/config/update", adminHandler.UpdateProgramConfig)
 
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
