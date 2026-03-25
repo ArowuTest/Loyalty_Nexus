@@ -62,7 +62,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(authSvc)
 	momoHandler := handlers.NewMoMoHandler(momoSvc, authSvc)
 	mnoHandler := handlers.NewMNOWebhookHandler(eq)
-	adminHandler := &handlers.AdminHandler{}
+	adminHandler := handlers.NewAdminHandler(db)
 	ussdHandler := &handlers.USSDHandler{}
 
 	// --- ROUTES ---
