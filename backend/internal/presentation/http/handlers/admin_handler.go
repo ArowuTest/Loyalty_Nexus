@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"loyalty-nexus/internal/application/services"
@@ -24,6 +25,7 @@ type AdminHandler struct {
 	drawSvc  *services.DrawService
 	fraudSvc *services.FraudService
 	warsSvc  *services.RegionalWarsService
+	rdb      *redis.Client
 }
 
 func NewAdminHandler(
@@ -33,6 +35,7 @@ func NewAdminHandler(
 	drawSvc *services.DrawService,
 	fraudSvc *services.FraudService,
 	warsSvc *services.RegionalWarsService,
+	rdb *redis.Client,
 ) *AdminHandler {
 	return &AdminHandler{
 		db:       db,
@@ -41,6 +44,7 @@ func NewAdminHandler(
 		drawSvc:  drawSvc,
 		fraudSvc: fraudSvc,
 		warsSvc:  warsSvc,
+		rdb:      rdb,
 	}
 }
 
@@ -786,4 +790,145 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 func atoi(s string) int {
 	n, _ := strconv.Atoi(s)
 	return n
+}
+
+// ─── AI Health ────────────────────────────────────────────────────────────────
+
+// GetAIHealth returns real-time provider health data from Redis.
+// GET /api/v1/admin/ai-health
+func (h *AdminHandler) GetAIHealth(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.rdb == nil {
+		jsonError(w, "redis not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	allProviders := []string{"GROQ", "GEMINI_LITE", "DEEPSEEK"}
+
+	// ── active_chat_provider ────────────────────────────────────────
+	activeProvider, _ := h.rdb.Get(ctx, "nexus:ai:active_chat_provider").Result()
+
+	// ── per-provider stats ──────────────────────────────────────────
+	type ProviderHealth struct {
+		Name          string      `json:"name"`
+		Status        string      `json:"status"`
+		RequestsToday int64       `json:"requests_today"`
+		LastUsedAt    *time.Time  `json:"last_used_at"`
+		LastError     interface{} `json:"last_error"` // null when no error
+	}
+
+	providers := make([]ProviderHealth, 0, len(allProviders))
+	for _, name := range allProviders {
+		pkey := "nexus:ai:provider:" + name
+
+		status, err := h.rdb.Get(ctx, pkey+":status").Result()
+		if err != nil {
+			status = "unknown"
+		}
+
+		reqStr, _ := h.rdb.Get(ctx, pkey+":requests_today").Result()
+		var reqsToday int64
+		if reqStr != "" {
+			fmt.Sscanf(reqStr, "%d", &reqsToday)
+		}
+
+		var lastUsedAt *time.Time
+		if tsStr, err2 := h.rdb.Get(ctx, pkey+":last_used_at").Result(); err2 == nil {
+			var ts int64
+			if _, scanErr := fmt.Sscanf(tsStr, "%d", &ts); scanErr == nil {
+				t := time.Unix(ts, 0).UTC()
+				lastUsedAt = &t
+			}
+		}
+
+		var lastError interface{}
+		if errMsg, err2 := h.rdb.Get(ctx, pkey+":last_error").Result(); err2 == nil && errMsg != "" {
+			lastError = errMsg
+		}
+
+		providers = append(providers, ProviderHealth{
+			Name:          name,
+			Status:        status,
+			RequestsToday: reqsToday,
+			LastUsedAt:    lastUsedAt,
+			LastError:     lastError,
+		})
+	}
+
+	// ── recent provider switches ────────────────────────────────────
+	type SwitchEntry struct {
+		From   string `json:"from"`
+		To     string `json:"to"`
+		Reason string `json:"reason"`
+		TS     int64  `json:"ts"`
+	}
+
+	rawSwitches, _ := h.rdb.LRange(ctx, "nexus:ai:provider_switch_log", 0, 49).Result()
+	recentSwitches := make([]SwitchEntry, 0, len(rawSwitches))
+	for _, raw := range rawSwitches {
+		var entry SwitchEntry
+		if jsonErr := json.Unmarshal([]byte(raw), &entry); jsonErr == nil {
+			recentSwitches = append(recentSwitches, entry)
+		}
+	}
+
+	// ── studio tools ────────────────────────────────────────────────
+	type StudioToolHealth struct {
+		Slug          string     `json:"slug"`
+		RequestsToday int64      `json:"requests_today"`
+		LastProvider  string     `json:"last_provider"`
+		LastUsedAt    *time.Time `json:"last_used_at"`
+	}
+
+	// Scan all nexus:ai:studio:*:requests_today keys
+	var studioTools []StudioToolHealth
+	iter := h.rdb.Scan(ctx, 0, "nexus:ai:studio:*:requests_today", 100).Iterator()
+	for iter.Next(ctx) {
+		key := iter.Val() // nexus:ai:studio:{slug}:requests_today
+		// extract slug: strip prefix "nexus:ai:studio:" and suffix ":requests_today"
+		const prefix = "nexus:ai:studio:"
+		const suffix = ":requests_today"
+		if len(key) <= len(prefix)+len(suffix) {
+			continue
+		}
+		slug := key[len(prefix) : len(key)-len(suffix)]
+		if slug == "" {
+			continue
+		}
+
+		base := "nexus:ai:studio:" + slug
+		reqStr, _ := h.rdb.Get(ctx, key).Result()
+		var reqs int64
+		fmt.Sscanf(reqStr, "%d", &reqs)
+
+		lastProvider, _ := h.rdb.Get(ctx, base+":last_provider").Result()
+
+		var lastUsedAt *time.Time
+		if tsStr, err2 := h.rdb.Get(ctx, base+":last_used_at").Result(); err2 == nil {
+			var ts int64
+			if _, scanErr := fmt.Sscanf(tsStr, "%d", &ts); scanErr == nil {
+				t := time.Unix(ts, 0).UTC()
+				lastUsedAt = &t
+			}
+		}
+
+		studioTools = append(studioTools, StudioToolHealth{
+			Slug:          slug,
+			RequestsToday: reqs,
+			LastProvider:  lastProvider,
+			LastUsedAt:    lastUsedAt,
+		})
+	}
+	if studioTools == nil {
+		studioTools = []StudioToolHealth{}
+	}
+
+	jsonOK(w, map[string]interface{}{
+		"active_chat_provider": activeProvider,
+		"providers":            providers,
+		"recent_switches":      recentSwitches,
+		"studio_tools":         studioTools,
+		"checked_at":           time.Now().UTC().Format(time.RFC3339),
+	})
 }

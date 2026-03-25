@@ -1,0 +1,32 @@
+# Environment — NEVER commit real keys
+.env
+.env.local
+.env.production
+.env.staging
+backend/.env
+frontend/.env.local
+admin/.env.local
+
+# Go
+backend/tmp/
+backend/coverage.out
+*.test
+
+# Node
+node_modules/
+frontend/.next/
+admin/.next/
+frontend/out/
+admin/out/
+*.tsbuildinfo
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

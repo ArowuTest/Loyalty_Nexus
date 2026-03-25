@@ -95,6 +95,7 @@ func main() {
 
 	// ─── AI Studio Orchestrator (4-tier provider) ──────────────
 	aiStudioOrch := services.NewAIStudioOrchestrator(cfg, studioRepo, studioSvc, userRepo, assetStorage)
+	aiStudioOrch.SetLLMOrch(llmOrch) // wire health tracking
 
 	// ─── Knowledge Worker (dispatches studio jobs) ─────────────
 	kbWorker := handlers.NewAsyncStudioWorker(studioSvc, aiStudioOrch)
@@ -106,7 +107,7 @@ func main() {
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
 	// kbWorker no longer needs a back-link — orch is injected directly
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
-	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc)
+	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc, rdb)
 	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, cfg)
 	// ─── WebSocket Hub (Regional Wars real-time leaderboard) ────
 	leaderboardHub := handlers.NewLeaderboardHub()
@@ -244,6 +245,7 @@ func main() {
 	mux.Handle("POST   /api/v1/admin/wars/cycle/reset",       adminAuth(http.HandlerFunc(adminH.ResetWarsCycle)))
 	// System health (REQ-5.8.3)
 	mux.Handle("GET    /api/v1/admin/health",                 adminAuth(http.HandlerFunc(adminH.GetHealth)))
+	mux.Handle("GET    /api/v1/admin/ai-health",              adminAuth(http.HandlerFunc(adminH.GetAIHealth)))
 
 	// ─── HTTP Server ──────────────────────────────────────────
 	port := cfg.GetString("port", "8080")

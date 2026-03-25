@@ -15,6 +15,22 @@ import (
 	"loyalty-nexus/internal/domain/repositories"
 )
 
+// ─── Redis key helpers ────────────────────────────────────────────────────────
+
+func providerStatusKey(p LLMProvider) string    { return "nexus:ai:provider:" + string(p) + ":status" }
+func providerLastUsedKey(p LLMProvider) string  { return "nexus:ai:provider:" + string(p) + ":last_used_at" }
+func providerLastErrKey(p LLMProvider) string   { return "nexus:ai:provider:" + string(p) + ":last_error" }
+func providerReqTodayKey(p LLMProvider) string  { return "nexus:ai:provider:" + string(p) + ":requests_today" }
+const activeProviderKey    = "nexus:ai:active_chat_provider"
+const providerSwitchLogKey = "nexus:ai:provider_switch_log"
+
+// secondsUntilMidnightUTC returns the number of seconds until the next UTC midnight.
+func secondsUntilMidnightUTC() time.Duration {
+	now := time.Now().UTC()
+	midnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
+	return time.Until(midnight)
+}
+
 // ─── Provider constants ──────────────────────────────────────────────────────
 
 type LLMProvider string
@@ -150,6 +166,88 @@ func (o *LLMOrchestrator) buildMemoryBlock(ctx context.Context, uid uuid.UUID, s
 	return sb.String()
 }
 
+// ─── Provider health helpers ──────────────────────────────────────────────────
+
+// recordProviderUse writes health-tracking keys to Redis after each LLM call.
+// It runs synchronously but with a short-circuit timeout so it never blocks Chat.
+func (o *LLMOrchestrator) recordProviderUse(ctx context.Context, provider LLMProvider, success bool, errMsg string) {
+	rCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	now := time.Now().UTC()
+	ts := fmt.Sprintf("%d", now.Unix())
+
+	// Determine status
+	status := "ok"
+	if !success {
+		lower := strings.ToLower(errMsg)
+		if strings.Contains(lower, "429") || strings.Contains(lower, "rate") || strings.Contains(lower, "limit") {
+			status = "limit_reached"
+		} else {
+			status = "error"
+		}
+	}
+
+	pipe := o.rdb.Pipeline()
+	pipe.Set(rCtx, providerStatusKey(provider), status, 0)
+	pipe.Set(rCtx, providerLastUsedKey(provider), ts, 0)
+
+	if !success && errMsg != "" {
+		pipe.Set(rCtx, providerLastErrKey(provider), errMsg, 0)
+	}
+
+	if success {
+		pipe.Incr(rCtx, providerReqTodayKey(provider))
+		pipe.ExpireAt(rCtx, providerReqTodayKey(provider), time.Now().UTC().Add(secondsUntilMidnightUTC()))
+	}
+
+	pipe.Set(rCtx, activeProviderKey, string(provider), 0)
+	_, _ = pipe.Exec(rCtx)
+
+	// If provider changed, push a switch log entry
+	prev, err := o.rdb.Get(rCtx, activeProviderKey).Result()
+	if err == nil && prev != string(provider) {
+		type switchEntry struct {
+			From   string `json:"from"`
+			To     string `json:"to"`
+			Reason string `json:"reason"`
+			TS     int64  `json:"ts"`
+		}
+		reason := "provider_change"
+		if status == "limit_reached" {
+			reason = "rate_limit"
+		} else if status == "error" {
+			reason = "error"
+		}
+		entry := switchEntry{From: prev, To: string(provider), Reason: reason, TS: now.Unix()}
+		entryBytes, jsonErr := json.Marshal(entry)
+		if jsonErr == nil {
+			pipe2 := o.rdb.Pipeline()
+			pipe2.LPush(rCtx, providerSwitchLogKey, string(entryBytes))
+			pipe2.LTrim(rCtx, providerSwitchLogKey, 0, 49) // keep last 50
+			_, _ = pipe2.Exec(rCtx)
+		}
+	}
+}
+
+// RecordStudioToolUse records per-tool usage stats in Redis.
+// Intended to be called as a fire-and-forget goroutine from AIStudioOrchestrator.
+func (o *LLMOrchestrator) RecordStudioToolUse(ctx context.Context, toolSlug, provider string) {
+	rCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	base := "nexus:ai:studio:" + toolSlug
+	now := time.Now().UTC()
+	ts := fmt.Sprintf("%d", now.Unix())
+
+	pipe := o.rdb.Pipeline()
+	pipe.Incr(rCtx, base+":requests_today")
+	pipe.ExpireAt(rCtx, base+":requests_today", time.Now().UTC().Add(secondsUntilMidnightUTC()))
+	pipe.Set(rCtx, base+":last_provider", provider, 0)
+	pipe.Set(rCtx, base+":last_used_at", ts, 0)
+	_, _ = pipe.Exec(rCtx)
+}
+
 // ─── Chat ────────────────────────────────────────────────────────────────────
 
 func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
@@ -179,10 +277,12 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 		text, err = o.groqClient.Complete(ctx, systemPrompt, req.Prompt)
 		if err != nil {
 			log.Printf("[LLM] Groq failed (count=%d) → falling through to Gemini: %v", dailyCount, err)
+			go o.recordProviderUse(context.Background(), ProviderGroq, false, err.Error())
 			// Fall through to Gemini
 			text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
 			if err != nil {
 				log.Printf("[LLM] Gemini failed → DeepSeek: %v", err)
+				go o.recordProviderUse(context.Background(), ProviderGeminiLite, false, err.Error())
 				text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
 				provider = ProviderDeepSeek
 			} else {
@@ -196,6 +296,7 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 		text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
 		if err != nil {
 			log.Printf("[LLM] Gemini failed (count=%d) → DeepSeek: %v", dailyCount, err)
+			go o.recordProviderUse(context.Background(), ProviderGeminiLite, false, err.Error())
 			text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
 			provider = ProviderDeepSeek
 		} else {
@@ -208,6 +309,8 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 	}
 
 	if err != nil {
+		// Record the failure for the last-attempted provider
+		go o.recordProviderUse(context.Background(), provider, false, err.Error())
 		return nil, fmt.Errorf("all LLM providers exhausted: %w", err)
 	}
 
@@ -221,6 +324,9 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 			_ = o.chatRepo.AppendMessage(ctx, sid, "assistant", text)
 		}
 	}
+
+	// Record successful provider use (non-blocking)
+	go o.recordProviderUse(context.Background(), provider, true, "")
 
 	return &LLMResponse{
 		Text:     text,

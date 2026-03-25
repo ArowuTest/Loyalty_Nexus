@@ -106,6 +106,7 @@ type AIStudioOrchestrator struct {
 	userRepo   repositories.UserRepository
 	storage    external.AssetStorage
 	httpClient *http.Client
+	llmOrch    *external.LLMOrchestrator // for provider health tracking
 }
 
 func NewAIStudioOrchestrator(
@@ -126,6 +127,12 @@ func NewAIStudioOrchestrator(
 		storage:    storage,
 		httpClient: &http.Client{Timeout: 120 * time.Second},
 	}
+}
+
+// SetLLMOrch wires the LLM orchestrator for provider health tracking.
+// Called after construction so the constructor stays dependency-free.
+func (o *AIStudioOrchestrator) SetLLMOrch(orch *external.LLMOrchestrator) {
+	o.llmOrch = orch
 }
 
 // Dispatch is the main entry point: resolves category, calls the right provider chain,
@@ -154,6 +161,10 @@ func (o *AIStudioOrchestrator) Dispatch(ctx context.Context, genID uuid.UUID) er
 	}
 
 	result.DurationMs = elapsed
+	// Track studio tool usage in Redis for admin AI health dashboard
+	if o.llmOrch != nil {
+		go o.llmOrch.RecordStudioToolUse(context.Background(), gen.ToolSlug, result.Provider)
+	}
 	return o.complete(ctx, gen, result)
 }
 

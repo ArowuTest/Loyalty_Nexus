@@ -46,6 +46,7 @@ class AdminAPI {
   // Regional Wars admin
   resolveWar(period: string) { return this.req("POST", "/admin/wars/resolve", { period }); }
   getHealth() { return this.req<HealthReport>("GET", "/admin/health"); }
+  getAIHealth() { return this.req<AIHealthReport>("GET", "/admin/ai-health"); }
 }
 export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
@@ -106,5 +107,33 @@ export interface HealthReport {
   api_p99_ms: number;
   db_pool_used: number; db_pool_max: number;
   redis_hit_rate: number;
+  checked_at: string;
+}
+
+// ─── AI Health types ──────────────────────────────────────────────────────────
+export interface AIProviderStatus {
+  name: string;
+  status: "ok" | "error" | "limit_reached" | "unknown";
+  requests_today: number;
+  last_used_at: string | null;
+  last_error: string | null;
+}
+export interface ProviderSwitchEvent {
+  from: string;
+  to: string;
+  reason: string;
+  ts: number;
+}
+export interface StudioToolHealth {
+  slug: string;
+  requests_today: number;
+  last_provider: string;
+  last_used_at: string | null;
+}
+export interface AIHealthReport {
+  active_chat_provider: string;
+  providers: AIProviderStatus[];
+  recent_switches: ProviderSwitchEvent[];
+  studio_tools: StudioToolHealth[];
   checked_at: string;
 }
