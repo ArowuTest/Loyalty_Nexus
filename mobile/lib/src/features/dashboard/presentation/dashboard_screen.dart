@@ -1,135 +1,148 @@
 import 'package:flutter/material.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/api/api_client.dart';
+import '../../../core/auth/auth_provider.dart';
+import '../../../core/theme/nexus_theme.dart';
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
+  @override ConsumerState<DashboardScreen> createState() => _State();
+}
+
+class _State extends ConsumerState<DashboardScreen> {
+  Map<String, dynamic>? wallet;
+  Map<String, dynamic>? profile;
+  bool loading = true;
 
   @override
-  Widget build(BuildContext context) {
+  void initState() { super.initState(); _load(); }
+
+  Future<void> _load() async {
+    try {
+      final dio = ref.read(dioProvider);
+      final w = await dio.apiGet<Map<String, dynamic>>('/user/wallet');
+      final p = await dio.apiGet<Map<String, dynamic>>('/user/profile');
+      setState(() { wallet = w; profile = p; loading = false; });
+    } catch (_) { setState(() => loading = false); }
+  }
+
+  @override
+  Widget build(BuildContext ctx) {
+    final pts = wallet?['pulse_points'] ?? 0;
+    final spins = wallet?['spin_credits'] ?? 0;
+    final tier = profile?['tier'] ?? 'BRONZE';
     return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(),
-              const SizedBox(height: 32),
-              _buildBalanceGrid(),
-              const SizedBox(height: 32),
-              _buildPassportCard(),
-              const SizedBox(height: 32),
-              _buildTournamentSection(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('NEXUS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.black, fontStyle: FontStyle.italic, color: Color(0xFFD4AF37))),
-            Text('Lagos, Nigeria', style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.bold)),
-          ],
-        ),
-        const CircleAvatar(radius: 24, backgroundColor: Color(0xFFD4AF37)),
-      ],
-    );
-  }
-
-  Widget _buildBalanceGrid() {
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      crossAxisSpacing: 16,
-      mainAxisSpacing: 16,
-      children: [
-        _buildStatCard('Airtime', '₦4,250', LucideIcons.phone),
-        _buildStatCard('Data', '12.5 GB', LucideIcons.wifi),
-      ],
-    );
-  }
-
-  Widget _buildStatCard(String title, String value, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: const Color(0xFFD4AF37), size: 20),
-          const SizedBox(height: 12),
-          Text(title, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
-          Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.black, color: Colors.white)),
+      appBar: AppBar(
+        title: const Text('Home'),
+        actions: [
+          IconButton(icon: const Icon(Icons.settings_outlined),
+            onPressed: () => ctx.go('/settings')),
         ],
       ),
-    );
-  }
-
-  Widget _buildPassportCard() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: const Color(0xFFD4AF37).withOpacity(0.3)),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Colors.white.withOpacity(0.05), Colors.white.withOpacity(0.01)],
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
-                child: const Text('PASSPORT ACTIVE', style: TextStyle(color: Colors.green, fontSize: 8, fontWeight: FontWeight.black)),
-              ),
-              const Icon(LucideIcons.smartphone, color: Color(0xFFD4AF37)),
-            ],
+      body: loading
+        ? const Center(child: CircularProgressIndicator(color: NexusColors.primary))
+        : RefreshIndicator(
+            onRefresh: _load,
+            color: NexusColors.primary,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(20),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // Wallet card
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF4A56EE), Color(0xFF8B5CF6)],
+                      begin: Alignment.topLeft, end: Alignment.bottomRight),
+                    borderRadius: BorderRadius.circular(20)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      const Text('Pulse Points', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20)),
+                        child: Text(tier, style: const TextStyle(
+                          color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold))),
+                    ]),
+                    const SizedBox(height: 8),
+                    Text('\$pts pts', style: const TextStyle(
+                      color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold,
+                      fontFamily: 'Syne')),
+                    const SizedBox(height: 16),
+                    Row(children: [
+                      Expanded(child: _statBox('Spin Credits', '\$spins')),
+                      const SizedBox(width: 12),
+                      Expanded(child: _statBox('Lifetime', '\${wallet?['lifetime_points'] ?? 0} pts')),
+                    ]),
+                  ])),
+                const SizedBox(height: 24),
+                Text('Quick Actions', style: Theme.of(ctx).textTheme.titleLarge),
+                const SizedBox(height: 12),
+                GridView.count(
+                  crossAxisCount: 2, shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 1.6,
+                  children: [
+                    _actionCard(ctx, '🎡', 'Spin & Win', 'Use credits', '/spin', NexusColors.primary),
+                    _actionCard(ctx, '🧠', 'AI Studio', '17 free tools', '/studio', const Color(0xFF8B5CF6)),
+                    _actionCard(ctx, '🌍', 'Regional Wars', 'State rank', '/wars', NexusColors.green),
+                    _actionCard(ctx, '🎁', 'My Prizes', 'Claim rewards', '/prizes', NexusColors.gold),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: NexusColors.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: NexusColors.border)),
+                  child: Row(children: [
+                    const Icon(Icons.bolt, color: NexusColors.primary),
+                    const SizedBox(width: 12),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Text('Recharge to earn more', style: TextStyle(
+                        color: NexusColors.textPrimary, fontWeight: FontWeight.w600)),
+                      const Text('₦200+ → 2 points + 1 spin credit',
+                        style: TextStyle(color: NexusColors.textSecondary, fontSize: 12)),
+                    ])),
+                  ]),
+                ),
+              ]),
+            ),
           ),
-          const SizedBox(height: 24),
-          const Text('Digital Passport', style: TextStyle(fontSize: 20, fontWeight: FontWeight.black, fontStyle: FontStyle.italic)),
-          const Text('Persistent Lock-screen Card', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
-        ],
-      ),
     );
   }
 
-  Widget _buildTournamentSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('REGIONAL WARS', style: TextStyle(fontSize: 18, fontWeight: FontWeight.black, fontStyle: FontStyle.italic)),
-            Text('LIVE', style: TextStyle(color: Color(0xFFD4AF37), fontSize: 10, fontWeight: FontWeight.black)),
-          ],
-        ),
-        const SizedBox(height: 16),
-        Container(
-          height: 100,
-          decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(24)),
-          child: const Center(child: Text('Tournament Feed...', style: TextStyle(color: Colors.grey, fontSize: 12))),
-        ),
-      ],
-    );
-  }
+  Widget _statBox(String label, String value) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.15),
+      borderRadius: BorderRadius.circular(10)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10)),
+      Text(value, style: const TextStyle(
+        color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+    ]));
+
+  Widget _actionCard(BuildContext ctx, String icon, String title, String sub,
+      String route, Color color) => GestureDetector(
+    onTap: () => ctx.go(route),
+    child: Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: NexusColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: NexusColors.border)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(icon, style: const TextStyle(fontSize: 22)),
+        const SizedBox(height: 4),
+        Text(title, style: TextStyle(
+          color: NexusColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 13)),
+        Text(sub, style: const TextStyle(color: NexusColors.textSecondary, fontSize: 11)),
+      ])));
 }
