@@ -124,14 +124,6 @@ func (m *mockUserRepoAuth) FindUsersWithExpiringPoints(_ context.Context, _, _ i
 func (m *mockUserRepoAuth) CountByState(_ context.Context, _ string) (int64, error) { return 0, nil }
 func (m *mockUserRepoAuth) UpdateState(_ context.Context, _ uuid.UUID, _ string) error { return nil }
 
-// notifyMock
-type notifyMock struct{ sent []string }
-
-func (n *notifyMock) SendSMS(_ context.Context, phone, msg string) error {
-	n.sent = append(n.sent, phone)
-	return nil
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func setupAuthCfg(t *testing.T) *config.ConfigManager {

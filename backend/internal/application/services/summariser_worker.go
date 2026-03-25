@@ -74,12 +74,14 @@ func (w *SummariserWorker) getTranscript(ctx context.Context, sessionID uuid.UUI
 }
 
 func (w *SummariserWorker) storeSummary(ctx context.Context, userID, sessionID uuid.UUID, summary string) {
-	w.db.Transaction(func(tx *gorm.DB) error {
+	if err := w.db.Transaction(func(tx *gorm.DB) error {
 		tx.Table("session_summaries").Create(map[string]interface{}{
 			"user_id": userID,
 			"summary": summary,
 		})
 		tx.Table("chat_sessions").Where("id = ?", sessionID).Update("status", "summarized")
 		return nil
-	})
+	}); err != nil {
+		log.Printf("[Summariser] storeSummary transaction error: %v", err)
+	}
 }

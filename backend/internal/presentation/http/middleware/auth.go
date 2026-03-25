@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -95,5 +96,7 @@ func extractBearer(r *http.Request) string {
 func writeError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	if encErr := json.NewEncoder(w).Encode(map[string]string{"error": msg}); encErr != nil {
+		log.Printf("[Auth] writeError encode failure: %v", encErr)
+	}
 }

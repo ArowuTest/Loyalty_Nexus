@@ -50,7 +50,10 @@ func (h *FraudHandler) SuspendUser(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Reason string `json:"reason"`
 	}
-	decodeJSON(r, &body)
+	if decErr := decodeJSON(r, &body); decErr != nil {
+		// Non-fatal: body is optional, Reason has a default
+		body.Reason = ""
+	}
 	if body.Reason == "" {
 		body.Reason = "Admin manual suspension"
 	}

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
 
 // ─── ApplePassAdapter ─────────────────────────────────────────────────────
@@ -198,9 +197,35 @@ func (w *WalletPassportAdapter) IssueGooglePass(ctx context.Context, userID stri
 	return w.google.IssueGooglePass(ctx, userID, points)
 }
 
-// PushUpdate logs the points update and can trigger downstream notifications.
+// PushUpdate sends a points-updated push payload to a configurable webhook
+// endpoint (WALLET_PUSH_ENDPOINT) and logs the event. The endpoint is optional;
+// if not set the call is a structured no-op.
 func (w *WalletPassportAdapter) PushUpdate(ctx context.Context, userID string, points int64) error {
 	log.Printf("[WalletPassport] PushUpdate: userID=%s points=%d", userID, points)
+
+	endpoint := os.Getenv("WALLET_PUSH_ENDPOINT")
+	if endpoint == "" {
+		return nil // not configured — skip HTTP call
+	}
+
+	body := newPushRequestBody(userID, points)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("[WalletPassport] PushUpdate: build request error: %v", err)
+		return nil // non-fatal
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[WalletPassport] PushUpdate: HTTP error: %v", err)
+		return nil // non-fatal
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		log.Printf("[WalletPassport] PushUpdate: upstream returned HTTP %d", resp.StatusCode)
+	}
 	return nil
 }
 
@@ -249,8 +274,8 @@ func (a *RebitesWalletAdapter) PushUpdate(ctx context.Context, userID string, po
 
 // ─── helpers ──────────────────────────────────────────────────────────────
 
-// newPushRequestBody builds a generic push notification payload (for future
-// APNS/FCM integration).
+// newPushRequestBody builds the push notification payload sent to
+// WALLET_PUSH_ENDPOINT when a user's points balance changes.
 func newPushRequestBody(userID string, points int64) []byte {
 	payload := map[string]interface{}{
 		"userID": userID,
@@ -261,8 +286,3 @@ func newPushRequestBody(userID string, points int64) []byte {
 	b, _ := json.Marshal(payload)
 	return b
 }
-
-// unused reference to keep imports tidy
-var _ = bytes.NewReader
-var _ = uuid.New
-var _ = http.MethodPost

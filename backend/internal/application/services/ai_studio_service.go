@@ -1289,7 +1289,9 @@ func (o *AIStudioOrchestrator) callAssemblyAI(ctx context.Context, apiKey, audio
 			Text   string `json:"text"`
 			Error  string `json:"error"`
 		}
-		json.NewDecoder(pollResp.Body).Decode(&result)
+		if decErr := json.NewDecoder(pollResp.Body).Decode(&result); decErr != nil {
+			log.Printf("[Studio] AssemblyAI poll decode error: %v", decErr)
+		}
 		pollResp.Body.Close()
 
 		switch result.Status {
@@ -2360,9 +2362,4 @@ func truncateStr(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
-}
-
-// encodeBase64 encodes bytes to standard base64 string.
-func encodeBase64(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
 }

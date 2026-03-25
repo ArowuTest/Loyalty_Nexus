@@ -292,9 +292,3 @@ func hexSHA256(data []byte) string {
 func amzDate(t time.Time) string {
 	return t.Format("20060102T150405Z")
 }
-
-// _getenv is a thin wrapper so other files in this package can read env vars
-// without importing "os" directly.
-func _getenv(key string) string {
-	return os.Getenv(key)
-}

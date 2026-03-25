@@ -235,7 +235,10 @@ func (s *AuthService) decrypt(ciphertext string) (string, error) {
 
 func generateUserCode() string {
 	b := make([]byte, 4)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failure is extremely unlikely; fall back to timestamp-based code
+		return fmt.Sprintf("NXS%08X", uint32(time.Now().UnixNano()))
+	}
 	return "NXS" + fmt.Sprintf("%08X", b)
 }
 

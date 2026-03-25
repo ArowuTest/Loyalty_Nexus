@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -104,7 +105,9 @@ func (rl *RateLimiter) Middleware(keyFn func(*http.Request) string) func(http.Ha
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Retry-After", fmt.Sprintf("%.0f", rl.banDuration.Seconds()))
 				w.WriteHeader(http.StatusTooManyRequests)
-				w.Write([]byte(`{"error":"too many requests — please slow down"}`))
+				if _, writeErr := w.Write([]byte(`{"error":"too many requests — please slow down"}`)); writeErr != nil {
+					log.Printf("[RateLimiter] write error: %v", writeErr)
+				}
 				return
 			}
 			next.ServeHTTP(w, r)

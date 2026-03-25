@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -116,14 +117,23 @@ func (h *PassportHandler) DownloadPKPass(w http.ResponseWriter, r *http.Request)
 	// Build a minimal .pkpass zip (pass.json only; icon/logo need CDN assets in prod)
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	pf, _ := zw.Create("pass.json")
-	pf.Write(passJSON)
+	pf, createErr := zw.Create("pass.json")
+	if createErr != nil {
+		log.Printf("[Passport] zip Create error: %v", createErr)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if _, writeErr := pf.Write(passJSON); writeErr != nil {
+		log.Printf("[Passport] zip Write error: %v", writeErr)
+	}
 	zw.Close()
 
 	w.Header().Set("Content-Type", "application/vnd.apple.pkpass")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=nexus_passport_%s.pkpass", userID.String()[:8]))
 	w.WriteHeader(http.StatusOK)
-	w.Write(buf.Bytes())
+	if _, writeErr := w.Write(buf.Bytes()); writeErr != nil {
+		log.Printf("[Passport] response Write error: %v", writeErr)
+	}
 }
 
 // ─── GET /api/v1/passport/events ─────────────────────────────────────────

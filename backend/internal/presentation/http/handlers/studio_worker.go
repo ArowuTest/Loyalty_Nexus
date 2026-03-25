@@ -80,7 +80,9 @@ func (w *AsyncStudioWorker) run() {
 	for genID := range w.jobQueue {
 		// Give each job its own context with a generous timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		w.orch.Dispatch(ctx, genID)
+		if dispatchErr := w.orch.Dispatch(ctx, genID); dispatchErr != nil {
+			log.Printf("[StudioWorker] dispatch error for gen %s: %v", genID, dispatchErr)
+		}
 		cancel()
 	}
 }

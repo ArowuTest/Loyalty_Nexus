@@ -52,7 +52,7 @@ func (w *TournamentWorker) CheckGoldenHour(ctx context.Context) {
 	// Innovation: Regional Wars (Strategy Doc Section 4)
 	// Every Friday, enable Golden Hour for the region with the highest weekly growth.
 	if time.Now().Weekday() == time.Friday {
-		w.db.Transaction(func(tx *gorm.DB) error {
+		if err := w.db.Transaction(func(tx *gorm.DB) error {
 			// 1. Reset all golden hours
 			tx.Table("regional_settings").Update("is_golden_hour", false)
 
@@ -66,6 +66,8 @@ func (w *TournamentWorker) CheckGoldenHour(ctx context.Context) {
 				log.Printf("[TournamentWorker] Golden Hour Activated for %s", topRegion)
 			}
 			return nil
-		})
+		}); err != nil {
+			log.Printf("[TournamentWorker] CheckGoldenHour transaction error: %v", err)
+		}
 	}
 }

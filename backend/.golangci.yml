@@ -1,0 +1,23 @@
+run:
+  timeout: 5m
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+
+linters-settings:
+  staticcheck:
+    # SA1019 is suppressed per-call with //nolint:staticcheck in wars_ws.go
+    checks: ["all"]
+
+issues:
+  exclude-rules:
+    # wars_ws.go uses nhooyr.io/websocket which is the same as coder/websocket
+    # All deprecated call sites already have //nolint:staticcheck inline comments
+    - path: wars_ws\.go
+      linters:
+        - staticcheck
+      text: "SA1019"

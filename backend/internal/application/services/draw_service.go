@@ -170,13 +170,13 @@ func (svc *DrawService) CreateDraw(
 		Recurrence:     recurrence,
 		StartTime:      drawDate.Add(-24 * time.Hour),
 		EndTime:        drawDate,
-		DrawTime:       &drawDate,
+		DrawTime:       timePtr(drawDate),
 	}
 
 	// If recurring, set NextDrawAt
 	if recurrence != "none" {
 		next := nextDrawTime(drawDate, recurrence)
-		draw.NextDrawAt = &next
+		draw.NextDrawAt = timePtr(next)
 	}
 
 	if err := svc.db.WithContext(ctx).Create(draw).Error; err != nil {
@@ -258,7 +258,7 @@ func (svc *DrawService) UpdateDraw(ctx context.Context, drawID uuid.UUID, update
 	if v, ok := updates["draw_time"].(string); ok {
 		if t, err2 := time.Parse(time.RFC3339, v); err2 == nil {
 			safe["draw_time"] = t
-			draw.DrawTime = &t
+			draw.DrawTime = timePtr(t)
 		}
 	}
 	if v, ok := updates["recurrence"].(string); ok {
@@ -423,7 +423,7 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 				Recurrence:     draw.Recurrence,
 				StartTime:      next.Add(-24 * time.Hour),
 				EndTime:        next,
-				DrawTime:       &next,
+				DrawTime:       timePtr(next),
 				CreatedAt:      now,
 				UpdatedAt:      now,
 			}
@@ -692,5 +692,6 @@ func drawShuffleCrypto(s []DrawEntry) {
 	}
 }
 
-// timePtr returns a pointer to a time.Time value.
+// timePtr returns a pointer to a time.Time — used when assigning optional
+// *time.Time fields on draw and schedule entities.
 func timePtr(t time.Time) *time.Time { return &t }

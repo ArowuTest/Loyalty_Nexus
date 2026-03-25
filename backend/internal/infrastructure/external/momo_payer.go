@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -108,7 +109,9 @@ func (m *MTNMomoAdapter) VerifyAccount(ctx context.Context, phone string) (strin
 		var info struct {
 			Name string `json:"name"`
 		}
-		json.NewDecoder(resp.Body).Decode(&info)
+		if decErr := json.NewDecoder(resp.Body).Decode(&info); decErr != nil {
+			log.Printf("[MoMo] account-info decode error: %v", decErr)
+		}
 		return info.Name, true, nil
 	}
 	return "", false, fmt.Errorf("MoMo account not found (HTTP %d)", resp.StatusCode)
@@ -135,7 +138,9 @@ func (m *MTNMomoAdapter) GetTransactionStatus(ctx context.Context, momoRef strin
 	var result struct {
 		Status string `json:"status"` // SUCCESSFUL | FAILED | PENDING
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if decErr := json.NewDecoder(resp.Body).Decode(&result); decErr != nil {
+		log.Printf("[MoMo] transaction-status decode error: %v", decErr)
+	}
 	return result.Status, nil
 }
 

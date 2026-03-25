@@ -15,6 +15,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -205,7 +206,7 @@ func (svc *RegionalWarsService) awardStateBonuses(ctx context.Context, winners [
 			Pluck("id", &userIDs)
 
 		for _, uid := range userIDs {
-			svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if txErr := svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 				// Credit wallet
 				if err := tx.Exec(`
 					UPDATE wallets SET pulse_points = pulse_points + ?, lifetime_points = lifetime_points + ?
@@ -227,7 +228,9 @@ func (svc *RegionalWarsService) awardStateBonuses(ctx context.Context, winners [
 					Reference:   "wars_bonus_" + w.State + "_rank" + fmt.Sprintf("%d", w.Rank),
 					CreatedAt:   time.Now(),
 				}).Error
-			})
+			}); txErr != nil {
+				log.Printf("[WarsService] bonus transaction error for user %s: %v", uid, txErr)
+			}
 		}
 	}
 }

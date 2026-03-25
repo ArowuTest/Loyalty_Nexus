@@ -202,7 +202,8 @@ func (h *AdminHandler) SuspendUser(w http.ResponseWriter, r *http.Request) {
 		Suspended bool   `json:"suspended"`
 		Reason    string `json:"reason"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	// body is optional — default values (Suspended=false) apply if body omitted
+	_ = json.NewDecoder(r.Body).Decode(&body)
 
 	h.db.WithContext(r.Context()).Table("users").
 		Where("id = ?", id).
@@ -261,7 +262,9 @@ func (h *AdminHandler) CreatePrize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(prize)
+	if encErr := json.NewEncoder(w).Encode(prize); encErr != nil {
+		log.Printf("[Admin] CreatePrize encode error: %v", encErr)
+	}
 }
 
 func (h *AdminHandler) UpdatePrize(w http.ResponseWriter, r *http.Request) {
@@ -395,7 +398,9 @@ func (h *AdminHandler) CreateDraw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(draw)
+	if encErr := json.NewEncoder(w).Encode(draw); encErr != nil {
+		log.Printf("[Admin] CreateDraw encode error: %v", encErr)
+	}
 }
 
 func (h *AdminHandler) UpdateDraw(w http.ResponseWriter, r *http.Request) {
@@ -625,10 +630,12 @@ func (h *AdminHandler) BroadcastNotification(w http.ResponseWriter, r *http.Requ
 	}()
 
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
 		"broadcast_id": broadcastID,
 		"status":       "queued",
-	})
+	}); encErr != nil {
+		log.Printf("[Admin] BroadcastSMS encode error: %v", encErr)
+	}
 }
 
 func (h *AdminHandler) GetBroadcastHistory(w http.ResponseWriter, r *http.Request) {
@@ -695,7 +702,8 @@ func (h *AdminHandler) ResolveFraudEvent(w http.ResponseWriter, r *http.Request)
 		Action string `json:"action"` // resolve | freeze | clear
 		Notes  string `json:"notes"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	// body is optional — default values apply if body omitted
+	_ = json.NewDecoder(r.Body).Decode(&body)
 	h.db.WithContext(r.Context()).Table("fraud_events").
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
@@ -778,18 +786,17 @@ func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 
 func jsonOK(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	if encErr := json.NewEncoder(w).Encode(data); encErr != nil {
+		log.Printf("[Admin] jsonOK encode error: %v", encErr)
+	}
 }
 
 func jsonError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-func atoi(s string) int {
-	n, _ := strconv.Atoi(s)
-	return n
+	if encErr := json.NewEncoder(w).Encode(map[string]string{"error": msg}); encErr != nil {
+		log.Printf("[Admin] jsonError encode failure: %v", encErr)
+	}
 }
 
 // ─── AI Health ────────────────────────────────────────────────────────────────
@@ -830,7 +837,9 @@ func (h *AdminHandler) GetAIHealth(w http.ResponseWriter, r *http.Request) {
 		reqStr, _ := h.rdb.Get(ctx, pkey+":requests_today").Result()
 		var reqsToday int64
 		if reqStr != "" {
-			fmt.Sscanf(reqStr, "%d", &reqsToday)
+			if _, scanErr := fmt.Sscanf(reqStr, "%d", &reqsToday); scanErr != nil {
+				log.Printf("[Admin] reqsToday parse error: %v", scanErr)
+			}
 		}
 
 		var lastUsedAt *time.Time
@@ -900,7 +909,9 @@ func (h *AdminHandler) GetAIHealth(w http.ResponseWriter, r *http.Request) {
 		base := "nexus:ai:studio:" + slug
 		reqStr, _ := h.rdb.Get(ctx, key).Result()
 		var reqs int64
-		fmt.Sscanf(reqStr, "%d", &reqs)
+		if _, scanErr := fmt.Sscanf(reqStr, "%d", &reqs); scanErr != nil && reqStr != "" {
+			log.Printf("[Admin] reqs parse error for %s: %v", slug, scanErr)
+		}
 
 		lastProvider, _ := h.rdb.Get(ctx, base+":last_provider").Result()
 

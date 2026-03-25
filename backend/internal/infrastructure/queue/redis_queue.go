@@ -67,7 +67,9 @@ func (q *EventQueue) Subscribe(ctx context.Context, group, consumer string, hand
 			for _, msg := range stream.Messages {
 				var event map[string]interface{}
 				if dataStr, ok := msg.Values["data"].(string); ok {
-					json.Unmarshal([]byte(dataStr), &event)
+					if unmarshalErr := json.Unmarshal([]byte(dataStr), &event); unmarshalErr != nil {
+						log.Printf("[QUEUE] unmarshal error for msg %s: %v", msg.ID, unmarshalErr)
+					}
 				}
 				if err := handler(event); err != nil {
 					log.Printf("[QUEUE] handler error for %s: %v", msg.ID, err)

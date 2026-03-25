@@ -30,6 +30,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -63,7 +64,9 @@ func (h *USSDHandler) SetDrawService(ds *services.DrawService) {
 
 // Handle is the HTTP entry-point for Africa's Talking USSD gateway POST requests.
 func (h *USSDHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
+	if parseErr := r.ParseForm(); parseErr != nil {
+		log.Printf("[USSD] ParseForm error: %v", parseErr)
+	}
 	sessionID := r.FormValue("sessionId")
 	phone     := r.FormValue("phoneNumber")
 	text      := r.FormValue("text")

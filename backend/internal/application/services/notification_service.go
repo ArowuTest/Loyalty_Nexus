@@ -126,7 +126,14 @@ func (n *NotificationService) sendViaAfricasTalking(ctx context.Context, phone, 
 	return nil
 }
 
-// ─── FCM (Firebase Cloud Messaging) via HTTP v1 API ──────────────────────────
+// ─── FCM (Firebase Cloud Messaging) ──────────────────────────────────────────
+//
+// Two modes are supported:
+//   - v1 HTTP API  (preferred): set FCM_V1_ACCESS_TOKEN (OAuth2 bearer) + FCM_PROJECT_ID
+//   - Legacy API  (fallback):   set FCM_SERVER_KEY only
+//
+// fcmPayload / fcmMessage / etc. are the typed structs for the v1 API.
+// The legacy path uses a raw map for the /fcm/send endpoint.
 
 type fcmPayload struct {
 	Message fcmMessage `json:"message"`
@@ -141,7 +148,6 @@ type fcmMessage struct {
 type fcmNotification struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
-	Image string `json:"image,omitempty"`
 }
 type fcmAndroid struct {
 	Priority string `json:"priority"` // "high" | "normal"
@@ -150,15 +156,54 @@ type fcmAPNS struct {
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// SendPush sends a push notification via FCM HTTP v1.
-// fcmServerKey is the legacy server key (from Firebase console → Project Settings → Cloud Messaging).
+// SendPush sends a push notification via FCM.
+// It prefers the HTTP v1 API (FCM_V1_ACCESS_TOKEN + FCM_PROJECT_ID) and falls
+// back to the legacy /fcm/send endpoint (FCM_SERVER_KEY).
 func (n *NotificationService) SendPush(ctx context.Context, fcmToken, title, body string, data map[string]string) error {
-	serverKey := os.Getenv("FCM_SERVER_KEY")
-	if serverKey == "" || fcmToken == "" {
-		return nil // Silently skip if not configured
+	if fcmToken == "" {
+		return nil // no device token — silently skip
 	}
 
-	payload := map[string]interface{}{
+	// ── FCM HTTP v1 (preferred) ────────────────────────────────────────────
+	accessToken := os.Getenv("FCM_V1_ACCESS_TOKEN")
+	projectID   := os.Getenv("FCM_PROJECT_ID")
+	if accessToken != "" && projectID != "" {
+		payload := fcmPayload{
+			Message: fcmMessage{
+				Token:        fcmToken,
+				Notification: fcmNotification{Title: title, Body: body},
+				Data:         data,
+				Android:      &fcmAndroid{Priority: "high"},
+			},
+		}
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("FCM v1 marshal: %w", err)
+		}
+		url := fmt.Sprintf("https://fcm.googleapis.com/v1/projects/%s/messages:send", projectID)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+		if err != nil {
+			return fmt.Errorf("FCM v1 request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		resp, err := n.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("FCM v1 HTTP: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			return fmt.Errorf("FCM v1 HTTP %d", resp.StatusCode)
+		}
+		return nil
+	}
+
+	// ── Legacy /fcm/send fallback ─────────────────────────────────────────
+	serverKey := os.Getenv("FCM_SERVER_KEY")
+	if serverKey == "" {
+		return nil // neither v1 nor legacy configured — silently skip
+	}
+	legacyPayload := map[string]interface{}{
 		"to": fcmToken,
 		"notification": map[string]string{
 			"title": title,
@@ -167,7 +212,7 @@ func (n *NotificationService) SendPush(ctx context.Context, fcmToken, title, bod
 		"data":     data,
 		"priority": "high",
 	}
-	b, _ := json.Marshal(payload)
+	b, _ := json.Marshal(legacyPayload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://fcm.googleapis.com/fcm/send", bytes.NewReader(b))
 	if err != nil {
@@ -175,14 +220,13 @@ func (n *NotificationService) SendPush(ctx context.Context, fcmToken, title, bod
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "key="+serverKey)
-
 	resp, err := n.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("FCM HTTP: %w", err)
+		return fmt.Errorf("FCM legacy HTTP: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("FCM HTTP %d", resp.StatusCode)
+		return fmt.Errorf("FCM legacy HTTP %d", resp.StatusCode)
 	}
 	return nil
 }

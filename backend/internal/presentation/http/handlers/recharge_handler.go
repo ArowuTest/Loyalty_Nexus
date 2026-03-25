@@ -42,7 +42,7 @@ func (h *RechargeHandler) PaystackWebhook(w http.ResponseWriter, r *http.Request
 	}
 	if secret != "" {
 		mac := hmac.New(sha256.New, []byte(secret))
-		mac.Write(body)
+		mac.Write(body) //nolint:errcheck // hash.Hash.Write never returns an error
 		expected := hex.EncodeToString(mac.Sum(nil))
 		got := r.Header.Get("X-Paystack-Signature")
 		if got != "" && !hmac.Equal([]byte(expected), []byte(got)) {
@@ -86,7 +86,7 @@ func (h *RechargeHandler) MNOWebhook(w http.ResponseWriter, r *http.Request) {
 	secret := os.Getenv("BSS_WEBHOOK_SECRET")
 	if secret != "" {
 		mac := hmac.New(sha256.New, []byte(secret))
-		mac.Write(body)
+		mac.Write(body) //nolint:errcheck // hash.Hash.Write never returns an error
 		expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
 		got := r.Header.Get("X-BSS-Signature")
 		if got != "" && !hmac.Equal([]byte(expected), []byte(got)) {

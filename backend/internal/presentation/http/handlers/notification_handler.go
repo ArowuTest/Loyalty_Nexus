@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -63,7 +64,7 @@ func (h *NotificationHandler) ListNotifications(w http.ResponseWriter, r *http.R
 		"unread_count":  unreadCount,
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil { log.Printf("[Notify] encode error: %v", encErr) }
 }
 
 // MarkRead PATCH /api/v1/notifications/{id}/read
@@ -89,7 +90,7 @@ func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request
 		Where("user_id = ? AND is_read = false", userID).
 		Updates(map[string]interface{}{"is_read": true, "read_at": now})
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int64{"marked": result.RowsAffected})
+	if encErr := json.NewEncoder(w).Encode(map[string]int64{"marked": result.RowsAffected}); encErr != nil { log.Printf("[Notify] encode error: %v", encErr) }
 }
 
 // RegisterPushToken POST /api/v1/notifications/push-token
@@ -139,7 +140,7 @@ func (h *NotificationHandler) GetPreferences(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(prefs)
+	if encErr := json.NewEncoder(w).Encode(prefs); encErr != nil { log.Printf("[Notify] encode error: %v", encErr) }
 }
 
 // UpdatePreferences PATCH /api/v1/notifications/preferences

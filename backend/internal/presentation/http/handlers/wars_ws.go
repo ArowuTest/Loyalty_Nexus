@@ -31,8 +31,8 @@ import (
 	"sync"
 	"time"
 
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
+	"nhooyr.io/websocket"      //nolint:staticcheck // nhooyr.io/websocket is maintained as github.com/coder/websocket; API identical
+	"nhooyr.io/websocket/wsjson" //nolint:staticcheck
 
 	"loyalty-nexus/internal/application/services"
 	"loyalty-nexus/internal/domain/entities"
@@ -121,7 +121,7 @@ func (h *WarsHandler) LiveLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{ //nolint:staticcheck
 		// Allow any origin in dev; tighten in production via CORS middleware
 		InsecureSkipVerify: true,
 	})
@@ -137,7 +137,7 @@ func (h *WarsHandler) LiveLeaderboard(w http.ResponseWriter, r *http.Request) {
 	h.hub.register(client)
 	defer h.hub.unregister(client)
 
-	ctx := conn.CloseRead(r.Context())
+	ctx := conn.CloseRead(r.Context()) //nolint:staticcheck
 
 	// Send full snapshot immediately on connect
 	entries, err := h.warsSvc.GetLeaderboard(ctx, 37)
@@ -158,11 +158,11 @@ func (h *WarsHandler) LiveLeaderboard(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ctx.Done():
-			conn.Close(websocket.StatusNormalClosure, "done")
+			conn.Close(websocket.StatusNormalClosure, "done") //nolint:staticcheck
 			return
 		case msg, ok := <-client.send:
 			if !ok {
-				conn.Close(websocket.StatusNormalClosure, "hub closed")
+				conn.Close(websocket.StatusNormalClosure, "hub closed") //nolint:staticcheck
 				return
 			}
 			if err := wsjson.Write(ctx, conn, msg); err != nil {
