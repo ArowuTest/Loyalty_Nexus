@@ -16,6 +16,9 @@ type User struct {
 	StreakCount         int       `json:"streak_count"`
 	LastVisitAt         time.Time `json:"last_visit_at"`
 	IsActive            bool      `json:"is_active"`
+	MoMoNumber          string    `json:"momo_number"`
+	MoMoVerified        bool      `json:"momo_verified"`
+	MoMoVerifiedAt      time.Time `json:"momo_verified_at"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }

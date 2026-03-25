@@ -58,6 +58,7 @@ func main() {
 	authSvc := services.NewAuthService(authRepo, userRepo, notifySvc, os.Getenv("JWT_SECRET"))
 	userUC := usecases.NewUserUseCase(userRepo)
 	hlrSvc := services.NewHLRService(hlrRepo)
+	momoSvc := services.NewMoMoService()
 	spinSvc := services.NewSpinService(userRepo, txRepo, cfg, db)
 	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, db)
 
@@ -68,6 +69,7 @@ func main() {
 	// Handlers
 	studioHandler := handlers.NewStudioHandler(studioSvc, llmOrchestrator, asyncWorker, notebookLM)
 	authHandler := handlers.NewAuthHandler(authSvc)
+	momoHandler := handlers.NewMoMoHandler(momoSvc, authSvc)
 	adminHandler := &handlers.AdminHandler{}
 	ussdHandler := &handlers.USSDHandler{}
 
@@ -76,6 +78,9 @@ func main() {
 	// Auth Routes (REQ-1.1, REQ-1.2)
 	http.HandleFunc("/api/v1/auth/otp/send", authHandler.SendOTP)
 	http.HandleFunc("/api/v1/auth/otp/verify", authHandler.VerifyOTP)
+
+	// MoMo Routes (REQ-1.3)
+	http.HandleFunc("/api/v1/user/momo/link", momoHandler.RequestLink)
 
 	// USSD Entry Point
 	http.Handle("/api/v1/ussd", ussdHandler)
