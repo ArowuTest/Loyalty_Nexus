@@ -49,5 +49,23 @@ func (w *TournamentWorker) AggregateRanks(ctx context.Context) {
 }
 
 func (w *TournamentWorker) CheckGoldenHour(ctx context.Context) {
-	// Logic implementation...
+	// Innovation: Regional Wars (Strategy Doc Section 4)
+	// Every Friday, enable Golden Hour for the region with the highest weekly growth.
+	if time.Now().Weekday() == time.Friday {
+		w.db.Transaction(func(tx *gorm.DB) error {
+			// 1. Reset all golden hours
+			tx.Table("regional_settings").Update("is_golden_hour", false)
+
+			// 2. Find top region
+			var topRegion string
+			tx.Table("regional_stats").Order("total_recharge_kobo DESC").Limit(1).Pluck("region_code", &topRegion)
+
+			// 3. Activate
+			if topRegion != "" {
+				tx.Table("regional_settings").Where("region_code = ?", topRegion).Update("is_golden_hour", true)
+				log.Printf("[TournamentWorker] Golden Hour Activated for %s", topRegion)
+			}
+			return nil
+		})
+	}
 }

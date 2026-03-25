@@ -79,14 +79,14 @@ func main() {
 					hlrSvc.DetectNetwork(ctx, event.MSISDN, nil)
 				}
 
-				processRecharge(ctx, event, userRepo, txRepo, cfg)
+				processRecharge(ctx, event, userRepo, txRepo, cfg, db)
 				rdb.XAck(ctx, streamName, groupName, msg.ID)
 			}
 		}
 	}
 }
 
-func processRecharge(ctx context.Context, event queue.RechargeEvent, ur repositories.UserRepository, tr repositories.TransactionRepository, cfg *config.ConfigManager) {
+func processRecharge(ctx context.Context, event queue.RechargeEvent, ur repositories.UserRepository, tr repositories.TransactionRepository, cfg *config.ConfigManager, db *gorm.DB) {
 	user, err := ur.FindByMSISDN(ctx, event.MSISDN)
 	if err != nil {
 		user = &entities.User{
@@ -114,9 +114,31 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	user.LastVisitAt = time.Now()
 
 	// 2. Points & Spin Credit Earning
-	multiplier := cfg.GetFloat("global_points_multiplier", 1.0)
+	globalMultiplier := cfg.GetFloat("global_points_multiplier", 1.0)
+	
+	// Innovation: Regional Wars (Strategy Doc Section 4)
+	regionalMultiplier := 1.0
+	if user.State != "" {
+		var reg struct {
+			BaseMultiplier       float64
+			IsGoldenHour         bool
+			GoldenHourMultiplier float64
+		}
+		err := db.Table("regional_settings").
+			Where("region_name = ?", user.State).
+			Select("base_multiplier, is_golden_hour, golden_hour_multiplier").
+			First(&reg).Error
+		if err == nil {
+			regionalMultiplier = reg.BaseMultiplier
+			if reg.IsGoldenHour {
+				regionalMultiplier = reg.GoldenHourMultiplier
+			}
+		}
+	}
+
 	pointsRate := cfg.GetInt("base_points_rate", 250)
-	pointsEarned := int64(float64(event.Amount/int64(pointsRate*100)) * multiplier)
+	finalMultiplier := globalMultiplier * regionalMultiplier
+	pointsEarned := int64(float64(event.Amount/int64(pointsRate*100)) * finalMultiplier)
 
 	user.TotalPoints += pointsEarned
 	user.TotalRechargeAmount += event.Amount
@@ -125,7 +147,6 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	spinThreshold := int64(cfg.GetInt("recharge_to_spin_naira", 1000) * 100)
 	if user.TotalRechargeAmount >= spinThreshold {
 		user.TotalRechargeAmount -= spinThreshold
-		// Add logic to award spin credit in DB
 	}
 
 	ur.Update(ctx, user)
