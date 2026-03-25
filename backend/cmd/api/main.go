@@ -88,10 +88,13 @@ func main() {
 	// ─── LLM Orchestrator (Groq → Gemini → DeepSeek) ─────────
 	groqLimit   := cfg.GetInt("chat_groq_daily_limit", 1000)
 	geminiLimit := cfg.GetInt("chat_gemini_daily_limit", 2000)
-	llmOrch := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, chatRepo, groqLimit, geminiLimit)
+	llmOrch := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, chatRepo, rdb, groqLimit, geminiLimit)
+
+	// ─── Asset Storage (S3 / GCS / local — driven by STORAGE_BACKEND env var) ──
+	assetStorage := external.NewAssetStorageFromEnv()
 
 	// ─── AI Studio Orchestrator (4-tier provider) ──────────────
-	aiStudioOrch := services.NewAIStudioOrchestrator(cfg, studioRepo, studioSvc, userRepo)
+	aiStudioOrch := services.NewAIStudioOrchestrator(cfg, studioRepo, studioSvc, userRepo, assetStorage)
 
 	// ─── Knowledge Worker (dispatches studio jobs) ─────────────
 	kbWorker := handlers.NewAsyncStudioWorker(studioSvc, aiStudioOrch)

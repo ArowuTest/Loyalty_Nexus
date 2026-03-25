@@ -10,27 +10,37 @@ import (
 	"strings"
 	"time"
 
-	"loyalty-nexus/internal/domain/repositories"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+	"loyalty-nexus/internal/domain/repositories"
 )
+
+// ─── Provider constants ──────────────────────────────────────────────────────
 
 type LLMProvider string
+
 const (
-	ProviderGroq     LLMProvider = "GROQ"
-	ProviderGemini   LLMProvider = "GEMINI"
-	ProviderDeepSeek LLMProvider = "DEEPSEEK"
+	ProviderGroq       LLMProvider = "GROQ"
+	ProviderGeminiLite LLMProvider = "GEMINI_LITE"
+	ProviderDeepSeek   LLMProvider = "DEEPSEEK"
 )
 
+// ─── Request / Response ──────────────────────────────────────────────────────
+
 type LLMRequest struct {
-	UserID  string
-	Prompt  string
-	History []string
+	UserID    string
+	SessionID string   // for session memory lookup
+	Prompt    string
+	History   []string
 }
 
 type LLMResponse struct {
 	Text     string
 	Provider LLMProvider
+	Cached   bool // true if served from Redis cache
 }
+
+// ─── Interfaces ──────────────────────────────────────────────────────────────
 
 type LLMClient interface {
 	Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error)
@@ -41,70 +51,213 @@ type UsageTracker interface {
 	Increment(ctx context.Context, userID string) error
 }
 
+// ─── Orchestrator struct ─────────────────────────────────────────────────────
+
 type LLMOrchestrator struct {
-	groqClient     LLMClient
-	geminiClient   LLMClient
-	deepSeekClient LLMClient
-	usageTracker   UsageTracker
-	chatRepo       repositories.ChatRepository
-	groqLimit      int
-	geminiLimit    int
+	groqClient       LLMClient
+	geminiClient     LLMClient // gemini-2.0-flash-lite
+	deepSeekClient   LLMClient
+	usageTracker     UsageTracker
+	chatRepo         repositories.ChatRepository
+	groqDailyLimit   int
+	geminiDailyLimit int
+	rdb              *redis.Client
 }
 
-func NewLLMOrchestrator(g, gem, ds LLMClient, ut UsageTracker, cr repositories.ChatRepository, gLim, gemLim int) *LLMOrchestrator {
+// ─── Constructor ─────────────────────────────────────────────────────────────
+
+func NewLLMOrchestrator(
+	g, gem, ds LLMClient,
+	ut UsageTracker,
+	cr repositories.ChatRepository,
+	rdb *redis.Client,
+	groqLim, gemLim int,
+) *LLMOrchestrator {
 	return &LLMOrchestrator{
-		groqClient: g, geminiClient: gem, deepSeekClient: ds,
-		usageTracker: ut, chatRepo: cr,
-		groqLimit: gLim, geminiLimit: gemLim,
+		groqClient:       g,
+		geminiClient:     gem,
+		deepSeekClient:   ds,
+		usageTracker:     ut,
+		chatRepo:         cr,
+		rdb:              rdb,
+		groqDailyLimit:   groqLim,
+		geminiDailyLimit: gemLim,
 	}
 }
+
+// ─── buildMemoryBlock constructs the [NEXUS MEMORY] context block ────────────
+
+func (o *LLMOrchestrator) buildMemoryBlock(ctx context.Context, uid uuid.UUID, sessionID string) string {
+	// 1. Fetch up to 3 past session summaries
+	summaries, _ := o.chatRepo.GetLastSummaries(ctx, uid, 3)
+
+	// 2. Fetch last 5 raw messages from the current session (if sessionID given)
+	var recentMsgs []repositories.ChatMessage
+	if sessionID != "" {
+		sid, err := uuid.Parse(sessionID)
+		if err == nil {
+			all, err := o.chatRepo.GetSessionMessages(ctx, sid)
+			if err == nil && len(all) > 0 {
+				// Take the last 5
+				start := len(all) - 5
+				if start < 0 {
+					start = 0
+				}
+				recentMsgs = all[start:]
+			}
+		}
+	}
+
+	if len(summaries) == 0 && len(recentMsgs) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("[NEXUS MEMORY]\n")
+
+	if len(summaries) > 0 {
+		sb.WriteString("Previous sessions summary:\n")
+		labels := []string{
+			"Session (older)",
+			"Session (recent)",
+			"Session (latest)",
+		}
+		// summaries come oldest-first from GetLastSummaries; assign labels accordingly
+		for i, s := range summaries {
+			label := labels[0]
+			if i < len(labels) {
+				label = labels[i]
+			}
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", label, s))
+		}
+	}
+
+	if len(recentMsgs) > 0 {
+		sb.WriteString("Last messages:\n")
+		for _, m := range recentMsgs {
+			switch strings.ToLower(m.Role) {
+			case "user":
+				sb.WriteString(fmt.Sprintf("User: %q\n", m.Content))
+			case "assistant":
+				sb.WriteString(fmt.Sprintf("Nexus: %q\n", m.Content))
+			default:
+				sb.WriteString(fmt.Sprintf("%s: %q\n", m.Role, m.Content))
+			}
+		}
+	}
+
+	sb.WriteString("[END NEXUS MEMORY]")
+	return sb.String()
+}
+
+// ─── Chat ────────────────────────────────────────────────────────────────────
 
 func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+	// 1. Get current daily usage count
 	dailyCount, _ := o.usageTracker.GetDailyCount(ctx, req.UserID)
 
-	// Build memory context from session summaries
+	// 2. Build session memory context
 	uid, _ := uuid.Parse(req.UserID)
-	summaries, _ := o.chatRepo.GetLastSummaries(ctx, uid, 3)
-	systemPrompt := "You are Nexus, a helpful AI assistant for Loyalty Nexus subscribers in Nigeria. Be concise, friendly and locally aware."
-	if len(summaries) > 0 {
-		systemPrompt += "\n\nPrevious conversation context:\n" + strings.Join(summaries, "\n")
+	memoryBlock := o.buildMemoryBlock(ctx, uid, req.SessionID)
+
+	// 3. Build system prompt
+	systemPrompt := "You are Nexus, a helpful AI assistant for Loyalty Nexus subscribers in Nigeria. " +
+		"Be concise, practical and locally aware. You understand Nigerian English, culture, and context."
+	if memoryBlock != "" {
+		systemPrompt += "\n\n" + memoryBlock
 	}
 
-	// Phase 1: Groq (Primary)
-	if dailyCount < o.groqLimit {
-		if resp, err := o.groqClient.Complete(ctx, systemPrompt, req.Prompt); err == nil {
-			_ = o.usageTracker.Increment(ctx, req.UserID)
-			return &LLMResponse{Text: resp, Provider: ProviderGroq}, nil
+	// 4. Route: Groq → Gemini Flash-Lite → DeepSeek
+	var (
+		text     string
+		provider LLMProvider
+		err      error
+	)
+
+	switch {
+	case dailyCount < o.groqDailyLimit:
+		text, err = o.groqClient.Complete(ctx, systemPrompt, req.Prompt)
+		if err != nil {
+			log.Printf("[LLM] Groq failed (count=%d) → falling through to Gemini: %v", dailyCount, err)
+			// Fall through to Gemini
+			text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
+			if err != nil {
+				log.Printf("[LLM] Gemini failed → DeepSeek: %v", err)
+				text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
+				provider = ProviderDeepSeek
+			} else {
+				provider = ProviderGeminiLite
+			}
 		} else {
-			log.Printf("[LLM] Groq failed → Gemini: %v", err)
+			provider = ProviderGroq
+		}
+
+	case dailyCount < o.geminiDailyLimit:
+		text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
+		if err != nil {
+			log.Printf("[LLM] Gemini failed (count=%d) → DeepSeek: %v", dailyCount, err)
+			text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
+			provider = ProviderDeepSeek
+		} else {
+			provider = ProviderGeminiLite
+		}
+
+	default:
+		text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
+		provider = ProviderDeepSeek
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("all LLM providers exhausted: %w", err)
+	}
+
+	// 5. Post-success: increment usage counter & persist messages
+	_ = o.usageTracker.Increment(ctx, req.UserID)
+
+	if req.SessionID != "" {
+		sid, parseErr := uuid.Parse(req.SessionID)
+		if parseErr == nil {
+			_ = o.chatRepo.AppendMessage(ctx, sid, "user", req.Prompt)
+			_ = o.chatRepo.AppendMessage(ctx, sid, "assistant", text)
 		}
 	}
 
-	// Phase 2: Gemini Flash (Secondary)
-	if dailyCount < o.geminiLimit {
-		if resp, err := o.geminiClient.Complete(ctx, systemPrompt, req.Prompt); err == nil {
-			_ = o.usageTracker.Increment(ctx, req.UserID)
-			return &LLMResponse{Text: resp, Provider: ProviderGemini}, nil
-		} else {
-			log.Printf("[LLM] Gemini failed → DeepSeek: %v", err)
-		}
-	}
-
-	// Phase 3: DeepSeek (Paid overflow — last resort)
-	if resp, err := o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt); err == nil {
-		_ = o.usageTracker.Increment(ctx, req.UserID)
-		return &LLMResponse{Text: resp, Provider: ProviderDeepSeek}, nil
-	}
-
-	return nil, fmt.Errorf("all LLM providers exhausted")
+	return &LLMResponse{
+		Text:     text,
+		Provider: provider,
+		Cached:   false,
+	}, nil
 }
 
+// ─── Summarize ───────────────────────────────────────────────────────────────
+
+// Summarize sends a full conversation transcript to Gemini Flash-Lite and returns
+// a structured memory paragraph the AI can use to continue the conversation.
 func (o *LLMOrchestrator) Summarize(ctx context.Context, transcript string) (string, error) {
-	prompt := "Summarize this conversation in 2-3 sentences, preserving the user's key topics and preferences:\n\n" + transcript
-	return o.groqClient.Complete(ctx, "You are a helpful assistant that creates concise conversation summaries.", prompt)
+	systemPrompt := "You are a helpful assistant that creates structured conversation summaries for an AI memory system."
+
+	userPrompt := `Summarise this conversation. Extract:
+1. INTENT: What was the user trying to achieve?
+2. PERSONAL CONTEXT: Any personal details shared (name, business, location, preferences)
+3. TOPICS: Key subjects discussed and their outcomes
+4. NEXT STEPS: Did the user mention plans to continue or return?
+Write as a structured paragraph the AI can use to seamlessly continue the conversation.
+
+Conversation:
+` + transcript
+
+	return o.geminiClient.Complete(ctx, systemPrompt, userPrompt)
 }
 
-// ─── GroqAdapter ────────────────────────────────────────────────
+// ─── SaveMessage ─────────────────────────────────────────────────────────────
+
+// SaveMessage persists a single message (role: "user" or "assistant") to the chat repo.
+func (o *LLMOrchestrator) SaveMessage(ctx context.Context, sessionID uuid.UUID, role, content string) error {
+	return o.chatRepo.AppendMessage(ctx, sessionID, role, content)
+}
+
+// ─── GroqAdapter ─────────────────────────────────────────────────────────────
+
 type GroqAdapter struct {
 	apiKey string
 	client *http.Client
@@ -121,17 +274,25 @@ func (a *GroqAdapter) Complete(ctx context.Context, systemPrompt, userPrompt str
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
 		},
-		"max_tokens": 1024,
+		"max_tokens":  2048,
 		"temperature": 0.7,
 	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewBuffer(body))
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("groq marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.groq.com/openai/v1/chat/completions", bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("groq new request: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("groq http: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -146,18 +307,19 @@ func (a *GroqAdapter) Complete(ctx context.Context, systemPrompt, userPrompt str
 		} `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+		return "", fmt.Errorf("groq decode: %w", err)
 	}
 	if result.Error != nil {
-		return "", fmt.Errorf("Groq API: %s", result.Error.Message)
+		return "", fmt.Errorf("groq API error: %s", result.Error.Message)
 	}
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("Groq returned no choices")
+		return "", fmt.Errorf("groq: no choices returned")
 	}
 	return result.Choices[0].Message.Content, nil
 }
 
-// ─── GeminiAdapter ──────────────────────────────────────────────
+// ─── GeminiAdapter (gemini-2.0-flash-lite) ───────────────────────────────────
+
 type GeminiAdapter struct {
 	apiKey string
 	client *http.Client
@@ -168,20 +330,33 @@ func NewGeminiAdapter(apiKey string) *GeminiAdapter {
 }
 
 func (a *GeminiAdapter) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=%s", a.apiKey)
+	url := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=%s",
+		a.apiKey,
+	)
+
 	payload := map[string]interface{}{
-		"system_instruction": map[string]interface{}{"parts": []map[string]string{{"text": systemPrompt}}},
+		"system_instruction": map[string]interface{}{
+			"parts": []map[string]string{{"text": systemPrompt}},
+		},
 		"contents": []map[string]interface{}{
 			{"parts": []map[string]string{{"text": userPrompt}}},
 		},
 	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("gemini marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("gemini new request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("gemini http: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -193,17 +368,25 @@ func (a *GeminiAdapter) Complete(ctx context.Context, systemPrompt, userPrompt s
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
+		Error *struct {
+			Message string `json:"message"`
+			Code    int    `json:"code"`
+		} `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+		return "", fmt.Errorf("gemini decode: %w", err)
+	}
+	if result.Error != nil {
+		return "", fmt.Errorf("gemini API error %d: %s", result.Error.Code, result.Error.Message)
 	}
 	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("Gemini returned no content")
+		return "", fmt.Errorf("gemini: no content returned")
 	}
 	return result.Candidates[0].Content.Parts[0].Text, nil
 }
 
-// ─── DeepSeekAdapter ────────────────────────────────────────────
+// ─── DeepSeekAdapter ─────────────────────────────────────────────────────────
+
 type DeepSeekAdapter struct {
 	apiKey string
 	client *http.Client
@@ -220,15 +403,25 @@ func (a *DeepSeekAdapter) Complete(ctx context.Context, systemPrompt, userPrompt
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
 		},
+		"max_tokens":  2048,
+		"temperature": 0.7,
 	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.deepseek.com/chat/completions", bytes.NewBuffer(body))
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("deepseek marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.deepseek.com/chat/completions", bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("deepseek new request: %w", err)
+	}
 	req.Header.Set("Authorization", "Bearer "+a.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("deepseek http: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -238,12 +431,18 @@ func (a *DeepSeekAdapter) Complete(ctx context.Context, systemPrompt, userPrompt
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+		return "", fmt.Errorf("deepseek decode: %w", err)
+	}
+	if result.Error != nil {
+		return "", fmt.Errorf("deepseek API error: %s", result.Error.Message)
 	}
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("DeepSeek returned no choices")
+		return "", fmt.Errorf("deepseek: no choices returned")
 	}
 	return result.Choices[0].Message.Content, nil
 }

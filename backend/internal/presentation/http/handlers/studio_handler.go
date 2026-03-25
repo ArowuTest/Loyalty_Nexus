@@ -231,9 +231,10 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	// Daily chat message limit (from network_configs — zero-hardcoding rule)
 	// Enforcement is delegated to LLMOrchestrator (it tracks per-user daily usage)
 	resp, err := h.llmOrch.Chat(r.Context(), external.LLMRequest{
-		UserID:  uid,
-		Prompt:  req.Message,
-		History: req.History,
+		UserID:    uid,
+		SessionID: req.SessionID,
+		Prompt:    req.Message,
+		History:   req.History,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{

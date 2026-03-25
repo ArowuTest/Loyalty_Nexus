@@ -1,29 +1,34 @@
 package services
 
-// ai_studio_service.go — 4-tier AI provider orchestration (spec §9 "Nexus Studio")
+// ai_studio_service.go — Production 4-tier AI provider orchestration (spec §9)
 //
-// Provider Tier Priority (spec §9.1):
-//   Tier 1 (Free/Freemium) : Google Gemini Flash 2.0, Groq Llama-3.3-70B, HuggingFace
-//   Tier 2 (Pay-per-use)   : FAL.AI (image/video), ElevenLabs (voice), Mubert (music)
-//   Tier 3 (Overflow/paid) : DeepSeek-V3
-//   Tier 4 (Degraded)      : return structured error — user told to retry
+// ═══════════════════════════════════════════════════════════════════════════
+//  TOOL CATALOGUE (from key-points spec doc + master spec §3.2)
+// ═══════════════════════════════════════════════════════════════════════════
+//  Slug             Category   Points  Provider(s)
+//  ───────────────  ─────────  ──────  ────────────────────────────────────
+//  translate        Create      1 pt   Google Translate API (free)
+//  narrate          Create      2 pts  Google Cloud TTS → Azure TTS
+//  transcribe       Create      2 pts  AssemblyAI → Groq Whisper
+//  bg-remover       Create      3 pts  rembg (self-hosted) → Photoroom API
+//  study-guide      Learn       3 pts  Gemini Flash → Groq
+//  quiz             Learn       2 pts  Gemini Flash → Groq
+//  mindmap          Learn       2 pts  Gemini Flash → Groq
+//  research-brief   Learn       5 pts  Gemini Flash → Groq → DeepSeek
+//  ai-photo         Create     10 pts  HF FLUX.1-Schnell (free) → FAL.AI FLUX-dev
+//  bg-music         Create      5 pts  Mubert API (free tier) → ElevenLabs music
+//  podcast          Learn       4 pts  Gemini script + Google TTS narration
+//  slide-deck       Build       4 pts  Gemini Flash → Groq
+//  infographic      Build       5 pts  Gemini Flash → Groq
+//  bizplan          Build      12 pts  Gemini Flash → Groq → DeepSeek
+//  animate-photo    Create     65 pts  FAL.AI LTX-Video (basic)
+//  jingle           Create    200 pts  ElevenLabs Music (premium)
+//  video-premium    Build      65 pts  FAL.AI Kling v1.5 (premium)
+//  video-jingle     Build     470 pts  FAL.AI Kling + ElevenLabs (full production)
 //
-// Tool → provider mapping (spec §9.2):
-//   text (translate, study-guide, quiz, mindmap, research-brief, bizplan, slide-deck):
-//       Primary: Groq (Llama-3.3-70B) → Gemini Flash 2.0 → DeepSeek-V3
-//   image (ai-photo, bg-remover):
-//       Primary: FAL.AI FLUX.1-dev → HuggingFace SDXL
-//   video (animate-photo, video-premium):
-//       Primary: FAL.AI Kling v1.5 → FAL.AI LTX-Video
-//   voice (narrate, transcribe):
-//       Primary: ElevenLabs TTS → HuggingFace Bark
-//   music (jingle, bg-music):
-//       Primary: Mubert API → ElevenLabs sound-generation
-//   composite (podcast, infographic):
-//       Multi-step: LLM script + voice/image assembly
-//
-// Financial rule: point costs are NEVER read here — that is the service layer's job.
-// This orchestrator only does I/O; all DB writes go through StudioService.
+// Financial rule: point costs live ONLY in the DB (network_configs / studio_tools).
+// This service never hardcodes them — it dispatches and returns results only.
+// ═══════════════════════════════════════════════════════════════════════════
 
 import (
 	"bytes"
@@ -33,6 +38,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
@@ -43,9 +49,10 @@ import (
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
+	"loyalty-nexus/internal/infrastructure/external"
 )
 
-// ─── Tool category map ────────────────────────────────────────────────────────
+// ─── Tool category ────────────────────────────────────────────────────────────
 
 type studioToolCat string
 
@@ -58,664 +65,1208 @@ const (
 	catComposite studioToolCat = "composite"
 )
 
+// slugCategory maps every tool slug to its dispatch category.
 var slugCategory = map[string]studioToolCat{
-	"translate":      catText,
+	"translate":      catVoice,   // routed through voice pipeline (TTS/translate)
+	"narrate":        catVoice,
+	"transcribe":     catVoice,
+	"bg-remover":     catImage,
+	"ai-photo":       catImage,
+	"animate-photo":  catVideo,
+	"video-premium":  catVideo,
+	"video-jingle":   catVideo,
+	"bg-music":       catMusic,
+	"jingle":         catMusic,
 	"study-guide":    catText,
 	"quiz":           catText,
 	"mindmap":        catText,
 	"research-brief": catText,
-	"bizplan":        catText,
-	"slide-deck":     catText,
-	"ai-photo":       catImage,
-	"bg-remover":     catImage,
-	"narrate":        catVoice,
-	"transcribe":     catVoice,
-	"jingle":         catMusic,
-	"bg-music":       catMusic,
-	"animate-photo":  catVideo,
-	"video-premium":  catVideo,
 	"podcast":        catComposite,
-	"infographic":    catComposite,
+	"slide-deck":     catText,
+	"infographic":    catText,
+	"bizplan":        catText,
 }
 
 // ─── Provider result ──────────────────────────────────────────────────────────
 
 type studioProviderResult struct {
-	OutputURL  string // CDN / data URI
-	OutputText string // for text-generation tools
-	Provider   string // e.g. "groq", "fal.ai/flux"
+	OutputURL  string // CDN URL or data URI for binary outputs
+	OutputText string // for text-generation tools (study guide, bizplan, etc.)
+	Provider   string // e.g. "gemini-flash", "fal.ai/flux"
 	CostMicros int    // fractional cost in µUSD for accounting
-	DurationMs int    // wall-clock time
+	DurationMs int
 }
 
 // ─── AIStudioOrchestrator ─────────────────────────────────────────────────────
 
-// AIStudioOrchestrator calls external AI provider APIs and persists results via
-// StudioService (which owns the repo + ledger).  It has no direct DB access.
 type AIStudioOrchestrator struct {
 	cfg        *config.ConfigManager
 	studioRepo repositories.StudioRepository
-	studioSvc  *StudioService // for CompleteGeneration / FailGeneration
+	studioSvc  *StudioService
 	userRepo   repositories.UserRepository
+	storage    external.AssetStorage
+	httpClient *http.Client
 }
 
 func NewAIStudioOrchestrator(
 	cfg *config.ConfigManager,
-	sr repositories.StudioRepository,
-	ss *StudioService,
-	ur repositories.UserRepository,
+	studioRepo repositories.StudioRepository,
+	studioSvc *StudioService,
+	userRepo repositories.UserRepository,
+	storage external.AssetStorage,
 ) *AIStudioOrchestrator {
+	if storage == nil {
+		storage = external.NewAssetStorageFromEnv()
+	}
 	return &AIStudioOrchestrator{
 		cfg:        cfg,
-		studioRepo: sr,
-		studioSvc:  ss,
-		userRepo:   ur,
+		studioRepo: studioRepo,
+		studioSvc:  studioSvc,
+		userRepo:   userRepo,
+		storage:    storage,
+		httpClient: &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
-// ─── Main dispatch ────────────────────────────────────────────────────────────
-
-// Dispatch routes a generation job to the correct provider tier.
-// Called from the async worker goroutine after the HTTP handler has returned.
-func (o *AIStudioOrchestrator) Dispatch(ctx context.Context, genID uuid.UUID) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-
+// Dispatch is the main entry point: resolves category, calls the right provider chain,
+// then persists the result via StudioService.
+func (o *AIStudioOrchestrator) Dispatch(ctx context.Context, genID uuid.UUID) error {
 	gen, err := o.studioRepo.FindGenerationByID(ctx, genID)
 	if err != nil {
-		log.Printf("[AIStudio] Dispatch: gen %s not found: %v", genID, err)
-		return
+		return fmt.Errorf("generation not found: %w", err)
 	}
 
-	// Mark as processing
+	// Mark processing
 	if err := o.studioRepo.UpdateStatus(ctx, genID, "processing", "", ""); err != nil {
-		log.Printf("[AIStudio] UpdateStatus processing: %v", err)
+		return fmt.Errorf("mark processing: %w", err)
 	}
 
-	tool, err := o.studioRepo.FindToolByID(ctx, gen.ToolID)
-	if err != nil {
-		o.fail(ctx, gen, "tool configuration error: "+err.Error())
-		return
-	}
-
-	// Resolve slug: prefer stored ToolSlug, fall back to normalising tool.Name
-	slug := gen.ToolSlug
-	if slug == "" {
-		slug = normaliseSlug(tool.Name)
-	}
-
-	cat, ok := slugCategory[slug]
-	if !ok {
-		// Best-effort: treat as generic text tool
-		cat = catText
-	}
-
-	log.Printf("[AIStudio] dispatching gen=%s tool=%s slug=%s cat=%s", genID, tool.Name, slug, cat)
 	start := time.Now()
+	result, dispatchErr := o.route(ctx, gen)
+	elapsed := int(time.Since(start).Milliseconds())
 
-	var result *studioProviderResult
+	if dispatchErr != nil {
+		failErr := o.studioSvc.FailGeneration(ctx, genID, dispatchErr.Error())
+		if failErr != nil {
+			log.Printf("[AIStudio] FailGeneration for %s: %v", genID, failErr)
+		}
+		return dispatchErr
+	}
+
+	result.DurationMs = elapsed
+	return o.complete(ctx, gen, result)
+}
+
+// route dispatches to the correct provider chain based on slug category.
+func (o *AIStudioOrchestrator) route(ctx context.Context, gen *entities.AIGeneration) (*studioProviderResult, error) {
+	slug := gen.ToolSlug
+	prompt := gen.Prompt
+
+	cat, known := slugCategory[slug]
+	if !known {
+		return nil, fmt.Errorf("unknown tool slug %q", slug)
+	}
 
 	switch cat {
 	case catText:
-		result, err = o.dispatchText(ctx, slug, gen.Prompt)
+		return o.dispatchText(ctx, slug, prompt)
 	case catImage:
-		result, err = o.dispatchImage(ctx, slug, gen.Prompt)
-	case catVoice:
-		result, err = o.dispatchVoice(ctx, slug, gen.Prompt)
-	case catMusic:
-		result, err = o.dispatchMusic(ctx, slug, gen.Prompt)
+		return o.dispatchImage(ctx, slug, prompt)
 	case catVideo:
-		result, err = o.dispatchVideo(ctx, slug, gen.Prompt)
+		return o.dispatchVideo(ctx, slug, prompt)
+	case catVoice:
+		return o.dispatchVoiceOrTranslate(ctx, slug, prompt)
+	case catMusic:
+		return o.dispatchMusic(ctx, slug, prompt)
 	case catComposite:
-		result, err = o.dispatchComposite(ctx, slug, gen.Prompt)
+		return o.dispatchComposite(ctx, slug, prompt)
 	default:
-		err = fmt.Errorf("unknown category %q for slug %q", cat, slug)
+		return nil, fmt.Errorf("unhandled category %q", cat)
 	}
-
-	if err != nil {
-		log.Printf("[AIStudio] gen %s failed: %v", genID, err)
-		o.fail(ctx, gen, err.Error())
-		return
-	}
-
-	result.DurationMs = int(time.Since(start).Milliseconds())
-	o.complete(ctx, gen, result)
 }
 
-// ─── Text (Groq → Gemini → DeepSeek) ─────────────────────────────────────────
+// ─── Text dispatch (study guide, quiz, mindmap, research-brief, bizplan, slide-deck, infographic) ──
 
 func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
-	sys := textSystemPrompt(slug)
+	systemPrompt, userPrompt := buildTextPrompts(slug, prompt)
 
-	type llmProvider struct {
-		name, key, endpoint, model string
-	}
-	providers := []llmProvider{
-		{
-			name:     "groq",
-			key:      os.Getenv("GROQ_API_KEY"),
-			endpoint: "https://api.groq.com/openai/v1/chat/completions",
-			model:    "llama-3.3-70b-versatile",
-		},
-		{
-			name:     "gemini",
-			key:      os.Getenv("GEMINI_API_KEY"),
-			endpoint: fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", os.Getenv("GEMINI_API_KEY")),
-			model:    "gemini-2.0-flash",
-		},
-		{
-			name:     "deepseek",
-			key:      os.Getenv("DEEPSEEK_API_KEY"),
-			endpoint: "https://api.deepseek.com/chat/completions",
-			model:    "deepseek-chat",
-		},
+	providers := []struct {
+		name string
+		fn   func(ctx context.Context, sys, user string) (string, error)
+	}{
+		{"gemini-flash", o.callGeminiFlash},
+		{"groq-llama4", o.callGroqLlama4},
+		{"deepseek-v3", o.callDeepSeek},
 	}
 
 	for _, p := range providers {
-		if p.key == "" {
-			continue
-		}
-		text, err := callOpenAICompat(ctx, p.endpoint, p.key, p.model, sys, prompt)
+		text, err := p.fn(ctx, systemPrompt, userPrompt)
 		if err != nil {
-			log.Printf("[AIStudio] %s text failed (slug=%s): %v", p.name, slug, err)
+			log.Printf("[AIStudio] %s failed for %s: %v", p.name, slug, err)
 			continue
 		}
 		return &studioProviderResult{
 			OutputText: text,
 			Provider:   p.name,
-			CostMicros: estimateLLMCost(len(text)),
+			CostMicros: 0,
 		}, nil
 	}
-	return nil, fmt.Errorf("all LLM providers failed for tool %q", slug)
+	return nil, fmt.Errorf("all text providers failed for slug %q", slug)
 }
 
-func callOpenAICompat(ctx context.Context, endpoint, key, model, sys, user string) (string, error) {
-	payload := map[string]interface{}{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": sys},
-			{"role": "user", "content": user},
-		},
-		"max_tokens":  2048,
-		"temperature": 0.7,
+// buildTextPrompts returns (systemPrompt, userPrompt) for each tool slug.
+func buildTextPrompts(slug, input string) (system, user string) {
+	base := "You are Nexus AI, a helpful assistant for Nigerian users. Be clear, practical, and culturally aware."
+	switch slug {
+	case "study-guide":
+		return base, fmt.Sprintf(
+			"Create a comprehensive study guide for: %s\n\nInclude:\n- Key concepts with clear definitions\n- Real-world examples relevant to Nigerian context\n- Practice questions with answers\n- Quick revision summary\n\nFormat with clear headings.", input)
+	case "quiz":
+		return base, fmt.Sprintf(
+			"Create 10 quiz questions with answers about: %s\n\nReturn as JSON array:\n[{\"question\": \"...\", \"options\": [\"A) ...\", \"B) ...\", \"C) ...\", \"D) ...\"], \"answer\": \"A\", \"explanation\": \"...\"}]\n\nReturn ONLY the JSON, no extra text.", input)
+	case "mindmap":
+		return base, fmt.Sprintf(
+			"Create a detailed mind map for: %s\n\nReturn as JSON:\n{\"center\": \"...\", \"branches\": [{\"label\": \"...\", \"children\": [{\"label\": \"...\"}]}]}\n\nReturn ONLY the JSON.", input)
+	case "research-brief":
+		return base, fmt.Sprintf(
+			"Write a comprehensive research brief about: %s\n\nSections:\n1. Executive Summary (3 sentences)\n2. Background & Context\n3. Key Findings (5 bullet points)\n4. Market/Industry Data (with specific figures where available)\n5. Recommendations\n6. Conclusion\n\nBe specific and data-driven.", input)
+	case "slide-deck":
+		return base, fmt.Sprintf(
+			"Create a slide deck outline for: %s\n\nReturn as JSON:\n{\"title\": \"...\", \"slides\": [{\"number\": 1, \"title\": \"...\", \"bullets\": [\"...\"], \"speaker_notes\": \"...\"}]}\n\nCreate 10-12 slides. Return ONLY the JSON.", input)
+	case "infographic":
+		return base, fmt.Sprintf(
+			"Create an infographic content structure for: %s\n\nReturn as JSON:\n{\"title\": \"...\", \"subtitle\": \"...\", \"sections\": [{\"heading\": \"...\", \"stats\": [{\"label\": \"...\", \"value\": \"...\"}], \"bullets\": [\"...\"]}]}\n\nReturn ONLY the JSON.", input)
+	case "bizplan":
+		return base, fmt.Sprintf(
+			"Write a complete business plan for: %s\n\nSections:\n1. Executive Summary\n2. Company Description & Vision\n3. Market Analysis (target market, competition, Nigerian market context)\n4. Products/Services\n5. Marketing & Sales Strategy\n6. Operations Plan\n7. Financial Projections (3-year)\n8. Funding Requirements\n\nBe specific and actionable.", input)
+	default:
+		return base, fmt.Sprintf("Generate comprehensive, well-structured content about: %s", input)
 	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+key)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
-	}
-	var parsed struct {
-		Choices []struct {
-			Message struct{ Content string `json:"content"` } `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("parse OpenAI-compat: %w", err)
-	}
-	return parsed.Choices[0].Message.Content, nil
 }
 
-// ─── Image (FAL.AI FLUX → HuggingFace SDXL) ──────────────────────────────────
+// ─── Image dispatch (ai-photo → HF FLUX.1-Schnell primary, FAL.AI fallback; bg-remover → rembg/Photoroom) ──
 
 func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
-	if key := os.Getenv("FAL_API_KEY"); key != "" {
-		falModel := "fal-ai/flux/dev"
-		if slug == "bg-remover" {
-			falModel = "fal-ai/birefnet"
-		}
-		url, err := callFALImage(ctx, key, falModel, prompt)
+	if slug == "bg-remover" {
+		return o.dispatchBgRemover(ctx, prompt)
+	}
+	// ai-photo: HuggingFace FLUX.1-Schnell (free) → FAL.AI FLUX-dev (paid fallback)
+	if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
+		url, err := o.callHFFluxSchnell(ctx, hfKey, prompt)
 		if err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "fal.ai/" + falModel, CostMicros: 3000}, nil
+			return &studioProviderResult{OutputURL: url, Provider: "huggingface/flux-schnell", CostMicros: 0}, nil
 		}
-		log.Printf("[AIStudio] FAL image failed: %v", err)
+		log.Printf("[AIStudio] HF FLUX.1-Schnell failed: %v", err)
 	}
 
-	if key := os.Getenv("HUGGINGFACE_API_KEY"); key != "" {
-		url, err := callHuggingFaceImage(ctx, key, "stabilityai/stable-diffusion-xl-base-1.0", prompt)
+	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
+		url, err := o.callFALFlux(ctx, falKey, prompt)
 		if err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "huggingface/sdxl", CostMicros: 0}, nil
+			return &studioProviderResult{OutputURL: url, Provider: "fal.ai/flux-dev", CostMicros: 6500}, nil
 		}
-		log.Printf("[AIStudio] HF image failed: %v", err)
+		log.Printf("[AIStudio] FAL FLUX failed: %v", err)
 	}
 
-	return nil, fmt.Errorf("all image providers failed")
+	return nil, fmt.Errorf("image generation unavailable: configure HF_TOKEN or FAL_API_KEY")
 }
 
-func callFALImage(ctx context.Context, key, model, prompt string) (string, error) {
-	payload := map[string]interface{}{
-		"prompt":        prompt,
-		"image_size":    "square_hd",
-		"num_images":    1,
-		"output_format": "jpeg",
+func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL string) (*studioProviderResult, error) {
+	// Primary: self-hosted rembg microservice
+	if rembgURL := os.Getenv("REMBG_SERVICE_URL"); rembgURL != "" {
+		result, err := o.callRembgService(ctx, rembgURL, imageURL)
+		if err == nil {
+			return &studioProviderResult{OutputURL: result, Provider: "rembg/self-hosted", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] rembg failed: %v", err)
 	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://fal.run/"+model, bytes.NewReader(body))
-	req.Header.Set("Authorization", "Key "+key)
-	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	// Fallback: FAL.AI BiRefNet (accurate background removal)
+	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
+		result, err := o.callFALBgRemover(ctx, falKey, imageURL)
+		if err == nil {
+			return &studioProviderResult{OutputURL: result, Provider: "fal.ai/birefnet", CostMicros: 2000}, nil
+		}
+		log.Printf("[AIStudio] FAL BiRefNet failed: %v", err)
+	}
+
+	// Last resort: remove.bg API
+	if rbgKey := os.Getenv("REMOVEBG_API_KEY"); rbgKey != "" {
+		result, err := o.callRemoveBg(ctx, rbgKey, imageURL)
+		if err == nil {
+			return &studioProviderResult{OutputURL: result, Provider: "remove.bg", CostMicros: 1000}, nil
+		}
+		log.Printf("[AIStudio] remove.bg failed: %v", err)
+	}
+
+	return nil, fmt.Errorf("background removal unavailable: configure REMBG_SERVICE_URL, FAL_API_KEY, or REMOVEBG_API_KEY")
+}
+
+// ─── Video dispatch (animate-photo → FAL.AI LTX basic; video-premium → FAL.AI Kling v1.5) ──
+
+func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug, imageURL string) (*studioProviderResult, error) {
+	falKey := os.Getenv("FAL_API_KEY")
+	if falKey == "" {
+		return nil, fmt.Errorf("video generation requires FAL_API_KEY")
+	}
+
+	var model string
+	switch slug {
+	case "video-premium":
+		model = "fal-ai/kling-video/v1.5/standard/image-to-video"
+	case "video-jingle":
+		model = "fal-ai/kling-video/v1.5/standard/image-to-video"
+	default: // animate-photo
+		model = "fal-ai/ltx-video"
+	}
+
+	videoURL, err := o.callFALVideo(ctx, falKey, model, imageURL)
 	if err != nil {
-		return "", err
+		// Fallback for Kling → LTX
+		if slug == "video-premium" {
+			log.Printf("[AIStudio] Kling failed, falling back to LTX: %v", err)
+			videoURL, err = o.callFALVideo(ctx, falKey, "fal-ai/ltx-video", imageURL)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("video generation failed: %w", err)
+		}
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("FAL %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+
+	costMicros := 14500 // ~₦145 for LTX
+	if slug == "video-premium" {
+		costMicros = 56000 // ~₦560 for Kling
 	}
-	var parsed struct {
-		Images []struct{ URL string `json:"url"` } `json:"images"`
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Images) == 0 {
-		return "", fmt.Errorf("fal parse: %w", err)
-	}
-	return parsed.Images[0].URL, nil
+	return &studioProviderResult{OutputURL: videoURL, Provider: "fal.ai/" + model, CostMicros: costMicros}, nil
 }
 
-func callHuggingFaceImage(ctx context.Context, key, model, prompt string) (string, error) {
-	endpoint := "https://api-inference.huggingface.co/models/" + model
-	body, _ := json.Marshal(map[string]string{"inputs": prompt})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
+// ─── Voice / Translate dispatch ───────────────────────────────────────────────
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
+func (o *AIStudioOrchestrator) dispatchVoiceOrTranslate(ctx context.Context, slug, input string) (*studioProviderResult, error) {
+	switch slug {
+	case "translate":
+		return o.dispatchTranslate(ctx, input)
+	case "transcribe":
+		return o.dispatchTranscribe(ctx, input)
+	default: // narrate
+		return o.dispatchTTS(ctx, input)
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == http.StatusServiceUnavailable {
-		return "", fmt.Errorf("HF model loading")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HF %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
-	}
-	// HF returns raw binary; encode as data URI (prod: upload to CDN first)
-	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(raw), nil
 }
 
-// ─── Voice (ElevenLabs → HuggingFace Bark) ───────────────────────────────────
-
-func (o *AIStudioOrchestrator) dispatchVoice(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
-	if slug == "transcribe" {
-		return o.dispatchTranscribe(ctx, prompt)
+func (o *AIStudioOrchestrator) dispatchTranslate(ctx context.Context, input string) (*studioProviderResult, error) {
+	// Parse input: expected format "LANG:text" e.g. "yo:Hello world"
+	parts := strings.SplitN(input, ":", 2)
+	targetLang, text := "yo", input
+	if len(parts) == 2 {
+		targetLang = strings.ToLower(strings.TrimSpace(parts[0]))
+		text = parts[1]
+	}
+	// Validate supported languages
+	supportedLangs := map[string]bool{"yo": true, "ha": true, "ig": true, "fr": true, "en": true}
+	if !supportedLangs[targetLang] {
+		targetLang = "yo" // default to Yoruba
 	}
 
-	if key := os.Getenv("ELEVENLABS_API_KEY"); key != "" {
+	if apiKey := os.Getenv("GOOGLE_TRANSLATE_API_KEY"); apiKey != "" {
+		translated, err := o.callGoogleTranslate(ctx, apiKey, text, targetLang)
+		if err == nil {
+			return &studioProviderResult{
+				OutputText: translated,
+				Provider:   "google-translate",
+				CostMicros: 0,
+			}, nil
+		}
+		log.Printf("[AIStudio] Google Translate failed: %v", err)
+	}
+
+	// Fallback: use Gemini for translation
+	prompt := fmt.Sprintf("Translate the following text to %s. Return ONLY the translation, no explanation:\n\n%s", targetLang, text)
+	translated, err := o.callGeminiFlash(ctx, "You are a professional translator.", prompt)
+	if err == nil {
+		return &studioProviderResult{OutputText: translated, Provider: "gemini/translate", CostMicros: 0}, nil
+	}
+
+	return nil, fmt.Errorf("translation unavailable: configure GOOGLE_TRANSLATE_API_KEY")
+}
+
+func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*studioProviderResult, error) {
+	// Primary: Google Cloud TTS (free tier: 1M chars/month standard)
+	if gcpKey := os.Getenv("GOOGLE_CLOUD_TTS_KEY"); gcpKey != "" {
+		audioURL, err := o.callGoogleCloudTTS(ctx, gcpKey, text)
+		if err == nil {
+			return &studioProviderResult{OutputURL: audioURL, Provider: "google-cloud-tts", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] Google Cloud TTS failed: %v", err)
+	}
+
+	// Secondary: ElevenLabs TTS (premium quality)
+	if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 		voiceID := os.Getenv("ELEVENLABS_VOICE_ID")
 		if voiceID == "" {
-			voiceID = "21m00Tcm4TlvDq8ikWAM" // Rachel (default)
+			voiceID = "21m00Tcm4TlvDq8ikWAM" // Rachel
 		}
-		url, err := callElevenLabsTTS(ctx, key, voiceID, prompt)
+		audioURL, err := o.callElevenLabsTTS(ctx, el11Key, voiceID, text)
 		if err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "elevenlabs", CostMicros: 2000}, nil
+			return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-tts", CostMicros: 2000}, nil
 		}
 		log.Printf("[AIStudio] ElevenLabs TTS failed: %v", err)
 	}
 
-	if key := os.Getenv("HUGGINGFACE_API_KEY"); key != "" {
-		url, err := callHuggingFaceTTS(ctx, key, prompt)
+	// Fallback: HuggingFace Bark (free, lower quality)
+	if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
+		audioURL, err := o.callHuggingFaceTTS(ctx, hfKey, text)
 		if err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "huggingface/bark", CostMicros: 0}, nil
+			return &studioProviderResult{OutputURL: audioURL, Provider: "huggingface/bark", CostMicros: 0}, nil
 		}
-		log.Printf("[AIStudio] HF Bark failed: %v", err)
 	}
 
-	return nil, fmt.Errorf("all TTS providers failed")
-}
-
-func callElevenLabsTTS(ctx context.Context, key, voiceID, text string) (string, error) {
-	payload := map[string]interface{}{
-		"text":     text,
-		"model_id": "eleven_turbo_v2",
-		"voice_settings": map[string]float64{
-			"stability": 0.5, "similarity_boost": 0.75,
-		},
-	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.elevenlabs.io/v1/text-to-speech/"+voiceID, bytes.NewReader(body))
-	req.Header.Set("xi-api-key", key)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "audio/mpeg")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	audio, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ElevenLabs %d: %s", resp.StatusCode, truncateStr(string(audio), 200))
-	}
-	// Prod: upload to CDN; dev: data URI
-	return "data:audio/mpeg;base64," + base64.StdEncoding.EncodeToString(audio), nil
-}
-
-func callHuggingFaceTTS(ctx context.Context, key, text string) (string, error) {
-	body, _ := json.Marshal(map[string]string{"inputs": text})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api-inference.huggingface.co/models/suno/bark", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	audio, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HF Bark %d", resp.StatusCode)
-	}
-	return "data:audio/wav;base64," + base64.StdEncoding.EncodeToString(audio), nil
+	return nil, fmt.Errorf("TTS unavailable: configure GOOGLE_CLOUD_TTS_KEY or ELEVENLABS_API_KEY")
 }
 
 func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, audioURL string) (*studioProviderResult, error) {
-	// Groq Whisper-large-v3 — fastest + cheapest
-	if key := os.Getenv("GROQ_API_KEY"); key != "" {
-		text, err := callGroqWhisper(ctx, key, audioURL)
+	// Primary: AssemblyAI (free $50 credit on signup)
+	if aaiKey := os.Getenv("ASSEMBLY_AI_KEY"); aaiKey != "" {
+		text, err := o.callAssemblyAI(ctx, aaiKey, audioURL)
 		if err == nil {
-			return &studioProviderResult{OutputText: text, Provider: "groq/whisper", CostMicros: 100}, nil
+			return &studioProviderResult{OutputText: text, Provider: "assemblyai", CostMicros: 25}, nil
+		}
+		log.Printf("[AIStudio] AssemblyAI failed: %v", err)
+	}
+
+	// Fallback: Groq Whisper-large-v3 (fast, cheap)
+	if groqKey := os.Getenv("GROQ_API_KEY"); groqKey != "" {
+		text, err := o.callGroqWhisper(ctx, groqKey, audioURL)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "groq/whisper-large-v3", CostMicros: 10}, nil
 		}
 		log.Printf("[AIStudio] Groq Whisper failed: %v", err)
 	}
-	return nil, fmt.Errorf("transcription unavailable — no GROQ_API_KEY configured")
+
+	return nil, fmt.Errorf("transcription unavailable: configure ASSEMBLY_AI_KEY or GROQ_API_KEY")
 }
 
-func callGroqWhisper(ctx context.Context, key, audioURL string) (string, error) {
-	payload := map[string]string{"url": audioURL, "model": "whisper-large-v3"}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.groq.com/openai/v1/audio/transcriptions", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	var parsed struct{ Text string `json:"text"` }
-	json.NewDecoder(resp.Body).Decode(&parsed)
-	if parsed.Text == "" {
-		return "", fmt.Errorf("Groq Whisper returned no text")
-	}
-	return parsed.Text, nil
-}
-
-// ─── Music (Mubert → ElevenLabs sound-generation) ────────────────────────────
+// ─── Music dispatch ───────────────────────────────────────────────────────────
 
 func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
-	if key := os.Getenv("MUBERT_API_KEY"); key != "" {
-		url, err := callMubert(ctx, key, prompt, slug)
-		if err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "mubert", CostMicros: 5000}, nil
+	switch slug {
+	case "jingle":
+		// Premium: ElevenLabs Music (professional quality, ~₦450/jingle)
+		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
+			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-music", CostMicros: 45000}, nil
+			}
+			log.Printf("[AIStudio] ElevenLabs Music failed: %v", err)
 		}
-		log.Printf("[AIStudio] Mubert failed: %v", err)
-	}
+		return nil, fmt.Errorf("marketing jingle requires ELEVENLABS_API_KEY")
 
-	if key := os.Getenv("ELEVENLABS_API_KEY"); key != "" {
-		url, err := callElevenLabsMusic(ctx, key, prompt)
-		if err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "elevenlabs/music", CostMicros: 8000}, nil
+	default: // bg-music
+		// Primary: Mubert (free 25 tracks/month, royalty-free)
+		if mubertKey := os.Getenv("MUBERT_API_KEY"); mubertKey != "" {
+			audioURL, err := o.callMubert(ctx, mubertKey, prompt, 30)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "mubert", CostMicros: 0}, nil
+			}
+			log.Printf("[AIStudio] Mubert failed: %v", err)
 		}
-		log.Printf("[AIStudio] ElevenLabs music failed: %v", err)
+		// Fallback: ElevenLabs sound-generation
+		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
+			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-sound", CostMicros: 2000}, nil
+			}
+		}
+		return nil, fmt.Errorf("background music unavailable: configure MUBERT_API_KEY")
 	}
-
-	return nil, fmt.Errorf("all music providers failed")
 }
 
-func callMubert(ctx context.Context, key, prompt, slug string) (string, error) {
-	duration := 30
-	if slug == "bg-music" {
-		duration = 60
-	}
-	payload := map[string]interface{}{
-		"method": "RecordTrackTTM",
-		"params": map[string]interface{}{
-			"pat": key, "text": prompt, "duration": duration, "format": "mp3", "bitrate": 128,
-		},
-	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api-b2b.mubert.com/v2/RecordTrackTTM", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	var result struct {
-		Data struct {
-			Tasks []struct{ DownloadLink string `json:"download_link"` } `json:"tasks"`
-		} `json:"data"`
-		Error *struct{ Text string `json:"text"` } `json:"error"`
-	}
-	json.NewDecoder(resp.Body).Decode(&result)
-	if result.Error != nil {
-		return "", fmt.Errorf("mubert: %s", result.Error.Text)
-	}
-	if len(result.Data.Tasks) == 0 || result.Data.Tasks[0].DownloadLink == "" {
-		return "", fmt.Errorf("mubert: no download_link")
-	}
-	return result.Data.Tasks[0].DownloadLink, nil
-}
-
-func callElevenLabsMusic(ctx context.Context, key, prompt string) (string, error) {
-	body, _ := json.Marshal(map[string]interface{}{"prompt": prompt, "duration": 30})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.elevenlabs.io/v1/sound-generation", bytes.NewReader(body))
-	req.Header.Set("xi-api-key", key)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	audio, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ElevenLabs music %d", resp.StatusCode)
-	}
-	return "data:audio/mpeg;base64," + base64.StdEncoding.EncodeToString(audio), nil
-}
-
-// ─── Video (FAL.AI Kling v1.5 → LTX-Video) ───────────────────────────────────
-
-func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
-	key := os.Getenv("FAL_API_KEY")
-	if key == "" {
-		return nil, fmt.Errorf("FAL_API_KEY not configured for video generation")
-	}
-
-	primaryModel := "fal-ai/kling-video/v1.5/standard/image-to-video"
-	if slug == "video-premium" {
-		primaryModel = "fal-ai/kling-video/v1.5/pro/text-to-video"
-	}
-
-	url, err := callFALVideo(ctx, key, primaryModel, prompt)
-	if err == nil {
-		return &studioProviderResult{OutputURL: url, Provider: "fal.ai/kling", CostMicros: 25000}, nil
-	}
-	log.Printf("[AIStudio] FAL Kling failed: %v", err)
-
-	// Fallback: LTX-Video (faster, cheaper)
-	url, err = callFALVideo(ctx, key, "fal-ai/ltx-video", prompt)
-	if err == nil {
-		return &studioProviderResult{OutputURL: url, Provider: "fal.ai/ltx-video", CostMicros: 8000}, nil
-	}
-	log.Printf("[AIStudio] FAL LTX-Video failed: %v", err)
-
-	return nil, fmt.Errorf("all video providers failed")
-}
-
-func callFALVideo(ctx context.Context, key, model, prompt string) (string, error) {
-	body, _ := json.Marshal(map[string]interface{}{"prompt": prompt, "duration": "5"})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://fal.run/"+model, bytes.NewReader(body))
-	req.Header.Set("Authorization", "Key "+key)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("FAL video %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
-	}
-
-	// FAL.AI returns either {"video":{"url":"..."}} or {"url":"..."}
-	var parsed struct {
-		Video struct{ URL string `json:"url"` } `json:"video"`
-		URL   string                             `json:"url"`
-	}
-	json.Unmarshal(raw, &parsed)
-	if parsed.Video.URL != "" {
-		return parsed.Video.URL, nil
-	}
-	if parsed.URL != "" {
-		return parsed.URL, nil
-	}
-	return "", fmt.Errorf("FAL video: no URL in response")
-}
-
-// ─── Composite tools ──────────────────────────────────────────────────────────
+// ─── Composite dispatch (podcast, video-jingle) ───────────────────────────────
 
 func (o *AIStudioOrchestrator) dispatchComposite(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
 	switch slug {
 	case "podcast":
 		return o.assemblePodcast(ctx, prompt)
-	case "infographic":
-		return o.assembleInfographic(ctx, prompt)
 	default:
-		// Treat unknown composites as text
 		return o.dispatchText(ctx, slug, prompt)
 	}
 }
 
-func (o *AIStudioOrchestrator) assemblePodcast(ctx context.Context, prompt string) (*studioProviderResult, error) {
-	// Step 1: LLM generates 2-host script
-	script, err := o.dispatchText(ctx, "podcast", prompt)
+func (o *AIStudioOrchestrator) assemblePodcast(ctx context.Context, topic string) (*studioProviderResult, error) {
+	// Step 1: Generate podcast script via Gemini
+	scriptPrompt := fmt.Sprintf(`Create a podcast script with two hosts (Nexus and Ade) discussing: %s
+
+Format:
+NEXUS: [intro greeting, introduce topic]
+ADE: [react, add context relevant to Nigeria]
+NEXUS: [key point 1 with explanation]
+ADE: [question or real-world Nigerian example]
+NEXUS: [key point 2]
+ADE: [personal story or practical application]
+NEXUS: [key point 3 + actionable takeaway]
+ADE: [closing thoughts]
+NEXUS: [outro, mention Loyalty Nexus]
+
+Make it conversational, engaging, and relevant to Nigerian users. Total length: 400-600 words.`, topic)
+
+	script, err := o.callGeminiFlash(ctx,
+		"You are a podcast script writer for a Nigerian audience. Create engaging, educational content.",
+		scriptPrompt)
 	if err != nil {
-		return nil, fmt.Errorf("podcast script: %w", err)
+		// Fallback to Groq
+		script, err = o.callGroqLlama4(ctx,
+			"You are a podcast script writer for a Nigerian audience.",
+			scriptPrompt)
+		if err != nil {
+			return nil, fmt.Errorf("podcast script generation failed: %w", err)
+		}
 	}
 
-	// Step 2: Narrate script (best-effort — return text-only if voice fails)
-	voice, err := o.dispatchVoice(ctx, "narrate", script.OutputText)
+	// Step 2: Narrate the script (Google Cloud TTS preferred)
+	narrationResult, err := o.dispatchTTS(ctx, script)
 	if err != nil {
-		log.Printf("[AIStudio] podcast voice step failed (returning text-only): %v", err)
+		// Return text-only if TTS fails — still useful
+		log.Printf("[AIStudio] Podcast TTS failed, returning script only: %v", err)
 		return &studioProviderResult{
-			OutputText: script.OutputText,
-			Provider:   script.Provider + "/text-only",
-			CostMicros: script.CostMicros,
+			OutputText: script,
+			Provider:   "gemini-script-only",
+			CostMicros: 0,
 		}, nil
 	}
+
 	return &studioProviderResult{
-		OutputURL:  voice.OutputURL,
-		OutputText: script.OutputText,
-		Provider:   script.Provider + "+" + voice.Provider,
-		CostMicros: script.CostMicros + voice.CostMicros,
+		OutputURL:  narrationResult.OutputURL,
+		OutputText: script,
+		Provider:   "gemini+" + narrationResult.Provider,
+		CostMicros: narrationResult.CostMicros,
 	}, nil
 }
 
-func (o *AIStudioOrchestrator) assembleInfographic(ctx context.Context, prompt string) (*studioProviderResult, error) {
-	// Step 1: LLM generates JSON data layout
-	outline, err := o.dispatchText(ctx, "infographic", prompt)
+// ─── Provider API calls ───────────────────────────────────────────────────────
+
+// callGeminiFlash calls Gemini 2.0 Flash for text generation.
+func (o *AIStudioOrchestrator) callGeminiFlash(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		return "", fmt.Errorf("GEMINI_API_KEY not configured")
+	}
+
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", apiKey)
+	payload := map[string]interface{}{
+		"system_instruction": map[string]interface{}{
+			"parts": []map[string]string{{"text": systemPrompt}},
+		},
+		"contents": []map[string]interface{}{
+			{"parts": []map[string]string{{"text": userPrompt}}},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature":     0.7,
+			"maxOutputTokens": 4096,
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
+	req.Header.Set("Content-Type", "application/json")
 
-	// Step 2: Image model renders a visual (best-effort)
-	visualPrompt := fmt.Sprintf(
-		"Professional infographic design about: %s. Modern, data-rich, colourful, clean typography. %s",
-		prompt, truncateStr(outline.OutputText, 200),
-	)
-	img, err := o.dispatchImage(ctx, "ai-photo", visualPrompt)
+	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		log.Printf("[AIStudio] infographic image step failed (returning text-only): %v", err)
-		return &studioProviderResult{
-			OutputText: outline.OutputText,
-			Provider:   outline.Provider + "/text-only",
-			CostMicros: outline.CostMicros,
-		}, nil
+		return "", fmt.Errorf("Gemini request: %w", err)
 	}
-	return &studioProviderResult{
-		OutputURL:  img.OutputURL,
-		OutputText: outline.OutputText,
-		Provider:   outline.Provider + "+" + img.Provider,
-		CostMicros: outline.CostMicros + img.CostMicros,
-	}, nil
-}
+	defer resp.Body.Close()
 
-// ─── Persist helpers ──────────────────────────────────────────────────────────
-
-// complete persists result via StudioService (which owns the ledger / notifications).
-func (o *AIStudioOrchestrator) complete(ctx context.Context, gen *entities.AIGeneration, r *studioProviderResult) {
-	if err := o.studioSvc.CompleteGeneration(
-		ctx, gen.ID,
-		r.OutputURL, r.OutputText, r.Provider,
-		r.CostMicros, r.DurationMs,
-	); err != nil {
-		log.Printf("[AIStudio] complete gen %s: %v", gen.ID, err)
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Gemini %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
-}
 
-// fail persists failure and issues refund via StudioService.
-func (o *AIStudioOrchestrator) fail(ctx context.Context, gen *entities.AIGeneration, reason string) {
-	if err := o.studioSvc.FailGeneration(ctx, gen.ID, reason); err != nil {
-		log.Printf("[AIStudio] fail gen %s: %v", gen.ID, err)
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// textSystemPrompt returns a context-appropriate system prompt for each tool slug.
-func textSystemPrompt(slug string) string {
-	m := map[string]string{
-		"translate":      "You are an expert translator. Detect the language of the input and translate it to English (or to the language requested). Return only the translated text.",
-		"study-guide":    "You are an expert educator. Create a comprehensive study guide: Overview, Key Concepts, Summary Points, 3 Practice Questions. Use clear headings.",
-		"quiz":           "You are a quiz generator. Create 5 multiple-choice questions. Format each as:\nQ1. [question]\nA) [opt]\nB) [opt]\nC) [opt]\nD) [opt]\nAnswer: [letter]",
-		"mindmap":        `You are a mind-map expert. Return ONLY valid JSON: {"central":"topic","branches":[{"name":"branch","sub":["item1","item2"]}]}`,
-		"research-brief": "You are a research analyst. Write a concise 500–800 word research brief: Executive Summary, Key Findings (3–5), Analysis, Recommendations. Nigerian business context.",
-		"bizplan":        "You are a startup advisor. Write a 1-page business plan: Description, Target Market, Revenue Model, Competitive Advantage, Marketing, Year-1 Projections, Action Steps. Nigerian market focus.",
-		"slide-deck":     `You are a presentation expert. Return ONLY valid JSON: {"title":"...","slides":[{"title":"...","bullets":["..."],"speaker_notes":"..."}]} — 10 slides.`,
-		"infographic":    `You are a data visualisation expert. Return ONLY valid JSON: {"title":"...","sections":[{"heading":"...","stat":"...","icon":"emoji","description":"..."}],"source":"..."}`,
-		"podcast":        "You are a podcast scriptwriter for a Nigerian audience. Write an engaging 2-host script (HOST_A / HOST_B alternating). Under 500 words. Conversational, culturally relevant.",
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("Gemini parse: %w", err)
 	}
-	if p, ok := m[slug]; ok {
-		return p
+	if result.Error != nil {
+		return "", fmt.Errorf("Gemini API error: %s", result.Error.Message)
 	}
-	return "You are a helpful AI assistant. Answer the user's request concisely and accurately."
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("Gemini: no content returned")
+	}
+	return result.Candidates[0].Content.Parts[0].Text, nil
 }
 
-func normaliseSlug(name string) string {
-	s := strings.ToLower(strings.TrimSpace(name))
-	s = strings.ReplaceAll(s, " ", "-")
-	return strings.ReplaceAll(s, "_", "-")
+// callGroqLlama4 calls Groq's Llama-4-Scout model.
+func (o *AIStudioOrchestrator) callGroqLlama4(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	apiKey := os.Getenv("GROQ_API_KEY")
+	if apiKey == "" {
+		return "", fmt.Errorf("GROQ_API_KEY not configured")
+	}
+
+	payload := map[string]interface{}{
+		"model": "llama-4-scout-17b-16e-instruct",
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userPrompt},
+		},
+		"max_tokens":  4096,
+		"temperature": 0.7,
+	}
+
+	return o.callOpenAICompatible(ctx, "https://api.groq.com/openai/v1/chat/completions",
+		"Bearer "+apiKey, payload)
 }
 
-func estimateLLMCost(chars int) int {
-	tokens := chars / 4
-	return (tokens * 100) / 1000 // ~100 µUSD per 1k tokens
+// callDeepSeek calls DeepSeek V3 as paid overflow.
+func (o *AIStudioOrchestrator) callDeepSeek(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	apiKey := os.Getenv("DEEPSEEK_API_KEY")
+	if apiKey == "" {
+		return "", fmt.Errorf("DEEPSEEK_API_KEY not configured")
+	}
+
+	payload := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userPrompt},
+		},
+		"max_tokens":  4096,
+		"temperature": 0.7,
+	}
+
+	return o.callOpenAICompatible(ctx, "https://api.deepseek.com/chat/completions",
+		"Bearer "+apiKey, payload)
 }
 
-func truncateStr(s string, max int) string {
-	if len(s) <= max {
+// callOpenAICompatible is a shared helper for OpenAI-compatible chat APIs.
+func (o *AIStudioOrchestrator) callOpenAICompatible(ctx context.Context, endpoint, authHeader string, payload interface{}) (string, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", authHeader)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("HTTP: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Error *struct{ Message string `json:"message"` } `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return "", fmt.Errorf("parse: %w", err)
+	}
+	if parsed.Error != nil {
+		return "", fmt.Errorf("API error: %s", parsed.Error.Message)
+	}
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("no choices returned")
+	}
+	return parsed.Choices[0].Message.Content, nil
+}
+
+// callHFFluxSchnell calls HuggingFace FLUX.1-Schnell (free tier, ~3s).
+func (o *AIStudioOrchestrator) callHFFluxSchnell(ctx context.Context, hfKey, prompt string) (string, error) {
+	model := os.Getenv("HF_IMAGE_MODEL")
+	if model == "" {
+		model = "black-forest-labs/FLUX.1-schnell"
+	}
+	endpoint := "https://api-inference.huggingface.co/models/" + model
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"inputs": prompt,
+		"parameters": map[string]interface{}{
+			"num_inference_steps": 4,
+			"guidance_scale":      0,
+		},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+hfKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("HF request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		return "", fmt.Errorf("HF model loading, retry in ~20s")
+	}
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("HF %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	imgData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	// Upload to S3 if configured, otherwise return data URI
+	return o.uploadOrDataURI(ctx, imgData, "image/png", "generated/"+uuid.New().String()+".png"), nil
+}
+
+// callFALFlux calls FAL.AI FLUX-dev (paid, higher quality).
+func (o *AIStudioOrchestrator) callFALFlux(ctx context.Context, falKey, prompt string) (string, error) {
+	payload := map[string]interface{}{
+		"prompt":        prompt,
+		"image_size":    "square_hd",
+		"num_images":    1,
+		"output_format": "jpeg",
+		"num_inference_steps": 28,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://fal.run/fal-ai/flux/dev", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Key "+falKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("FAL %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	var parsed struct {
+		Images []struct {
+			URL string `json:"url"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Images) == 0 {
+		return "", fmt.Errorf("FAL parse: empty images")
+	}
+	return parsed.Images[0].URL, nil
+}
+
+// callRembgService calls the self-hosted rembg Python microservice.
+func (o *AIStudioOrchestrator) callRembgService(ctx context.Context, serviceURL, imageURL string) (string, error) {
+	payload := map[string]string{"url": imageURL}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, serviceURL+"/remove", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("rembg %d", resp.StatusCode)
+	}
+
+	var result struct {
+		ResultURL string `json:"result_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.ResultURL == "" {
+		// May return raw PNG — upload it
+		raw, _ := io.ReadAll(resp.Body)
+		return o.uploadOrDataURI(ctx, raw, "image/png", "bgremoved/"+uuid.New().String()+".png"), nil
+	}
+	return result.ResultURL, nil
+}
+
+// callFALBgRemover uses FAL.AI's BiRefNet for background removal.
+func (o *AIStudioOrchestrator) callFALBgRemover(ctx context.Context, falKey, imageURL string) (string, error) {
+	payload := map[string]interface{}{
+		"image_url": imageURL,
+		"model":     "General Use (Light)",
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://fal.run/fal-ai/birefnet", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Key "+falKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("FAL BiRefNet %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	var parsed struct {
+		Image struct{ URL string `json:"url"` } `json:"image"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Image.URL == "" {
+		return "", fmt.Errorf("FAL BiRefNet parse failed")
+	}
+	return parsed.Image.URL, nil
+}
+
+// callRemoveBg uses the remove.bg API as last resort.
+func (o *AIStudioOrchestrator) callRemoveBg(ctx context.Context, apiKey, imageURL string) (string, error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("image_url", imageURL)
+	_ = w.WriteField("size", "auto")
+	w.Close()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.remove.bg/v1.0/removebg", &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("X-Api-Key", apiKey)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("remove.bg %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	imgData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return o.uploadOrDataURI(ctx, imgData, "image/png", "bgremoved/"+uuid.New().String()+".png"), nil
+}
+
+// callFALVideo calls FAL.AI for image-to-video animation.
+func (o *AIStudioOrchestrator) callFALVideo(ctx context.Context, falKey, model, imageURL string) (string, error) {
+	payload := map[string]interface{}{
+		"image_url": imageURL,
+		"prompt":    "animate this photo naturally with smooth motion",
+		"duration":  "5",
+	}
+	if strings.Contains(model, "kling") {
+		payload["aspect_ratio"] = "9:16"
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://fal.run/"+model, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Key "+falKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("FAL video %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	var parsed struct {
+		Video struct{ URL string `json:"url"` } `json:"video"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Video.URL == "" {
+		return "", fmt.Errorf("FAL video parse failed: %s", truncateStr(string(raw), 200))
+	}
+	return parsed.Video.URL, nil
+}
+
+// callGoogleCloudTTS calls Google Cloud Text-to-Speech API.
+func (o *AIStudioOrchestrator) callGoogleCloudTTS(ctx context.Context, apiKey, text string) (string, error) {
+	url := fmt.Sprintf("https://texttospeech.googleapis.com/v1/text:synthesize?key=%s", apiKey)
+	payload := map[string]interface{}{
+		"input": map[string]string{"text": text},
+		"voice": map[string]interface{}{
+			"languageCode": "en-NG", // Nigerian English
+			"name":         "en-GB-Neural2-A",
+			"ssmlGender":   "NEUTRAL",
+		},
+		"audioConfig": map[string]interface{}{
+			"audioEncoding": "MP3",
+			"speakingRate":  1.0,
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Google TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	var result struct {
+		AudioContent string `json:"audioContent"` // base64-encoded MP3
+	}
+	if err := json.Unmarshal(raw, &result); err != nil || result.AudioContent == "" {
+		return "", fmt.Errorf("Google TTS parse failed")
+	}
+
+	audioData, err := base64.StdEncoding.DecodeString(result.AudioContent)
+	if err != nil {
+		return "", fmt.Errorf("Google TTS decode: %w", err)
+	}
+	return o.uploadOrDataURI(ctx, audioData, "audio/mpeg", "narrations/"+uuid.New().String()+".mp3"), nil
+}
+
+// callElevenLabsTTS calls ElevenLabs Text-to-Speech.
+func (o *AIStudioOrchestrator) callElevenLabsTTS(ctx context.Context, apiKey, voiceID, text string) (string, error) {
+	payload := map[string]interface{}{
+		"text":     text,
+		"model_id": "eleven_turbo_v2_5",
+		"voice_settings": map[string]float64{
+			"stability": 0.5, "similarity_boost": 0.75,
+		},
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.elevenlabs.io/v1/text-to-speech/"+voiceID,
+		bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("xi-api-key", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "audio/mpeg")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	audio, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ElevenLabs TTS %d: %s", resp.StatusCode, truncateStr(string(audio), 200))
+	}
+	return o.uploadOrDataURI(ctx, audio, "audio/mpeg", "narrations/"+uuid.New().String()+".mp3"), nil
+}
+
+// callHuggingFaceTTS calls HuggingFace Bark for TTS (free fallback).
+func (o *AIStudioOrchestrator) callHuggingFaceTTS(ctx context.Context, hfKey, text string) (string, error) {
+	body, _ := json.Marshal(map[string]string{"inputs": text})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api-inference.huggingface.co/models/suno/bark",
+		bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+hfKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	audio, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HF Bark %d", resp.StatusCode)
+	}
+	return o.uploadOrDataURI(ctx, audio, "audio/wav", "narrations/"+uuid.New().String()+".wav"), nil
+}
+
+// callAssemblyAI submits audio to AssemblyAI and polls for the transcript.
+func (o *AIStudioOrchestrator) callAssemblyAI(ctx context.Context, apiKey, audioURL string) (string, error) {
+	// Submit transcript job
+	submitPayload := map[string]interface{}{
+		"audio_url":     audioURL,
+		"language_code": "en",
+	}
+	body, _ := json.Marshal(submitPayload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.assemblyai.com/v2/transcript", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("AssemblyAI submit: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var jobResp struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&jobResp); err != nil {
+		return "", fmt.Errorf("AssemblyAI submit parse: %w", err)
+	}
+	if jobResp.ID == "" {
+		return "", fmt.Errorf("AssemblyAI: no job ID returned")
+	}
+
+	// Poll until completed (max 5 minutes)
+	pollURL := "https://api.assemblyai.com/v2/transcript/" + jobResp.ID
+	deadline := time.Now().Add(5 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(3 * time.Second)
+
+		pollReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		pollReq.Header.Set("Authorization", apiKey)
+
+		pollResp, err := o.httpClient.Do(pollReq)
+		if err != nil {
+			continue
+		}
+
+		var result struct {
+			Status string `json:"status"`
+			Text   string `json:"text"`
+			Error  string `json:"error"`
+		}
+		json.NewDecoder(pollResp.Body).Decode(&result)
+		pollResp.Body.Close()
+
+		switch result.Status {
+		case "completed":
+			return result.Text, nil
+		case "error":
+			return "", fmt.Errorf("AssemblyAI error: %s", result.Error)
+		}
+	}
+	return "", fmt.Errorf("AssemblyAI: transcription timed out after 5 minutes")
+}
+
+// callGroqWhisper uses Groq's Whisper for transcription (fast fallback).
+func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audioURL string) (string, error) {
+	// Groq Whisper accepts a URL for audio files
+	payload := map[string]interface{}{
+		"model":     "whisper-large-v3",
+		"url":       audioURL,
+		"language":  "en",
+		"response_format": "json",
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.groq.com/openai/v1/audio/transcriptions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Text string `json:"text"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result.Text == "" {
+		return "", fmt.Errorf("Groq Whisper: no transcription returned")
+	}
+	return result.Text, nil
+}
+
+// callGoogleTranslate uses the Google Cloud Translation API.
+func (o *AIStudioOrchestrator) callGoogleTranslate(ctx context.Context, apiKey, text, targetLang string) (string, error) {
+	url := fmt.Sprintf("https://translation.googleapis.com/language/translate/v2?key=%s", apiKey)
+	payload := map[string]interface{}{
+		"q":      text,
+		"target": targetLang,
+		"format": "text",
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Google Translate %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	var result struct {
+		Data struct {
+			Translations []struct {
+				TranslatedText string `json:"translatedText"`
+			} `json:"translations"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("Google Translate parse: %w", err)
+	}
+	if len(result.Data.Translations) == 0 {
+		return "", fmt.Errorf("Google Translate: no translation returned")
+	}
+	return result.Data.Translations[0].TranslatedText, nil
+}
+
+// callMubert calls the Mubert API for royalty-free background music generation.
+func (o *AIStudioOrchestrator) callMubert(ctx context.Context, apiKey, prompt string, durationSecs int) (string, error) {
+	payload := map[string]interface{}{
+		"method": "RecordTrackTTM",
+		"params": map[string]interface{}{
+			"pat":        apiKey,
+			"prompt":     prompt,
+			"mode":       "track",
+			"duration":   durationSecs,
+			"format":     "mp3",
+			"bitrate":    128,
+			"intensity":  "medium",
+			"copyright":  true,
+		},
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api-b2b.mubert.com/v2/RecordTrackTTM", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Mubert %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	var result struct {
+		Data struct {
+			Tasks []struct {
+				MusicURL string `json:"music_url"`
+			} `json:"tasks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil || len(result.Data.Tasks) == 0 || result.Data.Tasks[0].MusicURL == "" {
+		return "", fmt.Errorf("Mubert: no track URL returned — check API key and plan")
+	}
+	return result.Data.Tasks[0].MusicURL, nil
+}
+
+// callElevenLabsMusic calls ElevenLabs for music/sound generation.
+func (o *AIStudioOrchestrator) callElevenLabsMusic(ctx context.Context, apiKey, prompt string) (string, error) {
+	payload := map[string]interface{}{
+		"text":     prompt,
+		"duration_seconds": 30,
+		"prompt_influence": 0.3,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.elevenlabs.io/v1/sound-generation", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("xi-api-key", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	audio, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("ElevenLabs music %d: %s", resp.StatusCode, truncateStr(string(audio), 200))
+	}
+	return o.uploadOrDataURI(ctx, audio, "audio/mpeg", "music/"+uuid.New().String()+".mp3"), nil
+}
+
+// ─── S3 upload helper ─────────────────────────────────────────────────────────
+
+// uploadOrDataURI uploads binary data via the configured AssetStorage backend
+// (S3, GCS, or local). Falls back to a base64 data URI only if the storage
+// backend itself returns an error (e.g. no credentials in dev mode).
+func (o *AIStudioOrchestrator) uploadOrDataURI(ctx context.Context, data []byte, contentType, key string) string {
+	url, err := o.storage.Upload(ctx, key, data, contentType)
+	if err != nil {
+		log.Printf("[AIStudio] asset upload failed for %s (backend=%s): %v — using data URI",
+			key, o.storage.Provider(), err)
+		return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data)
+	}
+	return url
+}
+
+// ─── Completion helpers ───────────────────────────────────────────────────────
+
+func (o *AIStudioOrchestrator) complete(ctx context.Context, gen *entities.AIGeneration, r *studioProviderResult) error {
+	return o.studioSvc.CompleteGeneration(ctx, gen.ID, r.OutputURL, r.OutputText, r.Provider, r.CostMicros, r.DurationMs)
+}
+
+// ─── Utility ─────────────────────────────────────────────────────────────────
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
 		return s
 	}
-	return s[:max] + "…"
+	return s[:n] + "…"
+}
+
+// encodeBase64 encodes bytes to standard base64 string.
+func encodeBase64(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
 }
