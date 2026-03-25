@@ -23,6 +23,7 @@ type AdminHandler struct {
 	spinSvc  *services.SpinService
 	drawSvc  *services.DrawService
 	fraudSvc *services.FraudService
+	warsSvc  *services.RegionalWarsService
 }
 
 func NewAdminHandler(
@@ -31,6 +32,7 @@ func NewAdminHandler(
 	spinSvc *services.SpinService,
 	drawSvc *services.DrawService,
 	fraudSvc *services.FraudService,
+	warsSvc *services.RegionalWarsService,
 ) *AdminHandler {
 	return &AdminHandler{
 		db:       db,
@@ -38,6 +40,7 @@ func NewAdminHandler(
 		spinSvc:  spinSvc,
 		drawSvc:  drawSvc,
 		fraudSvc: fraudSvc,
+		warsSvc:  warsSvc,
 	}
 }
 
@@ -701,25 +704,34 @@ func (h *AdminHandler) ResolveFraudEvent(w http.ResponseWriter, r *http.Request)
 
 // ─── Regional Wars ────────────────────────────────────────────────────────
 
+// GetRegionalWars returns current war leaderboard + history for admin panel.
 func (h *AdminHandler) GetRegionalWars(w http.ResponseWriter, r *http.Request) {
-	var leaderboard []map[string]interface{}
-	h.db.WithContext(r.Context()).Raw(`
-		SELECT state, SUM(recharge_amount) AS total_recharge, COUNT(*) AS participant_count
-		FROM wars_snapshots
-		WHERE created_at >= NOW() - INTERVAL '24 hours'
-		GROUP BY state
-		ORDER BY total_recharge DESC
-		LIMIT 37
-	`).Scan(&leaderboard)
+	if h.warsSvc == nil {
+		jsonError(w, "wars service not available", http.StatusServiceUnavailable)
+		return
+	}
+	// Live leaderboard (top 37)
+	leaderboard, err := h.warsSvc.GetLeaderboard(r.Context(), 37)
+	if err != nil {
+		jsonError(w, "leaderboard error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// War history
+	wars, _ := h.warsSvc.ListWars(r.Context(), 12)
+
 	jsonOK(w, map[string]interface{}{
-		"leaderboard": leaderboard,
-		"cycle_duration_hours": h.cfg.GetInt("regional_wars_duration_hours", 24),
+		"leaderboard":           leaderboard,
+		"history":               wars,
+		"prize_pool_kobo":       h.cfg.GetInt("regional_wars_prize_pool_kobo", 50_000_000),
+		"winning_bonus_pp":      h.cfg.GetInt("regional_wars_winning_bonus", 50),
 	})
 }
 
+// ResetWarsCycle is kept for backward-compat; admin should use POST /wars/resolve instead.
 func (h *AdminHandler) ResetWarsCycle(w http.ResponseWriter, r *http.Request) {
-	h.db.WithContext(r.Context()).Exec("DELETE FROM wars_snapshots WHERE created_at < NOW() - INTERVAL '24 hours'")
-	jsonOK(w, map[string]string{"status": "cycle reset"})
+	jsonOK(w, map[string]string{
+		"message": "Use POST /api/v1/admin/wars/resolve to close a war cycle",
+	})
 }
 
 // ─── Health ───────────────────────────────────────────────────────────────

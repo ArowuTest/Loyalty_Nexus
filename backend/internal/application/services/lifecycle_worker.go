@@ -27,9 +27,12 @@ type LifecycleWorker struct {
 	prizeRepo   repositories.PrizeRepository
 	authRepo    repositories.AuthRepository
 	chatRepo    repositories.ChatRepository
+	warsRepo    repositories.WarsRepository
 	fulfillSvc  *PrizeFulfillmentService
 	drawSvc     *DrawService
 	winnerSvc   *WinnerService
+	warsSvc     *RegionalWarsService
+	studioSvc   *StudioService
 	notifySvc   *NotificationService
 	cfg         *config.ConfigManager
 }
@@ -41,9 +44,12 @@ func NewLifecycleWorker(
 	pr repositories.PrizeRepository,
 	ar repositories.AuthRepository,
 	cr repositories.ChatRepository,
+	wr repositories.WarsRepository,
 	fs  *PrizeFulfillmentService,
 	ds  *DrawService,
 	ws  *WinnerService,
+	warsSvc *RegionalWarsService,
+	ss  *StudioService,
 	ns  *NotificationService,
 	cfg *config.ConfigManager,
 ) *LifecycleWorker {
@@ -54,9 +60,12 @@ func NewLifecycleWorker(
 		prizeRepo:  pr,
 		authRepo:   ar,
 		chatRepo:   cr,
+		warsRepo:   wr,
 		fulfillSvc: fs,
 		drawSvc:    ds,
 		winnerSvc:  ws,
+		warsSvc:    warsSvc,
+		studioSvc:  ss,
 		notifySvc:  ns,
 		cfg:        cfg,
 	}
@@ -73,11 +82,12 @@ func (w *LifecycleWorker) Run(ctx context.Context) {
 	go w.runEvery(ctx, 5*time.Minute,  "fulfill-retry",      w.fulfillmentRetry)
 	go w.runEvery(ctx, 6*time.Hour,    "sub-lifecycle",      w.RunSubscriptionLifecycle)
 	go w.runEvery(ctx, 1*time.Hour,    "scheduled-draws",    w.RunScheduledDraws)
-	go w.runEvery(ctx, 24*time.Hour,   "monthly-spin-grant", w.RunMonthlySpinCreditGrant)
-	go w.runEvery(ctx, 24*time.Hour,   "wars-monthly",       w.RunWarsMonthlyResolve)
-	go w.runEvery(ctx, 10*time.Minute, "session-summarise",  w.sessionSummarise)
-	go w.runEvery(ctx, 1*time.Hour,    "momo-held-recovery", w.momoHeldRecovery)
-	go w.runEvery(ctx, 2*time.Hour,    "momo-held-expiry",   w.momoHeldExpiry)
+	go w.runEvery(ctx, 24*time.Hour,   "monthly-spin-grant",    w.RunMonthlySpinCreditGrant)
+	go w.runEvery(ctx, 10*time.Minute, "session-summarise",     w.sessionSummarise)
+	go w.runEvery(ctx, 1*time.Hour,    "momo-held-recovery",    w.momoHeldRecovery)
+	go w.runEvery(ctx, 2*time.Hour,    "momo-held-expiry",      w.momoHeldExpiry)
+	go w.runEvery(ctx, 10*time.Minute, "studio-stale-recovery", w.studioStaleRecovery)
+	go w.runEvery(ctx, 24*time.Hour,   "wars-monthly-resolve",  w.RunWarsMonthlyResolve)
 
 	<-ctx.Done()
 	log.Println("[WORKER] Lifecycle worker stopped")
@@ -212,21 +222,50 @@ func formatPointsExpiryMsg(phone string, daysLeft int) string {
 
 
 // RunWarsMonthlyResolve auto-resolves the current war on the last day of the month.
+// Uses RegionalWarsService for proper entity/repo flow.
 func (w *LifecycleWorker) RunWarsMonthlyResolve(ctx context.Context) {
 	now := time.Now().UTC()
 	tomorrow := now.AddDate(0, 0, 1)
 	if tomorrow.Month() == now.Month() {
-		return
+		return // Not the last day of the month
 	}
 	period := fmt.Sprintf("%d-%02d", now.Year(), now.Month())
 	log.Printf("[lifecycle] auto-resolving war period=%s", period)
-	w.db.WithContext(ctx).Table("regional_wars").
-		Where("period = ? AND status = 'ACTIVE'", period).
-		Updates(map[string]interface{}{
-			"status":      "COMPLETED",
-			"resolved_at": now,
-			"updated_at":  now,
-		})
+	if w.warsSvc != nil {
+		if _, err := w.warsSvc.ResolveWar(ctx, period); err != nil {
+			log.Printf("[lifecycle] wars auto-resolve failed for %s: %v", period, err)
+		} else {
+			log.Printf("[lifecycle] wars auto-resolved successfully for %s", period)
+		}
+	} else {
+		// Fallback: direct DB update if service not wired
+		w.db.WithContext(ctx).Table("regional_wars").
+			Where("period = ? AND status = 'ACTIVE'", period).
+			Updates(map[string]interface{}{"status": "COMPLETED", "resolved_at": now, "updated_at": now})
+	}
+}
+
+// studioStaleRecovery re-queues generation jobs stuck in pending/processing.
+func (w *LifecycleWorker) studioStaleRecovery(ctx context.Context) {
+	if w.studioSvc == nil {
+		return
+	}
+	const staleAfterSecs = 600 // 10 minutes
+	stale, err := w.studioSvc.ListStalePendingJobs(ctx, staleAfterSecs, 20)
+	if err != nil {
+		log.Printf("[lifecycle] studio-stale query: %v", err)
+		return
+	}
+	if len(stale) == 0 {
+		return
+	}
+	log.Printf("[lifecycle] studio-stale-recovery: failing %d stale jobs", len(stale))
+	for _, gen := range stale {
+		// Mark failed so points are refunded and user is notified
+		if err := w.studioSvc.FailGeneration(ctx, gen.ID, "generation timed out — please retry"); err != nil {
+			log.Printf("[lifecycle] fail stale gen %s: %v", gen.ID, err)
+		}
+	}
 }
 
 // RunSubscriptionLifecycle handles subscription expiry, grace period, and auto-downgrade.

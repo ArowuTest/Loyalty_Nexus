@@ -50,6 +50,7 @@ func main() {
 	chatRepo   := persistence.NewPostgresChatRepository(db)
 	authRepo   := persistence.NewPostgresAuthRepository(db)
 	prizeRepo  := persistence.NewPostgresPrizeRepository(db)
+	warsRepo   := persistence.NewPostgresWarsRepository(db)
 
 	// ─── External Adapters ────────────────────────────────────
 	vtpass    := external.NewVTPassAdapter()
@@ -74,7 +75,7 @@ func main() {
 	spinSvc    := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
 	studioSvc  := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
 	hlrSvc     := services.NewHLRService(hlrRepo)
-	warssSvc   := services.NewRegionalWarsService(db)
+	warssSvc   := services.NewRegionalWarsService(warsRepo, userRepo, txRepo, cfg, db)
 	drawSvc    := services.NewDrawService(db)
 	passportSvc := services.NewPassportService(db)
 	fraudSvc   := services.NewFraudService(db)
@@ -102,7 +103,7 @@ func main() {
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
 	// kbWorker no longer needs a back-link — orch is injected directly
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
-	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc)
+	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc)
 	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, cfg)
 	warsH    := handlers.NewWarsHandler(warssSvc)
 	drawH    := handlers.NewDrawHandler(drawSvc)
@@ -164,8 +165,10 @@ func main() {
 	mux.Handle("GET  /api/v1/studio/chat/usage",             auth(http.HandlerFunc(studioH.GetChatUsage)))
 
 	// Wars routes
-	mux.Handle("GET  /api/v1/wars/leaderboard",  auth(http.HandlerFunc(warsH.GetLeaderboard)))
-	mux.Handle("GET  /api/v1/wars/my-rank",      auth(http.HandlerFunc(warsH.GetMyRank)))
+	mux.Handle("GET  /api/v1/wars/leaderboard",         auth(http.HandlerFunc(warsH.GetLeaderboard)))
+	mux.Handle("GET  /api/v1/wars/my-rank",             auth(http.HandlerFunc(warsH.GetMyRank)))
+	mux.Handle("GET  /api/v1/wars/history",             auth(http.HandlerFunc(warsH.GetHistory)))
+	mux.Handle("GET  /api/v1/wars/{period}/winners",    auth(http.HandlerFunc(warsH.GetWinners)))
 
 	// Passport routes (spec §6)
 	mux.Handle("GET  /api/v1/passport",              auth(http.HandlerFunc(passportH.GetPassport)))
@@ -191,7 +194,8 @@ func main() {
 	mux.Handle("PUT    /api/v1/admin/studio-tools/{id}",  adminAuth(http.HandlerFunc(adminH.UpdateStudioTool)))
 	mux.Handle("GET    /api/v1/admin/users",              adminAuth(http.HandlerFunc(adminH.ListUsers)))
 	mux.Handle("GET    /api/v1/admin/regional-wars",      adminAuth(http.HandlerFunc(adminH.GetRegionalWars)))
-	mux.Handle("POST   /api/v1/admin/wars/resolve",        adminAuth(http.HandlerFunc(warsH.AdminResolve)))
+	mux.Handle("POST /api/v1/admin/wars/resolve",          adminAuth(http.HandlerFunc(warsH.AdminResolve)))
+	mux.Handle("PUT  /api/v1/admin/wars/prize-pool",       adminAuth(http.HandlerFunc(warsH.AdminUpdatePrizePool)))
 	mux.Handle("GET    /api/v1/admin/fraud-events",        adminAuth(http.HandlerFunc(fraudH.ListEvents)))
 	mux.Handle("PUT    /api/v1/admin/fraud-events/{id}/resolve", adminAuth(http.HandlerFunc(fraudH.ResolveEvent)))
 	mux.Handle("PUT    /api/v1/admin/users/{id}/suspend",  adminAuth(http.HandlerFunc(fraudH.SuspendUser)))
