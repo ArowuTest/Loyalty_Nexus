@@ -86,6 +86,7 @@ func main() {
 	rechargeH := handlers.NewRechargeHandler(rechargeSvc, eq)
 	spinH    := handlers.NewSpinHandler(spinSvc)
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
+	kbWorker.LinkHandler(studioH) // bidirectional link for background dispatch
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
 	adminH   := handlers.NewAdminHandler(db, cfg)
 	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, cfg)
