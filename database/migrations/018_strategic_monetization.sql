@@ -7,7 +7,7 @@ CREATE TABLE arpu_uplift_tracking (
     user_id UUID NOT NULL REFERENCES users(id),
     msisdn TEXT NOT NULL,
     month_period DATE NOT NULL, -- e.g. 2026-03-01
-    pre_program_avg_spend BIGINT, -- Baseline
+    pre_program_avg_spend BIGINT, -- Baseline before joining program
     current_month_spend BIGINT DEFAULT 0,
     uplift_amount BIGINT GENERATED ALWAYS AS (current_month_spend - COALESCE(pre_program_avg_spend, 0)) STORED,
     created_at TIMESTAMPTZ DEFAULT now()
@@ -19,7 +19,7 @@ CREATE TABLE churn_recovery_bounties (
     user_id UUID NOT NULL REFERENCES users(id),
     last_activity_before_reactivation TIMESTAMPTZ NOT NULL,
     reactivation_recharge_id UUID REFERENCES transactions(id),
-    bounty_amount_kobo INTEGER DEFAULT 15000, -- Fixed 150 Naira fee
+    bounty_amount_kobo INTEGER DEFAULT 15000, -- Fixed 150 Naira fee per Section 6.3
     processed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -29,7 +29,6 @@ CREATE TABLE studio_usage_metrics (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     generation_id UUID NOT NULL REFERENCES ai_generations(id),
     provider TEXT NOT NULL,
-    token_usage INTEGER,
     compute_cost_micros INTEGER, -- Internal tracking of API costs
     created_at TIMESTAMPTZ DEFAULT now()
 );

@@ -18,6 +18,7 @@ import (
 	"loyalty-nexus/internal/infrastructure/persistence"
 	"loyalty-nexus/internal/infrastructure/queue"
 	"loyalty-nexus/internal/presentation/http/handlers"
+	"loyalty-nexus/internal/presentation/http/middleware"
 )
 
 func main() {
@@ -38,21 +39,30 @@ func main() {
 	hlrRepo := persistence.NewPostgresHLRRepository(db)
 	chatRepo := persistence.NewPostgresChatRepository(db)
 	authRepo := persistence.NewPostgresAuthRepository(db)
-	prizeRepo := persistence.NewPostgresPrizeRepository(db)
 
 	// Infrastructure
-	// ...
-	provisioner := &external.VTPassAdapter{APIKey: os.Getenv("VTPASS_KEY")}
+	eq := queue.NewEventQueue(rdb, "recharge_stream")
+	cfg := config.NewConfigManager(db)
+	cfg.Refresh(context.Background())
+
+	// External AI Clients
+	groq := &external.GroqAdapter{}
+	gemini := &external.GeminiAdapter{}
+	deepseek := &external.DeepSeekAdapter{}
+	usageTracker := external.NewRedisUsageTracker(rdb)
+
+	// AI Orchestrator
+	llmOrchestrator := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, chatRepo, 10, 20)
 
 	// Services & UseCases
 	notifySvc := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
-	momoPayer := &external.MTNMomoAdapter{}
-	momoSvc := services.NewMoMoService(momoPayer)
+	monetSvc := services.NewMonetizationService(db)
 	authSvc := services.NewAuthService(authRepo, userRepo, notifySvc, os.Getenv("JWT_SECRET"))
-	
-	fulfillSvc := services.NewPrizeFulfillmentService(prizeRepo, userRepo, provisioner, momoSvc)
-	spinSvc := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, cfg, db)
-	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, db)
+	userUC := usecases.NewUserUseCase(userRepo)
+	hlrSvc := services.NewHLRService(hlrRepo)
+	momoSvc := services.NewMoMoService(&external.MTNMomoAdapter{})
+	spinSvc := services.NewSpinService(userRepo, txRepo, nil, nil, cfg, db) // prizeRepo/fulfillSvc placeholders
+	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, monetSvc, db)
 
 	// Knowledge / Async Engine
 	notebookLM := &external.NotebookLMAdapter{APIKey: os.Getenv("NOTEBOOK_LM_KEY")}
@@ -63,7 +73,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(authSvc)
 	momoHandler := handlers.NewMoMoHandler(momoSvc, authSvc)
 	mnoHandler := handlers.NewMNOWebhookHandler(eq)
-	adminHandler := handlers.NewAdminHandler(db)
+	adminHandler := &handlers.AdminHandler{}
 	ussdHandler := &handlers.USSDHandler{}
 
 	// --- ROUTES ---
@@ -81,7 +91,7 @@ func main() {
 	// USSD Entry Point
 	http.Handle("/api/v1/ussd", ussdHandler)
 
-	// Ingestor (MNO / Paystack Gateway Endpoint)
+	// Ingestor (Independent Mode Gateway Endpoint)
 	http.HandleFunc("/api/v1/recharge/ingest", func(w http.ResponseWriter, r *http.Request) {
 		msisdn := r.URL.Query().Get("msisdn")
 		amountRaw := r.URL.Query().Get("amount")
@@ -100,7 +110,7 @@ func main() {
 
 	// User Profile
 	http.HandleFunc("/api/v1/user/profile", func(w http.ResponseWriter, r *http.Request) {
-		msisdn := r.URL.Query().Get("msisdn") // In production, get from JWT
+		msisdn := r.URL.Query().Get("msisdn")
 		user, err := userUC.GetProfile(r.Context(), msisdn)
 		if err != nil {
 			http.Error(w, "User not found", 404)
@@ -120,8 +130,11 @@ func main() {
 	// Admin Routes
 	http.HandleFunc("/api/v1/admin/config/update", adminHandler.UpdateProgramConfig)
 
+	// Wrap mux with AuthMiddleware
+	handler := middleware.AuthMiddleware(http.DefaultServeMux)
+
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
 	log.Printf("Loyalty Nexus API listening on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":"+port, handler))
 }

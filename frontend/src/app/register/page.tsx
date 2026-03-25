@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/hooks/useAuth';
 import { Smartphone, Sparkles, MapPin, ArrowRight, Loader2 } from 'lucide-react';
 
 const NIGERIAN_STATES = [
@@ -13,6 +14,7 @@ const NIGERIAN_STATES = [
 
 export default function Register() {
   const router = useRouter();
+  const { setSession } = useAuth();
   const [msisdn, setMsisdn] = useState('');
   const [otp, setOtp] = useState('');
   const [state, setState] = useState('');
@@ -33,27 +35,28 @@ export default function Register() {
     setIsLoading(true);
     // In production: POST /api/v1/auth/otp/verify
     setTimeout(() => {
+      setSession('mock-jwt-7-days');
       router.push('/dashboard');
       setIsLoading(false);
     }, 1500);
   };
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 bg-[url('https://static-s3.skyworkcdn.com/fe/skywork-site-assets/images/skybot/bg-pattern.png')] bg-fixed">
+    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-md space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-1000">
         {/* Brand */}
         <div className="text-center space-y-2">
-          <h1 className="text-6xl font-black italic tracking-tighter text-white">NEXUS</h1>
+          <h1 className="text-6xl font-black italic tracking-tighter text-white uppercase">NEXUS</h1>
           <p className="text-xs font-black text-brand-gold uppercase tracking-[0.3em]">The Private Firm Infrastructure</p>
         </div>
 
         <div className="glass rounded-[2.5rem] p-10 border border-brand-gold/20 shadow-2xl shadow-brand-gold/10">
           {step === 1 ? (
-            <div className="space-y-8">
+            <div className="space-y-8 text-left">
               <div className="space-y-2 text-center">
                 <h2 className="text-2xl font-black text-white italic">Welcome to Pulse</h2>
                 <p className="text-sm text-slate-500 font-medium leading-relaxed">
-                  Enter your mobile number to begin your <span className="text-brand-gold">Loyalty Nexus</span> journey.
+                  Enter your mobile number to begin your <span className="text-brand-gold font-bold">Loyalty Nexus</span> journey.
                 </p>
               </div>
 
@@ -75,10 +78,10 @@ export default function Register() {
                     <select 
                       value={state}
                       onChange={(e) => setState(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-14 pr-6 text-sm font-bold text-white focus:outline-none focus:border-brand-gold/50 transition-all appearance-none"
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-14 pr-6 text-sm font-bold text-white focus:outline-none focus:border-brand-gold/50 transition-all appearance-none bg-black"
                     >
-                      <option value="" disabled className="bg-black">Select your state (REQ-1.5)</option>
-                      {NIGERIAN_STATES.map(s => <option key={s} value={s} className="bg-black">{s}</option>)}
+                      <option value="" disabled>Select your state (REQ-1.5)</option>
+                      {NIGERIAN_STATES.map(s => <option key={s} value={s} className="bg-black text-white">{s}</option>)}
                     </select>
                   </div>
                 </div>
@@ -86,14 +89,14 @@ export default function Register() {
                 <button 
                   onClick={handleSendOTP}
                   disabled={!msisdn || !state || isLoading}
-                  className="w-full gold-gradient text-black py-5 rounded-2xl font-black text-sm uppercase tracking-[0.2em] shadow-xl shadow-yellow-500/10 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:grayscale disabled:scale-100"
+                  className="w-full gold-gradient text-black py-5 rounded-2xl font-black text-sm uppercase tracking-[0.2em] shadow-xl shadow-yellow-500/10 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
                 >
-                  {isLoading ? <Loader2 className="animate-spin" size={20} /> : <>Generate OTP <ArrowRight size={18} /></>}
+                  {isLoading ? <Loader2 className="animate-spin text-black" size={20} /> : <>Generate OTP <ArrowRight size={18} /></>}
                 </button>
               </div>
             </div>
           ) : (
-            <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
+            <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500 text-left">
               <div className="space-y-2 text-center">
                 <h2 className="text-2xl font-black text-white italic">Verify Identity</h2>
                 <p className="text-sm text-slate-500 font-medium leading-relaxed">
@@ -117,7 +120,7 @@ export default function Register() {
                     disabled={otp.length < 6 || isLoading}
                     className="w-full gold-gradient text-black py-5 rounded-2xl font-black text-sm uppercase tracking-[0.2em] shadow-xl shadow-yellow-500/10 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
                   >
-                    {isLoading ? <Loader2 className="animate-spin" size={20} /> : <>Verify & Continue <Sparkles size={18} /></>}
+                    {isLoading ? <Loader2 className="animate-spin text-black" size={20} /> : <>Verify & Continue <Sparkles size={18} /></>}
                   </button>
                   
                   <button 
@@ -133,7 +136,6 @@ export default function Register() {
         </div>
 
         <p className="text-center text-[10px] font-medium text-slate-600 leading-relaxed uppercase tracking-[0.1em]">
-          By continuing, you agree to the <span className="text-slate-400 font-bold underline">Terms of Service</span>. <br/>
           Loyalty Nexus Enterprise Infrastructure V1.0.2
         </p>
       </div>

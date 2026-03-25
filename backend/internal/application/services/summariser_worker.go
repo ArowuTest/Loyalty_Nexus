@@ -32,25 +32,26 @@ func (w *SummariserWorker) Run(ctx context.Context) {
 }
 
 func (w *SummariserWorker) ProcessExpiredSessions(ctx context.Context) {
-	// 1. Find sessions inactive for > 30m
 	var sessions []struct {
 		ID     uuid.UUID
 		UserID uuid.UUID
 	}
+	// REQ-4.3.4: Sessions expire after 30 minutes of inactivity
 	query := "status = 'active' AND last_activity_at < now() - interval '30 minutes'"
 	if err := w.db.WithContext(ctx).Table("chat_sessions").Where(query).Find(&sessions).Error; err != nil {
 		return
 	}
 
 	for _, s := range sessions {
-		// 2. Aggregate Transcript
 		transcript, _ := w.getTranscript(ctx, s.ID)
+		if transcript == "" {
+			continue
+		}
 
-		// 3. Generate Summary
 		summary, err := w.llmOrchestrator.Summarize(ctx, transcript)
 		if err == nil {
-			// 4. Store Summary
 			w.storeSummary(ctx, s.UserID, s.ID, summary)
+			log.Printf("[Summariser] Session %s compressed into memory", s.ID)
 		}
 	}
 }

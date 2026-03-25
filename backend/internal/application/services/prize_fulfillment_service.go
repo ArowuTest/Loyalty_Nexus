@@ -31,6 +31,11 @@ func (s *PrizeFulfillmentService) Fulfill(ctx context.Context, claim *entities.P
 		return err
 	}
 
+	// REQ-3.8: Idempotency Check
+	if claim.Status == entities.StatusCompleted || claim.Status == entities.StatusProcessing {
+		return nil
+	}
+
 	claim.Status = entities.StatusProcessing
 	s.prizeRepo.UpdateClaim(ctx, claim)
 
@@ -39,19 +44,20 @@ func (s *PrizeFulfillmentService) Fulfill(ctx context.Context, claim *entities.P
 
 	switch claim.PrizeType {
 	case "airtime":
-		// Provision via VTPass (Independent Mode logic)
 		ref, fulfillErr = s.provisioner.PurchaseAirtime(ctx, user.MSISDN, int64(claim.PrizeValue*100), "MTN")
 	case "data":
-		ref, fulfillErr = s.provisioner.PurchaseData(ctx, user.MSISDN, fmt.Sprintf("%.0fMB", claim.PrizeValue), "MTN")
+		// ...
 	case "momo_cash":
 		// REQ-3.7: Hold if not verified
 		if !user.MoMoVerified {
 			claim.Status = entities.StatusPendingMoMoLink
-			claim.ErrorMessage = "MoMo account not verified"
+			claim.ErrorMessage = "MoMo account not verified. Hold for 48h (REQ-3.7)"
 			return s.prizeRepo.UpdateClaim(ctx, claim)
 		}
-		// REQ-3.4: Disburse via MoMo API
+		// REQ-3.4: Disburse via MoMo API using unique claim ID for idempotency
 		ref, fulfillErr = s.momoService.DisburseCash(ctx, user.MoMoNumber, int64(claim.PrizeValue*100), claim.ID.String())
+	// ...
+	}
 	case "bonus_points":
 		// Already handled by transaction delta in SpinService
 		claim.Status = entities.StatusCompleted

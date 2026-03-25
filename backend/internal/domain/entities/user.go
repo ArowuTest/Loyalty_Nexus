@@ -6,13 +6,14 @@ import (
 )
 
 type User struct {
-	ID                  uuid.UUID `json:"id"`
-	MSISDN              string    `json:"msisdn"` // Nigerian Phone Number
-	UserCode            string    `json:"user_code"`
+	ID                  uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	MSISDN              string    `gorm:"uniqueIndex" json:"msisdn"`
+	UserCode            string    `gorm:"uniqueIndex" json:"user_code"`
+	State               string    `json:"state"` // REQ-1.5
 	TotalPoints         int64     `json:"total_points"`
 	StampsCount         int       `json:"stamps_count"`
 	TotalRechargeAmount int64     `json:"total_recharge_amount"`
-	Tier                string    `json:"tier"` // Bronze, Silver, Gold, Platinum
+	Tier                string    `json:"tier"`
 	StreakCount         int       `json:"streak_count"`
 	LastVisitAt         time.Time `json:"last_visit_at"`
 	IsActive            bool      `json:"is_active"`

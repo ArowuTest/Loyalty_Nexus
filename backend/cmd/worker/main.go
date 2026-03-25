@@ -80,7 +80,7 @@ func main() {
 					continue
 				}
 
-				// 2. HLR Validation
+				// 2. HLR Validation (if integrated)
 				if os.Getenv("OPERATION_MODE") == "integrated" {
 					hlrSvc.DetectNetwork(ctx, event.MSISDN, nil)
 				}
@@ -96,7 +96,6 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	isFirstRecharge := false
 	user, err := ur.FindByMSISDN(ctx, event.MSISDN)
 	
-	// Track Last Activity before updating for monetization logic
 	lastActivity := time.Time{}
 	if err == nil {
 		lastActivity = user.LastVisitAt
@@ -128,54 +127,35 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	}
 	user.LastVisitAt = time.Now()
 
-	// 2. Dynamic Point Earning (REQ-5.2.3)
-	var tier struct {
-		PointsPerNaira float64
-	}
-	err = db.Table("recharge_tiers").
-		Where("min_amount_kobo <= ? AND is_active = true", event.Amount).
-		Order("min_amount_kobo DESC").
-		Limit(1).
-		Select("points_per_naira").
-		Scan(&tier).Error
-	
-	rate := tier.PointsPerNaira
-	if rate == 0 { rate = 0.004 } 
-
+	// 2. Points & Spin Credit Earning
 	globalMultiplier := cfg.GetFloat("global_points_multiplier", 1.0)
 	regionalMultiplier := 1.0
 	if user.State != "" {
 		var reg struct {
+			BaseMultiplier       float64
+			IsGoldenHour         bool
 			GoldenHourMultiplier float64
-			IsGoldenHour bool
-			BaseMultiplier float64
 		}
-		if err := db.Table("regional_settings").Where("region_name = ?", user.State).First(&reg).Error; err == nil {
+		err := db.Table("regional_settings").
+			Where("region_name = ?", user.State).
+			Select("base_multiplier, is_golden_hour, golden_hour_multiplier").
+			First(&reg).Error
+		if err == nil {
 			regionalMultiplier = reg.BaseMultiplier
-			if reg.IsGoldenHour { regionalMultiplier = reg.GoldenHourMultiplier }
+			if reg.IsGoldenHour {
+				regionalMultiplier = reg.GoldenHourMultiplier
+			}
 		}
 	}
 
-	nairaAmount := float64(event.Amount) / 100
-	pointsEarned := int64(nairaAmount * rate * globalMultiplier * regionalMultiplier)
-
-	// 3. Bonus Triggers (REQ-5.2.8, 5.2.9)
-	var bonuses int64
-	if isFirstRecharge {
-		db.Table("program_bonuses").Where("event_type = 'first_recharge' AND is_active = true").Pluck("bonus_points", &bonuses)
-		pointsEarned += bonuses
-	}
-
-	var streakBonus int64
-	db.Table("program_bonuses").
-		Where("event_type = 'streak_milestone' AND threshold = ? AND is_active = true", user.StreakCount).
-		Pluck("bonus_points", &streakBonus)
-	pointsEarned += streakBonus
+	pointsRate := cfg.GetInt("base_points_rate", 250)
+	finalMultiplier := globalMultiplier * regionalMultiplier
+	pointsEarned := int64(float64(event.Amount/int64(pointsRate*100)) * finalMultiplier)
 
 	user.TotalPoints += pointsEarned
 	user.TotalRechargeAmount += event.Amount
 
-	// Check Spin Credit Threshold (REQ-2.3)
+	// Check Spin Credit Threshold
 	spinThreshold := int64(cfg.GetInt("recharge_to_spin_naira", 1000) * 100)
 	if user.TotalRechargeAmount >= spinThreshold {
 		user.TotalRechargeAmount -= spinThreshold
@@ -183,10 +163,11 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	}
 
 	ur.Update(ctx, user)
-	
-	// 4. Strategic Monetization Tracking (Section 6)
+
+	// 3. Strategic Monetization Tracking (Section 6)
 	ms.TrackRechargeActivity(ctx, user.ID, user.MSISDN, event.Amount, lastActivity)
 
+	// 4. Sync Wallet Passport
 	ps.SyncWallet(ctx, user.ID.String(), user.TotalPoints, user.StreakCount, 500) 
 
 	tx := &entities.Transaction{
@@ -197,7 +178,8 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 		Amount:      event.Amount,
 		PointsDelta: pointsEarned,
 		CreatedAt:   time.Now(),
-		Metadata:    map[string]any{"ref": event.Ref, "tier_rate": rate, "first_recharge": isFirstRecharge},
+		Metadata:    map[string]any{"source": "gateway", "ref": event.Ref},
 	}
+
 	tr.Save(ctx, tx)
 }

@@ -16,15 +16,17 @@ type StudioService struct {
 	userRepo   repositories.UserRepository
 	txRepo     repositories.TransactionRepository
 	notifySvc  *NotificationService
+	monetSvc   *MonetizationService
 	db         *gorm.DB
 }
 
-func NewStudioService(sr repositories.StudioRepository, ur repositories.UserRepository, tr repositories.TransactionRepository, ns *NotificationService, db *gorm.DB) *StudioService {
+func NewStudioService(sr repositories.StudioRepository, ur repositories.UserRepository, tr repositories.TransactionRepository, ns *NotificationService, ms *MonetizationService, db *gorm.DB) *StudioService {
 	return &StudioService{
 		studioRepo: sr,
 		userRepo:   ur,
 		txRepo:     tr,
 		notifySvc:  ns,
+		monetSvc:   ms,
 		db:         db,
 	}
 }
@@ -46,15 +48,10 @@ func (s *StudioService) CompleteGeneration(ctx context.Context, genID uuid.UUID,
 		return err
 	}
 
-	// 1. Track GPU/API Usage (Innovation 6.4)
-	usage := map[string]interface{}{
-		"generation_id":      genID,
-		"provider":           provider,
-		"compute_cost_micros": costMicros,
-	}
-	s.db.Table("studio_usage_metrics").Create(usage)
+	// Track GPU Usage (Innovation 6.4)
+	s.monetSvc.TrackStudioUsage(ctx, genID, provider, costMicros)
 
-	// 2. Trigger SMS Notification
+	// Trigger SMS Notification
 	gen, err := s.studioRepo.FindGenerationByID(ctx, genID)
 	if err == nil {
 		user, _ := s.userRepo.FindByID(ctx, gen.UserID)
@@ -68,12 +65,11 @@ func (s *StudioService) CompleteGeneration(ctx context.Context, genID uuid.UUID,
 }
 
 func (s *StudioService) FailGeneration(ctx context.Context, genID uuid.UUID, errMsg string) error {
-	// 1. Mark generation as failed
 	if err := s.studioRepo.UpdateStatus(ctx, genID, "failed", "", errMsg); err != nil {
 		return err
 	}
 
-	// 2. COMPENSATING TRANSACTION: Refund Points
+	// COMPENSATING TRANSACTION: Refund Points
 	gen, err := s.studioRepo.FindGenerationByID(ctx, genID)
 	if err != nil {
 		return err
@@ -129,7 +125,6 @@ func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID,
 	}
 
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		// 1. Create Transaction (Audit Log)
 		ledgerTx := &entities.Transaction{
 			ID:          uuid.New(),
 			UserID:      userID,
@@ -144,7 +139,6 @@ func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID,
 			return err
 		}
 
-		// 2. Create Generation Record
 		if err := s.studioRepo.CreateGenerationTx(ctx, tx, gen); err != nil {
 			return err
 		}
