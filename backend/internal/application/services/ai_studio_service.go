@@ -40,6 +40,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -261,7 +262,7 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug, prompt s
 	if slug == "bg-remover" {
 		return o.dispatchBgRemover(ctx, prompt)
 	}
-	// ai-photo: HuggingFace FLUX.1-Schnell (free) → FAL.AI FLUX-dev (paid fallback)
+	// ai-photo tier 1: HuggingFace FLUX.1-Schnell (free, uses HF_TOKEN)
 	if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
 		url, err := o.callHFFluxSchnell(ctx, hfKey, prompt)
 		if err == nil {
@@ -270,6 +271,12 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug, prompt s
 		log.Printf("[AIStudio] HF FLUX.1-Schnell failed: %v", err)
 	}
 
+	// ai-photo tier 2: Pollinations.ai FLUX (100% free, no key required)
+	if url, err := o.callPollinationsImage(ctx, prompt); err == nil {
+		return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
+	}
+
+	// ai-photo tier 3: FAL.AI FLUX-dev (paid fallback)
 	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
 		url, err := o.callFALFlux(ctx, falKey, prompt)
 		if err == nil {
@@ -315,38 +322,43 @@ func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL s
 // ─── Video dispatch (animate-photo → FAL.AI LTX basic; video-premium → FAL.AI Kling v1.5) ──
 
 func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug, imageURL string) (*studioProviderResult, error) {
-	falKey := os.Getenv("FAL_API_KEY")
-	if falKey == "" {
-		return nil, fmt.Errorf("video generation requires FAL_API_KEY")
-	}
-
-	var model string
-	switch slug {
-	case "video-premium":
-		model = "fal-ai/kling-video/v1.5/standard/image-to-video"
-	case "video-jingle":
-		model = "fal-ai/kling-video/v1.5/standard/image-to-video"
-	default: // animate-photo
-		model = "fal-ai/ltx-video"
-	}
-
-	videoURL, err := o.callFALVideo(ctx, falKey, model, imageURL)
-	if err != nil {
-		// Fallback for Kling → LTX
-		if slug == "video-premium" {
-			log.Printf("[AIStudio] Kling failed, falling back to LTX: %v", err)
-			videoURL, err = o.callFALVideo(ctx, falKey, "fal-ai/ltx-video", imageURL)
+	// Tier 1: FAL.AI (Kling v1.5 for premium, LTX for standard)
+	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
+		var model string
+		switch slug {
+		case "video-premium":
+			model = "fal-ai/kling-video/v1.5/standard/image-to-video"
+		case "video-jingle":
+			model = "fal-ai/kling-video/v1.5/standard/image-to-video"
+		default: // animate-photo
+			model = "fal-ai/ltx-video"
 		}
+
+		videoURL, err := o.callFALVideo(ctx, falKey, model, imageURL)
 		if err != nil {
-			return nil, fmt.Errorf("video generation failed: %w", err)
+			// Fallback for Kling → LTX within FAL
+			if slug == "video-premium" {
+				log.Printf("[AIStudio] Kling failed, falling back to LTX: %v", err)
+				videoURL, err = o.callFALVideo(ctx, falKey, "fal-ai/ltx-video", imageURL)
+			}
 		}
+		if err == nil {
+			costMicros := 14500
+			if slug == "video-premium" {
+				costMicros = 56000
+			}
+			return &studioProviderResult{OutputURL: videoURL, Provider: "fal.ai/" + model, CostMicros: costMicros}, nil
+		}
+		log.Printf("[AIStudio] FAL video failed: %v", err)
 	}
 
-	costMicros := 14500 // ~₦145 for LTX
-	if slug == "video-premium" {
-		costMicros = 56000 // ~₦560 for Kling
+	// Tier 2: Pollinations.ai wan-fast (FREE — 5-second video, no key needed)
+	// Great for animate-photo as a zero-cost fallback
+	if videoURL, err := o.callPollinationsVideo(ctx, imageURL, "animate this image with subtle cinematic motion"); err == nil {
+		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 	}
-	return &studioProviderResult{OutputURL: videoURL, Provider: "fal.ai/" + model, CostMicros: costMicros}, nil
+
+	return nil, fmt.Errorf("video generation unavailable: configure FAL_API_KEY for premium video")
 }
 
 // ─── Voice / Translate dispatch ───────────────────────────────────────────────
@@ -427,6 +439,11 @@ func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*s
 		if err == nil {
 			return &studioProviderResult{OutputURL: audioURL, Provider: "huggingface/bark", CostMicros: 0}, nil
 		}
+	}
+
+	// Last resort: Pollinations.ai TTS (free, OpenAI-compatible, 30+ voices, no key)
+	if audioURL, err := o.callPollinationsTTS(ctx, text, "nova"); err == nil {
+		return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/tts", CostMicros: 0}, nil
 	}
 
 	return nil, fmt.Errorf("TTS unavailable: configure GOOGLE_CLOUD_TTS_KEY or ELEVENLABS_API_KEY")
@@ -1235,6 +1252,167 @@ func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt
 		// If storage fails, return data URI so the feature still works in dev
 		encoded := base64.StdEncoding.EncodeToString(audioBytes)
 		return "data:audio/wav;base64," + encoded, nil
+	}
+	return publicURL, nil
+}
+
+// ─── Pollinations.ai callers (100% free, no API key required) ────────────────
+// Pollinations is an open-source Berlin-based AI platform. Their gen.pollinations.ai
+// unified endpoint provides free image, TTS, and video — powered by FLUX, wan-fast,
+// and ElevenLabs voices. No signup, no rate limit per IP (publishable tier).
+// Docs: https://github.com/pollinations/pollinations
+// Used as: zero-cost tier between HuggingFace (free with key) and FAL.AI (paid).
+
+// callPollinationsImage generates an image using Pollinations FLUX (free, no key).
+// Simple GET URL: https://pollinations.ai/p/{prompt}?width=1024&height=1024&model=flux
+func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt string) (string, error) {
+	encoded := url.QueryEscape(prompt)
+	apiURL := fmt.Sprintf("https://pollinations.ai/p/%s?width=1024&height=1024&model=flux&nologo=true&seed=%d",
+		encoded, time.Now().UnixNano()%9999)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations image request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Pollinations image %d", resp.StatusCode)
+	}
+
+	imgBytes, err := io.ReadAll(resp.Body)
+	if err != nil || len(imgBytes) < 1000 {
+		return "", fmt.Errorf("Pollinations image: response too small")
+	}
+
+	// Upload to asset storage
+	fileName := fmt.Sprintf("studio/ai-photo/pollinations_%d.jpg", time.Now().UnixNano())
+	publicURL, err := o.storage.Upload(ctx, fileName, imgBytes, "image/jpeg")
+	if err != nil {
+		// Return data URI fallback for dev
+		encoded64 := base64.StdEncoding.EncodeToString(imgBytes)
+		return "data:image/jpeg;base64," + encoded64, nil
+	}
+	return publicURL, nil
+}
+
+// callPollinationsTTS generates speech using Pollinations TTS (free, OpenAI-compatible).
+// Supports 30+ voices including ElevenLabs voices. No API key needed.
+// Endpoint: POST https://gen.pollinations.ai/v1/audio/speech
+func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, voice string) (string, error) {
+	if voice == "" {
+		voice = "nova" // natural, clear English voice
+	}
+	payload := map[string]interface{}{
+		"model": "tts-1",
+		"input": text,
+		"voice": voice,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/v1/audio/speech", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations TTS request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Pollinations TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 100))
+	}
+
+	audioBytes, err := io.ReadAll(resp.Body)
+	if err != nil || len(audioBytes) < 500 {
+		return "", fmt.Errorf("Pollinations TTS: response too small")
+	}
+
+	fileName := fmt.Sprintf("studio/narrate/pollinations_%d.mp3", time.Now().UnixNano())
+	publicURL, err := o.storage.Upload(ctx, fileName, audioBytes, "audio/mpeg")
+	if err != nil {
+		encoded64 := base64.StdEncoding.EncodeToString(audioBytes)
+		return "data:audio/mpeg;base64," + encoded64, nil
+	}
+	return publicURL, nil
+}
+
+// callPollinationsVideo generates a short video using Pollinations wan-fast (free).
+// wan-fast: fast 5-second video generation, released 2026-03-23. No key needed.
+// Endpoint: POST https://gen.pollinations.ai/video
+func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageURL, prompt string) (string, error) {
+	payload := map[string]interface{}{
+		"model":    "wan-fast",
+		"image":    imageURL,
+		"prompt":   prompt,
+		"duration": 5,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/video", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	// Video generation takes 30-90s
+	videoCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	req = req.WithContext(videoCtx)
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations video request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Pollinations video %d: %s", resp.StatusCode, truncateStr(string(raw), 100))
+	}
+
+	// Check if response is JSON with a URL or raw video bytes
+	contentType := resp.Header.Get("Content-Type")
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations video read: %w", err)
+	}
+
+	if strings.Contains(contentType, "application/json") {
+		var result struct {
+			URL    string `json:"url"`
+			VideoURL string `json:"video_url"`
+		}
+		if jsonErr := json.Unmarshal(raw, &result); jsonErr == nil {
+			if result.URL != "" {
+				return result.URL, nil
+			}
+			if result.VideoURL != "" {
+				return result.VideoURL, nil
+			}
+		}
+	}
+
+	// Raw video bytes — upload to storage
+	if len(raw) < 1000 {
+		return "", fmt.Errorf("Pollinations video: response too small")
+	}
+	fileName := fmt.Sprintf("studio/animate/pollinations_%d.mp4", time.Now().UnixNano())
+	publicURL, err := o.storage.Upload(ctx, fileName, raw, "video/mp4")
+	if err != nil {
+		return "", fmt.Errorf("Pollinations video: upload failed: %w", err)
 	}
 	return publicURL, nil
 }

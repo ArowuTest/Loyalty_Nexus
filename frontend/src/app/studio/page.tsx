@@ -9,7 +9,7 @@ import { useStore } from "@/store/useStore";
 import toast, { Toaster } from "react-hot-toast";
 import {
   Send, Bot, User, Loader2, Wand2, Image as ImageIcon, BookOpen,
-  Mic, FileText, Music, Globe, ChevronRight, Sparkles, Zap,
+  Mic, FileText, Music, Globe, ChevronRight, Sparkles,
   AlertTriangle, CheckCircle2, Clock, ExternalLink, RefreshCw,
   Brain, Video, X, Info, Play, LayoutGrid, MessageSquare, History,
 } from "lucide-react";
@@ -81,11 +81,9 @@ const CAT = {
   },
 } as const;
 
-const PROVIDER_LABEL: Record<string, { label: string; color: string }> = {
-  GROQ:        { label: "Groq · Llama-4", color: "text-green-400" },
-  GEMINI_LITE: { label: "Gemini Flash", color: "text-blue-400" },
-  DEEPSEEK:    { label: "DeepSeek", color: "text-purple-400" },
-};
+// Provider labels are intentionally hidden from users.
+// Users see only "Nexus AI" — provider info is admin-only (see /admin/ai-health).
+// The provider field is retained in the Message type for admin debug purposes only.
 
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
 const fetchTools = () => api.getStudioTools() as Promise<{ tools: Tool[] }>;
@@ -216,7 +214,6 @@ function ConfirmModal({
 // ─── Chat bubble ──────────────────────────────────────────────────────────────
 function ChatBubble({ msg }: { msg: Message }) {
   const isUser = msg.role === "user";
-  const provInfo = msg.provider ? PROVIDER_LABEL[msg.provider] : null;
   return (
     <div className={cn("flex gap-2.5", isUser && "flex-row-reverse")}>
       {/* Avatar */}
@@ -238,13 +235,7 @@ function ChatBubble({ msg }: { msg: Message }) {
         )}>
           {msg.content}
         </div>
-        {/* Provider tag — only on AI messages */}
-        {!isUser && provInfo && (
-          <div className="flex items-center gap-1 px-1">
-            <Zap size={10} className={provInfo.color} />
-            <span className={cn("text-[10px]", provInfo.color)}>{provInfo.label}</span>
-          </div>
-        )}
+        {/* No provider tag shown to users — Nexus AI is the brand */}
       </div>
     </div>
   );
@@ -565,7 +556,7 @@ export default function StudioPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold font-display text-white leading-tight">Nexus AI Studio</h1>
-              <p className="text-white/40 text-xs">{tools.length} tools · Groq · Gemini · DeepSeek</p>
+              <p className="text-white/40 text-xs">{tools.length} AI-powered tools</p>
             </div>
           </div>
           {/* Points badge */}
@@ -659,7 +650,7 @@ export default function StudioPage() {
 
               {/* Free badge */}
               <p className="text-center text-white/25 text-[10px] mt-2">
-                💬 AI Chat is always free · No points used
+                💬 Nexus AI Chat is always free · No points used
               </p>
             </motion.div>
           )}
