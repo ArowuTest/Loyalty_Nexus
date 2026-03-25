@@ -89,15 +89,18 @@ func main() {
 	geminiLimit := cfg.GetInt("chat_gemini_daily_limit", 2000)
 	llmOrch := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, chatRepo, groqLimit, geminiLimit)
 
-	// ─── Knowledge Worker (NotebookLM) ────────────────────────
-	kbWorker := handlers.NewAsyncStudioWorker(studioSvc, nil)
+	// ─── AI Studio Orchestrator (4-tier provider) ──────────────
+	aiStudioOrch := services.NewAIStudioOrchestrator(cfg, studioRepo, studioSvc, userRepo)
+
+	// ─── Knowledge Worker (dispatches studio jobs) ─────────────
+	kbWorker := handlers.NewAsyncStudioWorker(studioSvc, aiStudioOrch)
 
 	// ─── HTTP Handlers ────────────────────────────────────────
 	authH    := handlers.NewAuthHandler(authSvc)
 	rechargeH := handlers.NewRechargeHandler(rechargeSvc, eq)
 	spinH    := handlers.NewSpinHandler(spinSvc)
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
-	kbWorker.LinkHandler(studioH) // bidirectional link for background dispatch
+	// kbWorker no longer needs a back-link — orch is injected directly
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
 	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc)
 	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, cfg)
@@ -150,11 +153,15 @@ func main() {
 	mux.Handle("PATCH /api/v1/notifications/preferences",  auth(http.HandlerFunc(notifyH.UpdatePreferences)))
 
 
-	mux.Handle("GET  /api/v1/studio/tools",              auth(http.HandlerFunc(studioH.ListTools)))
-	mux.Handle("POST /api/v1/studio/chat",               auth(http.HandlerFunc(studioH.Chat)))
-	mux.Handle("POST /api/v1/studio/generate",           auth(http.HandlerFunc(studioH.Generate)))
-	mux.Handle("GET  /api/v1/studio/generate/{id}/status", auth(http.HandlerFunc(studioH.GetGenerationStatus)))
-	mux.Handle("GET  /api/v1/studio/gallery",            auth(http.HandlerFunc(studioH.GetGallery)))
+	// ── Nexus Studio ────────────────────────────────────────────────────────
+	mux.Handle("GET  /api/v1/studio/tools",                  auth(http.HandlerFunc(studioH.ListTools)))
+	mux.Handle("GET  /api/v1/studio/tools/{slug}",           auth(http.HandlerFunc(studioH.GetTool)))
+	mux.Handle("POST /api/v1/studio/generate",               auth(http.HandlerFunc(studioH.Generate)))
+	mux.Handle("GET  /api/v1/studio/generate/{id}",          auth(http.HandlerFunc(studioH.GetGenerationStatus)))
+	mux.Handle("GET  /api/v1/studio/gallery",                auth(http.HandlerFunc(studioH.GetGallery)))
+	// ── Nexus Chat ───────────────────────────────────────────────────────────
+	mux.Handle("POST /api/v1/studio/chat",                   auth(http.HandlerFunc(studioH.Chat)))
+	mux.Handle("GET  /api/v1/studio/chat/usage",             auth(http.HandlerFunc(studioH.GetChatUsage)))
 
 	// Wars routes
 	mux.Handle("GET  /api/v1/wars/leaderboard",  auth(http.HandlerFunc(warsH.GetLeaderboard)))
