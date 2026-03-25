@@ -72,6 +72,15 @@ func main() {
 	spinSvc    := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
 	studioSvc  := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, db, cfg)
 	hlrSvc     := services.NewHLRService(hlrRepo)
+	warssSvc   := services.NewRegionalWarsService(db)
+	drawSvc    := services.NewDrawService(db)
+	passportSvc := services.NewPassportService(db)
+	fraudSvc   := services.NewFraudService(db)
+
+	// Bootstrap current month's war if none exists
+	if err := warssSvc.EnsureActiveWar(context.Background(), 50_000_000); err != nil {
+		log.Printf("[main] EnsureActiveWar: %v", err)
+	}
 
 	// ─── LLM Orchestrator (Groq → Gemini → DeepSeek) ─────────
 	groqLimit   := cfg.GetInt("chat_groq_daily_limit", 1000)
@@ -90,6 +99,10 @@ func main() {
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
 	adminH   := handlers.NewAdminHandler(db, cfg)
 	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, cfg)
+	warsH    := handlers.NewWarsHandler(warssSvc)
+	drawH    := handlers.NewDrawHandler(drawSvc)
+	passportH := handlers.NewPassportHandler(passportSvc)
+	fraudH   := handlers.NewFraudHandler(fraudSvc)
 
 	// ─── Router ───────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -131,6 +144,18 @@ func main() {
 	mux.Handle("GET  /api/v1/studio/generate/{id}/status", auth(http.HandlerFunc(studioH.GetGenerationStatus)))
 	mux.Handle("GET  /api/v1/studio/gallery",            auth(http.HandlerFunc(studioH.GetGallery)))
 
+	// Wars routes
+	mux.Handle("GET  /api/v1/wars/leaderboard",  auth(http.HandlerFunc(warsH.GetLeaderboard)))
+	mux.Handle("GET  /api/v1/wars/my-rank",      auth(http.HandlerFunc(warsH.GetMyRank)))
+
+	// Passport routes
+	mux.Handle("GET  /api/v1/passport",          auth(http.HandlerFunc(passportH.GetPassport)))
+	mux.Handle("GET  /api/v1/passport/badges",   auth(http.HandlerFunc(passportH.GetBadges)))
+
+	// Draws (public results)
+	mux.Handle("GET  /api/v1/draws",             auth(http.HandlerFunc(drawH.ListUpcoming)))
+	mux.Handle("GET  /api/v1/draws/{id}/winners", auth(http.HandlerFunc(drawH.GetWinners)))
+
 	// Admin routes (admin JWT required)
 	adminAuth := middleware.AdminAuthMiddleware(authSvc)
 	mux.Handle("GET    /api/v1/admin/dashboard",          adminAuth(http.HandlerFunc(adminH.GetDashboard)))
@@ -141,9 +166,12 @@ func main() {
 	mux.Handle("GET    /api/v1/admin/studio-tools",       adminAuth(http.HandlerFunc(adminH.GetStudioTools)))
 	mux.Handle("PUT    /api/v1/admin/studio-tools/{id}",  adminAuth(http.HandlerFunc(adminH.UpdateStudioTool)))
 	mux.Handle("GET    /api/v1/admin/users",              adminAuth(http.HandlerFunc(adminH.ListUsers)))
-	mux.Handle("PUT    /api/v1/admin/users/{id}/suspend", adminAuth(http.HandlerFunc(adminH.SuspendUser)))
-	mux.Handle("GET    /api/v1/admin/fraud-events",       adminAuth(http.HandlerFunc(adminH.GetFraudEvents)))
 	mux.Handle("GET    /api/v1/admin/regional-wars",      adminAuth(http.HandlerFunc(adminH.GetRegionalWars)))
+	mux.Handle("POST   /api/v1/admin/wars/resolve",        adminAuth(http.HandlerFunc(warsH.AdminResolve)))
+	mux.Handle("GET    /api/v1/admin/fraud-events",        adminAuth(http.HandlerFunc(fraudH.ListEvents)))
+	mux.Handle("PUT    /api/v1/admin/fraud-events/{id}/resolve", adminAuth(http.HandlerFunc(fraudH.ResolveEvent)))
+	mux.Handle("PUT    /api/v1/admin/users/{id}/suspend",  adminAuth(http.HandlerFunc(fraudH.SuspendUser)))
+	mux.Handle("POST   /api/v1/admin/draws/{id}/execute",  adminAuth(http.HandlerFunc(drawH.Execute)))
 
 	// ─── HTTP Server ──────────────────────────────────────────
 	port := cfg.GetString("port", "8080")

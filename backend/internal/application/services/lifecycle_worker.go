@@ -2,10 +2,12 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
 	"loyalty-nexus/internal/domain/repositories"
+	"gorm.io/gorm"
 	"loyalty-nexus/internal/infrastructure/config"
 )
 
@@ -17,6 +19,7 @@ import (
 // - Fulfillment Retry: retry failed prize fulfillments
 // - Session Summarisation: summarise idle chat sessions
 type LifecycleWorker struct {
+	db          *gorm.DB
 	userRepo    repositories.UserRepository
 	studioRepo  repositories.StudioRepository
 	prizeRepo   repositories.PrizeRepository
@@ -28,6 +31,7 @@ type LifecycleWorker struct {
 }
 
 func NewLifecycleWorker(
+	db *gorm.DB,
 	ur repositories.UserRepository,
 	sr repositories.StudioRepository,
 	pr repositories.PrizeRepository,
@@ -38,6 +42,7 @@ func NewLifecycleWorker(
 	cfg *config.ConfigManager,
 ) *LifecycleWorker {
 	return &LifecycleWorker{
+		db:         db,
 		userRepo:   ur,
 		studioRepo: sr,
 		prizeRepo:  pr,
@@ -189,4 +194,23 @@ func (w *LifecycleWorker) sessionSummarise(ctx context.Context) {
 
 func formatPointsExpiryMsg(phone string, daysLeft int) string {
 	return "Your Loyalty Nexus Pulse Points expire in " + string(rune('0'+daysLeft)) + " days. Recharge now to keep them active."
+}
+
+
+// RunWarsMonthlyResolve auto-resolves the current war on the last day of the month.
+func (w *LifecycleWorker) RunWarsMonthlyResolve(ctx context.Context) {
+	now := time.Now().UTC()
+	tomorrow := now.AddDate(0, 0, 1)
+	if tomorrow.Month() == now.Month() {
+		return
+	}
+	period := fmt.Sprintf("%d-%02d", now.Year(), now.Month())
+	log.Printf("[lifecycle] auto-resolving war period=%s", period)
+	w.db.WithContext(ctx).Table("regional_wars").
+		Where("period = ? AND status = 'ACTIVE'", period).
+		Updates(map[string]interface{}{
+			"status":      "COMPLETED",
+			"resolved_at": now,
+			"updated_at":  now,
+		})
 }

@@ -53,7 +53,7 @@ func main() {
 	)
 
 	worker := services.NewLifecycleWorker(
-		userRepo, studioRepo, prizeRepo, authRepo, chatRepo,
+		db, userRepo, studioRepo, prizeRepo, authRepo, chatRepo,
 		fulfillSvc, notifySvc, cfg,
 	)
 
