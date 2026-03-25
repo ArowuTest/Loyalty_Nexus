@@ -37,6 +37,7 @@ func main() {
 	studioRepo := persistence.NewPostgresStudioRepository(db)
 	hlrRepo := persistence.NewPostgresHLRRepository(db)
 	chatRepo := persistence.NewPostgresChatRepository(db)
+	authRepo := persistence.NewPostgresAuthRepository(db)
 
 	// Infrastructure
 	eq := queue.NewEventQueue(rdb, "recharge_stream")
@@ -54,6 +55,7 @@ func main() {
 
 	// Services & UseCases
 	notifySvc := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
+	authSvc := services.NewAuthService(authRepo, userRepo, notifySvc, os.Getenv("JWT_SECRET"))
 	userUC := usecases.NewUserUseCase(userRepo)
 	hlrSvc := services.NewHLRService(hlrRepo)
 	spinSvc := services.NewSpinService(userRepo, txRepo, cfg, db)
@@ -65,10 +67,15 @@ func main() {
 
 	// Handlers
 	studioHandler := handlers.NewStudioHandler(studioSvc, llmOrchestrator, asyncWorker, notebookLM)
+	authHandler := handlers.NewAuthHandler(authSvc)
 	adminHandler := &handlers.AdminHandler{}
 	ussdHandler := &handlers.USSDHandler{}
 
 	// --- ROUTES ---
+
+	// Auth Routes (REQ-1.1, REQ-1.2)
+	http.HandleFunc("/api/v1/auth/otp/send", authHandler.SendOTP)
+	http.HandleFunc("/api/v1/auth/otp/verify", authHandler.VerifyOTP)
 
 	// USSD Entry Point
 	http.Handle("/api/v1/ussd", ussdHandler)
@@ -92,7 +99,7 @@ func main() {
 
 	// User Profile
 	http.HandleFunc("/api/v1/user/profile", func(w http.ResponseWriter, r *http.Request) {
-		msisdn := r.URL.Query().Get("msisdn")
+		msisdn := r.URL.Query().Get("msisdn") // In production, get from JWT
 		user, err := userUC.GetProfile(r.Context(), msisdn)
 		if err != nil {
 			http.Error(w, "User not found", 404)
