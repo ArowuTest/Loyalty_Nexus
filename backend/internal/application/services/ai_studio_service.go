@@ -64,6 +64,7 @@ const (
 	catVoice     studioToolCat = "voice"
 	catMusic     studioToolCat = "music"
 	catComposite studioToolCat = "composite"
+	catVision    studioToolCat = "vision"
 )
 
 // slugCategory maps every tool slug to its dispatch category.
@@ -86,6 +87,22 @@ var slugCategory = map[string]studioToolCat{
 	"slide-deck":     catText,
 	"infographic":    catText,
 	"bizplan":        catText,
+	// ── NEW: Free tools (Pollinations secret key, zero Pollen cost) ────────────
+	"transcribe-african": catVoice,
+	"narrate-pro":        catVoice,
+	"web-search-ai":      catText,
+	"image-analyser":     catVision,
+	"ask-my-photo":       catVision,
+	"code-helper":        catText,
+	// ── NEW: Paid tools (Pollinations Pollen credits) ────────────────────────
+	"ai-photo-pro":    catImage,
+	"ai-photo-max":    catImage,
+	"ai-photo-dream":  catImage,
+	"photo-editor":    catImage,
+	"song-creator":    catMusic,
+	"instrumental":    catMusic,
+	"video-cinematic": catVideo,
+	"video-veo":       catVideo,
 }
 
 // ─── Provider result ──────────────────────────────────────────────────────────
@@ -192,14 +209,48 @@ func (o *AIStudioOrchestrator) route(ctx context.Context, gen *entities.AIGenera
 		return o.dispatchMusic(ctx, slug, prompt)
 	case catComposite:
 		return o.dispatchComposite(ctx, slug, prompt)
+	case catVision:
+		return o.dispatchVision(ctx, slug, prompt)
 	default:
 		return nil, fmt.Errorf("unhandled category %q", cat)
 	}
 }
 
-// ─── Text dispatch (study guide, quiz, mindmap, research-brief, bizplan, slide-deck, infographic) ──
+// ─── Text dispatch (study guide, quiz, mindmap, research-brief, bizplan, slide-deck, infographic,
+//                   web-search-ai, code-helper) ──────────────────────────────────────────────────
 
 func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
+	// web-search-ai: primary via Pollinations gemini-search, fallback to Gemini Flash
+	if slug == "web-search-ai" {
+		text, err := o.callPollinationsWebSearch(ctx, prompt)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "pollinations/gemini-search", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] Pollinations web-search failed: %v — falling back", err)
+		base := "You are Nexus AI, a helpful assistant for Nigerian users. Be clear, practical, and culturally aware."
+		fallbackText, fErr := o.callGeminiFlash(ctx, base, fmt.Sprintf("(Search unavailable) Answer as best you can: %s", prompt))
+		if fErr == nil {
+			return &studioProviderResult{OutputText: fallbackText, Provider: "gemini-flash/nosearch", CostMicros: 0}, nil
+		}
+		return nil, fmt.Errorf("web-search-ai: all providers failed: %v / %v", err, fErr)
+	}
+
+	// code-helper: primary via Pollinations Qwen3-Coder, fallback to Gemini Flash
+	if slug == "code-helper" {
+		codeSys := "You are an expert programmer. Write clean, well-commented code. Explain your solution briefly."
+		text, err := o.callPollinationsQwenCoder(ctx, codeSys, prompt)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "pollinations/qwen-coder", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] Pollinations Qwen-Coder failed: %v — falling back", err)
+		base := "You are an expert programmer. Write clean, well-commented code. Explain your solution briefly."
+		fallbackText, fErr := o.callGeminiFlash(ctx, base, prompt)
+		if fErr == nil {
+			return &studioProviderResult{OutputText: fallbackText, Provider: "gemini-flash/code", CostMicros: 0}, nil
+		}
+		return nil, fmt.Errorf("code-helper: all providers failed: %v / %v", err, fErr)
+	}
+
 	systemPrompt, userPrompt := buildTextPrompts(slug, prompt)
 
 	providers := []struct {
@@ -230,6 +281,11 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug, prompt st
 func buildTextPrompts(slug, input string) (system, user string) {
 	base := "You are Nexus AI, a helpful assistant for Nigerian users. Be clear, practical, and culturally aware."
 	switch slug {
+	case "web-search-ai":
+		return base, fmt.Sprintf("Search the web and answer: %s", input)
+	case "code-helper":
+		return "You are an expert programmer. Write clean, well-commented code. Explain your solution briefly.",
+			fmt.Sprintf("Help me with the following coding task: %s", input)
 	case "study-guide":
 		return base, fmt.Sprintf(
 			"Create a comprehensive study guide for: %s\n\nInclude:\n- Key concepts with clear definitions\n- Real-world examples relevant to Nigerian context\n- Practice questions with answers\n- Quick revision summary\n\nFormat with clear headings.", input)
@@ -256,36 +312,89 @@ func buildTextPrompts(slug, input string) (system, user string) {
 	}
 }
 
-// ─── Image dispatch (ai-photo → HF FLUX.1-Schnell primary, FAL.AI fallback; bg-remover → rembg/Photoroom) ──
+// ─── Image dispatch ────────────────────────────────────────────────────────────
+// Handles: ai-photo, bg-remover, ai-photo-pro, ai-photo-max, ai-photo-dream, photo-editor
 
 func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
-	if slug == "bg-remover" {
+	switch slug {
+	case "bg-remover":
 		return o.dispatchBgRemover(ctx, prompt)
-	}
-	// ai-photo tier 1: HuggingFace FLUX.1-Schnell (free, uses HF_TOKEN)
-	if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
-		url, err := o.callHFFluxSchnell(ctx, hfKey, prompt)
+
+	case "ai-photo-pro":
+		// GPT Image (gptimage model) — CostMicros: $0.02
+		url, err := o.callPollinationsGPTImage(ctx, prompt, "gptimage")
 		if err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "huggingface/flux-schnell", CostMicros: 0}, nil
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/gptimage", CostMicros: 20000}, nil
 		}
-		log.Printf("[AIStudio] HF FLUX.1-Schnell failed: %v", err)
-	}
-
-	// ai-photo tier 2: Pollinations.ai FLUX (100% free, no key required)
-	if url, err := o.callPollinationsImage(ctx, prompt); err == nil {
-		return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
-	}
-
-	// ai-photo tier 3: FAL.AI FLUX-dev (paid fallback)
-	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
-		url, err := o.callFALFlux(ctx, falKey, prompt)
+		log.Printf("[AIStudio] GPTImage failed for ai-photo-pro: %v — falling back to FLUX", err)
+		url, err = o.callPollinationsImage(ctx, prompt)
 		if err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "fal.ai/flux-dev", CostMicros: 6500}, nil
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
 		}
-		log.Printf("[AIStudio] FAL FLUX failed: %v", err)
-	}
+		return nil, fmt.Errorf("ai-photo-pro: all providers failed")
 
-	return nil, fmt.Errorf("image generation unavailable: configure HF_TOKEN or FAL_API_KEY")
+	case "ai-photo-max":
+		// GPT Image Large — CostMicros: $0.03
+		url, err := o.callPollinationsGPTImage(ctx, prompt, "gptimage-large")
+		if err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/gptimage-large", CostMicros: 30000}, nil
+		}
+		log.Printf("[AIStudio] GPTImage-large failed for ai-photo-max: %v — falling back", err)
+		url, err = o.callPollinationsImage(ctx, prompt)
+		if err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
+		}
+		return nil, fmt.Errorf("ai-photo-max: all providers failed")
+
+	case "ai-photo-dream":
+		// Seedream (ByteDance) — CostMicros: $0.01
+		url, err := o.callPollinationsGPTImage(ctx, prompt, "seedream")
+		if err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/seedream", CostMicros: 10000}, nil
+		}
+		log.Printf("[AIStudio] Seedream failed for ai-photo-dream: %v — falling back", err)
+		url, err = o.callPollinationsImage(ctx, prompt)
+		if err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
+		}
+		return nil, fmt.Errorf("ai-photo-dream: all providers failed")
+
+	case "photo-editor":
+		// Kontext image-to-image editing — CostMicros: $0.015
+		parts := strings.SplitN(prompt, "|||", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("photo-editor: input must be 'IMGURL|||INSTRUCTION'")
+		}
+		imgURL, instruction := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+		url, err := o.callPollinationsKontext(ctx, imgURL, instruction)
+		if err != nil {
+			return nil, fmt.Errorf("photo-editor requires Pollinations key: %w", err)
+		}
+		return &studioProviderResult{OutputURL: url, Provider: "pollinations/kontext", CostMicros: 15000}, nil
+
+	default: // ai-photo
+		// tier 1: HuggingFace FLUX.1-Schnell (free, uses HF_TOKEN)
+		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
+			url, err := o.callHFFluxSchnell(ctx, hfKey, prompt)
+			if err == nil {
+				return &studioProviderResult{OutputURL: url, Provider: "huggingface/flux-schnell", CostMicros: 0}, nil
+			}
+			log.Printf("[AIStudio] HF FLUX.1-Schnell failed: %v", err)
+		}
+		// tier 2: Pollinations.ai FLUX (100% free, no key required)
+		if url, err := o.callPollinationsImage(ctx, prompt); err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
+		}
+		// tier 3: FAL.AI FLUX-dev (paid fallback)
+		if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
+			url, err := o.callFALFlux(ctx, falKey, prompt)
+			if err == nil {
+				return &studioProviderResult{OutputURL: url, Provider: "fal.ai/flux-dev", CostMicros: 6500}, nil
+			}
+			log.Printf("[AIStudio] FAL FLUX failed: %v", err)
+		}
+		return nil, fmt.Errorf("image generation unavailable: configure HF_TOKEN or FAL_API_KEY")
+	}
 }
 
 func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL string) (*studioProviderResult, error) {
@@ -319,9 +428,46 @@ func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL s
 	return nil, fmt.Errorf("background removal unavailable: configure REMBG_SERVICE_URL, FAL_API_KEY, or REMOVEBG_API_KEY")
 }
 
-// ─── Video dispatch (animate-photo → FAL.AI LTX basic; video-premium → FAL.AI Kling v1.5) ──
+// ─── Video dispatch ────────────────────────────────────────────────────────────
+// Handles: animate-photo, video-premium, video-jingle, video-cinematic, video-veo
 
-func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug, imageURL string) (*studioProviderResult, error) {
+func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
+	// video-cinematic: Seedance (image + motion prompt, paid)
+	if slug == "video-cinematic" {
+		parts := strings.SplitN(prompt, "|||", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("video-cinematic: input must be 'IMGURL|||MOTION_PROMPT'")
+		}
+		imgURL, motionPrompt := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+		vidURL, err := o.callPollinationsSeedance(ctx, imgURL, motionPrompt)
+		if err == nil {
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/seedance", CostMicros: 200000}, nil
+		}
+		log.Printf("[AIStudio] Seedance failed for video-cinematic: %v — falling back to wan-fast", err)
+		vidURL, err = o.callPollinationsVideo(ctx, imgURL, motionPrompt)
+		if err == nil {
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
+		}
+		return nil, fmt.Errorf("video-cinematic: all providers failed")
+	}
+
+	// video-veo: Google Veo text-to-video (paid, highest quality)
+	if slug == "video-veo" {
+		vidURL, err := o.callPollinationsVeo(ctx, prompt)
+		if err == nil {
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo2", CostMicros: 400000}, nil
+		}
+		log.Printf("[AIStudio] Veo failed for video-veo: %v — falling back to wan-fast", err)
+		vidURL, err = o.callPollinationsVideo(ctx, "", prompt)
+		if err == nil {
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
+		}
+		return nil, fmt.Errorf("video-veo: all providers failed")
+	}
+
+	// Standard video slugs (animate-photo, video-premium, video-jingle)
+	imageURL := prompt // for existing slugs the prompt field is the imageURL
+
 	// Tier 1: FAL.AI (Kling v1.5 for premium, LTX for standard)
 	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
 		var model string
@@ -353,7 +499,6 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug, imageURL
 	}
 
 	// Tier 2: Pollinations.ai wan-fast (FREE — 5-second video, no key needed)
-	// Great for animate-photo as a zero-cost fallback
 	if videoURL, err := o.callPollinationsVideo(ctx, imageURL, "animate this image with subtle cinematic motion"); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 	}
@@ -369,6 +514,10 @@ func (o *AIStudioOrchestrator) dispatchVoiceOrTranslate(ctx context.Context, slu
 		return o.dispatchTranslate(ctx, input)
 	case "transcribe":
 		return o.dispatchTranscribe(ctx, input)
+	case "transcribe-african":
+		return o.dispatchTranscribeAfrican(ctx, input)
+	case "narrate-pro":
+		return o.dispatchNarratorPro(ctx, input)
 	default: // narrate
 		return o.dispatchTTS(ctx, input)
 	}
@@ -475,6 +624,38 @@ func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, audioURL 
 
 func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
 	switch slug {
+	case "song-creator":
+		// Full song with vocals via Pollinations ElevenMusic
+		audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, false)
+		if err == nil {
+			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic", CostMicros: 100000}, nil
+		}
+		log.Printf("[AIStudio] Pollinations ElevenMusic failed for song-creator: %v — falling back", err)
+		// Fallback: ElevenLabs Music
+		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
+			audioURL, err = o.callElevenLabsMusic(ctx, el11Key, prompt)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-music", CostMicros: 45000}, nil
+			}
+		}
+		return nil, fmt.Errorf("song-creator: all providers failed")
+
+	case "instrumental":
+		// Instrumental track (no vocals) via Pollinations ElevenMusic
+		audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, true)
+		if err == nil {
+			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic-instrumental", CostMicros: 100000}, nil
+		}
+		log.Printf("[AIStudio] Pollinations ElevenMusic failed for instrumental: %v — falling back", err)
+		// Fallback: ElevenLabs Music
+		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
+			audioURL, err = o.callElevenLabsMusic(ctx, el11Key, prompt)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-music", CostMicros: 45000}, nil
+			}
+		}
+		return nil, fmt.Errorf("instrumental: all providers failed")
+
 	case "jingle":
 		// Premium: ElevenLabs Music (professional quality, ~₦450/jingle)
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
@@ -1501,6 +1682,654 @@ func (o *AIStudioOrchestrator) callElevenLabsMusic(ctx context.Context, apiKey, 
 		return "", fmt.Errorf("ElevenLabs music %d: %s", resp.StatusCode, truncateStr(string(audio), 200))
 	}
 	return o.uploadOrDataURI(ctx, audio, "audio/mpeg", "music/"+uuid.New().String()+".mp3"), nil
+}
+
+// ─── NEW: Vision dispatch ─────────────────────────────────────────────────────
+// Handles: image-analyser, ask-my-photo
+
+func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
+	var imageURL, question string
+
+	switch slug {
+	case "ask-my-photo":
+		// Input: "IMGURL|||QUESTION"
+		parts := strings.SplitN(prompt, "|||", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("ask-my-photo: input must be 'IMGURL|||QUESTION'")
+		}
+		imageURL = strings.TrimSpace(parts[0])
+		question = strings.TrimSpace(parts[1])
+	default: // image-analyser
+		imageURL = strings.TrimSpace(prompt)
+		question = ""
+	}
+
+	// Primary: Pollinations Vision (OpenAI-compatible multimodal)
+	text, err := o.callPollinationsVision(ctx, imageURL, question)
+	if err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "pollinations/vision", CostMicros: 0}, nil
+	}
+	log.Printf("[AIStudio] Pollinations Vision failed for %s: %v — falling back to Gemini", slug, err)
+
+	// Fallback: Gemini Flash with URL in prompt
+	fallbackQ := question
+	if fallbackQ == "" {
+		fallbackQ = fmt.Sprintf("Describe this image: %s", imageURL)
+	} else {
+		fallbackQ = fmt.Sprintf("Regarding this image at %s — %s", imageURL, question)
+	}
+	text, err = o.callGeminiFlash(ctx, "You are a helpful image analysis assistant.", fallbackQ)
+	if err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "gemini-flash/vision", CostMicros: 0}, nil
+	}
+	return nil, fmt.Errorf("vision analysis failed: all providers unavailable")
+}
+
+// ─── NEW: dispatchTranscribeAfrican ──────────────────────────────────────────
+
+func (o *AIStudioOrchestrator) dispatchTranscribeAfrican(ctx context.Context, input string) (*studioProviderResult, error) {
+	// Input format: "LANG:audioURL" e.g. "yo:https://..."
+	parts := strings.SplitN(input, ":", 2)
+	lang, audioURL := "en", input
+	if len(parts) == 2 {
+		lang = strings.ToLower(strings.TrimSpace(parts[0]))
+		audioURL = strings.TrimSpace(parts[1])
+	}
+	// Validate language
+	validLangs := map[string]bool{"yo": true, "ha": true, "ig": true, "en": true, "fr": true}
+	if !validLangs[lang] {
+		lang = "en"
+	}
+
+	// Primary: Pollinations Whisper with African language selector
+	if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
+		text, err := o.callPollinationsWhisperAfrican(ctx, audioURL, lang)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "pollinations/whisper-african", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] Pollinations Whisper African failed: %v — falling back to Groq", err)
+	}
+
+	// Fallback: Groq Whisper
+	if groqKey := os.Getenv("GROQ_API_KEY"); groqKey != "" {
+		text, err := o.callGroqWhisper(ctx, groqKey, audioURL)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "groq/whisper-large-v3", CostMicros: 10}, nil
+		}
+		log.Printf("[AIStudio] Groq Whisper fallback failed: %v", err)
+	}
+
+	return nil, fmt.Errorf("transcribe-african: all providers unavailable — configure POLLINATIONS_SECRET_KEY or GROQ_API_KEY")
+}
+
+// ─── NEW: dispatchNarratorPro ─────────────────────────────────────────────────
+
+func (o *AIStudioOrchestrator) dispatchNarratorPro(ctx context.Context, input string) (*studioProviderResult, error) {
+	// Input: "VOICE:text" e.g. "coral:Hello Nigeria"
+	// Valid voices: alloy, echo, fable, onyx, nova, shimmer, coral, verse, ballad, ash, sage, amuch, dan
+	validVoices := map[string]bool{
+		"alloy": true, "echo": true, "fable": true, "onyx": true, "nova": true,
+		"shimmer": true, "coral": true, "verse": true, "ballad": true, "ash": true,
+		"sage": true, "amuch": true, "dan": true,
+	}
+	voice, text := "nova", input
+	if idx := strings.Index(input, ":"); idx > 0 {
+		candidate := strings.ToLower(strings.TrimSpace(input[:idx]))
+		if validVoices[candidate] {
+			voice = candidate
+			text = strings.TrimSpace(input[idx+1:])
+		}
+	}
+
+	// Use callPollinationsTTS — already implemented, uses POLLINATIONS_SECRET_KEY when set
+	audioURL, err := o.callPollinationsTTS(ctx, text, voice)
+	if err == nil {
+		return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/tts-" + voice, CostMicros: 0}, nil
+	}
+	log.Printf("[AIStudio] Pollinations TTS Pro failed: %v", err)
+
+	// Fallback: Google Cloud TTS
+	if gcpKey := os.Getenv("GOOGLE_CLOUD_TTS_KEY"); gcpKey != "" {
+		audioURL, err = o.callGoogleCloudTTS(ctx, gcpKey, text)
+		if err == nil {
+			return &studioProviderResult{OutputURL: audioURL, Provider: "google-cloud-tts", CostMicros: 0}, nil
+		}
+	}
+	return nil, fmt.Errorf("narrate-pro: all TTS providers failed")
+}
+
+// ─── NEW: Pollinations helper callers ─────────────────────────────────────────
+
+// callPollinationsWebSearch uses Pollinations gemini-search for live web-aware answers.
+func (o *AIStudioOrchestrator) callPollinationsWebSearch(ctx context.Context, prompt string) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+	payload := map[string]interface{}{
+		"model": "openai",
+		"messages": []map[string]interface{}{
+			{"role": "system", "content": "You are Nexus AI, a helpful assistant. You have access to real-time web search. Answer with current information."},
+			{"role": "user", "content": prompt},
+		},
+		"search": true,
+	}
+	return o.callPollinationsOpenAIChat(ctx, sk, payload)
+}
+
+// callPollinationsVision uses Pollinations multimodal API to analyse an image.
+func (o *AIStudioOrchestrator) callPollinationsVision(ctx context.Context, imageURL, question string) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+	if question == "" {
+		question = "Describe this image in detail. What do you see? Be comprehensive and mention colors, objects, people, text, and context."
+	}
+	payload := map[string]interface{}{
+		"model": "openai",
+		"messages": []map[string]interface{}{
+			{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{"type": "text", "text": question},
+					{"type": "image_url", "image_url": map[string]string{"url": imageURL}},
+				},
+			},
+		},
+	}
+	return o.callPollinationsOpenAIChat(ctx, sk, payload)
+}
+
+// callPollinationsQwenCoder uses Pollinations Qwen3-Coder for coding tasks.
+func (o *AIStudioOrchestrator) callPollinationsQwenCoder(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+	payload := map[string]interface{}{
+		"model": "qwen-coder",
+		"messages": []map[string]interface{}{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userPrompt},
+		},
+	}
+	return o.callPollinationsOpenAIChat(ctx, sk, payload)
+}
+
+// callPollinationsOpenAIChat is a shared helper for Pollinations OpenAI-compatible endpoints.
+// Parses choices[0].message.content from the response.
+func (o *AIStudioOrchestrator) callPollinationsOpenAIChat(ctx context.Context, sk string, payload interface{}) (string, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+sk)
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations chat request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Pollinations chat %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Error *struct{ Message string `json:"message"` } `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return "", fmt.Errorf("Pollinations chat parse: %w", err)
+	}
+	if parsed.Error != nil {
+		return "", fmt.Errorf("Pollinations chat API error: %s", parsed.Error.Message)
+	}
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("Pollinations chat: no choices returned")
+	}
+	return parsed.Choices[0].Message.Content, nil
+}
+
+// callPollinationsGPTImage generates a premium image via Pollinations (gptimage / gptimage-large / seedream).
+func (o *AIStudioOrchestrator) callPollinationsGPTImage(ctx context.Context, prompt, model string) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+	payload := map[string]interface{}{
+		"model":  model,
+		"prompt": prompt,
+		"n":      1,
+		"size":   "1024x1024",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/v1/images/generations", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+sk)
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations GPTImage request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Pollinations GPTImage %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+
+	var parsed struct {
+		Data []struct {
+			URL     string `json:"url"`
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Data) == 0 {
+		return "", fmt.Errorf("Pollinations GPTImage parse: empty data")
+	}
+	item := parsed.Data[0]
+	if item.URL != "" {
+		return item.URL, nil
+	}
+	if item.B64JSON != "" {
+		imgBytes, err := base64.StdEncoding.DecodeString(item.B64JSON)
+		if err != nil {
+			return "", fmt.Errorf("Pollinations GPTImage base64 decode: %w", err)
+		}
+		key := fmt.Sprintf("studio/ai-photo/%s_%d.png", model, time.Now().UnixNano())
+		return o.uploadOrDataURI(ctx, imgBytes, "image/png", key), nil
+	}
+	return "", fmt.Errorf("Pollinations GPTImage: no url or b64_json in response")
+}
+
+// callPollinationsKontext performs image-to-image editing via Pollinations Kontext.
+// Downloads the source image, then sends it as multipart to the edits endpoint.
+func (o *AIStudioOrchestrator) callPollinationsKontext(ctx context.Context, imageURL, instruction string) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+
+	// Step 1: Download source image
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("Kontext: build download request: %w", err)
+	}
+	dlResp, err := o.httpClient.Do(dlReq)
+	if err != nil {
+		return "", fmt.Errorf("Kontext: download image: %w", err)
+	}
+	defer dlResp.Body.Close()
+	imgBytes, err := io.ReadAll(dlResp.Body)
+	if err != nil || len(imgBytes) < 500 {
+		return "", fmt.Errorf("Kontext: image download failed or too small")
+	}
+
+	// Step 2: Build multipart body
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("model", "kontext")
+	_ = mw.WriteField("prompt", instruction)
+	fw, err := mw.CreateFormFile("image", "source.png")
+	if err != nil {
+		return "", err
+	}
+	if _, err = fw.Write(imgBytes); err != nil {
+		return "", err
+	}
+	mw.Close()
+
+	// Step 3: POST to edits endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/v1/images/edits", &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+sk)
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations Kontext request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Pollinations Kontext %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+
+	var parsed struct {
+		Data []struct {
+			URL     string `json:"url"`
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Data) == 0 {
+		return "", fmt.Errorf("Pollinations Kontext parse: empty data")
+	}
+	item := parsed.Data[0]
+	if item.URL != "" {
+		return item.URL, nil
+	}
+	if item.B64JSON != "" {
+		outBytes, err := base64.StdEncoding.DecodeString(item.B64JSON)
+		if err != nil {
+			return "", fmt.Errorf("Pollinations Kontext b64 decode: %w", err)
+		}
+		key := fmt.Sprintf("studio/photo-editor/kontext_%d.png", time.Now().UnixNano())
+		return o.uploadOrDataURI(ctx, outBytes, "image/png", key), nil
+	}
+	return "", fmt.Errorf("Pollinations Kontext: no url or b64_json in response")
+}
+
+// callPollinationsWhisperAfrican transcribes audio using Pollinations Whisper with African language support.
+// Downloads the audio file, then POSTs multipart to the transcriptions endpoint.
+func (o *AIStudioOrchestrator) callPollinationsWhisperAfrican(ctx context.Context, audioURL, lang string) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+
+	// Step 1: Download audio bytes
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, audioURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("Whisper African: build download request: %w", err)
+	}
+	dlResp, err := o.httpClient.Do(dlReq)
+	if err != nil {
+		return "", fmt.Errorf("Whisper African: download audio: %w", err)
+	}
+	defer dlResp.Body.Close()
+	audioBytes, err := io.ReadAll(dlResp.Body)
+	if err != nil || len(audioBytes) < 100 {
+		return "", fmt.Errorf("Whisper African: audio download failed or too small")
+	}
+
+	// Step 2: Build multipart body
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("model", "whisper-large-v3")
+	_ = mw.WriteField("language", lang)
+	fw, err := mw.CreateFormFile("file", "audio.mp3")
+	if err != nil {
+		return "", err
+	}
+	if _, err = fw.Write(audioBytes); err != nil {
+		return "", err
+	}
+	mw.Close()
+
+	// Step 3: POST to Pollinations Whisper endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/v1/audio/transcriptions", &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+sk)
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations Whisper African request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Pollinations Whisper African %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+
+	var result struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil || result.Text == "" {
+		return "", fmt.Errorf("Pollinations Whisper African: no transcription returned")
+	}
+	return result.Text, nil
+}
+
+// callPollinationsElevenMusic generates a full song or instrumental via Pollinations ElevenMusic.
+func (o *AIStudioOrchestrator) callPollinationsElevenMusic(ctx context.Context, prompt string, instrumental bool) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+	payload := map[string]interface{}{
+		"model":        "elevenmusic",
+		"prompt":       prompt,
+		"instrumental": instrumental,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/v1/audio/music", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+sk)
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	// Music generation can take up to 3 minutes
+	musicCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
+	defer cancel()
+	req = req.WithContext(musicCtx)
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations ElevenMusic request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Pollinations ElevenMusic %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+
+	// Response may be JSON with URL or raw audio bytes
+	contentType := resp.Header.Get("Content-Type")
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations ElevenMusic read: %w", err)
+	}
+
+	if strings.Contains(contentType, "application/json") {
+		var result struct {
+			URL      string `json:"url"`
+			AudioURL string `json:"audio_url"`
+		}
+		if jsonErr := json.Unmarshal(raw, &result); jsonErr == nil {
+			if result.URL != "" {
+				return result.URL, nil
+			}
+			if result.AudioURL != "" {
+				return result.AudioURL, nil
+			}
+		}
+	}
+
+	// Raw audio bytes — upload
+	if len(raw) < 1000 {
+		return "", fmt.Errorf("Pollinations ElevenMusic: response too small (%d bytes)", len(raw))
+	}
+	suffix := "song"
+	if instrumental {
+		suffix = "instrumental"
+	}
+	key := fmt.Sprintf("studio/music/%s_%d.mp3", suffix, time.Now().UnixNano())
+	return o.uploadOrDataURI(ctx, raw, "audio/mpeg", key), nil
+}
+
+// callPollinationsSeedance generates a cinematic video using Pollinations Seedance (image-to-video).
+func (o *AIStudioOrchestrator) callPollinationsSeedance(ctx context.Context, imageURL, prompt string) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+	payload := map[string]interface{}{
+		"model":    "seedance",
+		"image":    imageURL,
+		"prompt":   prompt,
+		"duration": 5,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/video", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+sk)
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	// Cinematic video generation can take up to 3 minutes
+	vidCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
+	defer cancel()
+	req = req.WithContext(vidCtx)
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations Seedance request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Pollinations Seedance %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations Seedance read: %w", err)
+	}
+
+	if strings.Contains(contentType, "application/json") {
+		var result struct {
+			URL      string `json:"url"`
+			VideoURL string `json:"video_url"`
+		}
+		if jsonErr := json.Unmarshal(raw, &result); jsonErr == nil {
+			if result.URL != "" {
+				return result.URL, nil
+			}
+			if result.VideoURL != "" {
+				return result.VideoURL, nil
+			}
+		}
+	}
+
+	if len(raw) < 1000 {
+		return "", fmt.Errorf("Pollinations Seedance: response too small")
+	}
+	key := fmt.Sprintf("studio/video/seedance_%d.mp4", time.Now().UnixNano())
+	publicURL, err := o.storage.Upload(ctx, key, raw, "video/mp4")
+	if err != nil {
+		return "", fmt.Errorf("Pollinations Seedance: upload failed: %w", err)
+	}
+	return publicURL, nil
+}
+
+// callPollinationsVeo generates a high-quality video using Google Veo via Pollinations (text-to-video).
+func (o *AIStudioOrchestrator) callPollinationsVeo(ctx context.Context, prompt string) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+	payload := map[string]interface{}{
+		"model":    "veo2",
+		"prompt":   prompt,
+		"duration": 5,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/video", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+sk)
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	// Veo can take up to 3 minutes
+	veoCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
+	defer cancel()
+	req = req.WithContext(veoCtx)
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations Veo request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Pollinations Veo %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations Veo read: %w", err)
+	}
+
+	if strings.Contains(contentType, "application/json") {
+		var result struct {
+			URL      string `json:"url"`
+			VideoURL string `json:"video_url"`
+		}
+		if jsonErr := json.Unmarshal(raw, &result); jsonErr == nil {
+			if result.URL != "" {
+				return result.URL, nil
+			}
+			if result.VideoURL != "" {
+				return result.VideoURL, nil
+			}
+		}
+	}
+
+	if len(raw) < 1000 {
+		return "", fmt.Errorf("Pollinations Veo: response too small")
+	}
+	key := fmt.Sprintf("studio/video/veo2_%d.mp4", time.Now().UnixNano())
+	publicURL, err := o.storage.Upload(ctx, key, raw, "video/mp4")
+	if err != nil {
+		return "", fmt.Errorf("Pollinations Veo: upload failed: %w", err)
+	}
+	return publicURL, nil
 }
 
 // ─── S3 upload helper ─────────────────────────────────────────────────────────
