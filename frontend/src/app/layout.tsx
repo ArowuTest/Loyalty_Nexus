@@ -1,24 +1,22 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
-
 export const metadata: Metadata = {
-  title: "Loyalty Nexus",
-  description: "Enterprise Rewards Infrastructure",
+  title: "Loyalty Nexus — Recharge. Earn. Win.",
+  description: "Nigeria's premium mobile rewards program. Recharge your airtime and win prizes with Loyalty Nexus.",
+  manifest: "/manifest.json",
+  themeColor: "#5f72f9",
+  viewport: "width=device-width, initial-scale=1, maximum-scale=1",
+  icons: {
+    icon: "/icon-192.png",
+    apple: "/icon-192.png",
+  },
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className={`${inter.className} bg-slate-950 text-white`}>
-        {children}
-      </body>
+    <html lang="en" suppressHydrationWarning>
+      <body>{children}</body>
     </html>
   );
 }

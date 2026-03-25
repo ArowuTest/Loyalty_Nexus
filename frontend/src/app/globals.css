@@ -1,23 +1,80 @@
 @import "tailwindcss";
-
-@theme {
-  --color-brand-gold: #FFCC00;
-  --color-brand-obsidian: #0A0A0A;
-  --color-brand-surface: #1A1A1A;
-  --color-brand-glass: rgba(255, 255, 255, 0.05);
-}
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Syne:wght@600;700;800&display=swap");
 
 @layer base {
-  body {
-    @apply bg-brand-obsidian text-slate-200;
+  :root {
+    --nexus-primary: 95 114 249;
+    --nexus-dark: 15 17 35;
+    --nexus-surface: 22 24 48;
+    --nexus-card: 28 32 58;
+    --nexus-gold: 249 199 79;
+    --nexus-text: 226 232 255;
+    --nexus-muted: 130 140 180;
   }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background-color: rgb(var(--nexus-dark));
+    color: rgb(var(--nexus-text));
+    font-family: "Inter", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: rgba(95, 114, 249, 0.3);
+    color: white;
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: rgb(var(--nexus-dark)); }
+  ::-webkit-scrollbar-thumb { background: rgba(95, 114, 249, 0.4); border-radius: 3px; }
 }
 
-/* Luxury Glassmorphism */
-.glass {
-  @apply bg-brand-glass backdrop-blur-xl border border-white/10;
+@layer components {
+  .nexus-card {
+    @apply bg-[rgb(28_32_58)] border border-[rgba(95,114,249,0.15)] rounded-2xl;
+  }
+
+  .nexus-btn-primary {
+    @apply bg-nexus-600 hover:bg-nexus-500 text-white font-semibold px-6 py-3 rounded-xl
+           transition-all duration-200 shadow-lg shadow-nexus-900/50 active:scale-95
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100;
+  }
+
+  .nexus-btn-outline {
+    @apply border border-nexus-600/50 text-nexus-400 hover:bg-nexus-600/10 font-medium
+           px-6 py-3 rounded-xl transition-all duration-200 active:scale-95;
+  }
+
+  .nexus-input {
+    @apply w-full bg-[rgb(22_24_48)] border border-[rgba(95,114,249,0.25)] text-white
+           rounded-xl px-4 py-3 focus:outline-none focus:border-nexus-500 focus:ring-1
+           focus:ring-nexus-500/50 transition-all placeholder-[rgb(130_140_180)];
+  }
+
+  .tier-badge {
+    @apply px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider;
+  }
+
+  .tier-BRONZE   { @apply bg-amber-500/20 text-amber-400 border border-amber-500/30; }
+  .tier-SILVER   { @apply bg-slate-500/20 text-slate-300 border border-slate-500/30; }
+  .tier-GOLD     { @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/30; }
+  .tier-PLATINUM { @apply bg-purple-500/20 text-purple-400 border border-purple-500/30; }
 }
 
-.gold-gradient {
-  background: linear-gradient(135deg, #FFCC00 0%, #FFAA00 100%);
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, #5f72f9, #f9c74f);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .glass {
+    background: rgba(28, 32, 58, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(95, 114, 249, 0.15);
+  }
 }

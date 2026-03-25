@@ -1,164 +1,159 @@
 "use client";
 
-import { BalanceCard } from "@/components/dashboard/BalanceCard";
-import { Trophy, Zap, Sparkles, Smartphone, Apple, Chrome, Users, MapPin, TrendingUp } from "lucide-react";
-import Link from 'next/link';
+import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import useSWR from "swr";
+import Link from "next/link";
+import AppShell from "@/components/layout/AppShell";
+import { useStore } from "@/store/useStore";
+import api from "@/lib/api";
+import { cn, formatPoints, TIER_THRESHOLDS } from "@/lib/utils";
+import { Zap, Wand2, Globe, TrendingUp, ChevronRight, Flame } from "lucide-react";
 
-  const handleIssueWallet = async (platform: 'apple' | 'google') => {
-    try {
-      // In production: GET /api/v1/user/wallet/issue?platform=...
-      // Redirect to the provided URL
-      const mockUrl = platform === 'apple' 
-        ? 'https://cdn.loyalty-nexus.ai/passes/mock.pkpass' 
-        : 'https://pay.google.com/gp/v/save/mock-jwt';
-      window.location.href = mockUrl;
-    } catch (error) {
-      console.error('Wallet issuance failed:', error);
-    }
-  };
+const QUICK_ACTIONS = [
+  { href: "/spin",     icon: Zap,        label: "Spin Now",     sub: "Use credits",   color: "bg-nexus-600/20 text-nexus-400" },
+  { href: "/studio",   icon: Wand2,      label: "AI Studio",    sub: "17 free tools", color: "bg-purple-600/20 text-purple-400" },
+  { href: "/wars",     icon: Globe,      label: "Regional Wars",sub: "Your state rank",color: "bg-green-600/20 text-green-400" },
+  { href: "/prizes",   icon: TrendingUp, label: "My Prizes",    sub: "Claim rewards",  color: "bg-gold-500/20 text-gold-400" },
+];
+
+const fetcher = (key: string) => {
+  if (key === "/user/profile") return api.getProfile();
+  if (key === "/user/wallet") return api.getWallet();
+  return Promise.resolve(null);
+};
+
+export default function DashboardPage() {
+  const { setUser, setWallet, user } = useStore();
+  const { data: profile } = useSWR("/user/profile", fetcher, { onSuccess: (d: unknown) => setUser(d as Parameters<typeof setUser>[0]) });
+  const { data: wallet } = useSWR("/user/wallet", fetcher, { onSuccess: (d: unknown) => setWallet(d as Parameters<typeof setWallet>[0]) });
+
+  const tierData = TIER_THRESHOLDS.find(t => t.tier === (profile as { tier?: string } | undefined)?.tier) || TIER_THRESHOLDS[0];
+  const nextTier = TIER_THRESHOLDS[TIER_THRESHOLDS.indexOf(tierData) + 1];
+  const progress = nextTier
+    ? Math.min(100, (((wallet as { lifetime_points?: number } | undefined)?.lifetime_points || 0) - tierData.min) / (nextTier.min - tierData.min) * 100)
+    : 100;
 
   return (
-    <div className="max-w-screen-xl mx-auto px-6 py-12 space-y-12 bg-black text-white">
-      {/* ... header ... */}
-
-      {/* Hero Stats */}
-      <div className="grid md:grid-cols-3 gap-6">
-        {/* ... */}
-        
-        {/* Passport Status Card */}
-        <div className="glass p-6 rounded-3xl flex flex-col justify-between border border-brand-gold/30">
-          {/* ... */}
-          
-          <div className="flex gap-2">
-            <button 
-              onClick={() => handleIssueWallet('apple')}
-              className="flex-grow flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all tracking-widest"
-            >
-              <Apple size={14} /> Apple
-            </button>
-            <button 
-              onClick={() => handleIssueWallet('google')}
-              className="flex-grow flex items-center justify-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all tracking-widest"
-            >
-              <Chrome size={14} /> Google
-            </button>
-          </div>
-        </div>
-      </div>
-      {/* ... */}
-    </div>
-  );
-
-      <div className="grid lg:grid-cols-3 gap-8">
-        {/* Regional Wars Tournament */}
-        <section className="lg:col-span-2 space-y-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-black text-white italic uppercase tracking-tighter flex items-center gap-2">
-              <Trophy className="text-brand-gold" size={20} /> Regional Wars
-            </h2>
-            <div className="bg-brand-gold text-black text-[10px] font-black px-3 py-1 rounded-full animate-pulse uppercase tracking-widest">
-              LIVE TOURNAMENT
+    <AppShell>
+      <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+        {/* Welcome */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+          <div className="flex items-center justify-between mb-1">
+            <div>
+              <h1 className="text-2xl font-bold font-display text-white">
+                Hey! 👋
+              </h1>
+              <p className="text-[rgb(130_140_180)] text-sm">
+                {(profile as { phone_number?: string } | undefined)?.phone_number || "Loading…"}
+              </p>
             </div>
+            {(profile as { streak_count?: number } | undefined)?.streak_count ? (
+              <div className="flex items-center gap-1.5 nexus-card px-3 py-2">
+                <Flame size={16} className="text-orange-400" />
+                <span className="text-white font-bold">{(profile as { streak_count?: number }).streak_count}d</span>
+                <span className="text-[rgb(130_140_180)] text-xs">streak</span>
+              </div>
+            ) : null}
           </div>
+        </motion.div>
 
-          <div className="glass rounded-[2rem] overflow-hidden border border-white/5">
-            <div className="bg-white/5 p-6 border-b border-white/5 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl gold-gradient flex items-center justify-center text-black shadow-xl">
-                  <MapPin size={24} />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 font-bold uppercase tracking-widest leading-none">Your Region</p>
-                  <h3 className="text-lg font-black text-white italic">LAGOS</h3>
-                </div>
+        {/* Wallet card */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="relative overflow-hidden rounded-2xl p-5"
+          style={{
+            background: "linear-gradient(135deg, rgb(74,86,238) 0%, rgb(139,92,246) 60%, rgb(249,199,79,0.3) 100%)",
+          }}
+        >
+          <div className="absolute inset-0 opacity-20 pointer-events-none"
+            style={{ backgroundImage: "radial-gradient(circle at 80% 20%, white 0%, transparent 50%)" }}
+          />
+          <div className="relative">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <p className="text-white/70 text-xs mb-1 uppercase tracking-widest">Pulse Points</p>
+                <p className="text-4xl font-bold font-display text-white">
+                  {formatPoints((wallet as { pulse_points?: number } | undefined)?.pulse_points || 0)}
+                </p>
               </div>
               <div className="text-right">
-                <p className="text-[10px] font-black text-brand-gold uppercase tracking-widest">Active Bonus</p>
-                <div className="flex items-center gap-1.5 text-white justify-end">
-                  <Zap size={14} className="fill-brand-gold text-brand-gold" />
-                  <span className="text-2xl font-black italic tracking-tighter">2.0X</span>
+                <span className={cn("tier-badge", `tier-${(profile as { tier?: string } | undefined)?.tier || "BRONZE"}`)}>
+                  {(profile as { tier?: string } | undefined)?.tier || "BRONZE"}
+                </span>
+              </div>
+            </div>
+            <div className="flex gap-4 mb-4">
+              <div className="bg-white/10 rounded-xl px-3 py-2 flex-1">
+                <p className="text-white/70 text-xs">Spin Credits</p>
+                <p className="text-white font-bold text-lg">{(wallet as { spin_credits?: number } | undefined)?.spin_credits || 0}</p>
+              </div>
+              <div className="bg-white/10 rounded-xl px-3 py-2 flex-1">
+                <p className="text-white/70 text-xs">Lifetime Pts</p>
+                <p className="text-white font-bold text-lg">{formatPoints((wallet as { lifetime_points?: number } | undefined)?.lifetime_points || 0)}</p>
+              </div>
+            </div>
+            {/* Tier progress */}
+            {nextTier && (
+              <div>
+                <div className="flex justify-between text-xs text-white/70 mb-1">
+                  <span>{tierData.label}</span>
+                  <span>{nextTier.label} in {formatPoints(nextTier.min - ((wallet as { lifetime_points?: number } | undefined)?.lifetime_points || 0))}</span>
+                </div>
+                <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-white rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${progress}%` }}
+                    transition={{ duration: 1, delay: 0.5 }}
+                  />
                 </div>
               </div>
-            </div>
+            )}
+          </div>
+        </motion.div>
 
-            <div className="p-2 space-y-1">
-              {[
-                { rank: 1, name: 'Lagos', amount: '₦12.4M', trend: 'up', bonus: true },
-                { rank: 2, name: 'Abuja', amount: '₦8.1M', trend: 'down', bonus: false },
-                { rank: 3, name: 'Port Harcourt', amount: '₦5.2M', trend: 'up', bonus: false },
-              ].map((region) => (
-                <div key={region.name} className={`flex items-center justify-between p-4 rounded-2xl transition-all ${region.bonus ? 'bg-white/5 border border-brand-gold/20' : 'hover:bg-white/5'}`}>
-                  <div className="flex items-center gap-4">
-                    <span className={`text-xl font-black italic w-6 ${region.rank === 1 ? 'text-brand-gold' : 'text-slate-700'}`}>
-                      {region.rank}
-                    </span>
-                    <div>
-                      <h4 className="font-bold text-white uppercase text-sm tracking-tight">{region.name}</h4>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{region.amount} Recharged</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {region.trend === 'up' ? <TrendingUp size={16} className="text-green-500" /> : <TrendingUp size={16} className="text-red-500 rotate-180" />}
-                    <div className="w-24 bg-white/5 h-1.5 rounded-full overflow-hidden">
-                      <div className={`h-full ${region.rank === 1 ? 'gold-gradient' : 'bg-slate-700'}`} style={{ width: `${100 - region.rank * 20}%` }} />
-                    </div>
-                  </div>
+        {/* Quick actions */}
+        <div className="grid grid-cols-2 gap-3">
+          {QUICK_ACTIONS.map((action, i) => (
+            <motion.div
+              key={action.href}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 + i * 0.05 }}
+            >
+              <Link href={action.href} className="nexus-card p-4 flex items-start gap-3 hover:border-nexus-500/30 transition-all block">
+                <div className={cn("p-2 rounded-xl", action.color)}>
+                  <action.icon size={18} />
                 </div>
-              ))}
-            </div>
-            
-            <div className="p-6 bg-brand-gold/5 border-t border-white/5 text-center">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">
-                Leading region wins <span className="text-brand-gold">Golden Hour</span> every Friday
-              </p>
-            </div>
-          </div>
-        </section>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium text-sm truncate">{action.label}</p>
+                  <p className="text-[rgb(130_140_180)] text-xs">{action.sub}</p>
+                </div>
+                <ChevronRight size={14} className="text-[rgb(130_140_180)] mt-0.5 flex-shrink-0" />
+              </Link>
+            </motion.div>
+          ))}
+        </div>
 
-        {/* Community & Streaks */}
-        <section className="space-y-6">
-          <h2 className="text-xl font-black text-white italic uppercase tracking-tighter flex items-center gap-2">
-            <Zap className="text-brand-gold" size={20} /> Pulse Streaks
-          </h2>
-          <div className="glass rounded-[2rem] p-8 border border-brand-gold/20 flex flex-col items-center text-center space-y-6">
-            <div className="relative">
-              <div className="w-32 h-32 rounded-full border-4 border-white/5 flex items-center justify-center relative">
-                <span className="text-5xl font-black text-white italic">5</span>
-                <div className="absolute inset-0 rounded-full border-4 border-brand-gold border-t-transparent animate-spin duration-[3s]" />
-              </div>
-              <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-brand-gold text-black text-[10px] font-black px-3 py-1 rounded-full shadow-xl">
-                DAY STREAK
-              </div>
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-white uppercase tracking-tight">Keep it going!</h3>
-              <p className="text-xs text-slate-500 font-medium leading-relaxed mt-2">
-                Recharge within <span className="text-white font-bold">12 hours</span> to keep your streak and earn a Mega Jackpot ticket.
-              </p>
-            </div>
-            <button className="w-full gold-gradient text-black py-4 rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl hover:scale-105 transition-transform active:scale-95">
-              Recharge Now
-            </button>
+        {/* Recharge CTA */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="nexus-card p-4 flex items-center justify-between"
+        >
+          <div>
+            <p className="text-white font-semibold">Recharge to earn more ⚡</p>
+            <p className="text-[rgb(130_140_180)] text-sm">₦200+ gets you 2 Pulse Points & 1 Spin Credit</p>
           </div>
-        </section>
+          <Link href="/recharge" className="nexus-btn-primary text-sm px-4 py-2">
+            Recharge
+          </Link>
+        </motion.div>
       </div>
-
-      {/* Live Feed */}
-      <section className="glass rounded-3xl overflow-hidden border border-white/5">
-        <div className="bg-white/5 px-6 py-3 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
-            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            LIVE WINNERS
-          </div>
-        </div>
-        <div className="px-6 py-4 h-12 flex items-center gap-8 whitespace-nowrap overflow-hidden italic font-bold text-sm text-slate-300">
-          <span>🏆 User 234803*** just won 5GB Data</span>
-          <span className="opacity-30">/</span>
-          <span>💎 Aisha from Kano earned 500 Studio Credits</span>
-          <span className="opacity-30">/</span>
-          <span>💰 ₦10,000 MoMo Cash won in Abuja</span>
-        </div>
-      </section>
-    </div>
+    </AppShell>
   );
 }

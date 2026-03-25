@@ -1,0 +1,16 @@
+{
+  "name": "Loyalty Nexus",
+  "short_name": "Nexus",
+  "description": "Nigeria's premium mobile rewards program",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1123",
+  "theme_color": "#5f72f9",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "categories": ["entertainment", "finance"],
+  "lang": "en-NG"
+}

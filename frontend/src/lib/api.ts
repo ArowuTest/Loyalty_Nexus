@@ -1,0 +1,101 @@
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
+
+class APIClient {
+  private token: string | null = null;
+
+  setToken(token: string) {
+    this.token = token;
+    if (typeof window !== "undefined") {
+      localStorage.setItem("nexus_token", token);
+    }
+  }
+
+  getToken(): string | null {
+    if (this.token) return this.token;
+    if (typeof window !== "undefined") {
+      this.token = localStorage.getItem("nexus_token");
+    }
+    return this.token;
+  }
+
+  clearToken() {
+    this.token = null;
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("nexus_token");
+    }
+  }
+
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    isPublic = false
+  ): Promise<T> {
+    const headers: HeadersInit = { "Content-Type": "application/json" };
+    const token = this.getToken();
+    if (token && !isPublic) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const resp = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (resp.status === 401) {
+      this.clearToken();
+      window.location.href = "/";
+      throw new Error("Session expired");
+    }
+
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "Request failed");
+    return data as T;
+  }
+
+  // Auth
+  sendOTP(phone: string, purpose = "login") {
+    return this.request("POST", "/auth/otp/send", { phone_number: phone, purpose }, true);
+  }
+  verifyOTP(phone: string, code: string, purpose = "login") {
+    return this.request<{ token: string; is_new_user: boolean }>(
+      "POST", "/auth/otp/verify", { phone_number: phone, code, purpose }, true
+    );
+  }
+
+  // User
+  getProfile() { return this.request("GET", "/user/profile"); }
+  getWallet() { return this.request("GET", "/user/wallet"); }
+  getTransactions() { return this.request("GET", "/user/transactions"); }
+  requestMoMoLink(momoNumber: string) {
+    return this.request("POST", "/user/momo/request", { momo_number: momoNumber });
+  }
+  verifyMoMo(momoNumber: string) {
+    return this.request("POST", "/user/momo/verify", { momo_number: momoNumber });
+  }
+  getPassportURLs() { return this.request("GET", "/user/passport"); }
+
+  // Spin
+  getWheelConfig() { return this.request("GET", "/spin/wheel"); }
+  playSpin() { return this.request("POST", "/spin/play", {}); }
+  getSpinHistory() { return this.request("GET", "/spin/history"); }
+
+  // Studio
+  getStudioTools() { return this.request("GET", "/studio/tools"); }
+  sendChat(message: string, sessionId?: string) {
+    return this.request("POST", "/studio/chat", { message, session_id: sessionId });
+  }
+  generateTool(toolId: string, prompt: string, sources?: string[]) {
+    return this.request<{ generation_id: string; status: string }>(
+      "POST", "/studio/generate", { tool_id: toolId, prompt, sources }
+    );
+  }
+  getGenerationStatus(id: string) {
+    return this.request("GET", `/studio/generate/${id}/status`);
+  }
+  getGallery() { return this.request("GET", "/studio/gallery"); }
+}
+
+export const api = new APIClient();
+export default api;
