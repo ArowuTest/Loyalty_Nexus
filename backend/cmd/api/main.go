@@ -46,7 +46,8 @@ func main() {
 
 	// Services & UseCases
 	notifySvc := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
-	momoSvc := services.NewMoMoService()
+	momoPayer := &external.MTNMomoAdapter{}
+	momoSvc := services.NewMoMoService(momoPayer)
 	authSvc := services.NewAuthService(authRepo, userRepo, notifySvc, os.Getenv("JWT_SECRET"))
 	
 	fulfillSvc := services.NewPrizeFulfillmentService(prizeRepo, userRepo, provisioner, momoSvc)

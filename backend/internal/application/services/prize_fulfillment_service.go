@@ -51,8 +51,7 @@ func (s *PrizeFulfillmentService) Fulfill(ctx context.Context, claim *entities.P
 			return s.prizeRepo.UpdateClaim(ctx, claim)
 		}
 		// REQ-3.4: Disburse via MoMo API
-		// (Mocking disbursement)
-		ref = "momo-ref-789"
+		ref, fulfillErr = s.momoService.DisburseCash(ctx, user.MoMoNumber, int64(claim.PrizeValue*100), claim.ID.String())
 	case "bonus_points":
 		// Already handled by transaction delta in SpinService
 		claim.Status = entities.StatusCompleted

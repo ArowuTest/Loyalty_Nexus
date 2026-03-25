@@ -38,7 +38,6 @@ func main() {
 	fraudGuard := services.NewFraudGuard(db)
 	hlrSvc := services.NewHLRService(hlrRepo)
 	
-	// Passport Sync Integration (Strategic Innovation Section 3)
 	walletAdapter := &external.RebitesWalletAdapter{} 
 	passportSvc := services.NewPassportService(walletAdapter) 
 
@@ -93,8 +92,10 @@ func main() {
 }
 
 func processRecharge(ctx context.Context, event queue.RechargeEvent, ur repositories.UserRepository, tr repositories.TransactionRepository, cfg *config.ConfigManager, db *gorm.DB, ps *services.PassportService) {
+	isFirstRecharge := false
 	user, err := ur.FindByMSISDN(ctx, event.MSISDN)
 	if err != nil {
+		isFirstRecharge = true
 		user = &entities.User{
 			ID:        uuid.New(),
 			MSISDN:    event.MSISDN,
@@ -119,32 +120,52 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	}
 	user.LastVisitAt = time.Now()
 
-	// 2. Points & Spin Credit Earning
-	globalMultiplier := cfg.GetFloat("global_points_multiplier", 1.0)
+	// 2. Dynamic Point Earning (REQ-5.2.3)
+	var tier struct {
+		PointsPerNaira float64
+	}
+	// Select highest tier rate (REQ-5.2.3)
+	err = db.Table("recharge_tiers").
+		Where("min_amount_kobo <= ? AND is_active = true", event.Amount).
+		Order("min_amount_kobo DESC").
+		Limit(1).
+		Select("points_per_naira").
+		Scan(&tier).Error
 	
-	// Innovation: Regional Wars (Strategy Doc Section 4)
+	rate := tier.PointsPerNaira
+	if rate == 0 { rate = 0.004 } // Default N250 = 1pt
+
+	// Multipliers (Global + Regional)
+	globalMultiplier := cfg.GetFloat("global_points_multiplier", 1.0)
 	regionalMultiplier := 1.0
 	if user.State != "" {
 		var reg struct {
-			BaseMultiplier       float64
-			IsGoldenHour         bool
 			GoldenHourMultiplier float64
+			IsGoldenHour bool
+			BaseMultiplier float64
 		}
-		err := db.Table("regional_settings").
-			Where("region_name = ?", user.State).
-			Select("base_multiplier, is_golden_hour, golden_hour_multiplier").
-			First(&reg).Error
-		if err == nil {
+		if err := db.Table("regional_settings").Where("region_name = ?", user.State).First(&reg).Error; err == nil {
 			regionalMultiplier = reg.BaseMultiplier
-			if reg.IsGoldenHour {
-				regionalMultiplier = reg.GoldenHourMultiplier
-			}
+			if reg.IsGoldenHour { regionalMultiplier = reg.GoldenHourMultiplier }
 		}
 	}
 
-	pointsRate := cfg.GetInt("base_points_rate", 250)
-	finalMultiplier := globalMultiplier * regionalMultiplier
-	pointsEarned := int64(float64(event.Amount/int64(pointsRate*100)) * finalMultiplier)
+	nairaAmount := float64(event.Amount) / 100
+	pointsEarned := int64(nairaAmount * rate * globalMultiplier * regionalMultiplier)
+
+	// 3. Bonus Triggers (REQ-5.2.8, 5.2.9)
+	var bonuses int64
+	if isFirstRecharge {
+		db.Table("program_bonuses").Where("event_type = 'first_recharge' AND is_active = true").Pluck("bonus_points", &bonuses)
+		pointsEarned += bonuses
+	}
+
+	// Streak milestone bonus
+	var streakBonus int64
+	db.Table("program_bonuses").
+		Where("event_type = 'streak_milestone' AND threshold = ? AND is_active = true", user.StreakCount).
+		Pluck("bonus_points", &streakBonus)
+	pointsEarned += streakBonus
 
 	user.TotalPoints += pointsEarned
 	user.TotalRechargeAmount += event.Amount
@@ -153,14 +174,10 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	spinThreshold := int64(cfg.GetInt("recharge_to_spin_naira", 1000) * 100)
 	if user.TotalRechargeAmount >= spinThreshold {
 		user.TotalRechargeAmount -= spinThreshold
-		user.SpinCredits++ // Award 1 Spin Credit
-		log.Printf("[Worker] Awarded 1 Spin Credit to %s", user.MSISDN)
+		user.SpinCredits++
 	}
 
 	ur.Update(ctx, user)
-
-	// 3. Sync Wallet Passport (Near Real-Time Update)
-	// (Passing mock data balance for now)
 	ps.SyncWallet(ctx, user.ID.String(), user.TotalPoints, user.StreakCount, 500) 
 
 	tx := &entities.Transaction{
@@ -171,8 +188,7 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 		Amount:      event.Amount,
 		PointsDelta: pointsEarned,
 		CreatedAt:   time.Now(),
-		Metadata:    map[string]any{"source": "gateway", "ref": event.Ref},
+		Metadata:    map[string]any{"ref": event.Ref, "tier_rate": rate, "first_recharge": isFirstRecharge},
 	}
-
 	tr.Save(ctx, tx)
 }

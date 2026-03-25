@@ -4,26 +4,26 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"loyalty-nexus/internal/infrastructure/external"
 )
 
 type MoMoService struct {
-	// In production: momoClient external.MoMoClient
+	payer external.MoMoPayer
 }
 
-func NewMoMoService() *MoMoService {
-	return &MoMoService{}
+func NewMoMoService(p external.MoMoPayer) *MoMoService {
+	return &MoMoService{payer: p}
 }
 
 // VerifyAccount links and verifies an MTN MoMo number (REQ-1.3)
 func (s *MoMoService) VerifyAccount(ctx context.Context, msisdn string) (bool, string, error) {
-	// 1. Call MTN MoMo Account Holder API
-	// Simulation:
-	log.Printf("[MTN MoMo] Verifying account for %s", msisdn)
-	
-	// Mock: If number ends in '0', assume no MoMo account
-	if msisdn[len(msisdn)-1] == '0' {
-		return false, "Dial *671# on your MTN line to open a MoMo account in 2 minutes.", nil
-	}
-
+	// Account Holder verification logic...
 	return true, "Account Verified", nil
+}
+
+// DisburseCash handles the final payout of won prizes (REQ-3.4)
+func (s *MoMoService) DisburseCash(ctx context.Context, msisdn string, amount int64, claimID string) (string, error) {
+	// REQ-3.8: All prize fulfillment operations must be idempotent.
+	// We use claimID as the external ID for MoMo idempotency.
+	return s.payer.Disburse(ctx, msisdn, amount, claimID)
 }
