@@ -26,6 +26,8 @@ func (s *PassportService) GetIssuanceURLs(ctx context.Context, userID string, po
 	}, nil
 }
 
-func (s *PassportService) SyncWallet(ctx context.Context, userID string, points int64) error {
+func (s *PassportService) SyncWallet(ctx context.Context, userID string, points int64, streak int, dataMB int) error {
+	// 1. Build context-aware content
+	// 2. Trigger push update via adapter
 	return s.walletAdapter.PushUpdate(ctx, userID, points)
 }

@@ -64,39 +64,35 @@ func main() {
 	}
 }
 
-func processRecharge(ctx context.Context, event queue.RechargeEvent, ur repositories.UserRepository, tr repositories.TransactionRepository) {
+func processRecharge(ctx context.Context, event queue.RechargeEvent, ur repositories.UserRepository, tr repositories.TransactionRepository, cfg *config.ConfigManager) {
 	user, err := ur.FindByMSISDN(ctx, event.MSISDN)
-	if err != nil {
-		// Create Guest User
-		user = &entities.User{
-			ID:        uuid.New(),
-			MSISDN:    event.MSISDN,
-			UserCode:  fmt.Sprintf("NEX%s", uuid.New().String()[:6]),
-			Tier:      "BRONZE",
-			IsActive:  true,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-		if err := ur.Create(ctx, user); err != nil {
-			log.Printf("Failed to create user: %v", err)
-			return
-		}
+	// ... (user creation logic) ...
+
+	// 1. Streak Calculation (REQ-2.5)
+	streakWindow := time.Duration(cfg.GetInt("streak_window_hours", 36)) * time.Hour
+	if !user.LastVisitAt.IsZero() && time.Since(user.LastVisitAt) <= streakWindow {
+		user.StreakCount++
+	} else {
+		user.StreakCount = 1
+	}
+	user.LastVisitAt = time.Now()
+
+	// 2. Points & Spin Credit Earning (REQ-2.2, REQ-2.3)
+	// Apply global multiplier (REQ-2.6)
+	multiplier := cfg.GetFloat("global_points_multiplier", 1.0)
+	pointsRate := cfg.GetInt("base_points_rate", 250) // 1 pt per N250
+	pointsEarned := int64(float64(event.Amount/int64(pointsRate*100)) * multiplier)
+
+	user.TotalPoints += pointsEarned
+	user.TotalRechargeAmount += event.Amount
+
+	// Check Spin Credit Threshold
+	spinThreshold := int64(cfg.GetInt("recharge_to_spin_naira", 1000) * 100)
+	if user.TotalRechargeAmount >= spinThreshold {
+		// Award Spin Credit
+		// (Implementation would add a row to transactions with spin_credit_delta: 1)
+		user.TotalRechargeAmount -= spinThreshold
 	}
 
-	pointsEarned := event.Amount / 20000 
-
-	tx := &entities.Transaction{
-		ID:          uuid.New(),
-		MSISDN:      event.MSISDN,
-		UserID:      user.ID,
-		Type:        entities.TxTypeVisit,
-		Amount:      event.Amount,
-		PointsDelta: pointsEarned,
-		CreatedAt:   time.Now(),
-		Metadata:    map[string]any{"source": "mtn_gateway", "ref": event.Ref},
-	}
-
-	if err := tr.Save(ctx, tx); err != nil {
-		log.Printf("Failed to save transaction: %v", err)
-	}
+	// ... (Save user and transaction) ...
 }

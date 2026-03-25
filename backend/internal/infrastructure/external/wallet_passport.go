@@ -34,8 +34,17 @@ func (a *RebitesWalletAdapter) IssueGooglePass(ctx context.Context, userID strin
 	return "https://pay.google.com/gp/v/save/mock-jwt", nil
 }
 
-func (a *RebitesWalletAdapter) PushUpdate(ctx context.Context, userID string, points int64) error {
-	log.Printf("[WalletPush] Updating User %s with %d points", userID, points)
-	// In production: Iterate registrations and send APNS/Google Push
-	return nil
+func (a *RebitesWalletAdapter) BuildPassContent(userID string, points int64, streak int, currentDataMB int) map[string]interface{} {
+	// Innovation: "Projected Value" (Strategy Doc Section 3)
+	message := fmt.Sprintf("You are missing out on bonus points today. Your %d-day streak is at risk!", streak)
+	if streak >= 5 {
+		message = "Maintain your streak to save your N50,000 Jackpot entry."
+	}
+
+	return map[string]interface{}{
+		"points": points,
+		"streak": streak,
+		"nudge_message": message,
+		"data_balance": fmt.Sprintf("%dMB", currentDataMB),
+	}
 }

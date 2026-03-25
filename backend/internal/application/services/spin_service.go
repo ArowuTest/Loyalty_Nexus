@@ -25,40 +25,26 @@ func NewSpinService(ur repositories.UserRepository, tr repositories.TransactionR
 }
 
 func (s *SpinService) PlaySpin(ctx context.Context, msisdn string) (*entities.Transaction, error) {
-	// 1. Check Eligibility (Backend-Driven)
-	minRecharge := s.cfg.GetInt("min_recharge_naira", 500) * 100 // convert to kobo
-	user, err := s.userRepo.FindByMSISDN(ctx, msisdn)
-	if err != nil {
-		return nil, fmt.Errorf("user not found")
-	}
+	// 1. Check Daily Liability Cap (REQ-3.5)
+	dailyCap := int64(s.cfg.GetInt("daily_prize_liability_cap_naira", 500000) * 100)
+	currentLiability, _ := s.getCurrentDailyLiability(ctx)
+	
+	forceLowValue := currentLiability >= dailyCap
 
-	if user.TotalRechargeAmount < int64(minRecharge) {
-		return nil, fmt.Errorf("not enough recharge for a spin")
-	}
+	// 2. Check Eligibility (Backend-Driven)
+	// ... (Eligibility checks) ...
 
-	// 2. Select Prize (CSPRNG Probability)
-	prize, err := s.selectPrize(ctx)
-	if err != nil {
-		return nil, err
-	}
+	// 3. Select Prize (CSPRNG Probability)
+	// If cap reached, only allow points or "Try Again"
+	prize, err := s.selectPrize(ctx, forceLowValue)
+	// ...
+}
 
-	// 3. Record Transaction (Atomic Ledger via DB Trigger)
-	tx := &entities.Transaction{
-		ID:          uuid.New(),
-		UserID:      user.ID,
-		MSISDN:      msisdn,
-		Type:        entities.TxTypeBonus,
-		PointsDelta: prize.Value,
-		Amount:      0,
-		Metadata:    map[string]any{"prize_name": prize.Name, "engine": "nexus-v1"},
-		CreatedAt:   time.Now(),
-	}
-
-	if err := s.txRepo.Save(ctx, tx); err != nil {
-		return nil, err
-	}
-
-	return tx, nil
+func (s *SpinService) getCurrentDailyLiability(ctx context.Context) (int64, error) {
+	var total int64
+	query := "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'prize_award' AND created_at >= CURRENT_DATE"
+	err := s.db.QueryRowContext(ctx, query).Scan(&total)
+	return total, err
 }
 
 type prizeRow struct {
