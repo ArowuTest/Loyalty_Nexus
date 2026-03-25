@@ -1,11 +1,11 @@
 {
-  "name": "loyalty-nexus-portal",
-  "version": "0.1.0",
+  "name": "loyalty-nexus-admin",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3001",
     "lint": "next lint"
   },
   "dependencies": {
@@ -15,7 +15,11 @@
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.468.0",
     "clsx": "^2.1.1",
-    "tailwind-merge": "^2.5.5"
+    "tailwind-merge": "^2.5.5",
+    "swr": "^2.3.0",
+    "recharts": "^2.14.1",
+    "date-fns": "^4.1.0",
+    "react-hot-toast": "^2.4.1"
   },
   "devDependencies": {
     "typescript": "^5",
@@ -23,6 +27,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "postcss": "^8",
-    "tailwindcss": "^4.0.0-alpha.1"
+    "tailwindcss": "^3.4.17",
+    "autoprefixer": "^10.4.20"
   }
 }

@@ -1,1 +1,10 @@
 @import "tailwindcss";
+:root { --bg: #0f1123; --surface: #1c2038; --primary: #5f72f9; --gold: #f9c74f; --text: #e2e8ff; --muted: #828cb4; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.card { background: var(--surface); border: 1px solid rgba(95,114,249,0.15); border-radius: 14px; }
+.btn-primary { background: var(--primary); color: white; font-weight: 600; padding: 10px 20px; border-radius: 10px; border: none; cursor: pointer; transition: opacity 0.15s; }
+.btn-primary:hover { opacity: 0.9; }
+.btn-outline { background: transparent; color: var(--primary); border: 1px solid rgba(95,114,249,0.4); padding: 10px 20px; border-radius: 10px; cursor: pointer; }
+.input { background: rgba(22,24,48,0.8); border: 1px solid rgba(95,114,249,0.25); color: var(--text); border-radius: 10px; padding: 10px 14px; width: 100%; outline: none; }
+.input:focus { border-color: var(--primary); }

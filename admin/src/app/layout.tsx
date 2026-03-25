@@ -1,24 +1,6 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"] });
-
-export const metadata: Metadata = {
-  title: "Loyalty Nexus",
-  description: "Enterprise Rewards Infrastructure",
-};
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <html lang="en">
-      <body className={`${inter.className} bg-slate-950 text-white`}>
-        {children}
-      </body>
-    </html>
-  );
+export const metadata: Metadata = { title: "Loyalty Nexus — Admin Cockpit", description: "Operations dashboard" };
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return <html lang="en"><body>{children}</body></html>;
 }
