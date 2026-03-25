@@ -9,18 +9,20 @@ import (
 // Transaction is the immutable ledger record for all balance changes.
 // Once written, a transaction MUST never be updated — compensate with a new row.
 type Transaction struct {
-	ID           uuid.UUID       `db:"id" json:"id"`
-	UserID       uuid.UUID       `db:"user_id" json:"user_id"`
-	PhoneNumber  string          `db:"phone_number" json:"phone_number"`
-	Type         TransactionType `db:"type" json:"type"`
-	PointsDelta  int64           `db:"points_delta" json:"points_delta"`
-	SpinDelta    int             `db:"spins_delta" json:"spins_delta"` // For spin credit events
-	Amount       int64           `db:"amount" json:"amount"`           // Kobo
-	BalanceAfter int64           `db:"balance_after" json:"balance_after"`
-	Reference    string          `db:"reference" json:"reference"` // External idempotency key
-	Metadata     json.RawMessage `db:"metadata" json:"metadata,omitempty"`
-	CreatedAt    time.Time       `db:"created_at" json:"created_at"`
+	ID           uuid.UUID       `db:"id"            gorm:"column:id;primaryKey"         json:"id"`
+	UserID       uuid.UUID       `db:"user_id"       gorm:"column:user_id;index"         json:"user_id"`
+	PhoneNumber  string          `db:"phone_number"  gorm:"column:phone_number"          json:"phone_number"`
+	Type         TransactionType `db:"type"          gorm:"column:type"                  json:"type"`
+	PointsDelta  int64           `db:"points_delta"  gorm:"column:points_delta"          json:"points_delta"`
+	SpinDelta    int             `db:"spin_delta"    gorm:"column:spin_delta"            json:"spins_delta"` // For spin credit events
+	Amount       int64           `db:"amount"        gorm:"column:amount"                json:"amount"`
+	BalanceAfter int64           `db:"balance_after" gorm:"column:balance_after"         json:"balance_after"`
+	Reference    string          `db:"reference"     gorm:"column:reference"             json:"reference"`
+	Metadata     json.RawMessage `db:"metadata"      gorm:"column:metadata;serializer:json" json:"metadata,omitempty"`
+	CreatedAt    time.Time       `db:"created_at"    gorm:"column:created_at;autoCreateTime" json:"created_at"`
 }
+
+func (Transaction) TableName() string { return "transactions" }
 
 type TransactionType string
 

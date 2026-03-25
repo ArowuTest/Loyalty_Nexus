@@ -45,6 +45,7 @@ func main() {
 
 	// ─── Services ───────────────────────────────────────────────
 	notifySvc := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
+	drawSvc   := services.NewDrawService(db)
 	fulfillSvc := services.NewPrizeFulfillmentService(
 		prizeRepo, userRepo,
 		external.NewVTPassAdapter(),
@@ -54,7 +55,7 @@ func main() {
 
 	worker := services.NewLifecycleWorker(
 		db, userRepo, studioRepo, prizeRepo, authRepo, chatRepo,
-		fulfillSvc, notifySvc, cfg,
+		fulfillSvc, drawSvc, notifySvc, cfg,
 	)
 
 	log.Println("[WORKER] Starting Loyalty Nexus background worker")

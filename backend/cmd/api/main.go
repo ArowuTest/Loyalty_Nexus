@@ -67,6 +67,8 @@ func main() {
 	// ─── Services ─────────────────────────────────────────────
 	notifySvc  := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
 	authSvc    := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
+	notifyH    := handlers.NewNotificationHandler(db)
+
 	fulfillSvc := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
 	rechargeSvc := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
 	spinSvc    := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
@@ -137,6 +139,15 @@ func main() {
 	mux.Handle("GET  /api/v1/spin/wheel",         auth(http.HandlerFunc(spinH.GetWheelConfig)))
 	mux.Handle("POST /api/v1/spin/play",          auth(http.HandlerFunc(spinH.Play)))
 	mux.Handle("GET  /api/v1/spin/history",       auth(http.HandlerFunc(spinH.GetHistory)))
+
+	// ─── Notifications ────────────────────────────────────────────────────────
+	mux.Handle("GET /api/v1/notifications",                auth(http.HandlerFunc(notifyH.ListNotifications)))
+	mux.Handle("PATCH /api/v1/notifications/{id}/read",    auth(http.HandlerFunc(notifyH.MarkRead)))
+	mux.Handle("POST /api/v1/notifications/read-all",      auth(http.HandlerFunc(notifyH.MarkAllRead)))
+	mux.Handle("POST /api/v1/notifications/push-token",    auth(http.HandlerFunc(notifyH.RegisterPushToken)))
+	mux.Handle("GET /api/v1/notifications/preferences",    auth(http.HandlerFunc(notifyH.GetPreferences)))
+	mux.Handle("PATCH /api/v1/notifications/preferences",  auth(http.HandlerFunc(notifyH.UpdatePreferences)))
+
 
 	mux.Handle("GET  /api/v1/studio/tools",              auth(http.HandlerFunc(studioH.ListTools)))
 	mux.Handle("POST /api/v1/studio/chat",               auth(http.HandlerFunc(studioH.Chat)))

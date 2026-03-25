@@ -62,11 +62,21 @@ jobs:
             psql "$DATABASE_URL" -f "$f" || true
           done
 
+      - name: Install CGO dependencies
+        run: sudo apt-get install -y gcc libsqlite3-dev
+
       - name: Build
         working-directory: backend
-        run: go build ./cmd/api ./cmd/worker
+        run: CGO_ENABLED=1 go build ./cmd/api ./cmd/worker
 
-      - name: Test
+      - name: Unit Tests (SQLite in-memory)
+        working-directory: backend
+        env:
+          CGO_ENABLED: "1"
+        run: go test ./internal/application/services/... -count=1 -timeout 60s -v
+
+      - name: Integration Tests
+
         working-directory: backend
         env:
           DATABASE_URL: postgres://nexus:nexus_test_secret@localhost:5432/nexus_test?sslmode=disable

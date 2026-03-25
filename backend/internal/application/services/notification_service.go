@@ -125,3 +125,136 @@ func (n *NotificationService) sendViaAfricasTalking(ctx context.Context, phone, 
 	}
 	return nil
 }
+
+// ─── FCM (Firebase Cloud Messaging) via HTTP v1 API ──────────────────────────
+
+type fcmPayload struct {
+	Message fcmMessage `json:"message"`
+}
+type fcmMessage struct {
+	Token        string            `json:"token"`
+	Notification fcmNotification   `json:"notification"`
+	Data         map[string]string `json:"data,omitempty"`
+	Android      *fcmAndroid       `json:"android,omitempty"`
+	APNS         *fcmAPNS          `json:"apns,omitempty"`
+}
+type fcmNotification struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	Image string `json:"image,omitempty"`
+}
+type fcmAndroid struct {
+	Priority string `json:"priority"` // "high" | "normal"
+}
+type fcmAPNS struct {
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// SendPush sends a push notification via FCM HTTP v1.
+// fcmServerKey is the legacy server key (from Firebase console → Project Settings → Cloud Messaging).
+func (n *NotificationService) SendPush(ctx context.Context, fcmToken, title, body string, data map[string]string) error {
+	serverKey := os.Getenv("FCM_SERVER_KEY")
+	if serverKey == "" || fcmToken == "" {
+		return nil // Silently skip if not configured
+	}
+
+	payload := map[string]interface{}{
+		"to": fcmToken,
+		"notification": map[string]string{
+			"title": title,
+			"body":  body,
+		},
+		"data":     data,
+		"priority": "high",
+	}
+	b, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://fcm.googleapis.com/fcm/send", bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "key="+serverKey)
+
+	resp, err := n.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("FCM HTTP: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("FCM HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// ─── Convenience notification helpers ────────────────────────────────────────
+
+// NotifySpinWin sends both SMS and push when a user wins a significant prize.
+func (n *NotificationService) NotifySpinWin(ctx context.Context, phone, fcmToken, prizeLabel string) {
+	msg := fmt.Sprintf("🎉 Congratulations! You just won: %s on Loyalty Nexus Spin. Open the app to claim!", prizeLabel)
+	_ = n.SendSMS(ctx, phone, msg)
+	_ = n.SendPush(ctx, fcmToken, "You Won! 🎉", "You won: "+prizeLabel, map[string]string{
+		"type": "spin_win", "prize": prizeLabel,
+	})
+}
+
+// NotifyDrawResult sends win/loss notification after a draw.
+func (n *NotificationService) NotifyDrawResult(ctx context.Context, phone, fcmToken string, won bool, prizeLabel string) {
+	if won {
+		msg := fmt.Sprintf("🏆 You WON the Loyalty Nexus Draw! Prize: %s. We'll contact you shortly.", prizeLabel)
+		_ = n.SendSMS(ctx, phone, msg)
+		_ = n.SendPush(ctx, fcmToken, "Draw Winner! 🏆", "You won: "+prizeLabel, map[string]string{
+			"type": "draw_result", "won": "true",
+		})
+	} else {
+		_ = n.SendPush(ctx, fcmToken, "Draw Result", "Better luck next time! Keep spinning to earn more entries.", map[string]string{
+			"type": "draw_result", "won": "false",
+		})
+	}
+}
+
+// NotifySubscriptionExpiring warns user that their subscription is about to expire.
+func (n *NotificationService) NotifySubscriptionExpiring(ctx context.Context, phone, fcmToken string, hoursLeft int) {
+	msg := fmt.Sprintf("⏰ Your Loyalty Nexus subscription expires in %d hours. Recharge to stay Premium!", hoursLeft)
+	_ = n.SendSMS(ctx, phone, msg)
+	_ = n.SendPush(ctx, fcmToken, "Subscription Expiring ⏰", msg, map[string]string{
+		"type": "subscription_warn",
+	})
+}
+
+// NotifySubscriptionExpired tells user their subscription has been downgraded.
+func (n *NotificationService) NotifySubscriptionExpired(ctx context.Context, phone, fcmToken string) {
+	msg := "Your Loyalty Nexus Premium subscription has expired. Recharge to unlock premium spins & AI Studio!"
+	_ = n.SendSMS(ctx, phone, msg)
+	_ = n.SendPush(ctx, fcmToken, "Subscription Expired", msg, map[string]string{
+		"type": "subscription_expired",
+	})
+}
+
+// NotifyRegionalWarsResult announces war results to all state participants.
+func (n *NotificationService) NotifyRegionalWarsResult(ctx context.Context, phone, fcmToken, state string, rank int) {
+	var msg string
+	switch rank {
+	case 1:
+		msg = fmt.Sprintf("🥇 %s takes FIRST PLACE in this month's Regional Wars! Your share of the prize pool is on its way!", state)
+	case 2:
+		msg = fmt.Sprintf("🥈 %s finishes 2nd in Regional Wars! Great effort — prize payout incoming.", state)
+	case 3:
+		msg = fmt.Sprintf("🥉 %s finishes 3rd in Regional Wars! Prize incoming.", state)
+	default:
+		msg = fmt.Sprintf("Regional Wars results are in. %s finished #%d. Keep playing to climb next month!", state, rank)
+	}
+	_ = n.SendSMS(ctx, phone, msg)
+	_ = n.SendPush(ctx, fcmToken, "Regional Wars Result 🗺️", msg, map[string]string{
+		"type": "wars_result", "state": state,
+	})
+}
+
+// NotifyStudioGenReady tells user their AI generation is complete.
+func (n *NotificationService) NotifyStudioGenReady(ctx context.Context, phone, fcmToken, toolName, genID string) {
+	msg := fmt.Sprintf("Your %s is ready on Nexus Studio! Tap to view & download (expires in 7 days).", toolName)
+	_ = n.SendSMS(ctx, phone, msg)
+	_ = n.SendPush(ctx, fcmToken, "Studio Ready ✨", msg, map[string]string{
+		"type": "studio_ready", "gen_id": genID, "tool": toolName,
+	})
+}

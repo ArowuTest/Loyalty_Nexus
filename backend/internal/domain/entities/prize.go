@@ -28,20 +28,22 @@ const (
 
 // SpinResult is the authoritative record of a spin play.
 type SpinResult struct {
-	ID                uuid.UUID         `db:"id" json:"id"`
-	UserID            uuid.UUID         `db:"user_id" json:"user_id"`
-	PrizeType         PrizeType         `db:"prize_type" json:"prize_type"`
-	PrizeValue        float64           `db:"prize_value" json:"prize_value"`
-	SlotIndex         int               `db:"slot_index" json:"slot_index"`
-	FulfillmentStatus FulfillmentStatus `db:"fulfillment_status" json:"fulfillment_status"`
-	FulfillmentRef    string            `db:"fulfillment_ref" json:"fulfillment_ref,omitempty"`
-	MoMoNumber        string            `db:"momo_number" json:"momo_number,omitempty"`
-	ErrorMessage      string            `db:"error_message" json:"error_message,omitempty"`
-	RetryCount        int               `db:"retry_count" json:"retry_count"`
-	ClaimedAt         *time.Time        `db:"claimed_at" json:"claimed_at,omitempty"`
-	FulfilledAt       *time.Time        `db:"fulfilled_at" json:"fulfilled_at,omitempty"`
-	CreatedAt         time.Time         `db:"created_at" json:"created_at"`
+	ID                uuid.UUID         `db:"id"                 gorm:"column:id;primaryKey"                     json:"id"`
+	UserID            uuid.UUID         `db:"user_id"            gorm:"column:user_id;index"                     json:"user_id"`
+	PrizeType         PrizeType         `db:"prize_type"         gorm:"column:prize_type"                        json:"prize_type"`
+	PrizeValue        float64           `db:"prize_value"        gorm:"column:prize_value"                       json:"prize_value"`
+	SlotIndex         int               `db:"slot_index"         gorm:"column:slot_index"                        json:"slot_index"`
+	FulfillmentStatus FulfillmentStatus `db:"fulfillment_status" gorm:"column:fulfillment_status"               json:"fulfillment_status"`
+	FulfillmentRef    string            `db:"fulfillment_ref"    gorm:"column:fulfillment_ref;default:''"        json:"fulfillment_ref,omitempty"`
+	MoMoNumber        string            `db:"momo_number"        gorm:"column:mo_mo_number;default:''"           json:"momo_number,omitempty"`
+	ErrorMessage      string            `db:"error_message"      gorm:"column:error_message;default:''"          json:"error_message,omitempty"`
+	RetryCount        int               `db:"retry_count"        gorm:"column:retry_count;default:0"             json:"retry_count"`
+	ClaimedAt         *time.Time        `db:"claimed_at"         gorm:"column:claimed_at"                        json:"claimed_at,omitempty"`
+	FulfilledAt       *time.Time        `db:"fulfilled_at"       gorm:"column:fulfilled_at"                      json:"fulfilled_at,omitempty"`
+	CreatedAt         time.Time         `db:"created_at"         gorm:"column:created_at;autoCreateTime"         json:"created_at"`
 }
+
+func (SpinResult) TableName() string { return "spin_results" }
 
 // PrizePoolEntry is the admin-configurable prize slot (read from prize_pool table).
 type PrizePoolEntry struct {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"loyalty-nexus/internal/domain/repositories"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"loyalty-nexus/internal/infrastructure/config"
 )
@@ -26,6 +27,7 @@ type LifecycleWorker struct {
 	authRepo    repositories.AuthRepository
 	chatRepo    repositories.ChatRepository
 	fulfillSvc  *PrizeFulfillmentService
+	drawSvc     *DrawService
 	notifySvc   *NotificationService
 	cfg         *config.ConfigManager
 }
@@ -37,8 +39,9 @@ func NewLifecycleWorker(
 	pr repositories.PrizeRepository,
 	ar repositories.AuthRepository,
 	cr repositories.ChatRepository,
-	fs *PrizeFulfillmentService,
-	ns *NotificationService,
+	fs  *PrizeFulfillmentService,
+	ds  *DrawService,
+	ns  *NotificationService,
 	cfg *config.ConfigManager,
 ) *LifecycleWorker {
 	return &LifecycleWorker{
@@ -49,6 +52,7 @@ func NewLifecycleWorker(
 		authRepo:   ar,
 		chatRepo:   cr,
 		fulfillSvc: fs,
+		drawSvc:    ds,
 		notifySvc:  ns,
 		cfg:        cfg,
 	}
@@ -63,6 +67,10 @@ func (w *LifecycleWorker) Run(ctx context.Context) {
 	go w.runEvery(ctx, 24*time.Hour,   "points-expiry",      w.pointsExpiryJobs)
 	go w.runEvery(ctx, 30*time.Minute, "otp-cleanup",        w.otpCleanup)
 	go w.runEvery(ctx, 5*time.Minute,  "fulfill-retry",      w.fulfillmentRetry)
+	go w.runEvery(ctx, 6*time.Hour,    "sub-lifecycle",      w.RunSubscriptionLifecycle)
+	go w.runEvery(ctx, 1*time.Hour,    "scheduled-draws",    w.RunScheduledDraws)
+	go w.runEvery(ctx, 24*time.Hour,   "monthly-spin-grant", w.RunMonthlySpinCreditGrant)
+	go w.runEvery(ctx, 24*time.Hour,   "wars-monthly",       w.RunWarsMonthlyResolve)
 	go w.runEvery(ctx, 10*time.Minute, "session-summarise",  w.sessionSummarise)
 
 	<-ctx.Done()
@@ -214,3 +222,128 @@ func (w *LifecycleWorker) RunWarsMonthlyResolve(ctx context.Context) {
 			"updated_at":  now,
 		})
 }
+
+// RunSubscriptionLifecycle handles subscription expiry, grace period, and auto-downgrade.
+// Schedule: every 6 hours.
+func (w *LifecycleWorker) RunSubscriptionLifecycle(ctx context.Context) {
+	now := time.Now().UTC()
+
+	// --- 1. Warn users whose subscription expires within 24 hours ---
+	var expiringSoon []struct {
+		ID          string `gorm:"column:id"`
+		PhoneNumber string `gorm:"column:phone_number"`
+		ExpiresAt   *time.Time `gorm:"column:subscription_expires_at"`
+	}
+	in24h := now.Add(24 * time.Hour)
+	w.db.WithContext(ctx).Table("users").
+		Select("id, phone_number, subscription_expires_at").
+		Where("subscription_status = 'ACTIVE' AND subscription_expires_at BETWEEN ? AND ?", now, in24h).
+		Find(&expiringSoon)
+	for _, u := range expiringSoon {
+		msg := "Your Loyalty Nexus subscription expires in less than 24 hours. Recharge to continue enjoying premium spins & studio credits!"
+		_ = w.notifySvc.SendSMS(ctx, u.PhoneNumber, msg)
+		log.Printf("[WORKER] sub-expiry-warn: notified %s (expires %v)", u.PhoneNumber, u.ExpiresAt)
+	}
+
+	// --- 2. Downgrade users whose subscription has expired ---
+	gracePeriodHours := w.cfg.GetInt("subscription_grace_period_hours", 48)
+	graceDeadline := now.Add(-time.Duration(gracePeriodHours) * time.Hour)
+
+	result := w.db.WithContext(ctx).Table("users").
+		Where("subscription_status = 'ACTIVE' AND subscription_expires_at < ?", graceDeadline).
+		Updates(map[string]interface{}{
+			"subscription_status": "FREE",
+			"updated_at":          now,
+		})
+	if result.RowsAffected > 0 {
+		log.Printf("[WORKER] sub-lifecycle: downgraded %d expired subscriptions to FREE", result.RowsAffected)
+	}
+
+	// --- 3. Mark grace period users ---
+	result = w.db.WithContext(ctx).Table("users").
+		Where("subscription_status = 'ACTIVE' AND subscription_expires_at < ? AND subscription_expires_at >= ?",
+			now, graceDeadline).
+		Updates(map[string]interface{}{
+			"subscription_status": "GRACE",
+			"updated_at":          now,
+		})
+	if result.RowsAffected > 0 {
+		log.Printf("[WORKER] sub-lifecycle: %d users entered grace period", result.RowsAffected)
+	}
+
+	// --- 4. Revoke spin credits from newly-downgraded users (Free Tier: 0 auto-credits) ---
+	// We don't claw back existing spin credits — they expire naturally on use.
+	// We just stop the monthly credit grant for FREE users.
+}
+
+// RunMonthlySpinCreditGrant awards the monthly free spin credit to all active subscribers.
+// Should be scheduled on the 1st of each month.
+func (w *LifecycleWorker) RunMonthlySpinCreditGrant(ctx context.Context) {
+	now := time.Now().UTC()
+	// Only run on the 1st day of the month
+	if now.Day() != 1 {
+		return
+	}
+	spinCreditsPerMonth := w.cfg.GetInt("monthly_spin_credit_grant", 3)
+
+	result := w.db.WithContext(ctx).Exec(`
+		UPDATE wallets
+		SET spin_credits = spin_credits + ?,
+		    updated_at   = ?
+		WHERE user_id IN (
+			SELECT id FROM users
+			WHERE subscription_status IN ('ACTIVE', 'GRACE')
+		)
+	`, spinCreditsPerMonth, now)
+	if result.Error != nil {
+		log.Printf("[WORKER] monthly-spin-grant failed: %v", result.Error)
+		return
+	}
+	log.Printf("[WORKER] monthly-spin-grant: credited %d wallets with %d spins",
+		result.RowsAffected, spinCreditsPerMonth)
+}
+
+// RunScheduledDraws auto-executes draws that are due.
+func (w *LifecycleWorker) RunScheduledDraws(ctx context.Context) {
+	now := time.Now().UTC()
+	var dueDraw struct {
+		ID string `gorm:"column:id"`
+	}
+	err := w.db.WithContext(ctx).Table("draws").
+		Select("id").
+		Where("status = 'SCHEDULED' AND draw_date <= ?", now).
+		Order("draw_date ASC").
+		Limit(1).
+		Scan(&dueDraw).Error
+
+	if err != nil || dueDraw.ID == "" {
+		return // Nothing due
+	}
+
+	log.Printf("[WORKER] scheduled-draws: executing draw %s", dueDraw.ID)
+
+	// Mark as IN_PROGRESS first (idempotency guard)
+	w.db.WithContext(ctx).Table("draws").
+		Where("id = ? AND status = 'SCHEDULED'", dueDraw.ID).
+		Updates(map[string]interface{}{"status": "IN_PROGRESS", "updated_at": now})
+
+	// Execute draw via DrawService
+	if w.drawSvc == nil {
+		return
+	}
+	parsedID, parseErr := uuid.Parse(dueDraw.ID)
+	if parseErr != nil {
+		log.Printf("[WORKER] scheduled-draws: bad uuid %s: %v", dueDraw.ID, parseErr)
+		return
+	}
+	if execErr := w.drawSvc.ExecuteDraw(ctx, parsedID); execErr != nil {
+		log.Printf("[WORKER] scheduled-draws: ExecuteDraw %s failed: %v", dueDraw.ID, execErr)
+		// Revert status so it can be retried
+		w.db.WithContext(ctx).Table("draws").Where("id = ?", dueDraw.ID).
+			Updates(map[string]interface{}{"status": "SCHEDULED", "updated_at": now})
+	} else {
+		log.Printf("[WORKER] scheduled-draws: draw %s completed successfully", dueDraw.ID)
+	}
+}
+
+

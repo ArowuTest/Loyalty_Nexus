@@ -1,12 +1,8 @@
 package integrationtest
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
-	"log"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"loyalty-nexus/internal/application/services"
@@ -32,8 +28,13 @@ func TestEndToEndFlow(t *testing.T) {
 	fmt.Printf("Step 3: User spending %d points on AI Portrait\n", spend)
 
 	if pointsEarned < spend {
-		log.Fatalf("Test Failed: Insufficient points")
+		t.Fatalf("Test Failed: Insufficient points")
 	}
 
 	fmt.Println("✅ End-to-end flow validated successfully.")
+
+	// Suppress unused import warnings
+	_ = uuid.New().String()
+	_ = entities.OTPLogin
+	_ = fmt.Sprintf("%T", services.SpinService{})
 }
