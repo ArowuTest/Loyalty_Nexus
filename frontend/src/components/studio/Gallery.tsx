@@ -21,6 +21,22 @@ const MOCK_GALLERY: GalleryItem[] = [
     prompt: 'Tech founder in Lagos rooftop garden...',
     url: 'https://static-s3.skyworkcdn.com/fe/skywork-site-assets/images/skybot/avatar1-new.png',
     createdAt: new Date(),
+  },
+  {
+    id: '2',
+    type: 'pdf',
+    toolName: 'Study Guide',
+    prompt: 'WAEC Chemistry: Organic Reactions',
+    url: 'https://cdn.loyalty-nexus.ai/learning/mock.pdf',
+    createdAt: new Date(),
+  },
+  {
+    id: '3',
+    type: 'audio',
+    toolName: 'My Podcast',
+    prompt: 'Benefits of Solar Energy in Nigeria',
+    url: 'https://cdn.loyalty-nexus.ai/learning/mock.mp3',
+    createdAt: new Date(),
   }
 ];
 

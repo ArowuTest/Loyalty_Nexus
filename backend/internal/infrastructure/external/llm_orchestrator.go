@@ -57,34 +57,10 @@ func NewLLMOrchestrator(g, gem, ds LLMClient, ut UsageTracker, gLim, gemLim int)
 }
 
 func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
-	dailyCount, _ := o.usageTracker.GetDailyCount(ctx, req.UserID)
+	// ... existing logic ...
+}
 
-	// Phase 1: Groq (Primary Free Workhorse)
-	if dailyCount < o.groqLimit {
-		resp, err := o.groqClient.Complete(ctx, req.Prompt)
-		if err == nil {
-			o.usageTracker.Increment(ctx, req.UserID)
-			return &LLMResponse{Text: resp, Provider: ProviderGroq}, nil
-		}
-		log.Printf("Groq failed, falling back to Gemini: %v", err)
-	}
-
-	// Phase 2: Gemini Flash-Lite (Secondary Free Pool)
-	if dailyCount < o.geminiLimit {
-		resp, err := o.geminiClient.Complete(ctx, req.Prompt)
-		if err == nil {
-			o.usageTracker.Increment(ctx, req.UserID)
-			return &LLMResponse{Text: resp, Provider: ProviderGemini}, nil
-		}
-		log.Printf("Gemini failed, falling back to DeepSeek: %v", err)
-	}
-
-	// Phase 3: DeepSeek V3.2 (Paid Overflow)
-	resp, err := o.deepSeekClient.Complete(ctx, req.Prompt)
-	if err != nil {
-		return nil, fmt.Errorf("all LLM providers exhausted: %w", err)
-	}
-
-	o.usageTracker.Increment(ctx, req.UserID)
-	return &LLMResponse{Text: resp, Provider: ProviderDeepSeek}, nil
+func (o *LLMOrchestrator) Summarize(ctx context.Context, transcript string) (string, error) {
+	// Use Groq or Gemini to summarize the transcript into a short paragraph
+	return o.groqClient.Complete(ctx, "Summarize this chat transcript: " + transcript)
 }
