@@ -1,19 +1,16 @@
 package repositories
 
-import (
-	"context"
-	"loyalty-nexus/internal/domain/entities"
-)
+import "context"
 
-type NetworkCache struct {
-	MSISDN       string
-	Network      string
-	LookupSource string
+type HLRResult struct {
+	PhoneNumber  string
+	Network      string // MTN, AIRTEL, GLO, 9MOBILE
 	IsValid      bool
+	LookupSource string
 }
 
 type HLRRepository interface {
-	FindByMSISDN(ctx context.Context, msisdn string) (*NetworkCache, error)
-	Save(ctx context.Context, cache *NetworkCache) error
-	Invalidate(ctx context.Context, msisdn string) error
+	GetCached(ctx context.Context, phone string) (*HLRResult, error) // nil if miss or expired
+	Cache(ctx context.Context, result *HLRResult, ttlHours int) error
+	Invalidate(ctx context.Context, phone string) error
 }

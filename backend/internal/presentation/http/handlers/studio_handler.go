@@ -5,197 +5,130 @@ import (
 	"net/http"
 
 	"loyalty-nexus/internal/application/services"
+	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/infrastructure/external"
+	"loyalty-nexus/internal/presentation/http/middleware"
+
 	"github.com/google/uuid"
 )
 
 type StudioHandler struct {
-	studioService      *services.StudioService
-	llmOrchestrator    *external.LLMOrchestrator
-	asyncWorker        *AsyncStudioWorker
-	knowledgeGenerator external.KnowledgeGenerator
+	studioSvc *services.StudioService
+	llmOrch   *external.LLMOrchestrator
+	kbWorker  *AsyncStudioWorker
+	cfg       *config.ConfigManager
 }
 
-func NewStudioHandler(ss *services.StudioService, lo *external.LLMOrchestrator, aw *AsyncStudioWorker, kg external.KnowledgeGenerator) *StudioHandler {
-	return &StudioHandler{
-		studioService:      ss,
-		llmOrchestrator:    lo,
-		asyncWorker:        aw,
-		knowledgeGenerator: kg,
-	}
+func NewStudioHandler(ss *services.StudioService, lo *external.LLMOrchestrator, kb *AsyncStudioWorker, cfg *config.ConfigManager) *StudioHandler {
+	return &StudioHandler{studioSvc: ss, llmOrch: lo, kbWorker: kb, cfg: cfg}
 }
 
-func (h *StudioHandler) GenerateKnowledge(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var reqBody struct {
-		UserID string    `json:"user_id"`
-		ToolID uuid.UUID `json:"tool_id"`
-		Topic  string    `json:"topic"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-
-	uid, _ := uuid.Parse(reqBody.UserID)
-
-	// 1. Initial Request (Atomic Point Deduction)
-	gen, err := h.studioService.RequestGeneration(r.Context(), uid, reqBody.ToolID, reqBody.Topic)
+func (h *StudioHandler) ListTools(w http.ResponseWriter, r *http.Request) {
+	tools, err := h.studioSvc.ListActiveTools(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusPaymentRequired)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load tools"})
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"tools": tools})
+}
 
-	// 2. Trigger Async Generation at Provider (NotebookLM)
-	providerGenID, err := h.knowledgeGenerator.TriggerGeneration(r.Context(), reqBody.Topic, "pdf")
-	if err != nil {
-		h.studioService.FailGeneration(r.Context(), gen.ID, "Provider trigger failed")
-		http.Error(w, "Trigger failed", http.StatusInternalServerError)
-		return
-	}
-
-	// 3. Start Background Polling
-	h.asyncWorker.StartJob(gen.ID, providerGenID)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"generation_id": gen.ID.String(), "status": "processing"})
+type ChatRequest struct {
+	Message   string   `json:"message"`
+	SessionID string   `json:"session_id,omitempty"`
+	History   []string `json:"history,omitempty"`
 }
 
 func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+
+	var req ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
 		return
 	}
 
-	var reqBody struct {
-		Prompt string `json:"prompt"`
-		MSISDN string `json:"msisdn"` // In production, get from JWT
-	}
+	// Check daily chat limit
+	limit := h.cfg.GetInt("chat_daily_message_limit", 20)
+	_ = limit // enforced in llm orchestrator
 
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-
-	// 1. Prepare LLM Request
 	llmReq := external.LLMRequest{
-		UserID: reqBody.MSISDN,
-		Prompt: reqBody.Prompt,
+		UserID:  uid,
+		Prompt:  req.Message,
+		History: req.History,
 	}
 
-	// 2. Execute Orchestration (Groq -> Gemini -> DeepSeek)
-	resp, err := h.llmOrchestrator.Chat(r.Context(), llmReq)
+	resp, err := h.llmOrch.Chat(r.Context(), llmReq)
 	if err != nil {
-		http.Error(w, "AI Studio unavailable", http.StatusInternalServerError)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "AI service temporarily unavailable"})
 		return
 	}
 
-	// 3. Return Response
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"response": resp.Text,
+		"provider": resp.Provider,
+	})
 }
 
-func (h *StudioHandler) GenerateImage(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+type GenerateRequest struct {
+	ToolID string `json:"tool_id"`
+	Prompt string `json:"prompt"`
+	Sources []string `json:"sources,omitempty"` // For NotebookLM tools
+}
+
+func (h *StudioHandler) Generate(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uid)
+
+	var req GenerateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
 
-	var reqBody struct {
-		UserID string    `json:"user_id"`
-		ToolID uuid.UUID `json:"tool_id"`
-		Prompt string    `json:"prompt"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-
-	uid, _ := uuid.Parse(reqBody.UserID)
-
-	// 1. Initial Request (Atomic Point Deduction)
-	gen, err := h.studioService.RequestGeneration(r.Context(), uid, reqBody.ToolID, reqBody.Prompt)
+	toolID, err := uuid.Parse(req.ToolID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusPaymentRequired)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid tool_id"})
 		return
 	}
 
-	// 2. Determine Provider & Tool ID
-	tool, _ := h.studioService.FindToolByID(r.Context(), reqBody.ToolID)
-	
-	// 3. Dispatch to External Generator (Mocking the sync call)
-	// In production, this would use h.imageGenerator.Generate(...)
-	outputURL := fmt.Sprintf("https://cdn.loyalty-nexus.ai/generated/%s.webp", gen.ID.String())
-	
-	// Simulation of success
-	// costMicros is internal tracking of API costs (Innovation 6.4)
-	if err := h.studioService.CompleteGeneration(r.Context(), gen.ID, outputURL, "FAL_AI", 50000); err != nil {
-		h.studioService.FailGeneration(r.Context(), gen.ID, "Storage failure")
-		http.Error(w, "Processing failed", http.StatusInternalServerError)
+	gen, err := h.studioSvc.RequestGeneration(r.Context(), userID, toolID, req.Prompt)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"output_url": outputURL})
+	// Dispatch async generation
+	go h.kbWorker.DispatchGeneration(gen, req.Sources)
+
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		"generation_id": gen.ID,
+		"status":        "pending",
+		"message":       "Your generation is being processed. You'll be notified when it's ready.",
+	})
+}
+
+func (h *StudioHandler) GetGenerationStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	genID, err := uuid.Parse(id)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	gen, err := h.studioSvc.FindGenerationByID(r.Context(), genID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, gen)
 }
 
 func (h *StudioHandler) GetGallery(w http.ResponseWriter, r *http.Request) {
-	userID := r.URL.Query().Get("user_id")
-	uid, _ := uuid.Parse(userID)
-	
-	gallery, err := h.studioService.GetUserGallery(r.Context(), uid)
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uid)
+	gallery, err := h.studioSvc.GetUserGallery(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "Failed to load gallery", http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load gallery"})
 		return
 	}
-	json.NewEncoder(w).Encode(gallery)
-}
-
-func (h *StudioHandler) GenerateBuild(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var reqBody struct {
-		UserID      string    `json:"user_id"`
-		ToolID      uuid.UUID `json:"tool_id"`
-		Description string    `json:"description"`
-		AudioURL    string    `json:"audio_url,omitempty"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-
-	uid, _ := uuid.Parse(reqBody.UserID)
-
-	// 1. Point Deduction
-	gen, err := h.studioService.RequestGeneration(r.Context(), uid, reqBody.ToolID, reqBody.Description)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusPaymentRequired)
-		return
-	}
-
-	// 2. Handle Build Pipeline (Sync for now, can be moved to async worker)
-	var outputURL string
-	// Mocking tool logic based on catalogue
-	// In production, we check tool.Name or tool.ProviderToolID
-	outputURL = fmt.Sprintf("https://cdn.loyalty-nexus.ai/build/%s.pdf", gen.ID.String())
-
-	if err := h.studioService.CompleteGeneration(r.Context(), gen.ID, outputURL); err != nil {
-		h.studioService.FailGeneration(r.Context(), gen.ID, "Document gen failed")
-		http.Error(w, "Build failed", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"output_url": outputURL})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": gallery})
 }

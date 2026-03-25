@@ -2,80 +2,247 @@ package services
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"math/big"
+	"os"
+	"time"
+
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
-	"time"
+	"loyalty-nexus/internal/infrastructure/config"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+)
+
+var (
+	ErrOTPNotFound   = errors.New("OTP not found or already used")
+	ErrOTPExpired    = errors.New("OTP has expired")
+	ErrOTPInvalid    = errors.New("OTP code is incorrect")
+	ErrUserBanned    = errors.New("account is suspended")
 )
 
 type AuthService struct {
-	authRepo  repositories.AuthRepository
-	userRepo  repositories.UserRepository
-	notifySvc *NotificationService
-	jwtSecret []byte
+	authRepo    repositories.AuthRepository
+	userRepo    repositories.UserRepository
+	notifySvc   *NotificationService
+	cfg         *config.ConfigManager
+	jwtSecret   []byte
+	aesKey      []byte
 }
 
-func NewAuthService(ar repositories.AuthRepository, ur repositories.UserRepository, ns *NotificationService, secret string) *AuthService {
+func NewAuthService(
+	ar repositories.AuthRepository,
+	ur repositories.UserRepository,
+	ns *NotificationService,
+	cfg *config.ConfigManager,
+) *AuthService {
+	jwtSecret := []byte(mustEnv("JWT_SECRET"))
+	aesHex := mustEnv("AES_256_KEY") // 32-byte hex (64 chars)
+	aesKey, err := hex.DecodeString(aesHex)
+	if err != nil || len(aesKey) != 32 {
+		panic("AES_256_KEY must be a 64-char hex string (32 bytes)")
+	}
 	return &AuthService{
 		authRepo:  ar,
 		userRepo:  ur,
 		notifySvc: ns,
-		jwtSecret: []byte(secret),
+		cfg:       cfg,
+		jwtSecret: jwtSecret,
+		aesKey:    aesKey,
 	}
 }
 
-func (s *AuthService) SendLoginOTP(ctx context.Context, msisdn string) error {
-	code := s.generateNumericOTP(6)
-	
+// SendOTP generates a 6-digit OTP, encrypts it with AES-256-GCM, and delivers via Termii.
+func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) error {
+	// Generate 6-digit code using CSPRNG
+	n, err := rand.Int(rand.Reader, big.NewInt(900000))
+	if err != nil {
+		return fmt.Errorf("failed to generate OTP: %w", err)
+	}
+	code := fmt.Sprintf("%06d", n.Int64()+100000)
+
+	// Encrypt for storage (AES-256-GCM)
+	encrypted, err := s.encrypt(code)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt OTP: %w", err)
+	}
+
 	otp := &entities.AuthOTP{
-		MSISDN:    msisdn,
-		Code:      code,
-		Purpose:   entities.PurposeLogin,
-		Status:    "pending",
-		ExpiresAt: time.Now().Add(10 * time.Minute),
+		ID:          uuid.New(),
+		PhoneNumber: phone,
+		Code:        encrypted,
+		Purpose:     entities.OTPPurpose(purpose),
+		Status:      entities.OTPPending,
+		ExpiresAt:   time.Now().Add(5 * time.Minute),
+		CreatedAt:   time.Now(),
 	}
 
 	if err := s.authRepo.CreateOTP(ctx, otp); err != nil {
-		return err
+		return fmt.Errorf("failed to save OTP: %w", err)
 	}
 
-	// REQ-1.1: Deliver via Termii API
-	msg := fmt.Sprintf("Your Loyalty Nexus login code is %s. Valid for 10 minutes.", code)
-	return s.notifySvc.SendSMS(ctx, msisdn, msg)
+	// Deliver SMS via Termii
+	return s.notifySvc.SendOTP(ctx, phone, code)
 }
 
-func (s *AuthService) VerifyLogin(ctx context.Context, msisdn, code string) (string, error) {
-	otp, err := s.authRepo.FindPendingOTP(ctx, msisdn, code, entities.PurposeLogin)
+// VerifyOTP checks the OTP and returns a JWT on success.
+// If the user does not exist, they are auto-registered (first-time flow).
+func (s *AuthService) VerifyOTP(ctx context.Context, phone, code, purpose string) (string, bool, error) {
+	otp, err := s.authRepo.FindLatestPendingOTP(ctx, phone, purpose)
 	if err != nil {
-		return "", fmt.Errorf("invalid or expired code")
+		return "", false, ErrOTPNotFound
+	}
+	if time.Now().After(otp.ExpiresAt) {
+		_ = s.authRepo.ExpireOTP(ctx, otp.ID)
+		return "", false, ErrOTPExpired
 	}
 
-	s.authRepo.MarkOTPUsed(ctx, otp.ID)
+	// Decrypt and compare
+	decrypted, err := s.decrypt(otp.Code)
+	if err != nil || decrypted != code {
+		return "", false, ErrOTPInvalid
+	}
 
-	// Ensure user exists (Guest auto-creation handled in worker, but safe check here)
-	user, err := s.userRepo.FindByMSISDN(ctx, msisdn)
+	_ = s.authRepo.MarkOTPUsed(ctx, otp.ID)
+
+	// Auto-register if new user
+	isNew := false
+	user, err := s.userRepo.FindByPhoneNumber(ctx, phone)
 	if err != nil {
-		// Create if not exists
-		user = &entities.User{
-			MSISDN: msisdn,
-			Tier:   "BRONZE",
+		user, err = s.registerNewUser(ctx, phone)
+		if err != nil {
+			return "", false, fmt.Errorf("registration failed: %w", err)
 		}
-		s.userRepo.Create(ctx, user)
+		isNew = true
 	}
 
-	// REQ-1.2: issue a signed JWT with a 7-day expiry
-	// Assuming GenerateToken helper from pkg/utils
-	return "signed-jwt-token-placeholder", nil
+	if !user.IsActive {
+		return "", false, ErrUserBanned
+	}
+
+	token, err := s.issueJWT(user)
+	if err != nil {
+		return "", false, fmt.Errorf("JWT issue failed: %w", err)
+	}
+
+	return token, isNew, nil
 }
 
-func (s *AuthService) generateNumericOTP(length int) string {
-	const table = "1234567890"
-	b := make([]byte, length)
-	io.ReadFull(rand.Reader, b)
-	for i := 0; i < length; i++ {
-		b[i] = table[int(b[i])%len(table)]
+// ValidateJWT parses and validates a JWT, returning claims.
+func (s *AuthService) ValidateJWT(tokenStr string) (*entities.JWTClaims, error) {
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return s.jwtSecret, nil
+	})
+	if err != nil || !token.Valid {
+		return nil, fmt.Errorf("invalid token: %w", err)
 	}
-	return string(b)
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("invalid claims")
+	}
+
+	return &entities.JWTClaims{
+		UserID:      fmt.Sprintf("%v", claims["uid"]),
+		PhoneNumber: fmt.Sprintf("%v", claims["phone"]),
+		IsAdmin:     false,
+	}, nil
+}
+
+func (s *AuthService) registerNewUser(ctx context.Context, phone string) (*entities.User, error) {
+	user := &entities.User{
+		ID:               uuid.New(),
+		PhoneNumber:      phone,
+		UserCode:         generateUserCode(),
+		Tier:             entities.TierBronze,
+		IsActive:         true,
+		DeviceType:       "smartphone",
+		SubscriptionTier: "free",
+		KYCStatus:        "unverified",
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+	if err := s.userRepo.Create(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *AuthService) issueJWT(user *entities.User) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"uid":   user.ID.String(),
+		"phone": user.PhoneNumber,
+		"tier":  user.Tier,
+		"exp":   time.Now().Add(30 * 24 * time.Hour).Unix(), // 30-day session
+		"iat":   time.Now().Unix(),
+	})
+	return token.SignedString(s.jwtSecret)
+}
+
+// encrypt uses AES-256-GCM. Returns base64-encoded ciphertext.
+func (s *AuthService) encrypt(plaintext string) (string, error) {
+	block, err := aes.NewCipher(s.aesKey)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	ct := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(ct), nil
+}
+
+func (s *AuthService) decrypt(ciphertext string) (string, error) {
+	data, err := base64.StdEncoding.DecodeString(ciphertext)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(s.aesKey)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(data) < nonceSize {
+		return "", errors.New("ciphertext too short")
+	}
+	nonce, ct := data[:nonceSize], data[nonceSize:]
+	pt, err := gcm.Open(nil, nonce, ct, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(pt), nil
+}
+
+func generateUserCode() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return "NXS" + fmt.Sprintf("%08X", b)
+}
+
+func mustEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		panic("required environment variable not set: " + key)
+	}
+	return v
 }

@@ -1,53 +1,140 @@
-# docker-compose.yml
-version: '3.8'
+# Loyalty Nexus — Production-grade Docker Compose
+# Usage: docker compose up --build
+# All secrets via .env — NEVER committed to git
+
+version: '3.9'
 
 services:
+
+  # ─── PostgreSQL 15 ───────────────────────────────────────────
   db:
     image: postgres:15-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: pass
-      POSTGRES_DB: loyalty_nexus
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${DB_USER:-nexus}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: ${DB_NAME:-loyalty_nexus}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"  # Localhost only — not exposed publicly
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-nexus} -d ${DB_NAME:-loyalty_nexus}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # ─── Redis 7 (persistence enabled) ──────────────────────────
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  # ─── NATS JetStream (event broker) ───────────────────────────
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"  # Monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Loyalty Nexus API ───────────────────────────────────────
   api:
-    build: ./backend
-    command: ["/api"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${DB_USER:-nexus}:${DB_PASSWORD}@db:5432/${DB_NAME:-loyalty_nexus}?sslmode=disable
+      REDIS_URL: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      NATS_URL: nats://nats:4222
+      PORT: 8080
     ports:
       - "8080:8080"
-    environment:
-      DATABASE_URL: postgres://user:pass@db:5432/loyalty_nexus?sslmode=disable
-      REDIS_URL: redis:6379
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
+  # ─── Loyalty Nexus Background Worker ─────────────────────────
   worker:
-    build: ./backend
-    command: ["/worker"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: worker
+    restart: unless-stopped
+    env_file: .env
     environment:
-      DATABASE_URL: postgres://user:pass@db:5432/loyalty_nexus?sslmode=disable
+      DATABASE_URL: postgres://${DB_USER:-nexus}:${DB_PASSWORD}@db:5432/${DB_NAME:-loyalty_nexus}?sslmode=disable
       REDIS_URL: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      NATS_URL: nats://nats:4222
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
+  # ─── Next.js Frontend (PWA) ───────────────────────────────────
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080/api/v1}
+      NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY: ${NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY}
     ports:
       - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_URL: http://api:8080/api/v1
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+
+  # ─── Admin Portal ────────────────────────────────────────────
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080/api/v1}
+    ports:
+      - "3001:3000"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:
+  redis_data:
+
+networks:
+  default:
+    driver: bridge

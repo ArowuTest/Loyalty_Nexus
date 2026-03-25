@@ -152,3 +152,7 @@ func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID,
 
 	return gen, nil
 }
+
+func (s *StudioService) FindGenerationByID(ctx context.Context, id uuid.UUID) (*entities.AIGeneration, error) {
+	return s.studioRepo.FindGenerationByID(ctx, id)
+}

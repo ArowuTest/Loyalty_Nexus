@@ -2,17 +2,19 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
 	"loyalty-nexus/internal/application/services"
-	"loyalty-nexus/internal/application/usecases"
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/infrastructure/external"
 	"loyalty-nexus/internal/infrastructure/persistence"
@@ -22,106 +24,152 @@ import (
 )
 
 func main() {
-	dsn := os.Getenv("DATABASE_URL")
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// ─── Database ─────────────────────────────────────────────
+	db, err := gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("Failed to connect to DB: %v", err)
+		log.Fatalf("DB connect: %v", err)
 	}
 
+	// ─── Redis ────────────────────────────────────────────────
 	rdb := redis.NewClient(&redis.Options{
-		Addr: os.Getenv("REDIS_URL"),
+		Addr:     os.Getenv("REDIS_URL"),
+		Password: os.Getenv("REDIS_PASSWORD"),
 	})
 
-	// Repositories
-	userRepo := persistence.NewPostgresUserRepository(db)
-	txRepo := persistence.NewPostgresTransactionRepository(db)
-	studioRepo := persistence.NewPostgresStudioRepository(db)
-	hlrRepo := persistence.NewPostgresHLRRepository(db)
-	chatRepo := persistence.NewPostgresChatRepository(db)
-	authRepo := persistence.NewPostgresAuthRepository(db)
-
-	// Infrastructure
-	eq := queue.NewEventQueue(rdb, "recharge_stream")
+	// ─── Config Manager (reads all rules from network_configs) ──
 	cfg := config.NewConfigManager(db)
-	cfg.Refresh(context.Background())
 
-	// External AI Clients
-	groq := &external.GroqAdapter{}
-	gemini := &external.GeminiAdapter{}
-	deepseek := &external.DeepSeekAdapter{}
+	// ─── Repositories ─────────────────────────────────────────
+	userRepo   := persistence.NewPostgresUserRepository(db)
+	txRepo     := persistence.NewPostgresTransactionRepository(db)
+	studioRepo := persistence.NewPostgresStudioRepository(db)
+	hlrRepo    := persistence.NewPostgresHLRRepository(db)
+	chatRepo   := persistence.NewPostgresChatRepository(db)
+	authRepo   := persistence.NewPostgresAuthRepository(db)
+	prizeRepo  := persistence.NewPostgresPrizeRepository(db)
+
+	// ─── External Adapters ────────────────────────────────────
+	vtpass    := external.NewVTPassAdapter()
+	momoSvc   := external.NewMTNMomoAdapter()
 	usageTracker := external.NewRedisUsageTracker(rdb)
 
-	// AI Orchestrator
-	llmOrchestrator := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, chatRepo, 10, 20)
+	// ─── AI Clients ───────────────────────────────────────────
+	groq     := external.NewGroqAdapter(os.Getenv("GROQ_API_KEY"))
+	gemini   := external.NewGeminiAdapter(os.Getenv("GEMINI_API_KEY"))
+	deepseek := external.NewDeepSeekAdapter(os.Getenv("DEEPSEEK_API_KEY"))
 
-	// Services & UseCases
-	notifySvc := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
-	monetSvc := services.NewMonetizationService(db)
-	authSvc := services.NewAuthService(authRepo, userRepo, notifySvc, os.Getenv("JWT_SECRET"))
-	userUC := usecases.NewUserUseCase(userRepo)
-	hlrSvc := services.NewHLRService(hlrRepo)
-	momoSvc := services.NewMoMoService(&external.MTNMomoAdapter{})
-	spinSvc := services.NewSpinService(userRepo, txRepo, nil, nil, cfg, db) // prizeRepo/fulfillSvc placeholders
-	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, monetSvc, db)
+	// ─── NATS Event Queue ─────────────────────────────────────
+	eq := queue.NewEventQueue(rdb, "recharge_stream")
 
-	// Knowledge / Async Engine
-	notebookLM := &external.NotebookLMAdapter{APIKey: os.Getenv("NOTEBOOK_LM_KEY")}
-	asyncWorker := handlers.NewAsyncStudioWorker(studioSvc, notebookLM)
+	// ─── Services ─────────────────────────────────────────────
+	notifySvc  := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
+	authSvc    := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
+	fulfillSvc := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
+	rechargeSvc := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
+	spinSvc    := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
+	studioSvc  := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, db, cfg)
+	hlrSvc     := services.NewHLRService(hlrRepo)
 
-	// Handlers
-	studioHandler := handlers.NewStudioHandler(studioSvc, llmOrchestrator, asyncWorker, notebookLM)
-	authHandler := handlers.NewAuthHandler(authSvc)
-	momoHandler := handlers.NewMoMoHandler(momoSvc, authSvc)
-	mnoHandler := handlers.NewMNOWebhookHandler(eq)
-	adminHandler := &handlers.AdminHandler{}
-	ussdHandler := &handlers.USSDHandler{}
+	// ─── LLM Orchestrator (Groq → Gemini → DeepSeek) ─────────
+	groqLimit   := cfg.GetInt("chat_groq_daily_limit", 1000)
+	geminiLimit := cfg.GetInt("chat_gemini_daily_limit", 2000)
+	llmOrch := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, chatRepo, groqLimit, geminiLimit)
 
+	// ─── Knowledge Worker (NotebookLM) ────────────────────────
+	kbWorker := handlers.NewAsyncStudioWorker(studioSvc, nil)
+
+	// ─── HTTP Handlers ────────────────────────────────────────
+	authH    := handlers.NewAuthHandler(authSvc)
+	rechargeH := handlers.NewRechargeHandler(rechargeSvc, eq)
+	spinH    := handlers.NewSpinHandler(spinSvc)
+	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
+	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
+	adminH   := handlers.NewAdminHandler(db, cfg)
+	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, cfg)
+
+	// ─── Router ───────────────────────────────────────────────
 	mux := http.NewServeMux()
 
-	// Auth Routes (Public)
-	mux.HandleFunc("/api/v1/auth/otp/send", authHandler.SendOTP)
-	mux.HandleFunc("/api/v1/auth/otp/verify", authHandler.VerifyOTP)
-
-	// USSD Entry Point (Public)
-	mux.Handle("/api/v1/ussd", ussdHandler)
-
-	// Ingestors (Public - verify signatures internally)
-	mux.HandleFunc("/api/v1/recharge/mno-webhook", mnoHandler.BSSRechargeWebhook)
-	mux.HandleFunc("/api/v1/recharge/ingest", func(w http.ResponseWriter, r *http.Request) {
-		// ... existing ingest logic ...
+	// Health
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "1.0.0"})
 	})
 
-	// Protected Routes (Wrapped in middleware)
-	protected := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/user/profile" {
-			userUC.GetProfile(r.Context(), r.URL.Query().Get("msisdn")) // stub
+	// Auth (public)
+	mux.HandleFunc("POST /api/v1/auth/otp/send",   authH.SendOTP)
+	mux.HandleFunc("POST /api/v1/auth/otp/verify", authH.VerifyOTP)
+
+	// Webhooks (public — signature-verified internally)
+	mux.HandleFunc("POST /api/v1/recharge/paystack-webhook", rechargeH.PaystackWebhook)
+	mux.HandleFunc("POST /api/v1/recharge/mno-webhook",      rechargeH.MNOWebhook)
+
+	// USSD (public — HMAC-verified)
+	mux.HandleFunc("POST /api/v1/ussd", ussdH.Handle)
+
+	// Protected routes
+	auth := middleware.AuthMiddleware(authSvc)
+
+	mux.Handle("GET  /api/v1/user/profile",       auth(http.HandlerFunc(userH.GetProfile)))
+	mux.Handle("GET  /api/v1/user/wallet",        auth(http.HandlerFunc(userH.GetWallet)))
+	mux.Handle("POST /api/v1/user/momo/request",  auth(http.HandlerFunc(userH.RequestMoMoLink)))
+	mux.Handle("POST /api/v1/user/momo/verify",   auth(http.HandlerFunc(userH.VerifyMoMo)))
+	mux.Handle("GET  /api/v1/user/transactions",  auth(http.HandlerFunc(userH.GetTransactions)))
+	mux.Handle("GET  /api/v1/user/passport",      auth(http.HandlerFunc(userH.GetPassportURLs)))
+
+	mux.Handle("GET  /api/v1/spin/wheel",         auth(http.HandlerFunc(spinH.GetWheelConfig)))
+	mux.Handle("POST /api/v1/spin/play",          auth(http.HandlerFunc(spinH.Play)))
+	mux.Handle("GET  /api/v1/spin/history",       auth(http.HandlerFunc(spinH.GetHistory)))
+
+	mux.Handle("GET  /api/v1/studio/tools",              auth(http.HandlerFunc(studioH.ListTools)))
+	mux.Handle("POST /api/v1/studio/chat",               auth(http.HandlerFunc(studioH.Chat)))
+	mux.Handle("POST /api/v1/studio/generate",           auth(http.HandlerFunc(studioH.Generate)))
+	mux.Handle("GET  /api/v1/studio/generate/{id}/status", auth(http.HandlerFunc(studioH.GetGenerationStatus)))
+	mux.Handle("GET  /api/v1/studio/gallery",            auth(http.HandlerFunc(studioH.GetGallery)))
+
+	// Admin routes (admin JWT required)
+	adminAuth := middleware.AdminAuthMiddleware(authSvc)
+	mux.Handle("GET    /api/v1/admin/dashboard",          adminAuth(http.HandlerFunc(adminH.GetDashboard)))
+	mux.Handle("GET    /api/v1/admin/config",             adminAuth(http.HandlerFunc(adminH.GetConfig)))
+	mux.Handle("PUT    /api/v1/admin/config/{key}",       adminAuth(http.HandlerFunc(adminH.UpdateConfig)))
+	mux.Handle("GET    /api/v1/admin/prize-pool",         adminAuth(http.HandlerFunc(adminH.GetPrizePool)))
+	mux.Handle("PUT    /api/v1/admin/prize-pool/{id}",    adminAuth(http.HandlerFunc(adminH.UpdatePrize)))
+	mux.Handle("GET    /api/v1/admin/studio-tools",       adminAuth(http.HandlerFunc(adminH.GetStudioTools)))
+	mux.Handle("PUT    /api/v1/admin/studio-tools/{id}",  adminAuth(http.HandlerFunc(adminH.UpdateStudioTool)))
+	mux.Handle("GET    /api/v1/admin/users",              adminAuth(http.HandlerFunc(adminH.ListUsers)))
+	mux.Handle("PUT    /api/v1/admin/users/{id}/suspend", adminAuth(http.HandlerFunc(adminH.SuspendUser)))
+	mux.Handle("GET    /api/v1/admin/fraud-events",       adminAuth(http.HandlerFunc(adminH.GetFraudEvents)))
+	mux.Handle("GET    /api/v1/admin/regional-wars",      adminAuth(http.HandlerFunc(adminH.GetRegionalWars)))
+
+	// ─── HTTP Server ──────────────────────────────────────────
+	port := cfg.GetString("port", "8080")
+	if p := os.Getenv("PORT"); p != "" {
+		port = p
+	}
+
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      middleware.CORS(middleware.RequestLogger(mux)),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	log.Printf("[API] Loyalty Nexus API starting on :%s (mode: %s)", port, cfg.GetString("operation_mode", "independent"))
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[API] Server failed: %v", err)
 		}
-		// ... handle other routes ...
-	})
+	}()
 
-	mux.Handle("/api/v1/user/profile", middleware.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		msisdn := r.URL.Query().Get("msisdn")
-		user, err := userUC.GetProfile(r.Context(), msisdn)
-		if err != nil {
-			http.Error(w, "User not found", 404)
-			return
-		}
-		json.NewEncoder(w).Encode(user)
-	})))
-
-	// MoMo Routes (REQ-1.3)
-	mux.Handle("/api/v1/user/momo/link", middleware.AuthMiddleware(http.HandlerFunc(momoHandler.RequestLink)))
-
-	// Studio Routes
-	mux.Handle("/api/v1/studio/tools", middleware.AuthMiddleware(http.HandlerFunc(studioHandler.ListTools)))
-	mux.Handle("/api/v1/studio/chat", middleware.AuthMiddleware(http.HandlerFunc(studioHandler.Chat)))
-	mux.Handle("/api/v1/studio/generate/image", middleware.AuthMiddleware(http.HandlerFunc(studioHandler.GenerateImage)))
-	mux.Handle("/api/v1/studio/generate/knowledge", middleware.AuthMiddleware(http.HandlerFunc(studioHandler.GenerateKnowledge)))
-	mux.Handle("/api/v1/studio/generate/build", middleware.AuthMiddleware(http.HandlerFunc(studioHandler.GenerateBuild)))
-	mux.Handle("/api/v1/studio/gallery", middleware.AuthMiddleware(http.HandlerFunc(studioHandler.GetGallery)))
-
-	port := os.Getenv("PORT")
-	if port == "" { port = "8080" }
-	log.Printf("Loyalty Nexus API listening on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	<-ctx.Done()
+	log.Println("[API] Shutting down gracefully...")
+	shutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shutCtx)
+	log.Println("[API] Shutdown complete")
 }

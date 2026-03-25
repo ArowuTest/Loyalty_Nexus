@@ -2,33 +2,51 @@ package persistence
 
 import (
 	"context"
+	"errors"
+	"time"
 	"loyalty-nexus/internal/domain/repositories"
 	"gorm.io/gorm"
-	"time"
 )
 
-type PostgresHLRRepository struct {
-	db *gorm.DB
-}
+type postgresHLRRepository struct{ db *gorm.DB }
 
 func NewPostgresHLRRepository(db *gorm.DB) repositories.HLRRepository {
-	return &PostgresHLRRepository{db: db}
+	return &postgresHLRRepository{db: db}
 }
 
-func (r *PostgresHLRRepository) FindByMSISDN(ctx context.Context, msisdn string) (*repositories.NetworkCache, error) {
-	var c repositories.NetworkCache
-	if err := r.db.WithContext(ctx).Table("network_cache").Where("msisdn = ?", msisdn).First(&c).Error; err != nil {
-		return nil, err
+func (r *postgresHLRRepository) GetCached(ctx context.Context, phone string) (*repositories.HLRResult, error) {
+	var row struct {
+		Network      string    `gorm:"column:network"`
+		IsValid      bool      `gorm:"column:is_valid"`
+		LookupSource string    `gorm:"column:lookup_source"`
+		CacheExpires time.Time `gorm:"column:cache_expires"`
 	}
-	return &c, nil
+	err := r.db.WithContext(ctx).Table("network_cache").
+		Where("phone_number = ? AND cache_expires > NOW()", phone).First(&row).Error
+	if err != nil {
+		return nil, errors.New("cache miss")
+	}
+	return &repositories.HLRResult{
+		PhoneNumber:  phone,
+		Network:      row.Network,
+		IsValid:      row.IsValid,
+		LookupSource: row.LookupSource,
+	}, nil
 }
 
-func (r *PostgresHLRRepository) Save(ctx context.Context, cache *repositories.NetworkCache) error {
-	// Note: You might need to add gorm tags or map to an entity if network_cache table structure differs from repository struct
-	// Assuming simple mapping for now.
-	return r.db.WithContext(ctx).Table("network_cache").Save(cache).Error
+func (r *postgresHLRRepository) Cache(ctx context.Context, result *repositories.HLRResult, ttlHours int) error {
+	return r.db.WithContext(ctx).Table("network_cache").
+		Where("phone_number = ?", result.PhoneNumber).
+		Assign(map[string]interface{}{
+			"network":       result.Network,
+			"is_valid":      result.IsValid,
+			"lookup_source": result.LookupSource,
+			"cache_expires": time.Now().Add(time.Duration(ttlHours) * time.Hour),
+			"last_verified": time.Now(),
+		}).FirstOrCreate(&result).Error
 }
 
-func (r *PostgresHLRRepository) Invalidate(ctx context.Context, msisdn string) error {
-	return r.db.WithContext(ctx).Table("network_cache").Where("msisdn = ?", msisdn).Update("is_valid", false).Error
+func (r *postgresHLRRepository) Invalidate(ctx context.Context, phone string) error {
+	return r.db.WithContext(ctx).Table("network_cache").Where("phone_number = ?", phone).
+		Update("cache_expires", time.Now().Add(-1*time.Second)).Error
 }

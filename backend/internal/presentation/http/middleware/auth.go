@@ -2,60 +2,98 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
-	"os"
-	"github.com/golang-jwt/jwt/v5"
-	"loyalty-nexus/pkg/utils"
+
+	"loyalty-nexus/internal/application/services"
 )
 
 type contextKey string
+const (
+	ContextUserID  contextKey = "user_id"
+	ContextPhone   contextKey = "phone"
+	ContextIsAdmin contextKey = "is_admin"
+)
 
-const UserMSISDNKey contextKey = "user_msisdn"
-
-func AuthMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Public routes exclusion
-		path := r.URL.Path
-		if strings.HasPrefix(path, "/api/v1/auth") || 
-		   strings.HasPrefix(path, "/api/v1/recharge/ingest") ||
-		   strings.HasPrefix(path, "/api/v1/ussd") ||
-		   strings.HasPrefix(path, "/api/v1/recharge/mno-webhook") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			http.Error(w, "Invalid auth header", http.StatusUnauthorized)
-			return
-		}
-
-		tokenStr := parts[1]
-		secret := []byte(os.Getenv("JWT_SECRET"))
-
-		token, err := jwt.ParseWithClaims(tokenStr, &utils.TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-			return secret, nil
+// AuthMiddleware validates the Bearer JWT token and injects claims into context.
+func AuthMiddleware(authSvc *services.AuthService) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := extractBearer(r)
+			if token == "" {
+				writeError(w, http.StatusUnauthorized, "missing authorization header")
+				return
+			}
+			claims, err := authSvc.ValidateJWT(token)
+			if err != nil {
+				writeError(w, http.StatusUnauthorized, "invalid or expired token")
+				return
+			}
+			ctx := context.WithValue(r.Context(), ContextUserID, claims.UserID)
+			ctx = context.WithValue(ctx, ContextPhone, claims.PhoneNumber)
+			ctx = context.WithValue(ctx, ContextIsAdmin, false)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
+	}
+}
 
-		if err != nil || !token.Valid {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+// AdminAuthMiddleware validates admin JWT tokens.
+func AdminAuthMiddleware(authSvc *services.AuthService) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := extractBearer(r)
+			if token == "" {
+				writeError(w, http.StatusUnauthorized, "missing authorization header")
+				return
+			}
+			claims, err := authSvc.ValidateJWT(token)
+			if err != nil {
+				writeError(w, http.StatusUnauthorized, "invalid or expired token")
+				return
+			}
+			if !claims.IsAdmin {
+				writeError(w, http.StatusForbidden, "admin access required")
+				return
+			}
+			ctx := context.WithValue(r.Context(), ContextUserID, claims.UserID)
+			ctx = context.WithValue(ctx, ContextIsAdmin, true)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// CORS middleware — restrict to known origins in production.
+func CORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*") // Tighten in production
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-
-		claims, ok := token.Claims.(*utils.TokenClaims)
-		if !ok {
-			http.Error(w, "Invalid claims", http.StatusUnauthorized)
-			return
-		}
-
-		ctx := context.WithValue(r.Context(), UserMSISDNKey, claims.MSISDN)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r)
 	})
+}
+
+// RequestLogger logs each HTTP request.
+func RequestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+	})
+}
+
+func extractBearer(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	if strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimPrefix(h, "Bearer ")
+	}
+	return ""
+}
+
+func writeError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

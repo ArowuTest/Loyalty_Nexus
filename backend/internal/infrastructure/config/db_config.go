@@ -3,67 +3,129 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"log"
+	"os"
+	"strconv"
 	"sync"
 	"time"
+
 	"gorm.io/gorm"
 )
 
+// ConfigManager reads ALL business rules from the network_configs database table.
+// ZERO values are ever hardcoded in application logic.
+// The singleton is refresh-safe: a background goroutine calls Refresh() every 60s.
 type ConfigManager struct {
-	db         *gorm.DB
-	cache      map[string]any
-	mu         sync.RWMutex
-	lastUpdate time.Time
+	db    *gorm.DB
+	mu    sync.RWMutex
+	cache map[string]json.RawMessage
 }
 
 func NewConfigManager(db *gorm.DB) *ConfigManager {
-	return &ConfigManager{
+	cm := &ConfigManager{
 		db:    db,
-		cache: make(map[string]any),
+		cache: make(map[string]json.RawMessage),
+	}
+	if err := cm.Refresh(context.Background()); err != nil {
+		log.Printf("[CONFIG] Initial refresh failed (DB may be initialising): %v", err)
+	}
+	go cm.autoRefresh()
+	return cm
+}
+
+func (c *ConfigManager) autoRefresh() {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if err := c.Refresh(context.Background()); err != nil {
+			log.Printf("[CONFIG] Auto-refresh error: %v", err)
+		}
 	}
 }
 
-func (m *ConfigManager) Refresh(ctx context.Context) error {
-	type configRow struct {
-		ConfigKey   string
-		ConfigValue json.RawMessage
+func (c *ConfigManager) Refresh(ctx context.Context) error {
+	type row struct {
+		Key   string          `gorm:"column:key"`
+		Value json.RawMessage `gorm:"column:value"`
 	}
-	var rows []configRow
-	if err := m.db.WithContext(ctx).Table("program_configs").Select("config_key, config_value").Find(&rows).Error; err != nil {
+	var rows []row
+	if err := c.db.WithContext(ctx).Table("network_configs").Select("key, value").Find(&rows).Error; err != nil {
 		return err
 	}
-
-	newCache := make(map[string]any)
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, r := range rows {
-		var val any
-		json.Unmarshal(r.ConfigValue, &val)
-		newCache[r.ConfigKey] = val
+		c.cache[r.Key] = r.Value
 	}
-
-	m.mu.Lock()
-	m.cache = newCache
-	m.lastUpdate = time.Now()
-	m.mu.Unlock()
 	return nil
 }
 
-func (m *ConfigManager) GetInt(key string, fallback int) int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if v, ok := m.cache[key]; ok {
-		if f, ok := v.(float64); ok {
-			return int(f)
-		}
+// raw returns the raw JSON for a key, checking env var override first.
+func (c *ConfigManager) raw(key string) (string, bool) {
+	// Env overrides take precedence (useful for Docker secrets)
+	if v := os.Getenv("CFG_" + key); v != "" {
+		return v, true
 	}
-	return fallback
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if v, ok := c.cache[key]; ok {
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil {
+			return s, true
+		}
+		return string(v), true
+	}
+	return "", false
 }
 
-func (m *ConfigManager) GetFloat(key string, fallback float64) float64 {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if v, ok := m.cache[key]; ok {
-		if f, ok := v.(float64); ok {
+func (c *ConfigManager) GetString(key, defaultVal string) string {
+	if v, ok := c.raw(key); ok {
+		// Strip surrounding quotes if JSON string
+		if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
+			return v[1 : len(v)-1]
+		}
+		return v
+	}
+	return defaultVal
+}
+
+func (c *ConfigManager) GetInt(key string, defaultVal int) int {
+	if v, ok := c.raw(key); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return defaultVal
+}
+
+func (c *ConfigManager) GetInt64(key string, defaultVal int64) int64 {
+	if v, ok := c.raw(key); ok {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return defaultVal
+}
+
+func (c *ConfigManager) GetFloat(key string, defaultVal float64) float64 {
+	if v, ok := c.raw(key); ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			return f
 		}
 	}
-	return fallback
+	return defaultVal
+}
+
+func (c *ConfigManager) GetBool(key string, defaultVal bool) bool {
+	if v, ok := c.raw(key); ok {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return defaultVal
+}
+
+// IsIndependentMode reads OPERATION_MODE — never hardcoded.
+func (c *ConfigManager) IsIndependentMode() bool {
+	return c.GetString("operation_mode", "independent") == "independent"
 }

@@ -8,26 +8,66 @@ import (
 	"gorm.io/gorm"
 )
 
-type PostgresPrizeRepository struct {
-	db *gorm.DB
-}
+type postgresPrizeRepository struct{ db *gorm.DB }
 
 func NewPostgresPrizeRepository(db *gorm.DB) repositories.PrizeRepository {
-	return &PostgresPrizeRepository{db: db}
+	return &postgresPrizeRepository{db: db}
 }
 
-func (r *PostgresPrizeRepository) CreateClaim(ctx context.Context, claim *entities.PrizeClaim) error {
-	return r.db.WithContext(ctx).Create(claim).Error
+func (r *postgresPrizeRepository) ListActivePrizes(ctx context.Context) ([]entities.PrizePoolEntry, error) {
+	var prizes []entities.PrizePoolEntry
+	err := r.db.WithContext(ctx).Table("prize_pool").Where("is_active = true").Find(&prizes).Error
+	return prizes, err
 }
 
-func (r *PostgresPrizeRepository) UpdateClaim(ctx context.Context, claim *entities.PrizeClaim) error {
-	return r.db.WithContext(ctx).Save(claim).Error
+func (r *postgresPrizeRepository) ListActivePrizesMaxValue(ctx context.Context, maxValueKobo int64) ([]entities.PrizePoolEntry, error) {
+	var prizes []entities.PrizePoolEntry
+	err := r.db.WithContext(ctx).Table("prize_pool").
+		Where("is_active = true AND base_value <= ?", maxValueKobo/100).Find(&prizes).Error
+	return prizes, err
 }
 
-func (r *PostgresPrizeRepository) FindClaimByID(ctx context.Context, id uuid.UUID) (*entities.PrizeClaim, error) {
-	var claim entities.PrizeClaim
-	if err := r.db.WithContext(ctx).First(&claim, "id = ?", id).Error; err != nil {
-		return nil, err
+func (r *postgresPrizeRepository) GetDailyInventoryUsed(ctx context.Context, prizeID uuid.UUID) (int, error) {
+	var count int64
+	r.db.WithContext(ctx).Table("spin_results").
+		Joins("JOIN prize_pool ON prize_pool.name = spin_results.prize_type").
+		Where("prize_pool.id = ? AND spin_results.created_at >= CURRENT_DATE", prizeID).
+		Count(&count)
+	return int(count), nil
+}
+
+func (r *postgresPrizeRepository) CreateSpinResult(ctx context.Context, result *entities.SpinResult) error {
+	return r.db.WithContext(ctx).Create(result).Error
+}
+
+func (r *postgresPrizeRepository) FindSpinResult(ctx context.Context, id uuid.UUID) (*entities.SpinResult, error) {
+	var result entities.SpinResult
+	err := r.db.WithContext(ctx).Where("id = ?", id).First(&result).Error
+	return &result, err
+}
+
+func (r *postgresPrizeRepository) UpdateSpinFulfillment(ctx context.Context, id uuid.UUID, status entities.FulfillmentStatus, ref, errMsg string) error {
+	updates := map[string]interface{}{"fulfillment_status": status}
+	if ref != "" {
+		updates["fulfillment_ref"] = ref
 	}
-	return &claim, nil
+	if errMsg != "" {
+		updates["error_message"] = errMsg
+	}
+	return r.db.WithContext(ctx).Table("spin_results").Where("id = ?", id).Updates(updates).Error
+}
+
+func (r *postgresPrizeRepository) ListPendingFulfillments(ctx context.Context, limit int) ([]entities.SpinResult, error) {
+	var results []entities.SpinResult
+	r.db.WithContext(ctx).Table("spin_results").
+		Where("fulfillment_status IN ('pending', 'processing')").
+		Order("created_at ASC").Limit(limit).Find(&results)
+	return results, nil
+}
+
+func (r *postgresPrizeRepository) CountUserSpinsToday(ctx context.Context, userID uuid.UUID) (int, error) {
+	var count int64
+	r.db.WithContext(ctx).Table("spin_results").
+		Where("user_id = ? AND created_at >= CURRENT_DATE", userID).Count(&count)
+	return int(count), nil
 }

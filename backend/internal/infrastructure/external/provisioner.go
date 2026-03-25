@@ -5,68 +5,118 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"os"
 	"time"
 )
 
-type VTPassRequest struct {
-	RequestID string `json:"request_id"`
-	ServiceID string `json:"service_id"`
-	Amount    string `json:"amount"`
-	Phone     string `json:"phone"`
-}
-
-type VTPassResponse struct {
-	Code     string `json:"code"`
-	Content  struct {
-		Transactions struct {
-			Status string `json:"status"`
-		} `json:"transactions"`
-	} `json:"content"`
-}
-
+// VTPassAdapter implements VTPassClient against the VTPass REST API.
+// Ref: https://vtpass.com/documentation
 type VTPassAdapter struct {
-	APIKey    string
-	PublicKey string
-	BaseURL   string
+	apiKey    string
+	pubKey    string
+	baseURL   string
+	client    *http.Client
 }
 
-func NewVTPassAdapter(apiKey, pubKey string) *VTPassAdapter {
+func NewVTPassAdapter() *VTPassAdapter {
 	return &VTPassAdapter{
-		APIKey:    apiKey,
-		PublicKey: pubKey,
-		BaseURL:   "https://vtpass.com/api", // In production
+		apiKey:  os.Getenv("VTPASS_API_KEY"),
+		pubKey:  os.Getenv("VTPASS_PUBLIC_KEY"),
+		baseURL: "https://vtpass.com/api",
+		client:  &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
-func (a *VTPassAdapter) PurchaseAirtime(ctx context.Context, msisdn string, amountKobo int64, network string) (string, error) {
-	// 1. Generate unique request_id (YYYYMMDDHHII + random)
-	reqID := time.Now().Format("200601021504") + msisdn[len(msisdn)-4:]
-	
-	serviceID := a.mapNetworkToServiceID(network, "airtime")
-	amount := fmt.Sprintf("%.0f", float64(amountKobo)/100)
-
-	payload := VTPassRequest{
-		RequestID: reqID,
-		ServiceID: serviceID,
-		Amount:    amount,
-		Phone:     msisdn,
+func (v *VTPassAdapter) TopUpAirtime(ctx context.Context, phone, network string, amountNaira float64, ref string) (string, error) {
+	payload := map[string]interface{}{
+		"request_id":   ref,
+		"serviceID":    networkToVTPassID(network),
+		"amount":       amountNaira,
+		"phone":        phone,
 	}
-
-	// 2. Make API Call (Simulation)
-	fmt.Printf("[VTPass API] Request: %+v\n", payload)
-	
-	// Mock success
-	return "VT-" + reqID, nil
+	return v.post(ctx, "/pay", payload)
 }
 
-func (a *VTPassAdapter) PurchaseData(ctx context.Context, msisdn string, planID string, network string) (string, error) {
-	// Similar logic for data bundles
-	return "VT-DATA-MOCK", nil
+func (v *VTPassAdapter) TopUpData(ctx context.Context, phone, network string, dataMB float64, ref string) (string, error) {
+	serviceID := networkToVTPassDataID(network)
+	billersCode := networkDataCode(network, dataMB)
+	payload := map[string]interface{}{
+		"request_id":   ref,
+		"serviceID":    serviceID,
+		"billersCode":  billersCode,
+		"variation_code": billersCode,
+		"amount":       0, // Determined by variation
+		"phone":        phone,
+	}
+	return v.post(ctx, "/pay", payload)
 }
 
-func (a *VTPassAdapter) mapNetworkToServiceID(network, category string) string {
-	// Mapping logic for VTPass service IDs (mtn, airtel, etc.)
-	return fmt.Sprintf("%s-%s", network, category)
+func (v *VTPassAdapter) VerifyService(ctx context.Context, serviceID string) (bool, error) {
+	return true, nil
+}
+
+func (v *VTPassAdapter) post(ctx context.Context, path string, payload map[string]interface{}) (string, error) {
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, v.baseURL+path, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", v.apiKey)
+	req.Header.Set("public-key", v.pubKey)
+
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("VTPass request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code    string `json:"code"`
+		Content struct {
+			Transactions struct {
+				TransactionID string `json:"transactionId"`
+				Status        string `json:"status"`
+			} `json:"transactions"`
+		} `json:"content"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("VTPass decode error: %w", err)
+	}
+	if result.Code != "000" {
+		return "", fmt.Errorf("VTPass error code: %s", result.Code)
+	}
+	return result.Content.Transactions.TransactionID, nil
+}
+
+func networkToVTPassID(network string) string {
+	m := map[string]string{
+		"MTN": "mtn", "AIRTEL": "airtel", "GLO": "glo", "9MOBILE": "etisalat",
+	}
+	if v, ok := m[network]; ok {
+		return v
+	}
+	return "mtn"
+}
+
+func networkToVTPassDataID(network string) string {
+	m := map[string]string{
+		"MTN": "mtn-data", "AIRTEL": "airtel-data", "GLO": "glo-data", "9MOBILE": "etisalat-data",
+	}
+	if v, ok := m[network]; ok {
+		return v
+	}
+	return "mtn-data"
+}
+
+func networkDataCode(network string, dataMB float64) string {
+	// MTN data variation codes
+	switch {
+	case dataMB <= 100:
+		return "mtn-10mb-200"
+	case dataMB <= 500:
+		return "mtn-100mb-200"
+	case dataMB <= 1024:
+		return "mtn-1gb-300"
+	default:
+		return "mtn-2gb-500"
+	}
 }

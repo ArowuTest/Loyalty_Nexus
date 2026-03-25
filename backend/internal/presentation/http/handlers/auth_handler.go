@@ -2,51 +2,67 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+
 	"loyalty-nexus/internal/application/services"
 )
 
 type AuthHandler struct {
-	authService *services.AuthService
+	authSvc *services.AuthService
 }
 
 func NewAuthHandler(as *services.AuthService) *AuthHandler {
-	return &AuthHandler{authService: as}
+	return &AuthHandler{authSvc: as}
+}
+
+type SendOTPRequest struct {
+	PhoneNumber string `json:"phone_number"`
+	Purpose     string `json:"purpose"` // login | momo_link | prize_claim
+}
+
+type VerifyOTPRequest struct {
+	PhoneNumber string `json:"phone_number"`
+	Code        string `json:"code"`
+	Purpose     string `json:"purpose"`
 }
 
 func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		MSISDN string `json:"msisdn"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", 400)
+	var req SendOTPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PhoneNumber == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "phone_number is required"})
 		return
 	}
-
-	if err := h.authService.SendLoginOTP(r.Context(), req.MSISDN); err != nil {
-		http.Error(w, err.Error(), 500)
+	if req.Purpose == "" {
+		req.Purpose = "login"
+	}
+	if err := h.authSvc.SendOTP(r.Context(), req.PhoneNumber, req.Purpose); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send OTP"})
 		return
 	}
-
-	w.WriteHeader(200)
-	json.NewEncoder(w).Encode(map[string]string{"message": "OTP Sent"})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "OTP sent"})
 }
 
 func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		MSISDN string `json:"msisdn"`
-		Code   string `json:"code"`
-	}
+	var req VerifyOTPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", 400)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-
-	token, err := h.authService.VerifyLogin(r.Context(), req.MSISDN, req.Code)
+	if req.Purpose == "" {
+		req.Purpose = "login"
+	}
+	token, isNew, err := h.authSvc.VerifyOTP(r.Context(), req.PhoneNumber, req.Code, req.Purpose)
 	if err != nil {
-		http.Error(w, err.Error(), 401)
+		statusCode := http.StatusUnauthorized
+		if errors.Is(err, services.ErrOTPExpired) {
+			statusCode = http.StatusGone
+		}
+		writeJSON(w, statusCode, map[string]string{"error": err.Error()})
 		return
 	}
-
-	json.NewEncoder(w).Encode(map[string]string{"token": token})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"token":    token,
+		"is_new_user": isNew,
+	})
 }
