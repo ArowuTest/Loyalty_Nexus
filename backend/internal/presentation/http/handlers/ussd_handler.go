@@ -18,10 +18,16 @@ func (h *USSDHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(text, "*")
 
 	if text == "" {
-		response = "CON Nexus Rewards\n1. My Balance\n2. Redeem Points\n3. Spin Wheel\n4. Regional Wars"
+		response = "CON Nexus Rewards\n1. My Balance\n2. Redeem Points\n3. Spin Wheel\n4. Regional Wars\n5. Link MoMo"
 	} else if parts[0] == "1" {
-		// My Balance
-		response = "END Your Balance:\nPulse Points: 150\nSpin Credits: 2"
+		// ...
+	} else if parts[0] == "5" {
+		// Link MoMo (REQ-1.3)
+		if len(parts) == 1 {
+			response = "CON Enter MTN MoMo Number:"
+		} else {
+			response = "END Request Accepted. We will verify your MoMo account and notify you via SMS."
+		}
 	} else if parts[0] == "2" {
 		// Redeem Points (REQ-3.4)
 		if len(parts) == 1 {

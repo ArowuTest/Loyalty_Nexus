@@ -35,6 +35,7 @@ export default function AdminPortal() {
               { name: 'Prize Engine', icon: Trophy },
               { name: 'AI Studio', icon: Wand2 },
               { name: 'Regional Wars', icon: Zap },
+              { name: 'Monetization', icon: TrendingUp },
               { name: 'Users & Fraud', icon: ShieldCheck },
             ].map((item) => (
               <button
@@ -69,7 +70,57 @@ export default function AdminPortal() {
         {activeTab === 'Program Rules' && <ProgramRulesTab />}
         {activeTab === 'Prize Engine' && <PrizeEngineTab />}
         {activeTab === 'Regional Wars' && <RegionalWarsTab />}
+        {activeTab === 'Monetization' && <MonetizationTab />}
       </main>
+    </div>
+  );
+}
+
+function MonetizationTab() {
+  return (
+    <div className="space-y-10">
+      <header>
+        <h2 className="text-4xl font-black text-white italic tracking-tighter">Strategic Partner Model</h2>
+        <p className="text-slate-500 font-medium mt-2 uppercase text-xs tracking-widest">ARPU Uplift & Bounty Tracking</p>
+      </header>
+
+      <div className="grid grid-cols-3 gap-6">
+        {[
+          { label: 'Cumulative Uplift', value: '₦4.2M', trend: '+18%', icon: TrendingUp },
+          { label: 'Churn Bounties', value: '1,240', trend: '+5%', icon: Users },
+          { label: 'GPU Usage Fee', value: '$420', trend: '+12%', icon: Wand2 },
+        ].map((stat) => (
+          <div key={stat.label} className="glass p-6 rounded-3xl border border-white/5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-brand-gold">
+              <stat.icon size={24} />
+            </div>
+            <div>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
+              <p className="text-2xl font-black text-white italic">{stat.value}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="glass rounded-[2rem] border border-white/5 overflow-hidden shadow-2xl">
+        <div className="p-8 border-b border-white/5 bg-white/5">
+          <h3 className="text-sm font-black text-white uppercase tracking-widest leading-none italic">Revenue Breakdown by KPI</h3>
+        </div>
+        <div className="p-8 space-y-6">
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Monthly SaaS License Fee</span>
+            <span className="text-sm font-black text-white tracking-tighter italic">Fixed Agreement</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Performance Fee (ARPU Uplift)</span>
+            <span className="text-sm font-black text-white tracking-tighter italic">₦3,120,400</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">Churn Recovery Bounty (₦150/user)</span>
+            <span className="text-sm font-black text-white tracking-tighter italic">₦186,000</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
