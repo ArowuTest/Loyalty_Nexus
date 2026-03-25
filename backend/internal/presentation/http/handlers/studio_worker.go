@@ -47,7 +47,8 @@ func (w *AsyncStudioWorker) StartJob(genID uuid.UUID, providerGenID string) {
 					return
 				}
 				if ready {
-					w.studioService.CompleteGeneration(ctx, genID, url)
+					// Mapping cost based on tool/provider logic
+					w.studioService.CompleteGeneration(ctx, genID, url, "NOTEBOOK_LM", 10000)
 					log.Printf("[AsyncWorker] Completed GenID: %s", genID)
 					return
 				}

@@ -134,7 +134,8 @@ func (h *StudioHandler) GenerateImage(w http.ResponseWriter, r *http.Request) {
 	outputURL := fmt.Sprintf("https://cdn.loyalty-nexus.ai/generated/%s.webp", gen.ID.String())
 	
 	// Simulation of success
-	if err := h.studioService.CompleteGeneration(r.Context(), gen.ID, outputURL); err != nil {
+	// costMicros is internal tracking of API costs (Innovation 6.4)
+	if err := h.studioService.CompleteGeneration(r.Context(), gen.ID, outputURL, "FAL_AI", 50000); err != nil {
 		h.studioService.FailGeneration(r.Context(), gen.ID, "Storage failure")
 		http.Error(w, "Processing failed", http.StatusInternalServerError)
 		return

@@ -41,12 +41,20 @@ func (s *StudioService) GetUserGallery(ctx context.Context, userID uuid.UUID) ([
 	return s.studioRepo.GetUserGallery(ctx, userID)
 }
 
-func (s *StudioService) CompleteGeneration(ctx context.Context, genID uuid.UUID, outputURL string) error {
+func (s *StudioService) CompleteGeneration(ctx context.Context, genID uuid.UUID, outputURL string, provider string, costMicros int) error {
 	if err := s.studioRepo.UpdateStatus(ctx, genID, "completed", outputURL, ""); err != nil {
 		return err
 	}
 
-	// Trigger SMS Notification
+	// 1. Track GPU/API Usage (Innovation 6.4)
+	usage := map[string]interface{}{
+		"generation_id":      genID,
+		"provider":           provider,
+		"compute_cost_micros": costMicros,
+	}
+	s.db.Table("studio_usage_metrics").Create(usage)
+
+	// 2. Trigger SMS Notification
 	gen, err := s.studioRepo.FindGenerationByID(ctx, genID)
 	if err == nil {
 		user, _ := s.userRepo.FindByID(ctx, gen.UserID)
