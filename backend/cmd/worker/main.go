@@ -37,6 +37,7 @@ func main() {
 	hlrRepo := persistence.NewPostgresHLRRepository(db)
 	fraudGuard := services.NewFraudGuard(db)
 	hlrSvc := services.NewHLRService(hlrRepo)
+	monetizationSvc := services.NewMonetizationService(db)
 	
 	walletAdapter := &external.RebitesWalletAdapter{} 
 	passportSvc := services.NewPassportService(walletAdapter) 
@@ -79,21 +80,28 @@ func main() {
 					continue
 				}
 
-				// 2. HLR Validation (if integrated)
+				// 2. HLR Validation
 				if os.Getenv("OPERATION_MODE") == "integrated" {
 					hlrSvc.DetectNetwork(ctx, event.MSISDN, nil)
 				}
 
-				processRecharge(ctx, event, userRepo, txRepo, cfg, db, passportSvc)
+				processRecharge(ctx, event, userRepo, txRepo, cfg, db, passportSvc, monetizationSvc)
 				rdb.XAck(ctx, streamName, groupName, msg.ID)
 			}
 		}
 	}
 }
 
-func processRecharge(ctx context.Context, event queue.RechargeEvent, ur repositories.UserRepository, tr repositories.TransactionRepository, cfg *config.ConfigManager, db *gorm.DB, ps *services.PassportService) {
+func processRecharge(ctx context.Context, event queue.RechargeEvent, ur repositories.UserRepository, tr repositories.TransactionRepository, cfg *config.ConfigManager, db *gorm.DB, ps *services.PassportService, ms *services.MonetizationService) {
 	isFirstRecharge := false
 	user, err := ur.FindByMSISDN(ctx, event.MSISDN)
+	
+	// Track Last Activity before updating for monetization logic
+	lastActivity := time.Time{}
+	if err == nil {
+		lastActivity = user.LastVisitAt
+	}
+
 	if err != nil {
 		isFirstRecharge = true
 		user = &entities.User{
@@ -124,7 +132,6 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	var tier struct {
 		PointsPerNaira float64
 	}
-	// Select highest tier rate (REQ-5.2.3)
 	err = db.Table("recharge_tiers").
 		Where("min_amount_kobo <= ? AND is_active = true", event.Amount).
 		Order("min_amount_kobo DESC").
@@ -133,9 +140,8 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 		Scan(&tier).Error
 	
 	rate := tier.PointsPerNaira
-	if rate == 0 { rate = 0.004 } // Default N250 = 1pt
+	if rate == 0 { rate = 0.004 } 
 
-	// Multipliers (Global + Regional)
 	globalMultiplier := cfg.GetFloat("global_points_multiplier", 1.0)
 	regionalMultiplier := 1.0
 	if user.State != "" {
@@ -160,7 +166,6 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 		pointsEarned += bonuses
 	}
 
-	// Streak milestone bonus
 	var streakBonus int64
 	db.Table("program_bonuses").
 		Where("event_type = 'streak_milestone' AND threshold = ? AND is_active = true", user.StreakCount).
@@ -178,6 +183,10 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	}
 
 	ur.Update(ctx, user)
+	
+	// 4. Strategic Monetization Tracking (Section 6)
+	ms.TrackRechargeActivity(ctx, user.ID, user.MSISDN, event.Amount, lastActivity)
+
 	ps.SyncWallet(ctx, user.ID.String(), user.TotalPoints, user.StreakCount, 500) 
 
 	tx := &entities.Transaction{
