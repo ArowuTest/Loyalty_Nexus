@@ -27,6 +27,10 @@ func NewStudioService(sr repositories.StudioRepository, ur repositories.UserRepo
 	}
 }
 
+func (s *StudioService) ListActiveTools(ctx context.Context) ([]entities.StudioTool, error) {
+	return s.studioRepo.ListActiveTools(ctx)
+}
+
 // RequestGeneration handles the atomic point deduction and creation of a generation record
 func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID, toolID uuid.UUID, prompt string) (*entities.AIGeneration, error) {
 	tool, err := s.studioRepo.FindToolByID(ctx, toolID)
@@ -39,8 +43,8 @@ func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID,
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 
-	if user.PointBalance < tool.PointCost {
-		return nil, fmt.Errorf("insufficient points: need %d, have %d", tool.PointCost, user.PointBalance)
+	if user.TotalPoints < tool.PointCost {
+		return nil, fmt.Errorf("insufficient points: need %d, have %d", tool.PointCost, user.TotalPoints)
 	}
 
 	// Atomic Point Deduction + Generation Record

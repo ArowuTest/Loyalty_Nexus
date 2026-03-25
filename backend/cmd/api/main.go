@@ -17,6 +17,8 @@ import (
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/infrastructure/persistence"
 	"loyalty-nexus/internal/infrastructure/queue"
+	"loyalty-nexus/internal/infrastructure/external"
+	"loyalty-nexus/internal/presentation/http/handlers"
 )
 
 func main() {
@@ -33,15 +35,30 @@ func main() {
 	// Repositories
 	userRepo := persistence.NewPostgresUserRepository(db)
 	txRepo := persistence.NewPostgresTransactionRepository(db)
+	studioRepo := persistence.NewPostgresStudioRepository(db)
 
 	// Infrastructure
 	eq := queue.NewEventQueue(rdb, "recharge_stream")
 	cfg := config.NewConfigManager(db)
 	cfg.Refresh(context.Background())
 
+	// External AI Clients (Proxies/Adapters)
+	// In production, these are initialized with real API keys from env
+	groq := &external.GroqAdapter{}
+	gemini := &external.GeminiAdapter{}
+	deepseek := &external.DeepSeekAdapter{}
+	usageTracker := external.NewRedisUsageTracker(rdb)
+
+	// AI Orchestrator
+	llmOrchestrator := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, 10, 20)
+
 	// Services & UseCases
 	userUC := usecases.NewUserUseCase(userRepo)
 	spinSvc := services.NewSpinService(userRepo, txRepo, cfg, db)
+	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, db)
+
+	// Handlers
+	studioHandler := handlers.NewStudioHandler(studioSvc, llmOrchestrator)
 
 	// --- ROUTES ---
 
@@ -76,6 +93,10 @@ func main() {
 		}
 		json.NewEncoder(w).Encode(tx)
 	})
+
+	// Studio Routes
+	http.HandleFunc("/api/v1/studio/tools", studioHandler.ListTools)
+	http.HandleFunc("/api/v1/studio/chat", studioHandler.Chat)
 
 	port := os.Getenv("PORT")
 	if port == "" { port = "8080" }
