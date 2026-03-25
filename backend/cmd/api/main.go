@@ -108,7 +108,11 @@ func main() {
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
 	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc)
 	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, cfg)
-	warsH    := handlers.NewWarsHandler(warssSvc)
+	// ─── WebSocket Hub (Regional Wars real-time leaderboard) ────
+	leaderboardHub := handlers.NewLeaderboardHub()
+	handlers.StartLeaderboardPoller(ctx, leaderboardHub, warssSvc, 30*time.Second)
+
+	warsH    := handlers.NewWarsHandler(warssSvc, leaderboardHub)
 	drawH    := handlers.NewDrawHandler(drawSvc)
 	passportH := handlers.NewPassportHandler(passportSvc)
 	fraudH   := handlers.NewFraudHandler(fraudSvc)
@@ -172,6 +176,8 @@ func main() {
 	mux.Handle("GET  /api/v1/wars/my-rank",             auth(http.HandlerFunc(warsH.GetMyRank)))
 	mux.Handle("GET  /api/v1/wars/history",             auth(http.HandlerFunc(warsH.GetHistory)))
 	mux.Handle("GET  /api/v1/wars/{period}/winners",    auth(http.HandlerFunc(warsH.GetWinners)))
+	// WebSocket: real-time leaderboard (spec §3.5 Phase 3)
+	mux.Handle("GET  /api/v1/wars/live",                auth(http.HandlerFunc(warsH.LiveLeaderboard)))
 
 	// Passport routes (spec §6)
 	mux.Handle("GET  /api/v1/passport",              auth(http.HandlerFunc(passportH.GetPassport)))
@@ -255,6 +261,21 @@ func main() {
 
 	log.Printf("[API] Loyalty Nexus API starting on :%s (mode: %s)", port, cfg.GetString("operation_mode", "independent"))
 
+	// ─── Recharge-event → leaderboard broadcast ─────────────────────────
+	// Subscribe to the recharge stream; on every successful recharge re-fetch
+	// the leaderboard and push to all connected WebSocket clients (≤1s latency).
+	go eq.Subscribe(ctx, "wars-ws-group", "api-server", func(event map[string]interface{}) error {
+		if leaderboardHub.ConnectedClients() == 0 {
+			return nil // no one watching — skip expensive query
+		}
+		entries, err := warssSvc.GetLeaderboard(ctx, 37)
+		if err != nil {
+			return nil // non-fatal; poller will catch it in ≤30s
+		}
+		leaderboardHub.BroadcastLeaderboard(entries, currentWarPeriodStr(), "update")
+		return nil
+	})
+
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[API] Server failed: %v", err)
@@ -267,4 +288,9 @@ func main() {
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
 	log.Println("[API] Shutdown complete")
+}
+
+// currentWarPeriodStr returns "YYYY-MM" for the current UTC month.
+func currentWarPeriodStr() string {
+	return time.Now().UTC().Format("2006-01")
 }

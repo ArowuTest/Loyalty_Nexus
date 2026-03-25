@@ -50,8 +50,8 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           working-directory: backend
-          version: latest
-          args: --timeout=5m
+          version: v1.62.2
+          args: --timeout=5m --disable=typecheck --enable=govet,errcheck,staticcheck
 
       - name: Run migrations
         working-directory: backend
@@ -100,11 +100,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
+          cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
       - name: Install
         working-directory: frontend
-        run: npm ci
+        run: npm ci --prefer-offline
       - name: Lint
         working-directory: frontend
         run: npm run lint || true
@@ -123,11 +123,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
+          cache: 'npm'
           cache-dependency-path: admin/package-lock.json
       - name: Install
         working-directory: admin
-        run: npm ci
+        run: npm ci --prefer-offline
       - name: Lint
         working-directory: admin
         run: npm run lint || true

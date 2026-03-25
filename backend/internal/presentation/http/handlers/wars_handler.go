@@ -23,10 +23,11 @@ import (
 
 type WarsHandler struct {
 	warsSvc *services.RegionalWarsService
+	hub     *LeaderboardHub
 }
 
-func NewWarsHandler(ws *services.RegionalWarsService) *WarsHandler {
-	return &WarsHandler{warsSvc: ws}
+func NewWarsHandler(ws *services.RegionalWarsService, hub *LeaderboardHub) *WarsHandler {
+	return &WarsHandler{warsSvc: ws, hub: hub}
 }
 
 // GET /api/v1/wars/leaderboard
