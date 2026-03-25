@@ -64,14 +64,40 @@ func main() {
 
 	// Handlers
 	studioHandler := handlers.NewStudioHandler(studioSvc, llmOrchestrator, asyncWorker, notebookLM)
+	adminHandler := &handlers.AdminHandler{} // To be fully initialized
+	ussdHandler := &handlers.USSDHandler{}
 
 	// --- ROUTES ---
 
-	// Ingestor (MTN Gateway Endpoint)
+	// USSD Entry Point
+	http.Handle("/api/v1/ussd", ussdHandler)
+
+	// Admin Cockpit
+	http.HandleFunc("/api/v1/admin/config/update", adminHandler.UpdateProgramConfig)
+	http.HandleFunc("/api/v1/admin/prizes", adminHandler.ListPrizes)
+	http.HandleFunc("/api/v1/admin/prizes/update", adminHandler.UpdatePrizeWeight)
+
+	// Ingestor (MNO / Paystack Gateway Endpoint)
 	http.HandleFunc("/api/v1/recharge/ingest", func(w http.ResponseWriter, r *http.Request) {
+		mode := os.Getenv("OPERATION_MODE")
 		msisdn := r.URL.Query().Get("msisdn")
-		amount := 100000 // mock N1000
-		event := queue.RechargeEvent{MSISDN: msisdn, Amount: int64(amount), Ref: "MTN-" + time.Now().Format("150405")}
+		amountRaw := r.URL.Query().Get("amount")
+		
+		var amount int64
+		fmt.Sscanf(amountRaw, "%d", &amount)
+
+		// Verification logic based on mode
+		if mode == "integrated" {
+			// Validate MNO signature/header
+		} else {
+			// Independent Mode: Validate Paystack origin or ref
+		}
+
+		event := queue.RechargeEvent{
+			MSISDN: msisdn, 
+			Amount: amount, 
+			Ref:    "NEX-" + time.Now().Format("150405"),
+		}
 		eq.PushRecharge(r.Context(), event)
 		w.WriteHeader(202)
 		fmt.Fprintf(w, "Accepted")
