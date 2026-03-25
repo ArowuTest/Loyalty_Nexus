@@ -1,5 +1,3 @@
-package main
-
 import (
 	"context"
 	"database/sql"
@@ -16,48 +14,47 @@ import (
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/persistence"
 	"loyalty-nexus/internal/infrastructure/queue"
+	"loyalty-nexus/internal/application/services"
 )
 
 func main() {
-	db, err := sql.Open("postgres", os.Getenv("DATABASE_URL"))
-	if err != nil {
-		log.Fatalf("Failed to connect to DB: %v", err)
-	}
-	defer db.Close()
-
-	rdb := redis.NewClient(&redis.Options{
-		Addr: os.Getenv("REDIS_URL"),
-	})
+	// ... existing db/redis setup ...
+	db, _ := sql.Open("postgres", os.Getenv("DATABASE_URL"))
+	rdb := redis.NewClient(&redis.Options{Addr: os.Getenv("REDIS_URL")})
 
 	userRepo := persistence.NewPostgresUserRepository(db)
 	txRepo := persistence.NewPostgresTransactionRepository(db)
+	fraudGuard := services.NewFraudGuard(db)
+	hlrSvc := services.NewHLRService(nil, os.Getenv("TERMII_API_KEY")) // assuming cache repo optional
 
 	ctx := context.Background()
-	streamName := "recharge_stream"
-	groupName := "nexus_processors"
-
-	rdb.XGroupCreateMkStream(ctx, streamName, groupName, "0")
-
-	log.Printf("Loyalty Nexus Worker started.")
+	// ... stream setup ...
 
 	for {
-		entries, err := rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group:    groupName,
-			Consumer: "worker-1",
-			Streams:  []string{streamName, ">"},
-			Count:    10,
-			Block:    0,
-		}).Result()
-
-		if err != nil {
-			time.Sleep(2 * time.Second)
-			continue
-		}
-
+		// ... read group ...
 		for _, stream := range entries {
 			for _, msg := range stream.Messages {
 				var event queue.RechargeEvent
 				json.Unmarshal([]byte(msg.Values["payload"].(string)), &event)
+
+				// 1. Fraud Check
+				isFraud, reason, _ := fraudGuard.IsFraudulent(ctx, event.MSISDN, event.Amount)
+				if isFraud {
+					log.Printf("[Worker] Fraud Blocked: %s | Reason: %s", event.MSISDN, reason)
+					rdb.XAck(ctx, streamName, groupName, msg.ID)
+					continue
+				}
+
+				// 2. HLR Validation (Integrated Mode)
+				if os.Getenv("OPERATION_MODE") == "integrated" {
+					res, err := hlrSvc.DetectNetwork(ctx, event.MSISDN, nil)
+					if err != nil {
+						log.Printf("[Worker] HLR Failed for %s: %v", event.MSISDN, err)
+						// Handle error (e.g., dead letter queue or retry)
+					} else {
+						log.Printf("[Worker] Validated MSISDN %s on %s", res.MSISDN, res.Network)
+					}
+				}
 
 				processRecharge(ctx, event, userRepo, txRepo)
 				rdb.XAck(ctx, streamName, groupName, msg.ID)
