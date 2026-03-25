@@ -10,15 +10,60 @@ import (
 )
 
 type StudioHandler struct {
-	studioService   *services.StudioService
-	llmOrchestrator *external.LLMOrchestrator
+	studioService      *services.StudioService
+	llmOrchestrator    *external.LLMOrchestrator
+	asyncWorker        *AsyncStudioWorker
+	knowledgeGenerator external.KnowledgeGenerator
 }
 
-func NewStudioHandler(ss *services.StudioService, lo *external.LLMOrchestrator) *StudioHandler {
+func NewStudioHandler(ss *services.StudioService, lo *external.LLMOrchestrator, aw *AsyncStudioWorker, kg external.KnowledgeGenerator) *StudioHandler {
 	return &StudioHandler{
-		studioService:   ss,
-		llmOrchestrator: lo,
+		studioService:      ss,
+		llmOrchestrator:    lo,
+		asyncWorker:        aw,
+		knowledgeGenerator: kg,
 	}
+}
+
+func (h *StudioHandler) GenerateKnowledge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var reqBody struct {
+		UserID string    `json:"user_id"`
+		ToolID uuid.UUID `json:"tool_id"`
+		Topic  string    `json:"topic"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	uid, _ := uuid.Parse(reqBody.UserID)
+
+	// 1. Initial Request (Atomic Point Deduction)
+	gen, err := h.studioService.RequestGeneration(r.Context(), uid, reqBody.ToolID, reqBody.Topic)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusPaymentRequired)
+		return
+	}
+
+	// 2. Trigger Async Generation at Provider (NotebookLM)
+	providerGenID, err := h.knowledgeGenerator.TriggerGeneration(r.Context(), reqBody.Topic, "pdf")
+	if err != nil {
+		h.studioService.FailGeneration(r.Context(), gen.ID, "Provider trigger failed")
+		http.Error(w, "Trigger failed", http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Start Background Polling
+	h.asyncWorker.StartJob(gen.ID, providerGenID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"generation_id": gen.ID.String(), "status": "processing"})
 }
 
 func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {

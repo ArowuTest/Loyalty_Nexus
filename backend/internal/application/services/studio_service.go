@@ -15,14 +15,16 @@ type StudioService struct {
 	studioRepo repositories.StudioRepository
 	userRepo   repositories.UserRepository
 	txRepo     repositories.TransactionRepository
+	notifySvc  *NotificationService
 	db         *sql.DB
 }
 
-func NewStudioService(sr repositories.StudioRepository, ur repositories.UserRepository, tr repositories.TransactionRepository, db *sql.DB) *StudioService {
+func NewStudioService(sr repositories.StudioRepository, ur repositories.UserRepository, tr repositories.TransactionRepository, ns *NotificationService, db *sql.DB) *StudioService {
 	return &StudioService{
 		studioRepo: sr,
 		userRepo:   ur,
 		txRepo:     tr,
+		notifySvc:  ns,
 		db:         db,
 	}
 }
@@ -40,7 +42,21 @@ func (s *StudioService) GetUserGallery(ctx context.Context, userID uuid.UUID) ([
 }
 
 func (s *StudioService) CompleteGeneration(ctx context.Context, genID uuid.UUID, outputURL string) error {
-	return s.studioRepo.UpdateStatus(ctx, genID, "completed", outputURL, "")
+	if err := s.studioRepo.UpdateStatus(ctx, genID, "completed", outputURL, ""); err != nil {
+		return err
+	}
+
+	// Trigger SMS Notification
+	gen, err := s.studioRepo.FindGenerationByID(ctx, genID)
+	if err == nil {
+		user, _ := s.userRepo.FindByID(ctx, gen.UserID)
+		tool, _ := s.studioRepo.FindToolByID(ctx, gen.ToolID)
+		if user != nil && tool != nil {
+			s.notifySvc.NotifyAssetReady(ctx, user.MSISDN, tool.Name)
+		}
+	}
+
+	return nil
 }
 
 func (s *StudioService) FailGeneration(ctx context.Context, genID uuid.UUID, errMsg string) error {

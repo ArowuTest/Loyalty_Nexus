@@ -53,12 +53,17 @@ func main() {
 	llmOrchestrator := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, 10, 20)
 
 	// Services & UseCases
+	notifySvc := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
 	userUC := usecases.NewUserUseCase(userRepo)
 	spinSvc := services.NewSpinService(userRepo, txRepo, cfg, db)
-	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, db)
+	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, db)
+
+	// Knowledge / Async Engine
+	notebookLM := &external.NotebookLMAdapter{APIKey: os.Getenv("NOTEBOOK_LM_KEY")}
+	asyncWorker := handlers.NewAsyncStudioWorker(studioSvc, notebookLM)
 
 	// Handlers
-	studioHandler := handlers.NewStudioHandler(studioSvc, llmOrchestrator)
+	studioHandler := handlers.NewStudioHandler(studioSvc, llmOrchestrator, asyncWorker, notebookLM)
 
 	// --- ROUTES ---
 
@@ -98,6 +103,7 @@ func main() {
 	http.HandleFunc("/api/v1/studio/tools", studioHandler.ListTools)
 	http.HandleFunc("/api/v1/studio/chat", studioHandler.Chat)
 	http.HandleFunc("/api/v1/studio/generate/image", studioHandler.GenerateImage)
+	http.HandleFunc("/api/v1/studio/generate/knowledge", studioHandler.GenerateKnowledge)
 	http.HandleFunc("/api/v1/studio/gallery", studioHandler.GetGallery)
 
 	port := os.Getenv("PORT")
