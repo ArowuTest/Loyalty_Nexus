@@ -52,10 +52,11 @@ func main() {
 		external.NewMTNMomoAdapter(),
 		notifySvc, cfg,
 	)
+	winnerSvc := services.NewWinnerService(db, userRepo, prizeRepo, notifySvc)
 
 	worker := services.NewLifecycleWorker(
 		db, userRepo, studioRepo, prizeRepo, authRepo, chatRepo,
-		fulfillSvc, drawSvc, notifySvc, cfg,
+		fulfillSvc, drawSvc, winnerSvc, notifySvc, cfg,
 	)
 
 	log.Println("[WORKER] Starting Loyalty Nexus background worker")

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../theme/nexus_theme.dart';
 
+/// Main shell with 5 tabs exactly matching the spec:
+/// Home (Dashboard) · Spin Wheel · Nexus Studio · Regional Wars · Profile
 class MainShell extends StatelessWidget {
   final Widget child;
   const MainShell({super.key, required this.child});
@@ -11,12 +13,12 @@ class MainShell extends StatelessWidget {
     (path: '/spin',      icon: Icons.casino_rounded,    label: 'Spin'),
     (path: '/studio',    icon: Icons.auto_awesome,      label: 'Studio'),
     (path: '/wars',      icon: Icons.public_rounded,    label: 'Wars'),
-    (path: '/prizes',    icon: Icons.card_giftcard,     label: 'Prizes'),
+    (path: '/profile',   icon: Icons.person_rounded,    label: 'Profile'),
   ];
 
   int _idx(BuildContext ctx) {
     final path = GoRouterState.of(ctx).matchedLocation;
-    final i = _tabs.indexWhere((t) => t.path == path);
+    final i = _tabs.indexWhere((t) => path.startsWith(t.path));
     return i < 0 ? 0 : i;
   }
 
@@ -33,33 +35,10 @@ class MainShell extends StatelessWidget {
           indicatorColor: const Color(0x265F72F9),
           selectedIndex: _idx(context),
           onDestinationSelected: (i) => context.go(_tabs[i].path),
-          destinations: [
-            ..._tabs.map((t) =>
-                NavigationDestination(icon: Icon(t.icon), label: t.label)),
-          ],
+          destinations: _tabs
+              .map((t) => NavigationDestination(icon: Icon(t.icon), label: t.label))
+              .toList(),
         ),
-      ),
-      floatingActionButton: GoRouterState.of(context).matchedLocation != '/notifications'
-          ? _NotifFab()
-          : null,
-    );
-  }
-}
-
-/// Floating notification bell shown on all main screens
-class _NotifFab extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 44,
-      height: 44,
-      child: FloatingActionButton(
-        mini: true,
-        backgroundColor: NexusColors.surface,
-        elevation: 2,
-        onPressed: () => context.push('/notifications'),
-        child: const Icon(Icons.notifications_outlined,
-            color: NexusColors.textPrimary, size: 22),
       ),
     );
   }

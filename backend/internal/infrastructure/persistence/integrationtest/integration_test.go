@@ -16,16 +16,17 @@ func TestEndToEndFlow(t *testing.T) {
 
 	// 1. Simulate MTN Recharge Ingest
 	msisdn := "2348031234567"
-	amount := int64(100000) // N1000
+	amount := int64(100000) // N1000 in kobo
 	fmt.Printf("Step 1: Received N1000 recharge for %s\n", msisdn)
 
 	// 2. Ledger Update Simulation
-	pointsEarned := amount / 25000 // N250 per point
+	// Spec §4.1: 1 Pulse Point per ₦200 recharge → N1000 = 5 points
+	pointsEarned := amount / 20000 // 200 naira in kobo = 20000
 	fmt.Printf("Step 2: Ledger awarded %d points\n", pointsEarned)
 
-	// 3. AI Studio Spend Simulation
-	spend := int64(10) // My AI Photo
-	fmt.Printf("Step 3: User spending %d points on AI Portrait\n", spend)
+	// 3. AI Studio Spend Simulation — Ask Nexus is FREE, Translate = 1 pt (spec §9.2)
+	spend := int64(1) // Translate tool (cheapest paid tool)
+	fmt.Printf("Step 3: User spending %d point on AI Translate\n", spend)
 
 	if pointsEarned < spend {
 		t.Fatalf("Test Failed: Insufficient points")

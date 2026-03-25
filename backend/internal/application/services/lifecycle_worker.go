@@ -19,6 +19,7 @@ import (
 // - OTP Cleanup: expire old OTPs
 // - Fulfillment Retry: retry failed prize fulfillments
 // - Session Summarisation: summarise idle chat sessions
+// - MoMo Held Prize Recovery + Expiry (spec §8.2)
 type LifecycleWorker struct {
 	db          *gorm.DB
 	userRepo    repositories.UserRepository
@@ -28,6 +29,7 @@ type LifecycleWorker struct {
 	chatRepo    repositories.ChatRepository
 	fulfillSvc  *PrizeFulfillmentService
 	drawSvc     *DrawService
+	winnerSvc   *WinnerService
 	notifySvc   *NotificationService
 	cfg         *config.ConfigManager
 }
@@ -41,6 +43,7 @@ func NewLifecycleWorker(
 	cr repositories.ChatRepository,
 	fs  *PrizeFulfillmentService,
 	ds  *DrawService,
+	ws  *WinnerService,
 	ns  *NotificationService,
 	cfg *config.ConfigManager,
 ) *LifecycleWorker {
@@ -53,6 +56,7 @@ func NewLifecycleWorker(
 		chatRepo:   cr,
 		fulfillSvc: fs,
 		drawSvc:    ds,
+		winnerSvc:  ws,
 		notifySvc:  ns,
 		cfg:        cfg,
 	}
@@ -72,6 +76,8 @@ func (w *LifecycleWorker) Run(ctx context.Context) {
 	go w.runEvery(ctx, 24*time.Hour,   "monthly-spin-grant", w.RunMonthlySpinCreditGrant)
 	go w.runEvery(ctx, 24*time.Hour,   "wars-monthly",       w.RunWarsMonthlyResolve)
 	go w.runEvery(ctx, 10*time.Minute, "session-summarise",  w.sessionSummarise)
+	go w.runEvery(ctx, 1*time.Hour,    "momo-held-recovery", w.momoHeldRecovery)
+	go w.runEvery(ctx, 2*time.Hour,    "momo-held-expiry",   w.momoHeldExpiry)
 
 	<-ctx.Done()
 	log.Println("[WORKER] Lifecycle worker stopped")
@@ -347,3 +353,23 @@ func (w *LifecycleWorker) RunScheduledDraws(ctx context.Context) {
 }
 
 
+
+// ─── MoMo Held Prize Crons (spec §8.2) ───────────────────────────────────
+
+func (w *LifecycleWorker) momoHeldRecovery(ctx context.Context) {
+	if w.winnerSvc == nil {
+		return
+	}
+	if err := w.winnerSvc.ProcessHeldPrizes(ctx); err != nil {
+		log.Printf("[WORKER] momo-held-recovery error: %v", err)
+	}
+}
+
+func (w *LifecycleWorker) momoHeldExpiry(ctx context.Context) {
+	if w.winnerSvc == nil {
+		return
+	}
+	if err := w.winnerSvc.ExpireHeldPrizes(ctx); err != nil {
+		log.Printf("[WORKER] momo-held-expiry error: %v", err)
+	}
+}

@@ -102,3 +102,22 @@ func (h *UserHandler) GetPassportURLs(w http.ResponseWriter, r *http.Request) {
 		"message": "Wallet integration coming soon",
 	})
 }
+
+// UpdateProfileState handles POST /api/v1/user/profile/state
+// REQ-1.5: User sets their Nigerian state for Regional Wars team assignment
+func (h *UserHandler) UpdateProfileState(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uid)
+	var req struct {
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.State == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "state is required"})
+		return
+	}
+	if err := h.userRepo.UpdateState(r.Context(), userID, req.State); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}

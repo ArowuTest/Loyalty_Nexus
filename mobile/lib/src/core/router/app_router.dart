@@ -5,8 +5,7 @@ import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/spin/presentation/spin_screen.dart';
 import '../../features/studio/presentation/studio_screen.dart';
 import '../../features/wars/presentation/wars_screen.dart';
-import '../../features/prizes/presentation/prizes_screen.dart';
-import '../../features/settings/presentation/settings_screen.dart';
+import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../auth/auth_provider.dart';
 import '../shell/main_shell.dart';
@@ -30,8 +29,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/spin',           builder: (_, __) => const SpinScreen()),
           GoRoute(path: '/studio',         builder: (_, __) => const StudioScreen()),
           GoRoute(path: '/wars',           builder: (_, __) => const WarsScreen()),
-          GoRoute(path: '/prizes',         builder: (_, __) => const PrizesScreen()),
-          GoRoute(path: '/settings',       builder: (_, __) => const SettingsScreen()),
+          // REQ-1.3/1.5 — Profile with MoMo link, state selection, passport download
+          GoRoute(path: '/profile',        builder: (_, __) => const ProfileScreen()),
           GoRoute(path: '/notifications',  builder: (_, __) => const NotificationsScreen()),
         ],
       ),

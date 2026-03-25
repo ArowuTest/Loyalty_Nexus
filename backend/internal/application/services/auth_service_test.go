@@ -122,6 +122,7 @@ func (m *mockUserRepoAuth) FindUsersWithExpiringPoints(_ context.Context, _, _ i
 	return nil, nil
 }
 func (m *mockUserRepoAuth) CountByState(_ context.Context, _ string) (int64, error) { return 0, nil }
+func (m *mockUserRepoAuth) UpdateState(_ context.Context, _ uuid.UUID, _ string) error { return nil }
 
 // notifyMock
 type notifyMock struct{ sent []string }

@@ -24,11 +24,23 @@ func setupDrawDB(t *testing.T) *gorm.DB {
 	db.Exec(`CREATE TABLE IF NOT EXISTS draws (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'ACTIVE',
+		draw_type TEXT NOT NULL DEFAULT 'MONTHLY',
+		recurrence TEXT NOT NULL DEFAULT 'none',
 		winner_count INTEGER NOT NULL DEFAULT 3,
+		runner_ups_count INTEGER NOT NULL DEFAULT 0,
 		prize_type TEXT NOT NULL DEFAULT 'MOMO_CASH',
 		prize_value_kobo INTEGER NOT NULL DEFAULT 500000,
+		prize_pool REAL NOT NULL DEFAULT 0,
+		total_entries INTEGER NOT NULL DEFAULT 0,
+		total_winners INTEGER NOT NULL DEFAULT 0,
+		draw_time DATETIME,
+		start_time DATETIME,
+		end_time DATETIME,
+		next_draw_at DATETIME,
 		executed_at DATETIME,
+		completed_at DATETIME,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
@@ -37,6 +49,8 @@ func setupDrawDB(t *testing.T) *gorm.DB {
 		draw_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,
 		phone_number TEXT NOT NULL,
+		entry_source TEXT NOT NULL DEFAULT 'recharge',
+		amount INTEGER NOT NULL DEFAULT 0,
 		ticket_count INTEGER NOT NULL DEFAULT 1,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
@@ -48,6 +62,7 @@ func setupDrawDB(t *testing.T) *gorm.DB {
 		position INTEGER NOT NULL,
 		prize_type TEXT NOT NULL,
 		prize_value_kobo INTEGER NOT NULL DEFAULT 0,
+		is_runner_up INTEGER NOT NULL DEFAULT 0,
 		status TEXT NOT NULL DEFAULT 'PENDING_FULFILLMENT',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

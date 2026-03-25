@@ -9,7 +9,7 @@ class AdminAPI {
     return this.token;
   }
   clearToken() { this.token = null; typeof window !== "undefined" && localStorage.removeItem("nexus_admin_token"); }
-  private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async req<T>(method: string, path: string, body?: unknown): Promise<T> {
     const resp = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: { "Content-Type": "application/json", ...(this.getToken() ? { Authorization: `Bearer ${this.getToken()}` } : {}) },
@@ -29,6 +29,23 @@ class AdminAPI {
   suspendUser(id: string) { return this.req("PUT", `/admin/users/${id}/suspend`, {}); }
   getFraudEvents() { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud-events"); }
   getRegionalWars(){ return this.req<{ leaderboard: RegionalStat[] }>("GET", "/admin/regional-wars"); }
+  // Notifications & Broadcasts
+  broadcastNotification(payload: BroadcastPayload) { return this.req("POST", "/admin/notifications/broadcast", payload); }
+  getNotificationHistory(page = 0) { return this.req<{ broadcasts: Broadcast[] }>("GET", `/admin/notifications/broadcasts?offset=${page * 20}`); }
+  // Subscription management
+  getSubscriptions(page = 0, status = "") {
+    const qs = status ? `&status=${status}` : "";
+    return this.req<{ users: SubscriptionUser[] }>("GET", `/admin/subscriptions?offset=${page * 50}${qs}`);
+  }
+  updateSubscription(userId: string, payload: UpdateSubPayload) { return this.req("PUT", `/admin/users/${userId}/subscription`, payload); }
+  // Draws management
+  getDraws()               { return this.req<{ draws: Draw[] }>("GET", "/admin/draws"); }
+  createDraw(d: CreateDrawPayload) { return this.req<Draw>("POST", "/admin/draws", d); }
+  executeDraw(id: string)  { return this.req("POST", `/admin/draws/${id}/execute`, {}); }
+  getDrawWinners(id: string){ return this.req<{ winners: DrawWinner[] }>("GET", `/admin/draws/${id}/winners`); }
+  // Regional Wars admin
+  resolveWar(period: string) { return this.req("POST", "/admin/wars/resolve", { period }); }
+  getHealth() { return this.req<HealthReport>("GET", "/admin/health"); }
 }
 export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
@@ -39,3 +56,55 @@ export interface FraudEvent { id: string; user_id: string; event_type: string; s
 export interface RegionalStat { state: string; total_points: number; active_members: number; rank: number; }
 export const adminAPI = new AdminAPI();
 export default adminAPI;
+export interface BroadcastPayload {
+  title: string;
+  body: string;
+  type: string;
+  target: "all" | "active_subscribers" | "free_tier" | "phone_list";
+  phone_list?: string[];
+  deep_link?: string;
+}
+export interface Broadcast {
+  id: string; title: string; body: string; type: string;
+  target: string; sent_count: number; created_at: string;
+}
+export interface SubscriptionUser {
+  id: string; phone_number: string; tier: string;
+  subscription_status: string; subscription_expires_at: string | null;
+  created_at: string;
+}
+export interface UpdateSubPayload {
+  status: string;   // ACTIVE | FREE | GRACE | SUSPENDED
+  expires_at?: string; // ISO
+  note?: string;
+}
+export interface Draw {
+  id: string; name: string; prize_pool_kobo: number;
+  status: string; draw_date: string; entry_count: number;
+  recurrence: string; created_at: string;
+}
+export interface CreateDrawPayload {
+  name: string; prize_pool_kobo: number;
+  draw_date: string; recurrence: "once" | "weekly" | "monthly";
+}
+export interface DrawWinner {
+  id: string; user_id: string; phone_number: string;
+  prize_label: string; rank: number; created_at: string;
+}
+
+// REQ-5.8.3 — System health endpoint
+export interface ServiceHealth {
+  name: string; status: "up"|"degraded"|"down";
+  latency_ms: number; uptime_pct: number;
+  last_checked: string; note?: string;
+}
+export interface HealthReport {
+  overall: "healthy"|"degraded"|"outage";
+  services: ServiceHealth[];
+  webhook_success_rate_24h: number;
+  paystack_success_rate_24h: number;
+  api_p99_ms: number;
+  db_pool_used: number; db_pool_max: number;
+  redis_hit_rate: number;
+  checked_at: string;
+}

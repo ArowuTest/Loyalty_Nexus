@@ -134,3 +134,10 @@ func (r *postgresUserRepository) CountByState(ctx context.Context, state string)
 	r.db.WithContext(ctx).Table("users").Where("state = ?", state).Count(&count)
 	return count, nil
 }
+
+func (r *postgresUserRepository) UpdateState(ctx context.Context, userID uuid.UUID, state string) error {
+	return r.db.WithContext(ctx).
+		Table("users").
+		Where("id = ?", userID).
+		Update("state", state).Error
+}

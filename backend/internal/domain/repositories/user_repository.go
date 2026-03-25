@@ -31,4 +31,5 @@ type UserRepository interface {
 	FindInactiveUsers(ctx context.Context, inactiveSinceHours int, limit int) ([]entities.User, error)
 	FindUsersWithExpiringPoints(ctx context.Context, daysUntilExpiry int, limit int) ([]entities.User, error)
 	CountByState(ctx context.Context, state string) (int64, error)
+	UpdateState(ctx context.Context, userID uuid.UUID, state string) error
 }

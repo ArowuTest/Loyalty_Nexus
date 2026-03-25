@@ -1,17 +1,117 @@
 package services
 
+// draw_service.go — full draw management engine
+// Ported from RechargeMax draw_service.go and adapted for Loyalty Nexus:
+//   - Uses loyalty-nexus module paths
+//   - Uses net/http (not Gin)
+//   - Uses Nexus entities (User, Wallet, Transaction)
+//   - Adds recurrence + next_draw_at fields (spec §4)
+//   - crypto/rand Fisher-Yates shuffle for winner selection (SEC-009)
+
 import (
 	"context"
+	"encoding/csv"
 	crand "crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-// DrawService executes crypto-fair prize draws (REQ-3.2 / SEC-009).
+// ─── Draw entities (local to service — no separate repo interface needed) ────
+
+// DrawRecord mirrors the draws table.
+type DrawRecord struct {
+	ID              uuid.UUID  `gorm:"column:id;primaryKey"`
+	Name            string     `gorm:"column:name"`
+	Description     *string    `gorm:"column:description"`
+	DrawCode        string     `gorm:"column:draw_code;uniqueIndex"`
+	DrawType        string     `gorm:"column:draw_type"` // DAILY | WEEKLY | MONTHLY | SPECIAL
+	Status          string     `gorm:"column:status"`   // SCHEDULED | ACTIVE | COMPLETED | CANCELLED
+	PrizePool       float64    `gorm:"column:prize_pool"`
+	WinnerCount     int        `gorm:"column:winner_count"`
+	RunnerUpsCount  int        `gorm:"column:runner_ups_count"`
+	TotalEntries    int        `gorm:"column:total_entries"`
+	TotalWinners    int        `gorm:"column:total_winners"`
+	Recurrence      string     `gorm:"column:recurrence"` // none | daily | weekly | monthly
+	NextDrawAt      *time.Time `gorm:"column:next_draw_at"`
+	StartTime       time.Time  `gorm:"column:start_time"`
+	EndTime         time.Time  `gorm:"column:end_time"`
+	DrawTime        *time.Time `gorm:"column:draw_time"`
+	ExecutedAt      *time.Time `gorm:"column:executed_at"`
+	CompletedAt     *time.Time `gorm:"column:completed_at"`
+	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (DrawRecord) TableName() string { return "draws" }
+
+// DrawEntry mirrors draw_entries table.
+type DrawEntry struct {
+	ID          uuid.UUID  `gorm:"column:id;primaryKey"`
+	DrawID      uuid.UUID  `gorm:"column:draw_id;index"`
+	UserID      uuid.UUID  `gorm:"column:user_id;index"`
+	PhoneNumber string     `gorm:"column:phone_number"`
+	EntrySource string     `gorm:"column:entry_source"` // recharge | subscription | bonus
+	Amount      int64      `gorm:"column:amount"`        // kobo
+	TicketCount int        `gorm:"column:ticket_count"`
+	CreatedAt   *time.Time `gorm:"column:created_at;autoCreateTime"`
+}
+
+func (DrawEntry) TableName() string { return "draw_entries" }
+
+// DrawWinner mirrors draw_winners table.
+type DrawWinner struct {
+	ID          uuid.UUID  `gorm:"column:id;primaryKey"`
+	DrawID      uuid.UUID  `gorm:"column:draw_id;index"`
+	UserID      uuid.UUID  `gorm:"column:user_id;index"`
+	PhoneNumber string     `gorm:"column:phone_number"`
+	Position    int        `gorm:"column:position"`
+	PrizeType   string     `gorm:"column:prize_type"`
+	PrizeValue  int64      `gorm:"column:prize_value_kobo"`
+	IsRunnerUp  bool       `gorm:"column:is_runner_up;default:false"`
+	Status      string     `gorm:"column:status"` // PENDING_FULFILLMENT | FULFILLED | EXPIRED
+	CreatedAt   time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (DrawWinner) TableName() string { return "draw_winners" }
+
+// ─── Response types ────────────────────────────────────────────────────────
+
+type DrawEntryExport struct {
+	PhoneNumber string
+	Points      int64
+}
+
+type WinnerImport struct {
+	PhoneNumber string
+	Position    int
+	Prize       string
+	Amount      int64
+}
+
+type DrawWinnerResponse struct {
+	ID          uuid.UUID `json:"id"`
+	DrawID      uuid.UUID `json:"draw_id"`
+	UserID      uuid.UUID `json:"user_id"`
+	PhoneNumber string    `json:"phone_number"`
+	Position    int       `json:"position"`
+	PrizeType   string    `json:"prize_type"`
+	PrizeValue  float64   `json:"prize_value"`
+	IsRunnerUp  bool      `json:"is_runner_up"`
+	Status      string    `json:"status"`
+	WonAt       time.Time `json:"won_at"`
+}
+
+// ─── Service ──────────────────────────────────────────────────────────────
+
 type DrawService struct {
 	db *gorm.DB
 }
@@ -20,41 +120,185 @@ func NewDrawService(db *gorm.DB) *DrawService {
 	return &DrawService{db: db}
 }
 
-// DrawRecord mirrors the draws table.
-type DrawRecord struct {
-	ID          uuid.UUID  `gorm:"column:id"`
-	Name        string     `gorm:"column:name"`
-	Status      string     `gorm:"column:status"`
-	WinnerCount int        `gorm:"column:winner_count"`
-	PrizeValue  int64      `gorm:"column:prize_value_kobo"`
-	PrizeType   string     `gorm:"column:prize_type"`
-	ExecutedAt  *time.Time `gorm:"column:executed_at"`
+// ─── Draw code generator ──────────────────────────────────────────────────
+
+func generateDrawCode() string {
+	var b [8]byte
+	crand.Read(b[:]) //nolint:errcheck
+	n := int(binary.BigEndian.Uint64(b[:]) % 9000)
+	return fmt.Sprintf("DRAW-%s-%04d", time.Now().Format("20060102"), n+1000)
 }
 
-func (DrawRecord) TableName() string { return "draws" }
+// ─── CRUD ─────────────────────────────────────────────────────────────────
 
-// DrawEntry mirrors draw_entries table.
-type DrawEntry struct {
-	ID          uuid.UUID `gorm:"column:id"`
-	DrawID      uuid.UUID `gorm:"column:draw_id"`
-	UserID      uuid.UUID `gorm:"column:user_id"`
-	PhoneNumber string    `gorm:"column:phone_number"`
-	TicketCount int       `gorm:"column:ticket_count"`
+// CreateDraw creates a new draw record.
+func (svc *DrawService) CreateDraw(
+	ctx context.Context,
+	name, description, drawType, recurrence string,
+	drawDate time.Time,
+	prizePool float64,
+	winnerCount, runnerUpsCount int,
+) (*DrawRecord, error) {
+	if name == "" {
+		return nil, fmt.Errorf("draw name is required")
+	}
+	if drawType == "" {
+		drawType = "MONTHLY"
+	}
+	validStatuses := map[string]bool{"DAILY": true, "WEEKLY": true, "MONTHLY": true, "SPECIAL": true}
+	if !validStatuses[drawType] {
+		drawType = "MONTHLY"
+	}
+	if winnerCount < 1 {
+		winnerCount = 1
+	}
+	if recurrence == "" {
+		recurrence = "none"
+	}
+
+	desc := description
+	draw := &DrawRecord{
+		ID:             uuid.New(),
+		DrawCode:       generateDrawCode(),
+		Name:           name,
+		Description:    &desc,
+		DrawType:       drawType,
+		Status:         "SCHEDULED",
+		PrizePool:      prizePool,
+		WinnerCount:    winnerCount,
+		RunnerUpsCount: runnerUpsCount,
+		Recurrence:     recurrence,
+		StartTime:      drawDate.Add(-24 * time.Hour),
+		EndTime:        drawDate,
+		DrawTime:       &drawDate,
+	}
+
+	// If recurring, set NextDrawAt
+	if recurrence != "none" {
+		next := nextDrawTime(drawDate, recurrence)
+		draw.NextDrawAt = &next
+	}
+
+	if err := svc.db.WithContext(ctx).Create(draw).Error; err != nil {
+		return nil, fmt.Errorf("failed to create draw: %w", err)
+	}
+	return draw, nil
 }
 
-func (DrawEntry) TableName() string { return "draw_entries" }
+// GetDraws returns all draws with pagination.
+func (svc *DrawService) GetDraws(ctx context.Context, page, limit int) ([]DrawRecord, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
 
-// ExecuteDraw selects winners for a given draw using CSPRNG (SEC-009).
-// Each entry's ticket_count gives weighted probability.
+	var draws []DrawRecord
+	var total int64
+
+	if err := svc.db.WithContext(ctx).Model(&DrawRecord{}).Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count draws: %w", err)
+	}
+	if err := svc.db.WithContext(ctx).
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&draws).Error; err != nil {
+		return nil, 0, fmt.Errorf("list draws: %w", err)
+	}
+	return draws, total, nil
+}
+
+// GetDrawByID returns a draw by ID.
+func (svc *DrawService) GetDrawByID(ctx context.Context, drawID uuid.UUID) (*DrawRecord, error) {
+	var draw DrawRecord
+	if err := svc.db.WithContext(ctx).Where("id = ?", drawID).First(&draw).Error; err != nil {
+		return nil, fmt.Errorf("draw not found: %w", err)
+	}
+	return &draw, nil
+}
+
+// UpdateDraw updates mutable fields of a draw.
+func (svc *DrawService) UpdateDraw(ctx context.Context, drawID uuid.UUID, updates map[string]interface{}) (*DrawRecord, error) {
+	draw, err := svc.GetDrawByID(ctx, drawID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build safe update map (never touch draw_code, id, created_at)
+	safe := map[string]interface{}{}
+	if v, ok := updates["name"].(string); ok && v != "" {
+		safe["name"] = v
+		draw.Name = v
+	}
+	if v, ok := updates["description"].(string); ok {
+		safe["description"] = v
+	}
+	if v, ok := updates["status"].(string); ok {
+		allowed := map[string]bool{"SCHEDULED": true, "ACTIVE": true, "COMPLETED": true, "CANCELLED": true}
+		if allowed[v] {
+			safe["status"] = v
+			draw.Status = v
+		}
+	}
+	if v, ok := updates["prize_pool"].(float64); ok {
+		safe["prize_pool"] = v
+		draw.PrizePool = v
+	}
+	if v, ok := updates["winner_count"].(float64); ok {
+		safe["winner_count"] = int(v)
+		draw.WinnerCount = int(v)
+	}
+	if v, ok := updates["runner_ups_count"].(float64); ok {
+		safe["runner_ups_count"] = int(v)
+		draw.RunnerUpsCount = int(v)
+	}
+	if v, ok := updates["draw_time"].(string); ok {
+		if t, err2 := time.Parse(time.RFC3339, v); err2 == nil {
+			safe["draw_time"] = t
+			draw.DrawTime = &t
+		}
+	}
+	if v, ok := updates["recurrence"].(string); ok {
+		safe["recurrence"] = v
+		draw.Recurrence = v
+	}
+
+	if len(safe) == 0 {
+		return draw, nil
+	}
+	safe["updated_at"] = time.Now()
+	if err := svc.db.WithContext(ctx).Model(draw).Updates(safe).Error; err != nil {
+		return nil, fmt.Errorf("update draw: %w", err)
+	}
+	return draw, nil
+}
+
+// DeleteDraw cancels (soft-deletes) a draw.
+func (svc *DrawService) DeleteDraw(ctx context.Context, drawID uuid.UUID) error {
+	return svc.db.WithContext(ctx).
+		Table("draws").
+		Where("id = ? AND status NOT IN ('COMPLETED')", drawID).
+		Updates(map[string]interface{}{
+			"status":     "CANCELLED",
+			"updated_at": time.Now(),
+		}).Error
+}
+
+// ─── Execution ────────────────────────────────────────────────────────────
+
+// ExecuteDraw selects winners for a draw using CSPRNG Fisher-Yates (SEC-009).
 func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error {
 	return svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1 — fetch draw
 		var draw DrawRecord
-		if err := tx.Where("id = ? AND status = 'ACTIVE'", drawID).First(&draw).Error; err != nil {
-			return fmt.Errorf("active draw not found: %w", err)
+		if err := tx.Where("id = ? AND status IN ('SCHEDULED','ACTIVE')", drawID).First(&draw).Error; err != nil {
+			return fmt.Errorf("draw not found or not executable: %w", err)
 		}
 
-		// 2 — build weighted ticket pool
+		// 2 — load entries
 		var entries []DrawEntry
 		if err := tx.Where("draw_id = ?", drawID).Find(&entries).Error; err != nil {
 			return fmt.Errorf("load entries: %w", err)
@@ -63,7 +307,7 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 			return fmt.Errorf("no entries for draw %s", drawID)
 		}
 
-		// expand into ticket pool (up to 100k slots for memory safety)
+		// 3 — build weighted ticket pool (each entry.TicketCount multiplied)
 		pool := make([]DrawEntry, 0, len(entries)*2)
 		for _, e := range entries {
 			count := e.TicketCount
@@ -71,85 +315,375 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 				count = 1
 			}
 			if count > 100 {
-				count = 100 // cap per user
+				count = 100 // cap to prevent pool explosion
 			}
 			for i := 0; i < count; i++ {
 				pool = append(pool, e)
 			}
 		}
 
-		// 3 — crypto shuffle
-		cryptoShuffle(pool)
+		// 4 — crypto shuffle
+		drawShuffleCrypto(pool)
 
-		// 4 — pick winners (deduplicated by user_id)
+		// 5 — pick deduplicated winners
 		winnerCount := draw.WinnerCount
 		if winnerCount < 1 {
-			winnerCount = 3
+			winnerCount = 1
 		}
+		runnerUpCount := draw.RunnerUpsCount
+
 		seen := make(map[uuid.UUID]bool)
-		winners := make([]DrawEntry, 0, winnerCount)
+		mainWinners := make([]DrawEntry, 0, winnerCount)
+		runnerUps := make([]DrawEntry, 0, runnerUpCount)
+
 		for _, ticket := range pool {
 			if seen[ticket.UserID] {
 				continue
 			}
 			seen[ticket.UserID] = true
-			winners = append(winners, ticket)
-			if len(winners) >= winnerCount {
+			if len(mainWinners) < winnerCount {
+				mainWinners = append(mainWinners, ticket)
+			} else if len(runnerUps) < runnerUpCount {
+				runnerUps = append(runnerUps, ticket)
+			} else {
 				break
 			}
 		}
 
-		// 5 — insert draw_winners
 		now := time.Now()
-		for pos, w := range winners {
-			row := map[string]interface{}{
-				"id":            uuid.New(),
-				"draw_id":       drawID,
-				"user_id":       w.UserID,
-				"phone_number":  w.PhoneNumber,
-				"position":      pos + 1,
-				"prize_type":    draw.PrizeType,
-				"prize_value_kobo": draw.PrizeValue,
-				"status":        "PENDING_FULFILLMENT",
-				"created_at":    now,
-				"updated_at":    now,
+
+		// 6 — insert winners
+		position := 1
+		for _, w := range mainWinners {
+			row := DrawWinner{
+				ID:          uuid.New(),
+				DrawID:      drawID,
+				UserID:      w.UserID,
+				PhoneNumber: w.PhoneNumber,
+				Position:    position,
+				PrizeType:   "CASH",
+				PrizeValue:  int64(draw.PrizePool * 100), // convert to kobo
+				IsRunnerUp:  false,
+				Status:      "PENDING_FULFILLMENT",
+				CreatedAt:   now,
+				UpdatedAt:   now,
 			}
-			if err := tx.Table("draw_winners").Create(row).Error; err != nil {
-				return fmt.Errorf("insert winner pos %d: %w", pos+1, err)
+			if err := tx.Create(&row).Error; err != nil {
+				return fmt.Errorf("insert winner position %d: %w", position, err)
 			}
+			position++
+		}
+		for _, w := range runnerUps {
+			row := DrawWinner{
+				ID:          uuid.New(),
+				DrawID:      drawID,
+				UserID:      w.UserID,
+				PhoneNumber: w.PhoneNumber,
+				Position:    position,
+				PrizeType:   "CASH",
+				PrizeValue:  0, // runner-ups get notional prize
+				IsRunnerUp:  true,
+				Status:      "PENDING_FULFILLMENT",
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}
+			if err := tx.Create(&row).Error; err != nil {
+				return fmt.Errorf("insert runner-up position %d: %w", position, err)
+			}
+			position++
 		}
 
-		// 6 — mark draw completed
-		return tx.Table("draws").Where("id = ?", drawID).Updates(map[string]interface{}{
-			"status":      "COMPLETED",
-			"executed_at": now,
-			"updated_at":  now,
-		}).Error
+		// 7 — update draw record
+		updates := map[string]interface{}{
+			"status":       "COMPLETED",
+			"total_winners": len(mainWinners) + len(runnerUps),
+			"executed_at":  now,
+			"completed_at": now,
+			"updated_at":   now,
+		}
+		// If recurring: schedule next draw
+		if draw.Recurrence != "" && draw.Recurrence != "none" {
+			baseTime := now
+			if draw.DrawTime != nil {
+				baseTime = *draw.DrawTime
+			}
+			next := nextDrawTime(baseTime, draw.Recurrence)
+			updates["next_draw_at"] = next
+			// Spawn a new draw for the next cycle
+			nextDraw := DrawRecord{
+				ID:             uuid.New(),
+				DrawCode:       generateDrawCode(),
+				Name:           draw.Name,
+				Description:    draw.Description,
+				DrawType:       draw.DrawType,
+				Status:         "SCHEDULED",
+				PrizePool:      draw.PrizePool,
+				WinnerCount:    draw.WinnerCount,
+				RunnerUpsCount: draw.RunnerUpsCount,
+				Recurrence:     draw.Recurrence,
+				StartTime:      next.Add(-24 * time.Hour),
+				EndTime:        next,
+				DrawTime:       &next,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			}
+			_ = tx.Create(&nextDraw).Error // non-fatal if this fails
+		}
+		return tx.Table("draws").Where("id = ?", drawID).Updates(updates).Error
 	})
 }
+
+// ─── Entries ──────────────────────────────────────────────────────────────
+
+// AddEntry adds a single draw entry for a user.
+func (svc *DrawService) AddEntry(ctx context.Context, drawID, userID uuid.UUID, phone, source string, amount int64, tickets int) error {
+	if tickets < 1 {
+		tickets = 1
+	}
+	now := time.Now()
+	entry := DrawEntry{
+		ID:          uuid.New(),
+		DrawID:      drawID,
+		UserID:      userID,
+		PhoneNumber: phone,
+		EntrySource: source,
+		Amount:      amount,
+		TicketCount: tickets,
+		CreatedAt:   &now,
+	}
+	if err := svc.db.Create(&entry).Error; err != nil {
+		return fmt.Errorf("add entry: %w", err)
+	}
+	// Update total_entries on the draw
+	return svc.db.Exec("UPDATE draws SET total_entries = total_entries + ? WHERE id = ?", tickets, drawID).Error
+}
+
+// GetDrawEntries returns all entries for a draw (paginated).
+func (svc *DrawService) GetDrawEntries(ctx context.Context, drawID uuid.UUID, page, limit int) ([]DrawEntry, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 50
+	}
+	var entries []DrawEntry
+	var total int64
+	svc.db.WithContext(ctx).Model(&DrawEntry{}).Where("draw_id = ?", drawID).Count(&total)
+	err := svc.db.WithContext(ctx).
+		Where("draw_id = ?", drawID).
+		Order("created_at ASC").
+		Limit(limit).
+		Offset((page-1)*limit).
+		Find(&entries).Error
+	return entries, total, err
+}
+
+// ─── Winners ──────────────────────────────────────────────────────────────
+
+// GetDrawWinners returns winners for a completed draw.
+func (svc *DrawService) GetDrawWinners(ctx context.Context, drawID uuid.UUID) ([]DrawWinnerResponse, error) {
+	var winners []DrawWinner
+	if err := svc.db.WithContext(ctx).
+		Where("draw_id = ?", drawID).
+		Order("position ASC").
+		Find(&winners).Error; err != nil {
+		return nil, fmt.Errorf("get winners: %w", err)
+	}
+
+	resp := make([]DrawWinnerResponse, len(winners))
+	for i, w := range winners {
+		resp[i] = DrawWinnerResponse{
+			ID:          w.ID,
+			DrawID:      w.DrawID,
+			UserID:      w.UserID,
+			PhoneNumber: w.PhoneNumber,
+			Position:    w.Position,
+			PrizeType:   w.PrizeType,
+			PrizeValue:  float64(w.PrizeValue) / 100, // convert kobo → naira
+			IsRunnerUp:  w.IsRunnerUp,
+			Status:      w.Status,
+			WonAt:       w.CreatedAt,
+		}
+	}
+	return resp, nil
+}
+
+// ─── CSV Export / Import ──────────────────────────────────────────────────
+
+// ExportDrawEntries exports draw entries as CSV.
+func (svc *DrawService) ExportDrawEntries(ctx context.Context, drawID uuid.UUID, outputPath string) (string, error) {
+	type row struct {
+		PhoneNumber string `gorm:"column:phone_number"`
+		TotalTickets int64 `gorm:"column:total_tickets"`
+	}
+	var rows []row
+	err := svc.db.WithContext(ctx).
+		Table("draw_entries").
+		Select("phone_number, COALESCE(SUM(ticket_count), 0) AS total_tickets").
+		Where("draw_id = ?", drawID).
+		Group("phone_number").
+		Order("total_tickets DESC").
+		Scan(&rows).Error
+	if err != nil {
+		return "", fmt.Errorf("aggregate entries: %w", err)
+	}
+
+	f, err := os.Create(outputPath)
+	if err != nil {
+		return "", fmt.Errorf("create CSV: %w", err)
+	}
+	defer f.Close()
+
+	w := csv.NewWriter(f)
+	defer w.Flush()
+	_ = w.Write([]string{"PhoneNumber", "TotalTickets"})
+	for _, r := range rows {
+		_ = w.Write([]string{r.PhoneNumber, strconv.FormatInt(r.TotalTickets, 10)})
+	}
+	return outputPath, nil
+}
+
+// ProcessCSVEntries bulk-imports entries from a CSV reader.
+// CSV format: PhoneNumber,Tickets
+func (svc *DrawService) ProcessCSVEntries(ctx context.Context, drawID uuid.UUID, r io.Reader) (int, error) {
+	reader := csv.NewReader(r)
+	reader.TrimLeadingSpace = true
+	created := 0
+	lineNum := 0
+	for {
+		rec, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return created, fmt.Errorf("read CSV line %d: %w", lineNum, err)
+		}
+		lineNum++
+		if lineNum == 1 && (strings.ToLower(rec[0]) == "phonenumber" || strings.ToLower(rec[0]) == "phone_number") {
+			continue
+		}
+		if len(rec) < 2 {
+			continue
+		}
+		phone := strings.TrimSpace(rec[0])
+		tickets, _ := strconv.Atoi(strings.TrimSpace(rec[1]))
+		if tickets < 1 {
+			tickets = 1
+		}
+		now := time.Now()
+		entry := DrawEntry{
+			ID:          uuid.New(),
+			DrawID:      drawID,
+			PhoneNumber: phone,
+			EntrySource: "csv_import",
+			TicketCount: tickets,
+			CreatedAt:   &now,
+		}
+		if err := svc.db.WithContext(ctx).Create(&entry).Error; err != nil {
+			return created, fmt.Errorf("insert entry at line %d: %w", lineNum, err)
+		}
+		created += tickets
+	}
+	// Update total_entries
+	_ = svc.db.Exec("UPDATE draws SET total_entries = total_entries + ? WHERE id = ?", created, drawID).Error
+	return created, nil
+}
+
+// ImportWinners imports winners from CSV (for external draw systems).
+func (svc *DrawService) ImportWinners(ctx context.Context, drawID uuid.UUID, csvPath string) ([]*WinnerImport, error) {
+	f, err := os.Open(csvPath)
+	if err != nil {
+		return nil, fmt.Errorf("open CSV: %w", err)
+	}
+	defer f.Close()
+
+	reader := csv.NewReader(f)
+	header, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("read header: %w", err)
+	}
+	expected := []string{"PhoneNumber", "Position", "Prize", "Amount"}
+	if len(header) != len(expected) {
+		return nil, fmt.Errorf("expected CSV header: %v", expected)
+	}
+
+	var winners []*WinnerImport
+	for {
+		rec, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil || len(rec) != 4 {
+			continue
+		}
+		pos, _ := strconv.Atoi(rec[1])
+		amount, _ := strconv.ParseInt(rec[3], 10, 64)
+		winners = append(winners, &WinnerImport{
+			PhoneNumber: rec[0],
+			Position:    pos,
+			Prize:       rec[2],
+			Amount:      amount,
+		})
+	}
+	return winners, nil
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────
 
 // ListUpcomingDraws returns draws with status SCHEDULED or ACTIVE.
 func (svc *DrawService) ListUpcomingDraws(ctx context.Context) ([]DrawRecord, error) {
 	var draws []DrawRecord
 	err := svc.db.WithContext(ctx).
 		Where("status IN ('SCHEDULED','ACTIVE')").
-		Order("created_at ASC").
+		Order("draw_time ASC").
 		Find(&draws).Error
 	return draws, err
 }
 
-// GetDrawWinners returns the winner list for a completed draw.
-func (svc *DrawService) GetDrawWinners(ctx context.Context, drawID uuid.UUID) ([]map[string]interface{}, error) {
-	var rows []map[string]interface{}
-	err := svc.db.WithContext(ctx).Table("draw_winners").
-		Where("draw_id = ?", drawID).
-		Order("position ASC").
-		Find(&rows).Error
-	return rows, err
+// GetActiveDraws returns ACTIVE draws.
+func (svc *DrawService) GetActiveDraws(ctx context.Context) ([]DrawRecord, error) {
+	var draws []DrawRecord
+	err := svc.db.WithContext(ctx).
+		Where("status = 'ACTIVE'").
+		Order("draw_time ASC").
+		Find(&draws).Error
+	return draws, err
 }
 
-// cryptoShuffle performs a Fisher-Yates shuffle using CSPRNG.
-func cryptoShuffle[T any](s []T) {
+// GetStats returns aggregate draw statistics.
+func (svc *DrawService) GetStats(ctx context.Context) (map[string]interface{}, error) {
+	var totalDraws, completedDraws, scheduledDraws int64
+	var totalWinners int64
+	svc.db.Model(&DrawRecord{}).Count(&totalDraws)
+	svc.db.Model(&DrawRecord{}).Where("status = 'COMPLETED'").Count(&completedDraws)
+	svc.db.Model(&DrawRecord{}).Where("status = 'SCHEDULED'").Count(&scheduledDraws)
+	svc.db.Model(&DrawWinner{}).Where("is_runner_up = false").Count(&totalWinners)
+	return map[string]interface{}{
+		"total_draws":     totalDraws,
+		"completed_draws": completedDraws,
+		"scheduled_draws": scheduledDraws,
+		"total_winners":   totalWinners,
+	}, nil
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+// nextDrawTime computes the next draw time for a recurring schedule.
+func nextDrawTime(current time.Time, recurrence string) time.Time {
+	switch recurrence {
+	case "daily":
+		return current.Add(24 * time.Hour)
+	case "weekly":
+		return current.Add(7 * 24 * time.Hour)
+	case "monthly":
+		return current.AddDate(0, 1, 0)
+	default:
+		return current.Add(30 * 24 * time.Hour)
+	}
+}
+
+// drawShuffleCrypto performs a Fisher-Yates shuffle using CSPRNG.
+func drawShuffleCrypto(s []DrawEntry) {
 	for i := len(s) - 1; i > 0; i-- {
 		var b [8]byte
 		crand.Read(b[:]) //nolint:errcheck
@@ -157,3 +691,6 @@ func cryptoShuffle[T any](s []T) {
 		s[i], s[j] = s[j], s[i]
 	}
 }
+
+// timePtr returns a pointer to a time.Time value.
+func timePtr(t time.Time) *time.Time { return &t }
