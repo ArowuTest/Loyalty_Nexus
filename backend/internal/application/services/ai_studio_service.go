@@ -16,7 +16,7 @@ package services
 //  mindmap          Learn       2 pts  Gemini Flash → Groq
 //  research-brief   Learn       5 pts  Gemini Flash → Groq → DeepSeek
 //  ai-photo         Create     10 pts  HF FLUX.1-Schnell (free) → FAL.AI FLUX-dev
-//  bg-music         Create      5 pts  Mubert API (free tier) → ElevenLabs music
+//  bg-music         Create      5 pts  HF MusicGen-small (free, uses HF_TOKEN) → Mubert → ElevenLabs sound
 //  podcast          Learn       4 pts  Gemini script + Google TTS narration
 //  slide-deck       Build       4 pts  Gemini Flash → Groq
 //  infographic      Build       5 pts  Gemini Flash → Groq
@@ -459,22 +459,31 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug, prompt s
 		return nil, fmt.Errorf("marketing jingle requires ELEVENLABS_API_KEY")
 
 	default: // bg-music
-		// Primary: Mubert (free 25 tracks/month, royalty-free)
+		// Primary: HuggingFace MusicGen-small (FREE — uses existing HF_TOKEN, no extra signup)
+		// Model: facebook/musicgen-small — 5-30 second ambient/background music clips
+		if hfToken := os.Getenv("HF_TOKEN"); hfToken != "" {
+			audioURL, err := o.callHFMusicGen(ctx, hfToken, prompt, 15)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "hf-musicgen", CostMicros: 0}, nil
+			}
+			log.Printf("[AIStudio] HF MusicGen failed: %v — trying Mubert", err)
+		}
+		// Secondary: Mubert (if user has configured a paid plan key)
 		if mubertKey := os.Getenv("MUBERT_API_KEY"); mubertKey != "" {
 			audioURL, err := o.callMubert(ctx, mubertKey, prompt, 30)
 			if err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "mubert", CostMicros: 0}, nil
 			}
-			log.Printf("[AIStudio] Mubert failed: %v", err)
+			log.Printf("[AIStudio] Mubert failed: %v — trying ElevenLabs sound", err)
 		}
-		// Fallback: ElevenLabs sound-generation
+		// Final fallback: ElevenLabs sound-generation (uses existing ELEVENLABS_API_KEY)
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
 			if err == nil {
-				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-sound", CostMicros: 2000}, nil
+				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-sound", CostMicros: 500}, nil
 			}
 		}
-		return nil, fmt.Errorf("background music unavailable: configure MUBERT_API_KEY")
+		return nil, fmt.Errorf("background music unavailable: configure HF_TOKEN (free) to enable this feature")
 	}
 }
 
@@ -1158,6 +1167,65 @@ func (o *AIStudioOrchestrator) callGoogleTranslate(ctx context.Context, apiKey, 
 		return "", fmt.Errorf("Google Translate: no translation returned")
 	}
 	return result.Data.Translations[0].TranslatedText, nil
+}
+
+// callHFMusicGen calls the HuggingFace MusicGen-small model for background music.
+// This is FREE — it uses the same HF_TOKEN already required for image generation.
+// Model: facebook/musicgen-small (best quality/speed for short clips)
+// Returns a public CDN URL to the uploaded MP3.
+func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt string, durationSecs int) (string, error) {
+	// HF Inference API for audio generation
+	apiURL := "https://api-inference.huggingface.co/models/facebook/musicgen-small"
+	payload := map[string]interface{}{
+		"inputs": prompt,
+		"parameters": map[string]interface{}{
+			"max_new_tokens": durationSecs * 50, // ~50 tokens per second of audio
+			"do_sample":      true,
+			"guidance_scale": 3.0,
+		},
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	// MusicGen can take 10-30s to load on cold start
+	req.Header.Set("X-Wait-For-Model", "true")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("HF MusicGen request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		return "", fmt.Errorf("HF MusicGen model loading — retry in 20s")
+	}
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("HF MusicGen %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	// Response is raw audio bytes (WAV/FLAC — HF returns audio directly)
+	audioBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("HF MusicGen read: %w", err)
+	}
+	if len(audioBytes) < 1000 {
+		return "", fmt.Errorf("HF MusicGen: response too small (%d bytes) — likely an error", len(audioBytes))
+	}
+
+	// Upload to asset storage and return public URL
+	fileName := fmt.Sprintf("studio/bg-music/%d.wav", time.Now().UnixNano())
+	publicURL, err := o.storage.Upload(ctx, fileName, audioBytes, "audio/wav")
+	if err != nil {
+		// If storage fails, return data URI so the feature still works in dev
+		encoded := base64.StdEncoding.EncodeToString(audioBytes)
+		return "data:audio/wav;base64," + encoded, nil
+	}
+	return publicURL, nil
 }
 
 // callMubert calls the Mubert API for royalty-free background music generation.

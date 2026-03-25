@@ -75,8 +75,8 @@ VALUES
     'Create',    2,  'assemblyai',        'best',                                '📝', 12,  true, NOW(), NOW()),
 
 (gen_random_uuid(), 'Background Music', 'bg-music',
-    'Generate 30s royalty-free background music (Mubert)',
-    'Create',    5,  'mubert',            'RecordTrackTTM',                      '🎶', 13,  true, NOW(), NOW()),
+    'Generate 15s royalty-free background music (HuggingFace MusicGen)',
+    'Create',    5,  'hf-musicgen',       'facebook/musicgen-small',             '🎶', 13,  true, NOW(), NOW()),
 
 (gen_random_uuid(), 'AI Photo',         'ai-photo',
     'Generate a high-quality AI image from your description',
