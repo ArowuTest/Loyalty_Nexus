@@ -1263,7 +1263,8 @@ func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt
 // Docs: https://github.com/pollinations/pollinations
 // Used as: zero-cost tier between HuggingFace (free with key) and FAL.AI (paid).
 
-// callPollinationsImage generates an image using Pollinations FLUX (free, no key).
+// callPollinationsImage generates an image using Pollinations FLUX.
+// Uses secret key (sk_...) when available for no rate limits.
 // Simple GET URL: https://pollinations.ai/p/{prompt}?width=1024&height=1024&model=flux
 func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt string) (string, error) {
 	encoded := url.QueryEscape(prompt)
@@ -1275,6 +1276,9 @@ func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt
 		return "", err
 	}
 	req.Header.Set("User-Agent", "NexusAI/1.0")
+	if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
+		req.Header.Set("Authorization", "Bearer "+sk)
+	}
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -1302,8 +1306,8 @@ func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt
 	return publicURL, nil
 }
 
-// callPollinationsTTS generates speech using Pollinations TTS (free, OpenAI-compatible).
-// Supports 30+ voices including ElevenLabs voices. No API key needed.
+// callPollinationsTTS generates speech using Pollinations TTS (OpenAI-compatible).
+// Uses secret key (sk_...) when available — unlocks 13+ voices and no rate limits.
 // Endpoint: POST https://gen.pollinations.ai/v1/audio/speech
 func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, voice string) (string, error) {
 	if voice == "" {
@@ -1322,6 +1326,9 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "NexusAI/1.0")
+	if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
+		req.Header.Set("Authorization", "Bearer "+sk)
+	}
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -1348,8 +1355,8 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 	return publicURL, nil
 }
 
-// callPollinationsVideo generates a short video using Pollinations wan-fast (free).
-// wan-fast: fast 5-second video generation, released 2026-03-23. No key needed.
+// callPollinationsVideo generates a short video using Pollinations wan-fast.
+// Uses secret key (sk_...) when available — no rate limits, server-side safe.
 // Endpoint: POST https://gen.pollinations.ai/video
 func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageURL, prompt string) (string, error) {
 	payload := map[string]interface{}{
@@ -1366,6 +1373,9 @@ func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageU
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "NexusAI/1.0")
+	if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
+		req.Header.Set("Authorization", "Bearer "+sk)
+	}
 
 	// Video generation takes 30-90s
 	videoCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
