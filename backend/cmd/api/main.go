@@ -61,6 +61,7 @@ func main() {
 	studioHandler := handlers.NewStudioHandler(studioSvc, llmOrchestrator, asyncWorker, notebookLM)
 	authHandler := handlers.NewAuthHandler(authSvc)
 	momoHandler := handlers.NewMoMoHandler(momoSvc, authSvc)
+	mnoHandler := handlers.NewMNOWebhookHandler(eq)
 	adminHandler := &handlers.AdminHandler{}
 	ussdHandler := &handlers.USSDHandler{}
 
@@ -72,6 +73,9 @@ func main() {
 
 	// MoMo Routes (REQ-1.3)
 	http.HandleFunc("/api/v1/user/momo/link", momoHandler.RequestLink)
+
+	// Integrated Mode Route (REQ-2.1)
+	http.HandleFunc("/api/v1/recharge/mno-webhook", mnoHandler.BSSRechargeWebhook)
 
 	// USSD Entry Point
 	http.Handle("/api/v1/ussd", ussdHandler)
