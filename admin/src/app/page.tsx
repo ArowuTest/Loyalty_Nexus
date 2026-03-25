@@ -68,7 +68,81 @@ export default function AdminPortal() {
         {activeTab === 'Overview' && <OverviewTab />}
         {activeTab === 'Program Rules' && <ProgramRulesTab />}
         {activeTab === 'Prize Engine' && <PrizeEngineTab />}
+        {activeTab === 'Regional Wars' && <RegionalWarsTab />}
       </main>
+    </div>
+  );
+}
+
+function RegionalWarsTab() {
+  return (
+    <div className="space-y-10">
+      <header className="flex justify-between items-end">
+        <div>
+          <h2 className="text-4xl font-black text-white italic tracking-tighter">Regional Wars</h2>
+          <p className="text-slate-500 font-medium mt-2 uppercase text-xs tracking-widest">Manage tournaments and regional boosters</p>
+        </div>
+        <button className="gold-gradient text-black px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-all">
+          Trigger Global Golden Hour
+        </button>
+      </header>
+
+      <div className="grid grid-cols-3 gap-6">
+        {[
+          { label: 'Active Regions', value: '36 States', icon: MapPin },
+          { label: 'Top Growth', value: 'Lagos (+18%)', icon: TrendingUp },
+          { label: 'Avg Multiplier', value: '1.4X', icon: Zap },
+        ].map((stat) => (
+          <div key={stat.label} className="glass p-6 rounded-3xl border border-white/5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-brand-gold">
+              <stat.icon size={24} />
+            </div>
+            <div>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{stat.label}</p>
+              <p className="text-2xl font-black text-white italic">{stat.value}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="glass rounded-[2rem] border border-white/5 overflow-hidden shadow-2xl">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="bg-white/5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] border-b border-white/5">
+              <th className="px-8 py-5">Region</th>
+              <th className="px-8 py-5">Volume (₦)</th>
+              <th className="px-8 py-5">Subscribers</th>
+              <th className="px-8 py-5">Base Mult.</th>
+              <th className="px-8 py-5">Golden Hour</th>
+              <th className="px-8 py-5 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {[
+              { name: 'Lagos', volume: '12.4M', subs: '42.5K', base: '1.0X', golden: true },
+              { name: 'Abuja (FCT)', volume: '8.1M', subs: '28.1K', base: '1.0X', golden: false },
+              { name: 'Kano', volume: '5.2M', subs: '19.4K', base: '1.2X', golden: false },
+            ].map((region) => (
+              <tr key={region.name} className="hover:bg-white/5 transition-colors">
+                <td className="px-8 py-5 font-bold text-sm text-white italic">{region.name}</td>
+                <td className="px-8 py-5 text-sm font-black text-white tracking-tighter">₦{region.volume}</td>
+                <td className="px-8 py-5 text-xs text-slate-400 font-medium">{region.subs}</td>
+                <td className="px-8 py-5">
+                  <input type="number" step="0.1" defaultValue={1.0} className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-white font-bold text-xs w-16" />
+                </td>
+                <td className="px-8 py-5">
+                  <div className={`w-10 h-5 rounded-full p-1 transition-colors ${region.golden ? 'bg-brand-gold' : 'bg-white/10'}`}>
+                    <div className={`w-3 h-3 rounded-full bg-black transition-transform ${region.golden ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </div>
+                </td>
+                <td className="px-8 py-5 text-right">
+                  <button className="text-brand-gold text-[10px] font-black uppercase hover:underline">Edit Boost</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

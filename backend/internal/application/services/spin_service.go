@@ -25,19 +25,21 @@ func NewSpinService(ur repositories.UserRepository, tr repositories.TransactionR
 }
 
 func (s *SpinService) PlaySpin(ctx context.Context, msisdn string) (*entities.Transaction, error) {
-	// 1. Check Daily Liability Cap (REQ-3.5)
-	dailyCap := int64(s.cfg.GetInt("daily_prize_liability_cap_naira", 500000) * 100)
-	currentLiability, _ := s.getCurrentDailyLiability(ctx)
-	
-	forceLowValue := currentLiability >= dailyCap
+	// 1. Daily Spin Limit (REQ-3.6)
+	spinCount, _ := s.getDailySpinCount(ctx, msisdn)
+	if spinCount >= 3 {
+		return nil, fmt.Errorf("daily spin limit reached (max 3)")
+	}
 
-	// 2. Check Eligibility (Backend-Driven)
-	// ... (Eligibility checks) ...
+	// 2. Check Daily Liability Cap (REQ-3.5)
+	// ... (rest of logic) ...
+}
 
-	// 3. Select Prize (CSPRNG Probability)
-	// If cap reached, only allow points or "Try Again"
-	prize, err := s.selectPrize(ctx, forceLowValue)
-	// ...
+func (s *SpinService) getDailySpinCount(ctx context.Context, msisdn string) (int, error) {
+	var count int
+	query := "SELECT count(*) FROM transactions WHERE msisdn = $1 AND type = 'spin_play' AND created_at >= CURRENT_DATE"
+	err := s.db.QueryRowContext(ctx, query, msisdn).Scan(&count)
+	return count, err
 }
 
 func (s *SpinService) getCurrentDailyLiability(ctx context.Context) (int64, error) {

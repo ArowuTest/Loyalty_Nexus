@@ -56,14 +56,14 @@ const MOCK_TOOLS: StudioTool[] = [
     examplePrompt: 'WAEC Chemistry: Redox Reactions summary.'
   },
   {
-    id: '5',
-    name: 'Business Plan',
-    description: 'Turn your idea into a professional one-page summary.',
+    id: 'voice-to-plan',
+    name: 'Voice to Business Plan',
+    description: 'Describe your idea by voice. We transcribe, structure, and build your summary.',
     category: 'Build',
-    pointCost: 5,
-    iconName: 'FileText',
+    pointCost: 6,
+    iconName: 'Mic',
     isActive: true,
-    examplePrompt: 'A solar panel cleaning service for homes in Abuja.'
+    examplePrompt: 'Record: "I want to start a drone photography business for weddings in Lagos."'
   }
 ];
 
@@ -80,6 +80,8 @@ export default function StudioLanding() {
       router.push('/studio/my-ai-photo');
     } else if (tool.id === '5') {
       router.push('/studio/business-plan');
+    } else if (tool.id === 'voice-to-plan') {
+      router.push('/studio/voice-to-plan');
     } else {
       console.log('Selected:', tool.name);
     }
