@@ -36,6 +36,7 @@ func main() {
 	userRepo := persistence.NewPostgresUserRepository(db)
 	txRepo := persistence.NewPostgresTransactionRepository(db)
 	studioRepo := persistence.NewPostgresStudioRepository(db)
+	hlrRepo := persistence.NewPostgresHLRRepository(db)
 
 	// Infrastructure
 	eq := queue.NewEventQueue(rdb, "recharge_stream")
@@ -55,6 +56,7 @@ func main() {
 	// Services & UseCases
 	notifySvc := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
 	userUC := usecases.NewUserUseCase(userRepo)
+	hlrSvc := services.NewHLRService(hlrRepo)
 	spinSvc := services.NewSpinService(userRepo, txRepo, cfg, db)
 	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, db)
 

@@ -24,8 +24,9 @@ func main() {
 
 	userRepo := persistence.NewPostgresUserRepository(db)
 	txRepo := persistence.NewPostgresTransactionRepository(db)
+	hlrRepo := persistence.NewPostgresHLRRepository(db)
 	fraudGuard := services.NewFraudGuard(db)
-	hlrSvc := services.NewHLRService(nil, os.Getenv("TERMII_API_KEY")) // assuming cache repo optional
+	hlrSvc := services.NewHLRService(hlrRepo) 
 
 	ctx := context.Background()
 	// ... stream setup ...

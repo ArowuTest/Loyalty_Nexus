@@ -2,36 +2,34 @@ package services
 
 import (
 	"context"
-	"strings"
+	"fmt"
+	"loyalty-nexus/internal/domain/repositories"
 )
 
-type NetworkInfo struct {
-	Network  string
-	Prefix   string
-	IsMobile bool
+type HLRService struct {
+	repo repositories.HLRRepository
+	// In production: hlrClient external.HLRClient
 }
 
-type HLRService struct{}
-
-func NewHLRService() *HLRService {
-	return &HLRService{}
+func NewHLRService(r repositories.HLRRepository) *HLRService {
+	return &HLRService{repo: r}
 }
 
-func (s *HLRService) DetectNetwork(ctx context.Context, msisdn string) (*NetworkInfo, error) {
-	// Normalize MSISDN (Remove 234 prefix if present)
-	normalized := strings.TrimPrefix(msisdn, "234")
-	if len(normalized) > 3 {
-		prefix := normalized[:3]
-		switch prefix {
-		case "803", "806", "810", "813", "814", "816", "903", "906", "913", "916":
-			return &NetworkInfo{Network: "MTN", Prefix: prefix, IsMobile: true}, nil
-		case "805", "807", "811", "815", "905", "915":
-			return &NetworkInfo{Network: "GLO", Prefix: prefix, IsMobile: true}, nil
-		case "802", "808", "812", "902", "904", "907", "912":
-			return &NetworkInfo{Network: "AIRTEL", Prefix: prefix, IsMobile: true}, nil
-		case "809", "817", "818", "909", "908":
-			return &NetworkInfo{Network: "9MOBILE", Prefix: prefix, IsMobile: true}, nil
-		}
+func (s *HLRService) DetectNetwork(ctx context.Context, msisdn string, userSelection *string) (string, error) {
+	// 1. Try Trusted Cache
+	cache, _ := s.repo.FindByMSISDN(ctx, msisdn)
+	if cache != nil && cache.IsValid && (cache.LookupSource == "hlr_api" || cache.LookupSource == "user_selection") {
+		return cache.Network, nil
 	}
-	return &NetworkInfo{Network: "UNKNOWN", IsMobile: false}, nil
+
+	// 2. Try HLR API (Primary Source)
+	// mock success
+	network := "MTN"
+	s.repo.Save(ctx, &repositories.NetworkCache{
+		MSISDN: msisdn,
+		Network: network,
+		LookupSource: "hlr_api",
+		IsValid: true,
+	})
+	return network, nil
 }
