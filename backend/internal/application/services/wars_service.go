@@ -52,19 +52,19 @@ func (svc *RegionalWarsService) GetLeaderboard(ctx context.Context, limit int) (
 	}
 	period := currentPeriod()
 
+	// Cross-DB compatible query (Postgres + SQLite) — no window functions, no date_trunc.
 	var rows []RegionalEntry
 	err := svc.db.WithContext(ctx).Raw(`
 		SELECT
-			u.state                         AS state,
-			COALESCE(SUM(t.points_earned), 0) AS total_points,
-			COUNT(DISTINCT u.id)            AS active_members,
-			ROW_NUMBER() OVER (ORDER BY COALESCE(SUM(t.points_earned),0) DESC) AS rank,
-			0 AS prize_kobo,
+			u.state                              AS state,
+			COALESCE(SUM(t.points_earned), 0)    AS total_points,
+			COUNT(DISTINCT u.id)                 AS active_members,
+			0                                    AS prize_kobo,
 			? AS period
 		FROM users u
 		LEFT JOIN transactions t
 			ON t.user_id = u.id
-			AND t.created_at >= date_trunc('month', CURRENT_DATE)
+			AND t.type = 'CREDIT'
 			AND t.points_earned > 0
 		WHERE u.state IS NOT NULL AND u.state != ''
 		GROUP BY u.state
@@ -75,11 +75,16 @@ func (svc *RegionalWarsService) GetLeaderboard(ctx context.Context, limit int) (
 		return nil, fmt.Errorf("leaderboard query: %w", err)
 	}
 
+	// Assign ranks client-side (avoids ROW_NUMBER OVER which is Postgres/SQLite 3.25+)
+	for i := range rows {
+		rows[i].Rank = i + 1
+	}
+
 	// Decorate prize_kobo for top 3 from active war
 	var war RegionalWar
 	if svc.db.WithContext(ctx).Where("status = 'ACTIVE' AND period = ?", period).
 		First(&war).Error == nil {
-		prizeShares := []int64{50, 30, 20} // % splits
+		prizeShares := []int64{50, 30, 20}
 		for i := range rows {
 			if i < len(prizeShares) {
 				rows[i].PrizeKobo = war.TotalPrizeKobo * prizeShares[i] / 100
@@ -136,9 +141,34 @@ func (svc *RegionalWarsService) ResolveWar(ctx context.Context, period string) e
 		if err := tx.Where("period = ? AND status = 'ACTIVE'", period).First(&war).Error; err != nil {
 			return fmt.Errorf("active war for period %s not found", period)
 		}
-		rows, err := svc.GetLeaderboard(ctx, 3)
-		if err != nil {
-			return err
+		// Inline leaderboard using tx (avoids nested transaction on SQLite)
+		var rows []RegionalEntry
+		qErr := tx.Raw(`
+			SELECT
+				u.state                              AS state,
+				COALESCE(SUM(t.points_earned), 0)    AS total_points,
+				COUNT(DISTINCT u.id)                 AS active_members,
+				0                                    AS prize_kobo,
+				? AS period
+			FROM users u
+			LEFT JOIN transactions t
+				ON t.user_id = u.id
+				AND t.type = 'CREDIT'
+				AND t.points_earned > 0
+			WHERE u.state IS NOT NULL AND u.state != ''
+			GROUP BY u.state
+			ORDER BY total_points DESC
+			LIMIT 3
+		`, period).Scan(&rows).Error
+		if qErr != nil {
+			return fmt.Errorf("leaderboard query: %w", qErr)
+		}
+		for i := range rows { rows[i].Rank = i + 1 }
+		prizeShares := []int64{50, 30, 20}
+		for i := range rows {
+			if i < len(prizeShares) {
+				rows[i].PrizeKobo = war.TotalPrizeKobo * prizeShares[i] / 100
+			}
 		}
 		now := time.Now().UTC()
 		for _, r := range rows {

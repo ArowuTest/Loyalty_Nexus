@@ -49,9 +49,9 @@ type PrizePoolEntry struct {
 	Name             string    `db:"name" json:"name"`
 	PrizeType        PrizeType `db:"prize_type" json:"prize_type"`
 	BaseValue        float64   `db:"base_value" json:"base_value"`
-	IsActive         bool      `db:"is_active" json:"is_active"`
-	ProbWeight       int       `db:"win_probability_weight" json:"win_probability_weight"`
-	DailyInventoryCap *int     `db:"daily_inventory_cap" json:"daily_inventory_cap,omitempty"`
+	IsActive         bool      `db:"is_active" gorm:"column:is_active" json:"is_active"`
+	ProbWeight       int       `db:"win_probability_weight" gorm:"column:win_probability_weight" json:"win_probability_weight"`
+	DailyInventoryCap *int     `db:"daily_inventory_cap" gorm:"column:daily_inventory_cap" json:"daily_inventory_cap,omitempty"`
 }
 
 // SpinWheel is the assembled payload sent to the frontend.

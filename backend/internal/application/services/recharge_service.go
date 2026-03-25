@@ -136,7 +136,7 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 		scheduledMultiplier := s.getActiveScheduledMultiplier(ctx, user.ID)
 		segmentMultiplier := s.getSegmentMultiplier(ctx, user)
 
-		effectiveRate := tieredRate * globalMultiplier * scheduledMultiplier * segmentMultiplier
+		effectiveRate := baseRate * tieredRate * globalMultiplier * scheduledMultiplier * segmentMultiplier
 		ptsEarned := int64(math.Floor(float64(amountNaira) * effectiveRate))
 
 		// --- Calculate Spin Credits ---

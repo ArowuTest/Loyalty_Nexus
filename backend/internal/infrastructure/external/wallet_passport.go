@@ -6,12 +6,6 @@ import (
 	"log"
 )
 
-type WalletPassport interface {
-	IssueApplePass(ctx context.Context, userID string, points int64) (string, error)
-	IssueGooglePass(ctx context.Context, userID string, points int64) (string, error)
-	PushUpdate(ctx context.Context, userID string, points int64, streak int, currentDataMB int) error
-}
-
 type RebitesWalletAdapter struct {
 	IssuerID string
 	APIKey   string

@@ -103,9 +103,9 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 	// --- Step 5: Atomic DB transaction ---
 	var spinResult *entities.SpinResult
 	err = s.db.WithContext(ctx).Transaction(func(dbTx *gorm.DB) error {
-		// Deduct 1 spin credit
+		// Deduct 1 spin credit (use dbTx directly to avoid nested transaction on SQLite)
 		wallet.SpinCredits--
-		if err := s.userRepo.UpdateWallet(ctx, wallet); err != nil {
+		if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).Save(wallet).Error; err != nil {
 			return fmt.Errorf("credit deduction failed: %w", err)
 		}
 
@@ -126,7 +126,7 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 			FulfillmentStatus: fulfillStatus,
 			CreatedAt:         time.Now(),
 		}
-		if err := s.prizeRepo.CreateSpinResult(ctx, spinResult); err != nil {
+		if err := s.prizeRepo.CreateSpinResultTx(ctx, dbTx, spinResult); err != nil {
 			return fmt.Errorf("spin result write failed: %w", err)
 		}
 
@@ -155,7 +155,7 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 			pts := int64(prize.BaseValue)
 			wallet.PulsePoints += pts
 			wallet.LifetimePoints += pts
-			if err := s.userRepo.UpdateWallet(ctx, wallet); err != nil {
+			if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).Save(wallet).Error; err != nil {
 				return err
 			}
 			ptsTx := &entities.Transaction{

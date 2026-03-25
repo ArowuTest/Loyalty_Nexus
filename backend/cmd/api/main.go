@@ -70,7 +70,7 @@ func main() {
 	fulfillSvc := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
 	rechargeSvc := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
 	spinSvc    := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
-	studioSvc  := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, db, cfg)
+	studioSvc  := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
 	hlrSvc     := services.NewHLRService(hlrRepo)
 	warssSvc   := services.NewRegionalWarsService(db)
 	drawSvc    := services.NewDrawService(db)

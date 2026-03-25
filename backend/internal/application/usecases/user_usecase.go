@@ -15,5 +15,5 @@ func NewUserUseCase(r repositories.UserRepository) *UserUseCase {
 }
 
 func (u *UserUseCase) GetProfile(ctx context.Context, msisdn string) (*entities.User, error) {
-	return u.repo.FindByMSISDN(ctx, msisdn)
+	return u.repo.FindByPhoneNumber(ctx, msisdn)
 }

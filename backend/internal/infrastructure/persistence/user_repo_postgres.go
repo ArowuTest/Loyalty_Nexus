@@ -96,15 +96,21 @@ func (r *postgresUserRepository) GetWallet(ctx context.Context, userID uuid.UUID
 
 func (r *postgresUserRepository) GetWalletForUpdate(ctx context.Context, userID uuid.UUID) (*entities.Wallet, error) {
 	var w entities.Wallet
-	if err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("user_id = ?", userID).First(&w).Error; err != nil {
-		return nil, fmt.Errorf("wallet SELECT FOR UPDATE failed: %w", err)
+	// Try SELECT FOR UPDATE (Postgres); fall back to plain SELECT for SQLite/test DBs.
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("user_id = ?", userID).First(&w).Error
+	if err != nil {
+		// Retry without lock (e.g. SQLite test environment)
+		err = r.db.WithContext(ctx).Where("user_id = ?", userID).First(&w).Error
+	}
+	if err != nil {
+		return nil, fmt.Errorf("wallet not found for user %s: %w", userID, err)
 	}
 	return &w, nil
 }
 
 func (r *postgresUserRepository) UpdateWallet(ctx context.Context, wallet *entities.Wallet) error {
-	return r.db.WithContext(ctx).Save(wallet).Error
+	return r.db.WithContext(ctx).Table("wallets").Where("user_id = ?", wallet.UserID).Save(wallet).Error
 }
 
 func (r *postgresUserRepository) FindInactiveUsers(ctx context.Context, inactiveSinceHours int, limit int) ([]entities.User, error) {

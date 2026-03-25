@@ -45,8 +45,8 @@ func (c *ConfigManager) autoRefresh() {
 
 func (c *ConfigManager) Refresh(ctx context.Context) error {
 	type row struct {
-		Key   string          `gorm:"column:key"`
-		Value json.RawMessage `gorm:"column:value"`
+		Key   string `gorm:"column:key"`
+		Value string `gorm:"column:value"`
 	}
 	var rows []row
 	if err := c.db.WithContext(ctx).Table("network_configs").Select("key, value").Find(&rows).Error; err != nil {
@@ -55,7 +55,14 @@ func (c *ConfigManager) Refresh(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, r := range rows {
-		c.cache[r.Key] = r.Value
+		// Wrap plain values in JSON quotes if they are not already valid JSON.
+		raw := json.RawMessage(r.Value)
+		if len(r.Value) == 0 || (r.Value[0] != '{' && r.Value[0] != '[' && r.Value[0] != '"' &&
+			!((r.Value[0] >= '0' && r.Value[0] <= '9') || r.Value[0] == '-') &&
+			r.Value != "true" && r.Value != "false" && r.Value != "null") {
+			raw = json.RawMessage(`"` + r.Value + `"`)
+		}
+		c.cache[r.Key] = raw
 	}
 	return nil
 }

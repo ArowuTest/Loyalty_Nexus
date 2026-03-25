@@ -38,14 +38,16 @@ type User struct {
 // PulsePoints  → AI Studio currency  (earned by recharging)
 // SpinCredits  → Spin Wheel currency (1 per ₦1,000 cumulative recharge)
 type Wallet struct {
-	ID              uuid.UUID `db:"id" json:"id"`
-	UserID          uuid.UUID `db:"user_id" json:"user_id"`
-	PulsePoints     int64     `db:"pulse_points" json:"pulse_points"`
-	SpinCredits     int       `db:"spin_credits" json:"spin_credits"`
-	LifetimePoints  int64     `db:"lifetime_points" json:"lifetime_points"`
-	RechargeCounter int64     `db:"recharge_counter" json:"recharge_counter"` // Kobo accumulator
-	UpdatedAt       time.Time `db:"updated_at" json:"updated_at"`
+	ID              uuid.UUID `db:"id"               gorm:"column:id;primaryKey"     json:"id"`
+	UserID          uuid.UUID `db:"user_id"           gorm:"column:user_id;uniqueIndex" json:"user_id"`
+	PulsePoints     int64     `db:"pulse_points"      gorm:"column:pulse_points"      json:"pulse_points"`
+	SpinCredits     int       `db:"spin_credits"      gorm:"column:spin_credits"      json:"spin_credits"`
+	LifetimePoints  int64     `db:"lifetime_points"   gorm:"column:lifetime_points"   json:"lifetime_points"`
+	RechargeCounter int64     `db:"recharge_counter"  gorm:"column:recharge_counter"  json:"recharge_counter"`
+	UpdatedAt       time.Time `db:"updated_at"        gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
+
+func (Wallet) TableName() string { return "wallets" }
 
 // UserTier thresholds (based on LifetimePoints)
 const (

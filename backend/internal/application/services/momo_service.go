@@ -2,8 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"loyalty-nexus/internal/infrastructure/external"
 )
 

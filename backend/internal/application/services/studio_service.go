@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -40,7 +41,7 @@ func (s *StudioService) FindToolByID(ctx context.Context, id uuid.UUID) (*entiti
 }
 
 func (s *StudioService) GetUserGallery(ctx context.Context, userID uuid.UUID) ([]entities.AIGeneration, error) {
-	return s.studioRepo.GetUserGallery(ctx, userID)
+	return s.studioRepo.GetUserGallery(ctx, userID, 50, 0)
 }
 
 func (s *StudioService) CompleteGeneration(ctx context.Context, genID uuid.UUID, outputURL string, provider string, costMicros int) error {
@@ -57,7 +58,7 @@ func (s *StudioService) CompleteGeneration(ctx context.Context, genID uuid.UUID,
 		user, _ := s.userRepo.FindByID(ctx, gen.UserID)
 		tool, _ := s.studioRepo.FindToolByID(ctx, gen.ToolID)
 		if user != nil && tool != nil {
-			s.notifySvc.NotifyAssetReady(ctx, user.MSISDN, tool.Name)
+			s.notifySvc.NotifyAssetReady(ctx, user.PhoneNumber, tool.Name)
 		}
 	}
 
@@ -75,20 +76,14 @@ func (s *StudioService) FailGeneration(ctx context.Context, genID uuid.UUID, err
 		return err
 	}
 
-	user, err := s.userRepo.FindByID(ctx, gen.UserID)
-	if err != nil {
-		return err
-	}
-
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		refundTx := &entities.Transaction{
 			ID:          uuid.New(),
 			UserID:      gen.UserID,
-			MSISDN:      user.MSISDN,
 			Type:        entities.TxTypeBonus,
 			PointsDelta: gen.PointsDeducted,
 			CreatedAt:   time.Now(),
-			Metadata:    map[string]any{"reason": "Studio Refund", "gen_id": genID.String()},
+			Metadata: func() json.RawMessage { b, _ := json.Marshal(map[string]any{"reason": "Studio Refund", "gen_id": genID.String()}); return b }(),
 		}
 
 		if err := s.txRepo.SaveTx(ctx, tx, refundTx); err != nil {
@@ -104,13 +99,18 @@ func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID,
 		return nil, fmt.Errorf("tool not found: %w", err)
 	}
 
-	user, err := s.userRepo.FindByID(ctx, userID)
+	_, err = s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 
-	if user.TotalPoints < tool.PointCost {
-		return nil, fmt.Errorf("insufficient points: need %d, have %d", tool.PointCost, user.TotalPoints)
+	wallet, err := s.userRepo.GetWallet(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("wallet not found: %w", err)
+	}
+
+	if wallet.PulsePoints < tool.PointCost {
+		return nil, fmt.Errorf("insufficient points: need %d, have %d", tool.PointCost, wallet.PulsePoints)
 	}
 
 	gen := &entities.AIGeneration{
@@ -128,11 +128,10 @@ func (s *StudioService) RequestGeneration(ctx context.Context, userID uuid.UUID,
 		ledgerTx := &entities.Transaction{
 			ID:          uuid.New(),
 			UserID:      userID,
-			MSISDN:      user.MSISDN,
 			Type:        entities.TxTypeStudioSpend,
 			PointsDelta: -tool.PointCost,
 			CreatedAt:   time.Now(),
-			Metadata:    map[string]any{"tool": tool.Name, "gen_id": gen.ID.String()},
+			Metadata: func() json.RawMessage { b, _ := json.Marshal(map[string]any{"tool": tool.Name, "gen_id": gen.ID.String()}); return b }(),
 		}
 
 		if err := s.txRepo.SaveTx(ctx, tx, ledgerTx); err != nil {

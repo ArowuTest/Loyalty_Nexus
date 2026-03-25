@@ -16,14 +16,14 @@ func NewPostgresPrizeRepository(db *gorm.DB) repositories.PrizeRepository {
 
 func (r *postgresPrizeRepository) ListActivePrizes(ctx context.Context) ([]entities.PrizePoolEntry, error) {
 	var prizes []entities.PrizePoolEntry
-	err := r.db.WithContext(ctx).Table("prize_pool").Where("is_active = true").Find(&prizes).Error
+	err := r.db.WithContext(ctx).Table("prize_pool").Where("is_active = ? OR is_active = 'true'", true).Find(&prizes).Error
 	return prizes, err
 }
 
 func (r *postgresPrizeRepository) ListActivePrizesMaxValue(ctx context.Context, maxValueKobo int64) ([]entities.PrizePoolEntry, error) {
 	var prizes []entities.PrizePoolEntry
 	err := r.db.WithContext(ctx).Table("prize_pool").
-		Where("is_active = true AND base_value <= ?", maxValueKobo/100).Find(&prizes).Error
+		Where("(is_active = ? OR is_active = 'true') AND base_value <= ?", true, maxValueKobo/100).Find(&prizes).Error
 	return prizes, err
 }
 
@@ -38,6 +38,10 @@ func (r *postgresPrizeRepository) GetDailyInventoryUsed(ctx context.Context, pri
 
 func (r *postgresPrizeRepository) CreateSpinResult(ctx context.Context, result *entities.SpinResult) error {
 	return r.db.WithContext(ctx).Create(result).Error
+}
+
+func (r *postgresPrizeRepository) CreateSpinResultTx(ctx context.Context, tx *gorm.DB, result *entities.SpinResult) error {
+	return tx.WithContext(ctx).Create(result).Error
 }
 
 func (r *postgresPrizeRepository) FindSpinResult(ctx context.Context, id uuid.UUID) (*entities.SpinResult, error) {

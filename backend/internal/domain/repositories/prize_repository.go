@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"gorm.io/gorm"
 	"context"
 	"loyalty-nexus/internal/domain/entities"
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ type PrizeRepository interface {
 
 	// Spin Results
 	CreateSpinResult(ctx context.Context, result *entities.SpinResult) error
+	CreateSpinResultTx(ctx context.Context, tx *gorm.DB, result *entities.SpinResult) error
 	FindSpinResult(ctx context.Context, id uuid.UUID) (*entities.SpinResult, error)
 	UpdateSpinFulfillment(ctx context.Context, id uuid.UUID, status entities.FulfillmentStatus, ref string, errMsg string) error
 	ListPendingFulfillments(ctx context.Context, limit int) ([]entities.SpinResult, error)

@@ -5,10 +5,6 @@ import (
 	"fmt"
 )
 
-type ImageGenerator interface {
-	Generate(ctx context.Context, prompt string) (string, error)
-}
-
 type FalAIAdapter struct {
 	APIKey string
 }

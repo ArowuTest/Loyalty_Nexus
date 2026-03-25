@@ -6,11 +6,6 @@ import (
 	"time"
 )
 
-type KnowledgeGenerator interface {
-	TriggerGeneration(ctx context.Context, topic string, toolType string) (string, error)
-	PollStatus(ctx context.Context, genID string) (bool, string, error) // ready, output_url, error
-}
-
 type NotebookLMAdapter struct {
 	APIKey string
 }
