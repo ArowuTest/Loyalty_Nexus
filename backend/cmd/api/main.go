@@ -38,28 +38,19 @@ func main() {
 	hlrRepo := persistence.NewPostgresHLRRepository(db)
 	chatRepo := persistence.NewPostgresChatRepository(db)
 	authRepo := persistence.NewPostgresAuthRepository(db)
+	prizeRepo := persistence.NewPostgresPrizeRepository(db)
 
 	// Infrastructure
-	eq := queue.NewEventQueue(rdb, "recharge_stream")
-	cfg := config.NewConfigManager(db)
-	cfg.Refresh(context.Background())
-
-	// External AI Clients
-	groq := &external.GroqAdapter{}
-	gemini := &external.GeminiAdapter{}
-	deepseek := &external.DeepSeekAdapter{}
-	usageTracker := external.NewRedisUsageTracker(rdb)
-
-	// AI Orchestrator
-	llmOrchestrator := external.NewLLMOrchestrator(groq, gemini, deepseek, usageTracker, chatRepo, 10, 20)
+	// ...
+	provisioner := &external.VTPassAdapter{APIKey: os.Getenv("VTPASS_KEY")}
 
 	// Services & UseCases
 	notifySvc := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
-	authSvc := services.NewAuthService(authRepo, userRepo, notifySvc, os.Getenv("JWT_SECRET"))
-	userUC := usecases.NewUserUseCase(userRepo)
-	hlrSvc := services.NewHLRService(hlrRepo)
 	momoSvc := services.NewMoMoService()
-	spinSvc := services.NewSpinService(userRepo, txRepo, cfg, db)
+	authSvc := services.NewAuthService(authRepo, userRepo, notifySvc, os.Getenv("JWT_SECRET"))
+	
+	fulfillSvc := services.NewPrizeFulfillmentService(prizeRepo, userRepo, provisioner, momoSvc)
+	spinSvc := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, cfg, db)
 	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, db)
 
 	// Knowledge / Async Engine
