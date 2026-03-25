@@ -20,17 +20,19 @@ func NewRechargeService(p external.Provisioner) *RechargeService {
 }
 
 func (s *RechargeService) ProcessSuccessfulPayment(ctx context.Context, msisdn string, amountKobo int64, network string, ref string) error {
-	// 1. Provision via VTPass
-	provRef, err := s.provisioner.PurchaseAirtime(ctx, msisdn, amountKobo, network)
-	if err != nil {
-		// Log error and handle compensating logic if needed
-		return err
+	mode := os.Getenv("OPERATION_MODE")
+
+	if mode == "independent" {
+		// 1. Provision via VTPass
+		provRef, err := s.provisioner.PurchaseAirtime(ctx, msisdn, amountKobo, network)
+		if err != nil {
+			return err
+		}
+		log.Printf("[RechargeService] Independent Provisioned: %s", provRef)
+	} else {
+		// Integrated Mode: Provisioning handled by MNO BSS
+		log.Printf("[RechargeService] Integrated Mode: Awaiting MNO BSS Confirmation for %s", msisdn)
 	}
 
-	log.Printf("[RechargeService] Provisioned successfully: %s", provRef)
-
-	// 2. Award Points & Spin Credits (handled by the common worker or ledger triggers)
-	// In production, we'd emit a domain event here or call the ledger service directly.
-	
 	return nil
 }

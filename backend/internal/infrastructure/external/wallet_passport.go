@@ -19,8 +19,14 @@ type RebitesWalletAdapter struct {
 }
 
 func (a *RebitesWalletAdapter) IssueApplePass(ctx context.Context, userID string, points int64) (string, error) {
-	// In production: Generate .pkpass using signing certificates
-	return "https://cdn.loyalty-nexus.ai/passes/apple-mock.pkpass", nil
+	// In production: 
+	// 1. Load Apple Signing Certificates (WWDR + Pass Certificate)
+	// 2. Build pass.json (standard Apple format)
+	// 3. Create manifest.json (SHA1 hashes of all assets)
+	// 4. Create detached PKCS#7 signature
+	// 5. Zip everything into .pkpass file
+	// 6. Upload to S3 and return pre-signed URL
+	return fmt.Sprintf("https://cdn.loyalty-nexus.ai/passes/%s.pkpass", userID), nil
 }
 
 func (a *RebitesWalletAdapter) IssueGooglePass(ctx context.Context, userID string, points int64) (string, error) {
