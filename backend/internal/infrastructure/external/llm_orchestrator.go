@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -48,6 +50,7 @@ type LLMRequest struct {
 	SessionID string   // for session memory lookup
 	Prompt    string
 	History   []string
+	ToolSlug  string   // optional: "web-search-ai" | "code-helper" — routes to Pollinations
 }
 
 type LLMResponse struct {
@@ -67,7 +70,7 @@ type UsageTracker interface {
 	Increment(ctx context.Context, userID string) error
 }
 
-// ─── Orchestrator struct ─────────────────────────────────────────────────────
+// ─── LLMOrchestrator struct ─────────────────────────────────────────────────
 
 type LLMOrchestrator struct {
 	groqClient       LLMClient
@@ -78,6 +81,7 @@ type LLMOrchestrator struct {
 	groqDailyLimit   int
 	geminiDailyLimit int
 	rdb              *redis.Client
+	httpClient       *http.Client // shared for Pollinations helper calls
 }
 
 // ─── Constructor ─────────────────────────────────────────────────────────────
@@ -98,6 +102,7 @@ func NewLLMOrchestrator(
 		rdb:              rdb,
 		groqDailyLimit:   groqLim,
 		geminiDailyLimit: gemLim,
+		httpClient:       &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
@@ -355,7 +360,117 @@ Conversation:
 	return o.geminiClient.Complete(ctx, systemPrompt, userPrompt)
 }
 
-// ─── SaveMessage ─────────────────────────────────────────────────────────────
+// ─── ChatWithTool ─────────────────────────────────────────────────────────────
+
+// ChatWithTool routes a chat message to a specific Pollinations-backed tool
+// (web-search-ai → gemini-search, code-helper → qwen-coder) and persists the
+// exchange to the session just like a normal Chat() call.
+func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		// No Pollinations key — graceful fallback to standard chat
+		return o.Chat(ctx, req)
+	}
+
+	var (
+		payload map[string]interface{}
+		providerName LLMProvider
+	)
+
+	switch req.ToolSlug {
+	case "web-search-ai":
+		payload = map[string]interface{}{
+			"model": "openai",
+			"messages": []map[string]interface{}{
+				{"role": "system", "content": "You are Nexus AI with real-time web search access. Provide current, accurate information with sources when relevant. Be concise and locally aware of Nigerian context."},
+				{"role": "user", "content": req.Prompt},
+			},
+			"search": true,
+		}
+		providerName = "POLLINATIONS_SEARCH"
+	case "code-helper":
+		payload = map[string]interface{}{
+			"model": "qwen-coder",
+			"messages": []map[string]interface{}{
+				{"role": "system", "content": "You are an expert programmer and coding assistant. Write clean, well-commented code. Explain your solution clearly. Format code blocks with proper markdown."},
+				{"role": "user", "content": req.Prompt},
+			},
+		}
+		providerName = "POLLINATIONS_QWEN"
+	default:
+		return o.Chat(ctx, req)
+	}
+
+	text, err := o.callPollinationsChat(ctx, sk, payload)
+	if err != nil {
+		log.Printf("[LLM] ChatWithTool %s failed: %v — falling back to general chat", req.ToolSlug, err)
+		go o.recordProviderUse(context.Background(), providerName, false, err.Error())
+		return o.Chat(ctx, req)
+	}
+
+	// Persist messages to session
+	if req.SessionID != "" {
+		sid, parseErr := uuid.Parse(req.SessionID)
+		if parseErr == nil {
+			_ = o.chatRepo.AppendMessage(ctx, sid, "user", req.Prompt)
+			_ = o.chatRepo.AppendMessage(ctx, sid, "assistant", text)
+		}
+	}
+	go o.recordProviderUse(context.Background(), providerName, true, "")
+
+	return &LLMResponse{Text: text, Provider: providerName}, nil
+}
+
+// callPollinationsChat is a shared helper for Pollinations OpenAI-compatible chat.
+func (o *LLMOrchestrator) callPollinationsChat(ctx context.Context, sk string, payload interface{}) (string, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/v1/chat/completions", bytes.NewBuffer(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+sk)
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations chat request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Pollinations chat %d: %s", resp.StatusCode, string(raw[:min(300, len(raw))]))
+	}
+
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Error *struct{ Message string `json:"message"` } `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return "", fmt.Errorf("Pollinations chat parse: %w", err)
+	}
+	if parsed.Error != nil {
+		return "", fmt.Errorf("Pollinations chat API error: %s", parsed.Error.Message)
+	}
+	if len(parsed.Choices) == 0 {
+		return "", fmt.Errorf("Pollinations chat: no choices returned")
+	}
+	return parsed.Choices[0].Message.Content, nil
+}
+
+func min(a, b int) int {
+	if a < b { return a }
+	return b
+}
 
 // SaveMessage persists a single message (role: "user" or "assistant") to the chat repo.
 func (o *LLMOrchestrator) SaveMessage(ctx context.Context, sessionID uuid.UUID, role, content string) error {

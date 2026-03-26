@@ -17,8 +17,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -236,6 +238,7 @@ func (h *StudioHandler) GetGallery(w http.ResponseWriter, r *http.Request) {
 type chatRequest struct {
 	Message   string   `json:"message"`
 	SessionID string   `json:"session_id,omitempty"`
+	ToolSlug  string   `json:"tool_slug,omitempty"` // "web-search-ai" | "code-helper" | "" (general)
 	History   []string `json:"history,omitempty"`
 }
 
@@ -248,11 +251,75 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Daily chat message limit (from network_configs — zero-hardcoding rule)
-	// Enforcement is delegated to LLMOrchestrator (it tracks per-user daily usage)
+	// ── Session ID: if frontend doesn't send one, mint a new one ──────────
+	sessionID := req.SessionID
+	if sessionID == "" {
+		sessionID = "sess_" + uid[:8] + "_" + fmt.Sprintf("%d", timeNowUnix())
+	}
+
+	// ── Route by tool_slug ────────────────────────────────────────────────
+	// web-search-ai and code-helper are dispatched through AIStudioOrchestrator
+	// (which uses Pollinations gemini-search and Qwen-Coder respectively).
+	// All other slugs (including empty) use the standard LLMOrchestrator chain.
+	switch req.ToolSlug {
+	case "web-search-ai", "code-helper":
+		// Resolve tool → get the tool entity so we can deduct points if needed
+		tool, err := h.studioSvc.FindToolBySlug(r.Context(), req.ToolSlug)
+		if err != nil {
+			// Tool not found — graceful fallback to general chat
+			h.handleGeneralChat(w, r, uid, sessionID, req)
+			return
+		}
+
+		// Check if user can afford it (most chat tools are free)
+		if !tool.IsFree && tool.PointCost > 0 {
+			userID, _ := uuid.Parse(uid)
+			gen, genErr := h.studioSvc.RequestGeneration(r.Context(), userID, tool.ID, req.Message)
+			if genErr != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": genErr.Error()})
+				return
+			}
+			// Dispatch as full generation job (async)
+			h.worker.DispatchGeneration(gen, nil)
+			writeJSON(w, http.StatusAccepted, map[string]interface{}{
+				"response":   "Processing your request… check Gallery for results.",
+				"provider":   req.ToolSlug,
+				"session_id": sessionID,
+				"generation_id": gen.ID,
+			})
+			return
+		}
+
+		// Free tool — call the AI studio orchestrator's text dispatcher inline
+		resp, err := h.llmOrch.ChatWithTool(r.Context(), external.LLMRequest{
+			UserID:    uid,
+			SessionID: sessionID,
+			Prompt:    req.Message,
+			History:   req.History,
+			ToolSlug:  req.ToolSlug,
+		})
+		if err != nil {
+			// Fallback to general chat on tool failure
+			h.handleGeneralChat(w, r, uid, sessionID, req)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"response":   resp.Text,
+			"provider":   resp.Provider,
+			"session_id": sessionID,
+		})
+		return
+
+	default:
+		h.handleGeneralChat(w, r, uid, sessionID, req)
+	}
+}
+
+// handleGeneralChat routes to the standard Groq → Gemini → DeepSeek cascade.
+func (h *StudioHandler) handleGeneralChat(w http.ResponseWriter, r *http.Request, uid, sessionID string, req chatRequest) {
 	resp, err := h.llmOrch.Chat(r.Context(), external.LLMRequest{
 		UserID:    uid,
-		SessionID: req.SessionID,
+		SessionID: sessionID,
 		Prompt:    req.Message,
 		History:   req.History,
 	})
@@ -262,12 +329,16 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"response":   resp.Text,
 		"provider":   resp.Provider,
-		"session_id": req.SessionID,
+		"session_id": sessionID,
 	})
+}
+
+// timeNowUnix returns the current Unix timestamp (abstracted so tests can stub it).
+func timeNowUnix() int64 {
+	return time.Now().UnixNano() / 1e6 // milliseconds
 }
 
 // ─── GET /api/v1/studio/chat/usage ───────────────────────────────────────────
@@ -349,9 +420,24 @@ func (h *StudioHandler) GetSessionUsage(w http.ResponseWriter, r *http.Request) 
 
 // ─── buildEnrichedPrompt ──────────────────────────────────────────────────────
 // Serialises all template-specific parameters from a generateRequest into a
-// single structured JSON string that the AI orchestrator can parse.
-// Using a JSON envelope keeps the Prompt DB column as a single source of truth
-// while giving each dispatcher access to all structured params.
+// structured JSON envelope that each dispatcher can parse via parseEnvelope().
+//
+// The envelope is the single source of truth stored in the Prompt DB column.
+// All dispatchers must call parseEnvelope(gen.Prompt) to access fields —
+// never parse with string splitting.
+//
+// Envelope fields:
+//   prompt        string  — human-readable text prompt
+//   image_url     string  — source image URL (ImageEditor, VideoAnimator, VisionAsk)
+//   voice_id      string  — TTS voice name (VoiceStudio / narrate-pro)
+//   language      string  — BCP-47 code (Transcribe, Translate, TTS)
+//   aspect_ratio  string  — "16:9", "9:16", "1:1" etc.
+//   duration      int     — seconds
+//   vocals        bool    — music with/without vocals
+//   lyrics        string  — user-supplied lyrics
+//   style_tags    []str   — style hint array
+//   negative_prompt string
+//   extra         object  — catch-all for future template fields (speed, bpm, etc.)
 func buildEnrichedPrompt(req generateRequest) string {
 	payload := map[string]interface{}{
 		"prompt": req.Prompt,

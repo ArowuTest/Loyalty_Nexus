@@ -189,7 +189,12 @@ func (o *AIStudioOrchestrator) Dispatch(ctx context.Context, genID uuid.UUID) er
 // route dispatches to the correct provider chain based on slug category.
 func (o *AIStudioOrchestrator) route(ctx context.Context, gen *entities.AIGeneration) (*studioProviderResult, error) {
 	slug := gen.ToolSlug
-	prompt := gen.Prompt
+
+	// ── Parse the JSON envelope emitted by buildEnrichedPrompt ────────────
+	// Every generation stores a JSON object in gen.Prompt produced by the HTTP
+	// handler's buildEnrichedPrompt(). Dispatch functions must read from this
+	// envelope — never do string-splitting on gen.Prompt directly.
+	env := parseEnvelope(gen.Prompt)
 
 	cat, known := slugCategory[slug]
 	if !known {
@@ -198,28 +203,57 @@ func (o *AIStudioOrchestrator) route(ctx context.Context, gen *entities.AIGenera
 
 	switch cat {
 	case catText:
-		return o.dispatchText(ctx, slug, prompt)
+		return o.dispatchText(ctx, slug, env)
 	case catImage:
-		return o.dispatchImage(ctx, slug, prompt)
+		return o.dispatchImage(ctx, slug, env)
 	case catVideo:
-		return o.dispatchVideo(ctx, slug, prompt)
+		return o.dispatchVideo(ctx, slug, env)
 	case catVoice:
-		return o.dispatchVoiceOrTranslate(ctx, slug, prompt)
+		return o.dispatchVoiceOrTranslate(ctx, slug, env)
 	case catMusic:
-		return o.dispatchMusic(ctx, slug, prompt)
+		return o.dispatchMusic(ctx, slug, env)
 	case catComposite:
-		return o.dispatchComposite(ctx, slug, prompt)
+		return o.dispatchComposite(ctx, slug, env)
 	case catVision:
-		return o.dispatchVision(ctx, slug, prompt)
+		return o.dispatchVision(ctx, slug, env)
 	default:
 		return nil, fmt.Errorf("unhandled category %q", cat)
 	}
 }
 
+// ─── promptEnvelope is the parsed form of buildEnrichedPrompt's output ───────
+
+type promptEnvelope struct {
+	Prompt         string                 `json:"prompt"`
+	ImageURL       string                 `json:"image_url"`
+	VoiceID        string                 `json:"voice_id"`
+	Language       string                 `json:"language"`
+	AspectRatio    string                 `json:"aspect_ratio"`
+	Duration       int                    `json:"duration"`
+	Vocals         *bool                  `json:"vocals"`
+	Lyrics         string                 `json:"lyrics"`
+	StyleTags      []string               `json:"style_tags"`
+	NegativePrompt string                 `json:"negative_prompt"`
+	Extra          map[string]interface{} `json:"extra"`
+}
+
+// parseEnvelope decodes the JSON envelope stored in the generation's Prompt column.
+// If the stored string is not valid JSON (legacy plain-text prompts), it returns an
+// envelope with Prompt set to the raw string so existing rows still work.
+func parseEnvelope(raw string) promptEnvelope {
+	var env promptEnvelope
+	if err := json.Unmarshal([]byte(raw), &env); err != nil {
+		// Plain-text fallback (old rows / direct API calls)
+		env.Prompt = raw
+	}
+	return env
+}
+
 // ─── Text dispatch (study guide, quiz, mindmap, research-brief, bizplan, slide-deck, infographic,
 //                   web-search-ai, code-helper) ──────────────────────────────────────────────────
 
-func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
+func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
+	prompt := env.Prompt
 	// web-search-ai: primary via Pollinations gemini-search, fallback to Gemini Flash
 	if slug == "web-search-ai" {
 		text, err := o.callPollinationsWebSearch(ctx, prompt)
@@ -315,7 +349,8 @@ func buildTextPrompts(slug, input string) (system, user string) {
 // ─── Image dispatch ────────────────────────────────────────────────────────────
 // Handles: ai-photo, bg-remover, ai-photo-pro, ai-photo-max, ai-photo-dream, photo-editor
 
-func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
+func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
+	prompt := env.Prompt
 	switch slug {
 	case "bg-remover":
 		return o.dispatchBgRemover(ctx, prompt)
@@ -361,11 +396,12 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug, prompt s
 
 	case "photo-editor":
 		// Kontext image-to-image editing — CostMicros: $0.015
-		parts := strings.SplitN(prompt, "|||", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("photo-editor: input must be 'IMGURL|||INSTRUCTION'")
+		// Frontend sends: { prompt: instruction, image_url: imgURL } via buildEnrichedPrompt
+		imgURL := env.ImageURL
+		instruction := env.Prompt
+		if imgURL == "" {
+			return nil, fmt.Errorf("photo-editor: image_url is required")
 		}
-		imgURL, instruction := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 		url, err := o.callPollinationsKontext(ctx, imgURL, instruction)
 		if err != nil {
 			return nil, fmt.Errorf("photo-editor requires Pollinations key: %w", err)
@@ -431,14 +467,15 @@ func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL s
 // ─── Video dispatch ────────────────────────────────────────────────────────────
 // Handles: animate-photo, video-premium, video-jingle, video-cinematic, video-veo
 
-func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
+func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	// video-cinematic: Seedance (image + motion prompt, paid)
+	// Frontend sends: { prompt: motionPrompt, image_url: imgURL } via buildEnrichedPrompt
 	if slug == "video-cinematic" {
-		parts := strings.SplitN(prompt, "|||", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("video-cinematic: input must be 'IMGURL|||MOTION_PROMPT'")
+		imgURL := env.ImageURL
+		motionPrompt := env.Prompt
+		if imgURL == "" {
+			return nil, fmt.Errorf("video-cinematic: image_url is required")
 		}
-		imgURL, motionPrompt := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 		vidURL, err := o.callPollinationsSeedance(ctx, imgURL, motionPrompt)
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/seedance", CostMicros: 200000}, nil
@@ -453,6 +490,7 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug, prompt s
 
 	// video-veo: Google Veo text-to-video (paid, highest quality)
 	if slug == "video-veo" {
+		prompt := env.Prompt
 		vidURL, err := o.callPollinationsVeo(ctx, prompt)
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo2", CostMicros: 400000}, nil
@@ -466,7 +504,11 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug, prompt s
 	}
 
 	// Standard video slugs (animate-photo, video-premium, video-jingle)
-	imageURL := prompt // for existing slugs the prompt field is the imageURL
+	// Frontend sends image_url in the envelope; prompt is the motion description
+	imageURL := env.ImageURL
+	if imageURL == "" {
+		imageURL = env.Prompt // legacy fallback: older rows stored imageURL in prompt
+	}
 
 	// Tier 1: FAL.AI (Kling v1.5 for premium, LTX for standard)
 	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
@@ -508,33 +550,37 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug, prompt s
 
 // ─── Voice / Translate dispatch ───────────────────────────────────────────────
 
-func (o *AIStudioOrchestrator) dispatchVoiceOrTranslate(ctx context.Context, slug, input string) (*studioProviderResult, error) {
+func (o *AIStudioOrchestrator) dispatchVoiceOrTranslate(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	switch slug {
 	case "translate":
-		return o.dispatchTranslate(ctx, input)
+		return o.dispatchTranslate(ctx, env)
 	case "transcribe":
-		return o.dispatchTranscribe(ctx, input)
+		return o.dispatchTranscribe(ctx, env.Prompt) // prompt holds audioURL for transcription
 	case "transcribe-african":
-		return o.dispatchTranscribeAfrican(ctx, input)
+		return o.dispatchTranscribeAfrican(ctx, env)
 	case "narrate-pro":
-		return o.dispatchNarratorPro(ctx, input)
+		return o.dispatchNarratorPro(ctx, env)
 	default: // narrate
-		return o.dispatchTTS(ctx, input)
+		// Use voice_id from envelope if set, else fall back to generic TTS
+		if env.VoiceID != "" {
+			return o.dispatchNarratorPro(ctx, env)
+		}
+		return o.dispatchTTS(ctx, env.Prompt)
 	}
 }
 
-func (o *AIStudioOrchestrator) dispatchTranslate(ctx context.Context, input string) (*studioProviderResult, error) {
-	// Parse input: expected format "LANG:text" e.g. "yo:Hello world"
-	parts := strings.SplitN(input, ":", 2)
-	targetLang, text := "yo", input
-	if len(parts) == 2 {
-		targetLang = strings.ToLower(strings.TrimSpace(parts[0]))
-		text = parts[1]
+func (o *AIStudioOrchestrator) dispatchTranslate(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
+	// Frontend sends: { prompt: textToTranslate, language: "yo" } via buildEnrichedPrompt
+	// Legacy fallback: if language is empty, default to Yoruba
+	targetLang := strings.ToLower(strings.TrimSpace(env.Language))
+	text := env.Prompt
+	if targetLang == "" || targetLang == "auto" {
+		targetLang = "yo" // default to Yoruba
 	}
 	// Validate supported languages
 	supportedLangs := map[string]bool{"yo": true, "ha": true, "ig": true, "fr": true, "en": true}
 	if !supportedLangs[targetLang] {
-		targetLang = "yo" // default to Yoruba
+		targetLang = "yo"
 	}
 
 	if apiKey := os.Getenv("GOOGLE_TRANSLATE_API_KEY"); apiKey != "" {
@@ -622,7 +668,8 @@ func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, audioURL 
 
 // ─── Music dispatch ───────────────────────────────────────────────────────────
 
-func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
+func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
+	prompt := env.Prompt
 	switch slug {
 	case "song-creator":
 		// Full song with vocals via Pollinations ElevenMusic
@@ -698,12 +745,12 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug, prompt s
 
 // ─── Composite dispatch (podcast, video-jingle) ───────────────────────────────
 
-func (o *AIStudioOrchestrator) dispatchComposite(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
+func (o *AIStudioOrchestrator) dispatchComposite(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	switch slug {
 	case "podcast":
-		return o.assemblePodcast(ctx, prompt)
+		return o.assemblePodcast(ctx, env.Prompt)
 	default:
-		return o.dispatchText(ctx, slug, prompt)
+		return o.dispatchText(ctx, slug, env)
 	}
 }
 
@@ -1691,20 +1738,23 @@ func (o *AIStudioOrchestrator) callElevenLabsMusic(ctx context.Context, apiKey, 
 // ─── NEW: Vision dispatch ─────────────────────────────────────────────────────
 // Handles: image-analyser, ask-my-photo
 
-func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug, prompt string) (*studioProviderResult, error) {
+func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	var imageURL, question string
 
 	switch slug {
 	case "ask-my-photo":
-		// Input: "IMGURL|||QUESTION"
-		parts := strings.SplitN(prompt, "|||", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("ask-my-photo: input must be 'IMGURL|||QUESTION'")
+		// Frontend sends: { prompt: question, image_url: imgURL } via buildEnrichedPrompt
+		imageURL = env.ImageURL
+		question = env.Prompt
+		if imageURL == "" {
+			return nil, fmt.Errorf("ask-my-photo: image_url is required")
 		}
-		imageURL = strings.TrimSpace(parts[0])
-		question = strings.TrimSpace(parts[1])
 	default: // image-analyser
-		imageURL = strings.TrimSpace(prompt)
+		// Frontend sends image_url or puts imageURL in prompt for legacy compatibility
+		imageURL = env.ImageURL
+		if imageURL == "" {
+			imageURL = env.Prompt
+		}
 		question = ""
 	}
 
@@ -1731,13 +1781,12 @@ func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug, prompt 
 
 // ─── NEW: dispatchTranscribeAfrican ──────────────────────────────────────────
 
-func (o *AIStudioOrchestrator) dispatchTranscribeAfrican(ctx context.Context, input string) (*studioProviderResult, error) {
-	// Input format: "LANG:audioURL" e.g. "yo:https://..."
-	parts := strings.SplitN(input, ":", 2)
-	lang, audioURL := "en", input
-	if len(parts) == 2 {
-		lang = strings.ToLower(strings.TrimSpace(parts[0]))
-		audioURL = strings.TrimSpace(parts[1])
+func (o *AIStudioOrchestrator) dispatchTranscribeAfrican(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
+	// Frontend sends: { prompt: audioURL, language: "yo" } via buildEnrichedPrompt
+	audioURL := env.Prompt
+	lang := strings.ToLower(strings.TrimSpace(env.Language))
+	if lang == "" {
+		lang = "en"
 	}
 	// Validate language
 	validLangs := map[string]bool{"yo": true, "ha": true, "ig": true, "en": true, "fr": true}
@@ -1768,22 +1817,18 @@ func (o *AIStudioOrchestrator) dispatchTranscribeAfrican(ctx context.Context, in
 
 // ─── NEW: dispatchNarratorPro ─────────────────────────────────────────────────
 
-func (o *AIStudioOrchestrator) dispatchNarratorPro(ctx context.Context, input string) (*studioProviderResult, error) {
-	// Input: "VOICE:text" e.g. "coral:Hello Nigeria"
-	// Valid voices: alloy, echo, fable, onyx, nova, shimmer, coral, verse, ballad, ash, sage, amuch, dan
+func (o *AIStudioOrchestrator) dispatchNarratorPro(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
+	// Frontend sends: { prompt: text, voice_id: "coral" } via buildEnrichedPrompt
 	validVoices := map[string]bool{
 		"alloy": true, "echo": true, "fable": true, "onyx": true, "nova": true,
 		"shimmer": true, "coral": true, "verse": true, "ballad": true, "ash": true,
 		"sage": true, "amuch": true, "dan": true,
 	}
-	voice, text := "nova", input
-	if idx := strings.Index(input, ":"); idx > 0 {
-		candidate := strings.ToLower(strings.TrimSpace(input[:idx]))
-		if validVoices[candidate] {
-			voice = candidate
-			text = strings.TrimSpace(input[idx+1:])
-		}
+	voice := strings.ToLower(strings.TrimSpace(env.VoiceID))
+	if voice == "" || !validVoices[voice] {
+		voice = "nova" // safe default
 	}
+	text := env.Prompt
 
 	// Use callPollinationsTTS — already implemented, uses POLLINATIONS_SECRET_KEY when set
 	audioURL, err := o.callPollinationsTTS(ctx, text, voice)
