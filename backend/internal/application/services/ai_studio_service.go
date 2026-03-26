@@ -1495,20 +1495,25 @@ func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt
 // Docs: https://github.com/pollinations/pollinations
 // Used as: zero-cost tier between HuggingFace (free with key) and FAL.AI (paid).
 
-// callPollinationsImage generates an image using Pollinations FLUX.
-// Uses secret key (sk_...) when available for no rate limits.
-// Simple GET URL: https://pollinations.ai/p/{prompt}?width=1024&height=1024&model=flux
+// callPollinationsImage generates an image using Pollinations FLUX (free model).
+// Official documented endpoint: GET https://gen.pollinations.ai/image/{prompt}
+// Docs: https://gen.pollinations.ai  — Returns JPEG/PNG directly (not JSON).
+// Bearer sk_ key required for rate-limit-free access; key passed as Authorization header.
 func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt string) (string, error) {
-	encoded := url.QueryEscape(prompt)
-	apiURL := fmt.Sprintf("https://pollinations.ai/p/%s?width=1024&height=1024&model=flux&nologo=true&seed=%d",
-		encoded, time.Now().UnixNano()%9999)
+	encoded := url.PathEscape(prompt)
+	seed := time.Now().UnixNano() % 999983
+	apiURL := fmt.Sprintf(
+		"https://gen.pollinations.ai/image/%s?model=flux&width=1024&height=1024&nologo=true&seed=%d&enhance=false",
+		encoded, seed,
+	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "NexusAI/1.0")
-	if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk != "" {
 		req.Header.Set("Authorization", "Bearer "+sk)
 	}
 
@@ -1519,21 +1524,30 @@ func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Pollinations image %d", resp.StatusCode)
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Pollinations image %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
 	}
 
 	imgBytes, err := io.ReadAll(resp.Body)
 	if err != nil || len(imgBytes) < 1000 {
-		return "", fmt.Errorf("Pollinations image: response too small")
+		return "", fmt.Errorf("Pollinations image: response too small (%d bytes)", len(imgBytes))
 	}
 
-	// Upload to asset storage
-	fileName := fmt.Sprintf("studio/ai-photo/pollinations_%d.jpg", time.Now().UnixNano())
-	publicURL, err := o.storage.Upload(ctx, fileName, imgBytes, "image/jpeg")
+	// Detect content type from response header (may be image/jpeg or image/png)
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "image/jpeg"
+	}
+	ext := "jpg"
+	if strings.Contains(ct, "png") {
+		ext = "png"
+	}
+
+	fileName := fmt.Sprintf("studio/ai-photo/flux_%d.%s", time.Now().UnixNano(), ext)
+	publicURL, err := o.storage.Upload(ctx, fileName, imgBytes, ct)
 	if err != nil {
-		// Return data URI fallback for dev
 		encoded64 := base64.StdEncoding.EncodeToString(imgBytes)
-		return "data:image/jpeg;base64," + encoded64, nil
+		return "data:" + ct + ";base64," + encoded64, nil
 	}
 	return publicURL, nil
 }
@@ -1587,76 +1601,58 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 	return publicURL, nil
 }
 
-// callPollinationsVideo generates a short video using Pollinations wan-fast.
-// Uses secret key (sk_...) when available — no rate limits, server-side safe.
-// Endpoint: POST https://gen.pollinations.ai/video
+// callPollinationsVideo generates a short video using Pollinations wan-fast (free tier).
+// Official documented endpoint: GET https://gen.pollinations.ai/image/{prompt}?model=wan-fast
+// Docs: https://gen.pollinations.ai — video models use the /image/{prompt} route.
+// The response is a raw MP4 binary (not JSON). sk_ key required via Bearer header.
+// imageURL is passed as the `image` query param for image-to-video; empty = text-to-video.
 func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageURL, prompt string) (string, error) {
-	payload := map[string]interface{}{
-		"model":    "wan-fast",
-		"image":    imageURL,
-		"prompt":   prompt,
-		"duration": 5,
+	return o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, prompt, 120)
+}
+
+// callPollinationsVideoModel is the shared GET-based video caller for any video model.
+func (o *AIStudioOrchestrator) callPollinationsVideoModel(ctx context.Context, model, imageURL, prompt string, timeoutSecs int) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
 	}
-	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://gen.pollinations.ai/video", bytes.NewReader(body))
+
+	encoded := url.PathEscape(prompt)
+	apiURL := fmt.Sprintf("https://gen.pollinations.ai/image/%s?model=%s&duration=5&aspectRatio=16:9",
+		encoded, model)
+	if imageURL != "" {
+		apiURL += "&image=" + url.QueryEscape(imageURL)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+sk)
 	req.Header.Set("User-Agent", "NexusAI/1.0")
-	if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
-		req.Header.Set("Authorization", "Bearer "+sk)
-	}
 
-	// Video generation takes 30-90s
-	videoCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	vidCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
 	defer cancel()
-	req = req.WithContext(videoCtx)
+	req = req.WithContext(vidCtx)
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations video request: %w", err)
+		return "", fmt.Errorf("Pollinations %s video request: %w", model, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Pollinations video %d: %s", resp.StatusCode, truncateStr(string(raw), 100))
+		return "", fmt.Errorf("Pollinations %s video %d: %s", model, resp.StatusCode, truncateStr(string(raw), 200))
 	}
 
-	// Check if response is JSON with a URL or raw video bytes
-	contentType := resp.Header.Get("Content-Type")
 	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("Pollinations video read: %w", err)
+	if err != nil || len(raw) < 1000 {
+		return "", fmt.Errorf("Pollinations %s video: response too small (%d bytes)", model, len(raw))
 	}
 
-	if strings.Contains(contentType, "application/json") {
-		var result struct {
-			URL    string `json:"url"`
-			VideoURL string `json:"video_url"`
-		}
-		if jsonErr := json.Unmarshal(raw, &result); jsonErr == nil {
-			if result.URL != "" {
-				return result.URL, nil
-			}
-			if result.VideoURL != "" {
-				return result.VideoURL, nil
-			}
-		}
-	}
-
-	// Raw video bytes — upload to storage
-	if len(raw) < 1000 {
-		return "", fmt.Errorf("Pollinations video: response too small")
-	}
-	fileName := fmt.Sprintf("studio/animate/pollinations_%d.mp4", time.Now().UnixNano())
-	publicURL, err := o.storage.Upload(ctx, fileName, raw, "video/mp4")
-	if err != nil {
-		return "", fmt.Errorf("Pollinations video: upload failed: %w", err)
-	}
-	return publicURL, nil
+	key := fmt.Sprintf("studio/video/%s_%d.mp4", model, time.Now().UnixNano())
+	return o.uploadOrDataURI(ctx, raw, "video/mp4", key), nil
 }
 
 // callMubert calls the Mubert API for royalty-free background music generation.
@@ -2163,26 +2159,26 @@ func (o *AIStudioOrchestrator) callPollinationsWhisperAfrican(ctx context.Contex
 }
 
 // callPollinationsElevenMusic generates a full song or instrumental via Pollinations ElevenMusic.
+// Official documented endpoint: GET https://gen.pollinations.ai/audio/{text}?model=elevenmusic
+// Docs: https://gen.pollinations.ai — audio models use the /audio/{text} route.
+// Returns raw MP3 binary. sk_ key required via Bearer header. Timeout: 180s.
+// Set instrumental=true to skip vocals and generate a background track only.
 func (o *AIStudioOrchestrator) callPollinationsElevenMusic(ctx context.Context, prompt string, instrumental bool) (string, error) {
 	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
 	if sk == "" {
 		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
 	}
-	payload := map[string]interface{}{
-		"model":        "elevenmusic",
-		"prompt":       prompt,
-		"instrumental": instrumental,
+
+	encoded := url.PathEscape(prompt)
+	apiURL := fmt.Sprintf("https://gen.pollinations.ai/audio/%s?model=elevenmusic", encoded)
+	if instrumental {
+		apiURL += "&instrumental=true"
 	}
-	body, err := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://gen.pollinations.ai/v1/audio/music", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+sk)
 	req.Header.Set("User-Agent", "NexusAI/1.0")
 
@@ -2202,32 +2198,12 @@ func (o *AIStudioOrchestrator) callPollinationsElevenMusic(ctx context.Context, 
 		return "", fmt.Errorf("Pollinations ElevenMusic %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 
-	// Response may be JSON with URL or raw audio bytes
-	contentType := resp.Header.Get("Content-Type")
+	// GET /audio returns raw MP3 bytes directly
 	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("Pollinations ElevenMusic read: %w", err)
-	}
-
-	if strings.Contains(contentType, "application/json") {
-		var result struct {
-			URL      string `json:"url"`
-			AudioURL string `json:"audio_url"`
-		}
-		if jsonErr := json.Unmarshal(raw, &result); jsonErr == nil {
-			if result.URL != "" {
-				return result.URL, nil
-			}
-			if result.AudioURL != "" {
-				return result.AudioURL, nil
-			}
-		}
-	}
-
-	// Raw audio bytes — upload
-	if len(raw) < 1000 {
+	if err != nil || len(raw) < 1000 {
 		return "", fmt.Errorf("Pollinations ElevenMusic: response too small (%d bytes)", len(raw))
 	}
+
 	suffix := "song"
 	if instrumental {
 		suffix = "instrumental"
@@ -2236,149 +2212,18 @@ func (o *AIStudioOrchestrator) callPollinationsElevenMusic(ctx context.Context, 
 	return o.uploadOrDataURI(ctx, raw, "audio/mpeg", key), nil
 }
 
-// callPollinationsSeedance generates a cinematic video using Pollinations Seedance (image-to-video).
+// callPollinationsSeedance generates a cinematic image-to-video using Pollinations Seedance.
+// Official documented endpoint: GET gen.pollinations.ai/image/{prompt}?model=seedance&image={srcURL}
+// Paid model (~$0.20/video). Uses sk_ key via Bearer header. Timeout: 180s.
 func (o *AIStudioOrchestrator) callPollinationsSeedance(ctx context.Context, imageURL, prompt string) (string, error) {
-	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
-	if sk == "" {
-		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
-	}
-	payload := map[string]interface{}{
-		"model":    "seedance",
-		"image":    imageURL,
-		"prompt":   prompt,
-		"duration": 5,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://gen.pollinations.ai/video", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+sk)
-	req.Header.Set("User-Agent", "NexusAI/1.0")
-
-	// Cinematic video generation can take up to 3 minutes
-	vidCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
-	defer cancel()
-	req = req.WithContext(vidCtx)
-
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("Pollinations Seedance request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Pollinations Seedance %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
-	}
-
-	contentType := resp.Header.Get("Content-Type")
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("Pollinations Seedance read: %w", err)
-	}
-
-	if strings.Contains(contentType, "application/json") {
-		var result struct {
-			URL      string `json:"url"`
-			VideoURL string `json:"video_url"`
-		}
-		if jsonErr := json.Unmarshal(raw, &result); jsonErr == nil {
-			if result.URL != "" {
-				return result.URL, nil
-			}
-			if result.VideoURL != "" {
-				return result.VideoURL, nil
-			}
-		}
-	}
-
-	if len(raw) < 1000 {
-		return "", fmt.Errorf("Pollinations Seedance: response too small")
-	}
-	key := fmt.Sprintf("studio/video/seedance_%d.mp4", time.Now().UnixNano())
-	publicURL, err := o.storage.Upload(ctx, key, raw, "video/mp4")
-	if err != nil {
-		return "", fmt.Errorf("Pollinations Seedance: upload failed: %w", err)
-	}
-	return publicURL, nil
+	return o.callPollinationsVideoModel(ctx, "seedance", imageURL, prompt, 180)
 }
 
-// callPollinationsVeo generates a high-quality video using Google Veo via Pollinations (text-to-video).
+// callPollinationsVeo generates a premium text-to-video using Google Veo via Pollinations.
+// Official documented endpoint: GET gen.pollinations.ai/image/{prompt}?model=veo
+// Paid model (~$0.40-0.50/video). Uses sk_ key via Bearer header. Timeout: 180s.
 func (o *AIStudioOrchestrator) callPollinationsVeo(ctx context.Context, prompt string) (string, error) {
-	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
-	if sk == "" {
-		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
-	}
-	payload := map[string]interface{}{
-		"model":    "veo2",
-		"prompt":   prompt,
-		"duration": 5,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://gen.pollinations.ai/video", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+sk)
-	req.Header.Set("User-Agent", "NexusAI/1.0")
-
-	// Veo can take up to 3 minutes
-	veoCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
-	defer cancel()
-	req = req.WithContext(veoCtx)
-
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("Pollinations Veo request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Pollinations Veo %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
-	}
-
-	contentType := resp.Header.Get("Content-Type")
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("Pollinations Veo read: %w", err)
-	}
-
-	if strings.Contains(contentType, "application/json") {
-		var result struct {
-			URL      string `json:"url"`
-			VideoURL string `json:"video_url"`
-		}
-		if jsonErr := json.Unmarshal(raw, &result); jsonErr == nil {
-			if result.URL != "" {
-				return result.URL, nil
-			}
-			if result.VideoURL != "" {
-				return result.VideoURL, nil
-			}
-		}
-	}
-
-	if len(raw) < 1000 {
-		return "", fmt.Errorf("Pollinations Veo: response too small")
-	}
-	key := fmt.Sprintf("studio/video/veo2_%d.mp4", time.Now().UnixNano())
-	publicURL, err := o.storage.Upload(ctx, key, raw, "video/mp4")
-	if err != nil {
-		return "", fmt.Errorf("Pollinations Veo: upload failed: %w", err)
-	}
-	return publicURL, nil
+	return o.callPollinationsVideoModel(ctx, "veo", "", prompt, 180)
 }
 
 // ─── S3 upload helper ─────────────────────────────────────────────────────────
