@@ -383,11 +383,12 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 
 	case "ai-photo-dream":
 		// Seedream (ByteDance) — CostMicros: $0.01
-		url, err := o.callPollinationsGPTImage(ctx, prompt, "seedream")
+		// Live model ID from GET /v1/models is "seedream5" (not "seedream")
+		url, err := o.callPollinationsGPTImage(ctx, prompt, "seedream5")
 		if err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "pollinations/seedream", CostMicros: 10000}, nil
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/seedream5", CostMicros: 10000}, nil
 		}
-		log.Printf("[AIStudio] Seedream failed for ai-photo-dream: %v — falling back", err)
+		log.Printf("[AIStudio] Seedream5 failed for ai-photo-dream: %v — falling back", err)
 		url, err = o.callPollinationsImage(ctx, prompt)
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
@@ -961,7 +962,9 @@ func (o *AIStudioOrchestrator) callHFFluxSchnell(ctx context.Context, hfKey, pro
 	if model == "" {
 		model = "black-forest-labs/FLUX.1-schnell"
 	}
-	endpoint := "https://api-inference.huggingface.co/models/" + model
+	// HF deprecated api-inference.huggingface.co (returns 410 Gone).
+	// New canonical base: https://router.huggingface.co/hf-inference/models/<model>
+	endpoint := "https://router.huggingface.co/hf-inference/models/" + model
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"inputs": prompt,
@@ -1263,7 +1266,8 @@ func (o *AIStudioOrchestrator) callElevenLabsTTS(ctx context.Context, apiKey, vo
 func (o *AIStudioOrchestrator) callHuggingFaceTTS(ctx context.Context, hfKey, text string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"inputs": text})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api-inference.huggingface.co/models/suno/bark",
+		// HF deprecated api-inference.huggingface.co (410 Gone) — use router instead.
+	"https://router.huggingface.co/hf-inference/models/suno/bark",
 		bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -1434,8 +1438,9 @@ func (o *AIStudioOrchestrator) callGoogleTranslate(ctx context.Context, apiKey, 
 // Model: facebook/musicgen-small (best quality/speed for short clips)
 // Returns a public CDN URL to the uploaded MP3.
 func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt string, durationSecs int) (string, error) {
-	// HF Inference API for audio generation
-	apiURL := "https://api-inference.huggingface.co/models/facebook/musicgen-small"
+	// HF Inference API for audio generation.
+	// HF deprecated api-inference.huggingface.co (410 Gone) — use router instead.
+	apiURL := "https://router.huggingface.co/hf-inference/models/facebook/musicgen-small"
 	payload := map[string]interface{}{
 		"inputs": prompt,
 		"parameters": map[string]interface{}{
