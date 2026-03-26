@@ -16,7 +16,7 @@ package services
 //  mindmap          Learn       2 pts  Gemini Flash → Groq
 //  research-brief   Learn       5 pts  Gemini Flash → Groq → DeepSeek
 //  ai-photo         Create     10 pts  HF FLUX.1-Schnell (free) → FAL.AI FLUX-dev
-//  bg-music         Create      5 pts  HF MusicGen-small (free, uses HF_TOKEN) → Mubert → ElevenLabs sound
+//  bg-music         Create      5 pts  Pollinations ElevenMusic (instrumental) → Mubert → ElevenLabs sound
 //  podcast          Learn       4 pts  Gemini script + Google TTS narration
 //  slide-deck       Build       4 pts  Gemini Flash → Groq
 //  infographic      Build       5 pts  Gemini Flash → Groq
@@ -708,16 +708,18 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 		return nil, fmt.Errorf("marketing jingle requires ELEVENLABS_API_KEY")
 
 	default: // bg-music
-		// Primary: HuggingFace MusicGen-small (FREE — uses existing HF_TOKEN, no extra signup)
-		// Model: facebook/musicgen-small — 5-30 second ambient/background music clips
-		if hfToken := os.Getenv("HF_TOKEN"); hfToken != "" {
-			audioURL, err := o.callHFMusicGen(ctx, hfToken, prompt, 15)
+		// Primary: Pollinations ElevenMusic (instrumental mode — no vocals, pure background track)
+		// HuggingFace MusicGen was removed from HF serverless (410 Gone) — replaced by Pollinations.
+		// Pollinations ElevenMusic: GET /audio/{prompt}?model=elevenmusic&instrumental=true
+		// Cost: pollen credits (~$0.005/s). sk_ key required since 2026-03-26.
+		if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
+			audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, true)
 			if err == nil {
-				return &studioProviderResult{OutputURL: audioURL, Provider: "hf-musicgen", CostMicros: 0}, nil
+				return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic", CostMicros: 500}, nil
 			}
-			log.Printf("[AIStudio] HF MusicGen failed: %v — trying Mubert", err)
+			log.Printf("[AIStudio] Pollinations ElevenMusic failed for bg-music: %v — trying Mubert", err)
 		}
-		// Secondary: Mubert (if user has configured a paid plan key)
+		// Secondary: Mubert (royalty-free, text-to-music, paid plan)
 		if mubertKey := os.Getenv("MUBERT_API_KEY"); mubertKey != "" {
 			audioURL, err := o.callMubert(ctx, mubertKey, prompt, 30)
 			if err == nil {
@@ -725,14 +727,14 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 			}
 			log.Printf("[AIStudio] Mubert failed: %v — trying ElevenLabs sound", err)
 		}
-		// Final fallback: ElevenLabs sound-generation (uses existing ELEVENLABS_API_KEY)
+		// Final fallback: ElevenLabs direct (uses existing ELEVENLABS_API_KEY)
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
 			if err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-sound", CostMicros: 500}, nil
 			}
 		}
-		return nil, fmt.Errorf("background music unavailable: configure HF_TOKEN (free) to enable this feature")
+		return nil, fmt.Errorf("background music unavailable: configure POLLINATIONS_SECRET_KEY (primary) or MUBERT_API_KEY")
 	}
 }
 
