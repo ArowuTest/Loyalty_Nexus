@@ -71,6 +71,16 @@ class AdminAPI {
   resolveWar(period: string) { return this.req("POST", "/admin/wars/resolve", { period }); }
   getHealth() { return this.req<HealthReport>("GET", "/admin/health"); }
   getAIHealth() { return this.req<AIHealthReport>("GET", "/admin/ai-health"); }
+
+  // ── AI Provider Config (dynamic provider registry) ───────────────────────
+  getAIProviders()   { return this.req<AIProvidersResponse>("GET", "/admin/ai-providers"); }
+  getAIProviderMeta(){ return this.req<AIProviderMeta>("GET", "/admin/ai-providers/meta"); }
+  createAIProvider(data: AIProviderFormPayload) { return this.req<AIProviderConfig>("POST", "/admin/ai-providers", data); }
+  updateAIProvider(id: string, data: Partial<AIProviderFormPayload>) { return this.req<AIProviderConfig>("PUT", `/admin/ai-providers/${id}`, data); }
+  deleteAIProvider(id: string) { return this.req<{ status: string }>("DELETE", `/admin/ai-providers/${id}`); }
+  activateAIProvider(id: string)   { return this.req<{ status: string }>("POST", `/admin/ai-providers/${id}/activate`,   {}); }
+  deactivateAIProvider(id: string) { return this.req<{ status: string }>("POST", `/admin/ai-providers/${id}/deactivate`, {}); }
+  testAIProvider(id: string)       { return this.req<AIProviderTestResult>("POST", `/admin/ai-providers/${id}/test`,      {}); }
 }
 export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
@@ -212,4 +222,63 @@ export interface Generation {
   prompt: string;
   points_deducted: number;
   created_at: string;
+}
+
+// ── AI Provider Config types ──────────────────────────────────────────────────
+export interface AIProviderConfig {
+  id: string;
+  name: string;
+  slug: string;
+  category: string;
+  template: string;
+  env_key: string;
+  model_id: string;
+  extra_config: Record<string, unknown>;
+  priority: number;
+  is_primary: boolean;
+  is_active: boolean;
+  cost_micros: number;
+  pulse_pts: number;
+  notes: string;
+  has_key: boolean;
+  last_tested_at: string | null;
+  last_test_ok: boolean | null;
+  last_test_msg: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIProvidersResponse {
+  providers: AIProviderConfig[];
+  grouped: Record<string, AIProviderConfig[]>;
+  total: number;
+}
+
+export interface AIProviderMeta {
+  categories: string[];
+  templates: string[];
+  template_descriptions: Record<string, string>;
+}
+
+export interface AIProviderFormPayload {
+  name: string;
+  slug?: string;
+  category: string;
+  template: string;
+  env_key?: string;
+  api_key?: string;
+  model_id?: string;
+  extra_config?: Record<string, unknown>;
+  priority?: number;
+  is_primary?: boolean;
+  is_active?: boolean;
+  cost_micros?: number;
+  pulse_pts?: number;
+  notes?: string;
+}
+
+export interface AIProviderTestResult {
+  status: "ok" | "failed";
+  message: string;
+  last_tested_at: string;
 }

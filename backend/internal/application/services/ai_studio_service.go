@@ -125,6 +125,14 @@ type AIStudioOrchestrator struct {
 	storage    external.AssetStorage
 	httpClient *http.Client
 	llmOrch    *external.LLMOrchestrator // for provider health tracking
+	providerDB ProviderConfigStore       // optional DB-backed provider registry
+}
+
+// ProviderConfigStore is the minimal interface the orchestrator needs
+// to load dynamic provider chains from the database.
+// Implemented by persistence.AIProviderRepository.
+type ProviderConfigStore interface {
+	ListByCategory(ctx context.Context, category string) ([]entities.AIProviderConfig, error)
 }
 
 func NewAIStudioOrchestrator(
@@ -145,6 +153,28 @@ func NewAIStudioOrchestrator(
 		storage:    storage,
 		httpClient: &http.Client{Timeout: 120 * time.Second},
 	}
+}
+
+// SetProviderDB wires the DB-backed provider registry.
+// When set, the dispatch functions check DB for active providers before
+// falling back to the hardcoded chains (backward-compatible).
+func (o *AIStudioOrchestrator) SetProviderDB(store ProviderConfigStore) {
+	o.providerDB = store
+}
+
+// dbProviders returns active providers for a category from DB, sorted by priority.
+// Returns nil (not an error) if DB is not wired or returns nothing — callers
+// treat nil as "use hardcoded chain".
+func (o *AIStudioOrchestrator) dbProviders(ctx context.Context, category string) []entities.AIProviderConfig {
+	if o.providerDB == nil {
+		return nil
+	}
+	providers, err := o.providerDB.ListByCategory(ctx, category)
+	if err != nil {
+		log.Printf("[AIStudio] dbProviders(%s): %v — using hardcoded chain", category, err)
+		return nil
+	}
+	return providers
 }
 
 // SetLLMOrch wires the LLM orchestrator for provider health tracking.

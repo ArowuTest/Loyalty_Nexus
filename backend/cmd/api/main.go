@@ -97,6 +97,11 @@ func main() {
 	aiStudioOrch := services.NewAIStudioOrchestrator(cfg, studioRepo, studioSvc, userRepo, assetStorage)
 	aiStudioOrch.SetLLMOrch(llmOrch) // wire health tracking
 
+	// ─── AI Provider Registry (DB-backed dynamic dispatch) ────────────
+	aiProviderRepo := persistence.NewAIProviderRepository(db)
+	aiStudioOrch.SetProviderDB(aiProviderRepo) // enables DB-driven fallback chains
+	aiProviderH := handlers.NewAIProviderAdminHandler(aiProviderRepo)
+
 	// ─── Knowledge Worker (dispatches studio jobs) ─────────────
 	kbWorker := handlers.NewAsyncStudioWorker(studioSvc, aiStudioOrch)
 
@@ -251,6 +256,16 @@ func main() {
 	mux.Handle("POST   /api/v1/admin/fraud/{id}/resolve",     adminAuth(http.HandlerFunc(adminH.ResolveFraudEvent)))
 	// Regional Wars control
 	mux.Handle("POST   /api/v1/admin/wars/cycle/reset",       adminAuth(http.HandlerFunc(adminH.ResetWarsCycle)))
+	// AI Provider management (dynamic provider registry)
+	mux.Handle("GET    /api/v1/admin/ai-providers",                    adminAuth(http.HandlerFunc(aiProviderH.ListProviders)))
+	mux.Handle("GET    /api/v1/admin/ai-providers/meta",               adminAuth(http.HandlerFunc(aiProviderH.GetProviderMeta)))
+	mux.Handle("POST   /api/v1/admin/ai-providers",                    adminAuth(http.HandlerFunc(aiProviderH.CreateProvider)))
+	mux.Handle("PUT    /api/v1/admin/ai-providers/{id}",               adminAuth(http.HandlerFunc(aiProviderH.UpdateProvider)))
+	mux.Handle("DELETE /api/v1/admin/ai-providers/{id}",               adminAuth(http.HandlerFunc(aiProviderH.DeleteProvider)))
+	mux.Handle("POST   /api/v1/admin/ai-providers/{id}/activate",      adminAuth(http.HandlerFunc(aiProviderH.ActivateProvider)))
+	mux.Handle("POST   /api/v1/admin/ai-providers/{id}/deactivate",    adminAuth(http.HandlerFunc(aiProviderH.DeactivateProvider)))
+	mux.Handle("POST   /api/v1/admin/ai-providers/{id}/test",          adminAuth(http.HandlerFunc(aiProviderH.TestProvider)))
+
 	// System health (REQ-5.8.3)
 	mux.Handle("GET    /api/v1/admin/health",                 adminAuth(http.HandlerFunc(adminH.GetHealth)))
 	mux.Handle("GET    /api/v1/admin/ai-health",              adminAuth(http.HandlerFunc(adminH.GetAIHealth)))

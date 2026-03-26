@@ -22,6 +22,7 @@ const NAV = [
   ]},
   { group: "Content & AI", items: [
     { href: "/studio-tools",   label: "🧠 Studio Tools" },
+    { href: "/ai-providers",   label: "🔌 AI Providers" },
     { href: "/ai-health",      label: "⚡ AI Provider Health" },
     { href: "/notifications",  label: "📢 Notifications" },
   ]},
