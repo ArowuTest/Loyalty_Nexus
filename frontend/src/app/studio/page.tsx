@@ -350,24 +350,30 @@ function SessionBar({ userPoints }: { userPoints: number }) {
     active: boolean; total_pts_used: number; generation_count: number;
     started_at?: string; session_id?: string;
   } | null>(null);
+  const [chatInfo, setChatInfo] = useState<{ used: number; limit: number } | null>(null);
 
   useEffect(() => {
-    const fetchSession = async () => {
+    const fetchAll = async () => {
       try {
-        const data = await (api as any).getSessionUsage();
-        if (data?.active) setSession(data);
-        else setSession(null);
+        const [sess, chat] = await Promise.all([
+          (api as any).getSessionUsage(),
+          (api as any).getChatUsage(),
+        ]);
+        if (sess?.active) setSession(sess); else setSession(null);
+        if (chat?.limit != null) setChatInfo(chat);
       } catch { /* silent */ }
     };
-    fetchSession();
-    const iv = setInterval(fetchSession, 30000);
+    fetchAll();
+    const iv = setInterval(fetchAll, 10000);
     return () => clearInterval(iv);
   }, []);
 
-  if (!session?.active || session.total_pts_used === 0) return null;
+  const hasSession = session?.active && (session.total_pts_used > 0 || session.generation_count > 0);
+  const hasChat    = chatInfo && chatInfo.used > 0;
+  if (!hasSession && !hasChat) return null;
 
-  // Colour the bar based on % of starting balance used
-  const pct = userPoints > 0
+  // Points usage bar
+  const pct = userPoints > 0 && session
     ? Math.min(100, (session.total_pts_used / (userPoints + session.total_pts_used)) * 100)
     : 0;
   const barColor = pct < 30 ? "from-green-500 to-emerald-400"
@@ -378,26 +384,51 @@ function SessionBar({ userPoints }: { userPoints: number }) {
   return (
     <motion.div
       initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
-      className="nexus-card p-2.5 border-white/5 bg-white/[0.02]"
+      className="nexus-card p-2.5 border-white/5 bg-white/[0.02] space-y-2"
     >
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="flex items-center gap-1.5">
-          <Activity size={11} className={textColor} />
-          <span className="text-white/40 text-[10px] uppercase tracking-wider">Session usage</span>
+      {/* Generation session row */}
+      {hasSession && session && (
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-1.5">
+              <Activity size={11} className={textColor} />
+              <span className="text-white/40 text-[10px] uppercase tracking-wider">Session usage</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={cn("text-[10px] font-bold tabular-nums", textColor)}>
+                {session.total_pts_used} pts used
+              </span>
+              <span className="text-white/20 text-[10px]">{session.generation_count} gen{session.generation_count !== 1 ? "s" : ""}</span>
+            </div>
+          </div>
+          <div className="h-1 w-full rounded-full bg-white/8 overflow-hidden">
+            <div
+              className={cn("h-full rounded-full bg-gradient-to-r transition-all duration-700", barColor)}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={cn("text-[10px] font-bold tabular-nums", textColor)}>
-            {session.total_pts_used} pts used
-          </span>
-          <span className="text-white/20 text-[10px]">{session.generation_count} gen{session.generation_count !== 1 ? "s" : ""}</span>
+      )}
+      {/* Chat message row */}
+      {hasChat && chatInfo && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <MessageSquare size={11} className="text-nexus-400" />
+            <span className="text-white/40 text-[10px] uppercase tracking-wider">Chat today</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-1 w-16 rounded-full bg-white/10 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-nexus-500 to-purple-500 transition-all duration-500"
+                style={{ width: `${Math.min(100, (chatInfo.used / chatInfo.limit) * 100)}%` }}
+              />
+            </div>
+            <span className="text-nexus-300 text-[10px] font-bold tabular-nums">
+              {chatInfo.used}/{chatInfo.limit}
+            </span>
+          </div>
         </div>
-      </div>
-      <div className="h-1 w-full rounded-full bg-white/8 overflow-hidden">
-        <div
-          className={cn("h-full rounded-full bg-gradient-to-r transition-all duration-700", barColor)}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      )}
     </motion.div>
   );
 }
@@ -742,6 +773,8 @@ function ChatBubble({ msg }: { msg: Message }) {
 }
 
 // ─── Tool Card ────────────────────────────────────────────────────────────────
+const CHAT_REDIRECT_SLUGS = new Set(["web-search-ai", "code-helper"]);
+
 function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () => void; userPoints?: number }) {
   const cfg          = catCfg(tool.category);
   const isFree       = tool.is_free || tool.point_cost === 0;
@@ -749,6 +782,7 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
   const meta         = TOOL_META[tool.slug];
   const outType      = getOutputType(tool.slug);
   const entryLocked  = !tool.is_free && tool.entry_point_cost > 0 && userPoints < tool.entry_point_cost;
+  const isChatTool   = CHAT_REDIRECT_SLUGS.has(tool.slug);
 
   return (
     <motion.button
@@ -762,6 +796,14 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
           <div className="flex items-center gap-1 text-amber-300/80 text-[10px] font-semibold bg-amber-500/15 border border-amber-500/20 rounded-lg px-2 py-1">
             <Lock size={9} /> {tool.entry_point_cost} pts to unlock
           </div>
+        </div>
+      )}
+      {/* Chat-mode redirect hint */}
+      {isChatTool && (
+        <div className="absolute top-2 right-2 z-10">
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+            💬 Chat
+          </span>
         </div>
       )}
       <div className="flex items-start gap-3.5">
@@ -800,6 +842,7 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
               : AUDIO_SLUGS.has(tool.slug) ? "bg-green-500/15 text-green-300 border-green-500/20"
               : IMAGE_SLUGS.has(tool.slug) ? "bg-pink-500/15 text-pink-300 border-pink-500/20"
               : CODE_SLUGS.has(tool.slug)  ? "bg-lime-500/15 text-lime-300 border-lime-500/20"
+              : WEB_SLUGS.has(tool.slug)   ? "bg-cyan-500/15 text-cyan-300 border-cyan-500/20"
               : "bg-white/8 text-white/40 border-white/10"
             )}>
               {outType.emoji} {outType.label}
@@ -812,14 +855,15 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
           </div>
         </div>
 
-        {/* Use Tool CTA */}
+        {/* CTA */}
         <div className="flex-shrink-0 flex flex-col items-end gap-2 self-center">
           <div className={cn(
             "flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-xl transition-all",
-            "bg-nexus-600/20 text-nexus-300 border border-nexus-500/30",
-            "group-hover:bg-nexus-600 group-hover:text-white group-hover:border-nexus-500"
+            isChatTool
+              ? "bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-500"
+              : "bg-nexus-600/20 text-nexus-300 border border-nexus-500/30 group-hover:bg-nexus-600 group-hover:text-white group-hover:border-nexus-500"
           )}>
-            Use Tool <ChevronRight size={11} />
+            {isChatTool ? "Chat" : "Use Tool"} <ChevronRight size={11} />
           </div>
         </div>
       </div>
@@ -916,10 +960,17 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
         </div>
       </div>
 
-      {/* Prompt preview */}
-      {gen.prompt && (
-        <p className="text-white/30 text-[11px] italic line-clamp-1">"{gen.prompt}"</p>
-      )}
+      {/* Prompt preview — parse JSON envelope to show human-readable prompt */}
+      {gen.prompt && (() => {
+        let displayPrompt = gen.prompt;
+        try {
+          const env = JSON.parse(gen.prompt);
+          if (env?.prompt) displayPrompt = env.prompt;
+        } catch { /* plain text */ }
+        return displayPrompt ? (
+          <p className="text-white/30 text-[11px] italic line-clamp-1">"{displayPrompt}"</p>
+        ) : null;
+      })()}
 
       {/* ── Processing state ── */}
       {gen.status === "processing" && (
@@ -957,7 +1008,15 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
           {isImage && !isVideo && (
             <div className="space-y-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={gen.output_url} alt={gen.tool_name} className="w-full rounded-xl object-cover" />
+              <img src={gen.output_url} alt={gen.tool_name}
+                className="w-full rounded-xl object-cover max-h-80"
+                loading="lazy" />
+              {/* Vision tools may also return analysis text */}
+              {gen.output_text && isVision && (
+                <div className="bg-violet-500/5 border border-violet-500/10 rounded-xl p-3">
+                  <p className="text-white/80 text-sm leading-relaxed whitespace-pre-wrap">{gen.output_text}</p>
+                </div>
+              )}
               <div className="flex gap-2">
                 <a href={gen.output_url} download target="_blank" rel="noreferrer"
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
@@ -1027,15 +1086,19 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
               <div className="flex items-center gap-1.5 text-cyan-300 text-xs font-semibold">
                 <Globe size={12} /> 🔍 Live Web Result
               </div>
-              <p className="text-white/70 text-sm bg-white/5 rounded-xl p-3 leading-relaxed whitespace-pre-wrap">
-                {gen.output_text}
-              </p>
+              <div className="bg-white/5 rounded-xl p-3">
+                <RichMessage content={gen.output_text} mode="search" />
+              </div>
+              <CopyButton text={gen.output_text} label="📋 Copy" />
             </div>
           )}
           {isVision && (
-            <p className="text-white/80 text-sm bg-violet-500/5 border border-violet-500/10 rounded-xl p-3 leading-loose whitespace-pre-wrap">
-              {gen.output_text}
-            </p>
+            <div className="space-y-2">
+              <div className="bg-violet-500/5 border border-violet-500/10 rounded-xl p-3">
+                <RichMessage content={gen.output_text} mode="general" />
+              </div>
+              <CopyButton text={gen.output_text} label="📋 Copy Analysis" />
+            </div>
           )}
           {isCode && (
             <div className="relative">
@@ -1043,7 +1106,7 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                 <span className="text-xs text-white/40 font-mono">Code output</span>
                 <CopyButton text={gen.output_text} />
               </div>
-              <pre className="bg-gray-950 text-green-300 text-xs font-mono p-4 rounded-b-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto leading-relaxed">
+              <pre className="bg-gray-950 text-green-300 text-xs font-mono p-4 rounded-b-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed">
                 <code>{gen.output_text}</code>
               </pre>
             </div>
@@ -1069,9 +1132,9 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
           )}
           {!isWeb && !isVision && !isCode && !isJson && (
             <div className="space-y-2">
-              <p className="text-white/70 text-sm bg-white/5 rounded-xl p-3 leading-relaxed whitespace-pre-wrap">
-                {gen.output_text}
-              </p>
+              <div className="bg-white/5 rounded-xl p-3">
+                <RichMessage content={gen.output_text} mode="general" />
+              </div>
               <div className="flex gap-2">
                 <CopyButton text={gen.output_text} label="📋 Copy Text" />
                 {onRegenerate && (
@@ -1230,7 +1293,15 @@ function ToolDrawer({
   };
 
   // The prompt shown in the confirm modal — extracted from the pending payload
-  const confirmPrompt = pendingPayload?.prompt ?? "";
+  // Parse JSON envelope so the confirm modal shows a human-readable summary
+  const confirmPrompt = (() => {
+    const raw = pendingPayload?.prompt ?? "";
+    try {
+      const env = JSON.parse(raw);
+      if (env?.prompt) return env.prompt as string;
+    } catch { /* plain text */ }
+    return raw;
+  })();
 
   return (
     <>
@@ -1533,13 +1604,18 @@ export default function StudioPage() {
       let toolSlug: string | undefined;
       if (currentMode === 'search') toolSlug = 'web-search-ai';
       if (currentMode === 'code')   toolSlug = 'code-helper';
-      const resp = await api.sendChat(msg, sessionId, toolSlug) as { response: string; provider?: string; session_id?: string };
+      const resp = await api.sendChat(msg, sessionId, toolSlug) as { response: string; provider?: string; session_id?: string; message_count?: number };
       // If backend returns a new session_id, update localStorage
       if (resp.session_id && resp.session_id !== sessionId) {
         try { localStorage.setItem('nexus_chat_session', resp.session_id); } catch { /* ignore */ }
       }
       setMessages((m) => [...m, { role: "assistant", content: resp.response, provider: resp.provider, ts: Date.now(), mode: currentMode }]);
-      setChatUsage((prev) => prev ? { ...prev, used: prev.used + 1 } : null);
+      // Update chat usage counter from response
+      if (resp.message_count != null) {
+        setChatUsage((prev) => prev ? { ...prev, used: resp.message_count! } : { used: resp.message_count!, limit: 100 });
+      } else {
+        setChatUsage((prev) => prev ? { ...prev, used: prev.used + 1 } : null);
+      }
     } catch {
       setMessages((m) => [...m, {
         role: "assistant",
@@ -1868,7 +1944,23 @@ export default function StudioPage() {
                       </div>
                       <div className="space-y-1.5">
                         {catTools.map((tool) => (
-                          <ToolCard key={tool.id} tool={tool} userPoints={userPoints} onClick={() => setSelectedTool(tool)} />
+                          <ToolCard
+                            key={tool.id}
+                            tool={tool}
+                            userPoints={userPoints}
+                            onClick={() => {
+                              // Chat tools switch to Chat tab with correct mode
+                              if (tool.slug === "web-search-ai") {
+                                setChatMode("search");
+                                setActiveTab("chat");
+                              } else if (tool.slug === "code-helper") {
+                                setChatMode("code");
+                                setActiveTab("chat");
+                              } else {
+                                setSelectedTool(tool);
+                              }
+                            }}
+                          />
                         ))}
                       </div>
                     </div>

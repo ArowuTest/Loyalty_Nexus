@@ -472,7 +472,47 @@ func min(a, b int) int {
 	return b
 }
 
-// SaveMessage persists a single message (role: "user" or "assistant") to the chat repo.
+// ─── Daily chat usage counter (Redis) ────────────────────────────────────────
+
+// chatDailyKey returns the Redis key for the user's daily chat message counter.
+// Key expires at midnight UTC so the count resets each day.
+func chatDailyKey(uid string) string {
+	return fmt.Sprintf("nexus:chat:daily:%s:%s", uid, time.Now().UTC().Format("2006-01-02"))
+}
+
+// IncrDailyChatCount atomically increments the user's daily message counter
+// and sets TTL to 48 h (so counts survive midnight by one day).
+// Returns the new count after increment.
+func (o *LLMOrchestrator) IncrDailyChatCount(ctx context.Context, uid string) int {
+	if o.rdb == nil {
+		return 0
+	}
+	key := chatDailyKey(uid)
+	count, err := o.rdb.Incr(ctx, key).Result()
+	if err != nil {
+		return 0
+	}
+	// Set TTL on first increment; ignore error (key may already have TTL)
+	if count == 1 {
+		_ = o.rdb.Expire(ctx, key, 48*time.Hour)
+	}
+	return int(count)
+}
+
+// GetDailyChatCount returns the current daily message count for the user.
+func (o *LLMOrchestrator) GetDailyChatCount(ctx context.Context, uid string) int {
+	if o.rdb == nil {
+		return 0
+	}
+	key := chatDailyKey(uid)
+	val, err := o.rdb.Get(ctx, key).Int()
+	if err != nil {
+		return 0
+	}
+	return val
+}
+
+// ─── SaveMessage ─────────────────────────────────────────────────────────────
 func (o *LLMOrchestrator) SaveMessage(ctx context.Context, sessionID uuid.UUID, role, content string) error {
 	return o.chatRepo.AppendMessage(ctx, sessionID, role, content)
 }

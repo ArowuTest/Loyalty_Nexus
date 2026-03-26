@@ -47,6 +47,11 @@ func NewStudioHandler(
 	return &StudioHandler{studioSvc: ss, llmOrch: lo, worker: kb, cfg: cfg}
 }
 
+// chatUsageKey returns the Redis key for the user's daily chat message counter.
+func chatUsageKey(uid string) string {
+	return fmt.Sprintf("nexus:chat:daily:%s:%s", uid, time.Now().UTC().Format("2006-01-02"))
+}
+
 // ─── GET /api/v1/studio/tools ─────────────────────────────────────────────────
 
 func (h *StudioHandler) ListTools(w http.ResponseWriter, r *http.Request) {
@@ -304,9 +309,10 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"response":   resp.Text,
-			"provider":   resp.Provider,
-			"session_id": sessionID,
+			"response":      resp.Text,
+			"provider":      resp.Provider,
+			"session_id":    sessionID,
+			"message_count": h.llmOrch.IncrDailyChatCount(r.Context(), uid),
 		})
 		return
 
@@ -329,10 +335,13 @@ func (h *StudioHandler) handleGeneralChat(w http.ResponseWriter, r *http.Request
 		})
 		return
 	}
+	// Increment daily chat counter and return count so frontend can display it
+	msgCount := h.llmOrch.IncrDailyChatCount(r.Context(), uid)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"response":   resp.Text,
-		"provider":   resp.Provider,
-		"session_id": sessionID,
+		"response":      resp.Text,
+		"provider":      resp.Provider,
+		"session_id":    sessionID,
+		"message_count": msgCount,
 	})
 }
 
@@ -345,11 +354,10 @@ func timeNowUnix() int64 {
 
 func (h *StudioHandler) GetChatUsage(w http.ResponseWriter, r *http.Request) {
 	uid := r.Context().Value(middleware.ContextUserID).(string)
-	userID, _ := uuid.Parse(uid)
 
-	// Daily generation count doubles as chat quota indicator
-	used, _ := h.studioSvc.CountUserGenerationsToday(r.Context(), userID)
-	limit := h.cfg.GetInt("chat_daily_message_limit", 20)
+	// Read from dedicated Redis chat counter (set by Chat handler on each message)
+	used := h.llmOrch.GetDailyChatCount(r.Context(), uid)
+	limit := h.cfg.GetInt("chat_daily_message_limit", 100)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"used":      used,
