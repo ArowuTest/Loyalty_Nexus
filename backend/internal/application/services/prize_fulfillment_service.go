@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"log"
 	"time"
-
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/infrastructure/external"
+	"loyalty-nexus/internal/pkg/safe"
 )
 
 // PrizeFulfillmentService handles airtime, data, and MoMo cash prize delivery.
@@ -143,13 +143,14 @@ func (s *PrizeFulfillmentService) ReleaseMoMoHeldPrizes(ctx context.Context, use
 		return
 	}
 	for _, result := range pendingResults {
-		if result.FulfillmentStatus == entities.FulfillPendingMoMo {
-			go func(r entities.SpinResult) {
-				if err := s.Fulfill(ctx, &r); err != nil {
-					log.Printf("[FULFILL] MoMo release failed for %s: %v", r.ID, err)
-				}
-			}(result)
-		}
+			if result.FulfillmentStatus == entities.FulfillPendingMoMo {
+				r := result // capture loop variable
+				safe.Go(func() {
+					if err := s.Fulfill(context.Background(), &r); err != nil {
+						log.Printf("[FULFILL] MoMo release failed for %s: %v", r.ID, err)
+					}
+				})
+			}
 	}
 }
 

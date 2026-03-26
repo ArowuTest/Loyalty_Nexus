@@ -5,8 +5,11 @@ import (
 	"net/http"
 
 	"loyalty-nexus/internal/application/services"
+	"context"
+
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/external"
+	"loyalty-nexus/internal/pkg/safe"
 	"loyalty-nexus/internal/presentation/http/middleware"
 
 	"github.com/google/uuid"
@@ -90,7 +93,9 @@ func (h *UserHandler) VerifyMoMo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Release any held MoMo prizes
-	go h.fulfillSvc.ReleaseMoMoHeldPrizes(r.Context(), userID)
+	safe.Go(func() {
+		h.fulfillSvc.ReleaseMoMoHeldPrizes(context.Background(), userID)
+	})
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "MoMo number linked successfully"})
 }

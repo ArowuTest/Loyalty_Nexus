@@ -35,6 +35,7 @@ import (
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
+	"loyalty-nexus/internal/pkg/safe"
 
 	"github.com/google/uuid"
 )
@@ -95,7 +96,9 @@ func (h *USSDHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// REQ-6.5: Rollback any expired sessions with pending spins before processing.
 	// Use context.Background() so the goroutine is not cancelled when the HTTP
 	// request context ends (e.g. client disconnects or test finishes).
-	go h.rollbackExpiredSessions(context.Background())
+	safe.Go(func() {
+		h.rollbackExpiredSessions(context.Background())
+	})
 
 	// REQ-6.5: Load or create the session record.
 	session := h.loadOrCreateSession(r.Context(), sessionID, phone)

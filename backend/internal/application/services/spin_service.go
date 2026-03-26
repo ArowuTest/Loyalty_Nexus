@@ -12,6 +12,7 @@ import (
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
+	"loyalty-nexus/internal/pkg/safe"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -104,10 +105,11 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 	var spinResult *entities.SpinResult
 	err = s.db.WithContext(ctx).Transaction(func(dbTx *gorm.DB) error {
 		// Deduct 1 spin credit (use dbTx directly to avoid nested transaction on SQLite)
-		wallet.SpinCredits--
-		if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).Save(wallet).Error; err != nil {
+		if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).
+			UpdateColumn("spin_credits", gorm.Expr("spin_credits - 1")).Error; err != nil {
 			return fmt.Errorf("credit deduction failed: %w", err)
 		}
+		wallet.SpinCredits--
 
 		// Determine initial fulfillment status
 		fulfillStatus := entities.FulfillPending
@@ -150,14 +152,17 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 			return err
 		}
 
-		// For Pulse Points prizes, award immediately via ledger
-		if prize.PrizeType == entities.PrizePulsePoints {
-			pts := int64(prize.BaseValue)
-			wallet.PulsePoints += pts
-			wallet.LifetimePoints += pts
-			if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).Save(wallet).Error; err != nil {
-				return err
-			}
+			// For Pulse Points prizes, award immediately via ledger
+			if prize.PrizeType == entities.PrizePulsePoints {
+				pts := int64(prize.BaseValue)
+				if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).Updates(map[string]interface{}{
+					"pulse_points":    gorm.Expr("pulse_points + ?", pts),
+					"lifetime_points": gorm.Expr("lifetime_points + ?", pts),
+				}).Error; err != nil {
+					return err
+				}
+				wallet.PulsePoints += pts
+				wallet.LifetimePoints += pts
 			ptsTx := &entities.Transaction{
 				ID:           uuid.New(),
 				UserID:       userID,
@@ -182,14 +187,14 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 		return nil, err
 	}
 
-	// --- Step 6: Background fulfillment for physical prizes ---
-	if spinResult.FulfillmentStatus == entities.FulfillPending {
-		go func() {
-			if err := s.fulfillSvc.Fulfill(context.Background(), spinResult); err != nil {
-				log.Printf("[SPIN] Fulfillment failed for %s: %v", spinResult.ID, err)
-			}
-		}()
-	}
+		// --- Step 6: Background fulfillment for physical prizes ---
+		if spinResult.FulfillmentStatus == entities.FulfillPending {
+			safe.Go(func() {
+				if err := s.fulfillSvc.Fulfill(context.Background(), spinResult); err != nil {
+					log.Printf("[SPIN] Fulfillment failed for %s: %v", spinResult.ID, err)
+				}
+			})
+		}
 
 	// Build outcome response
 	outcome := &SpinOutcome{
@@ -526,11 +531,11 @@ func (s *SpinService) ConfirmMoMoPrize(ctx context.Context, userID uuid.UUID, sp
 	}
 
 	// Dispatch fulfillment
-	go func() {
+	safe.Go(func() {
 		if err := s.fulfillSvc.Fulfill(context.Background(), spinResult); err != nil {
 			log.Printf("[SPIN] MoMo fulfillment failed for %s: %v", spinResultID, err)
 		}
-	}()
+	})
 	return nil
 }
 

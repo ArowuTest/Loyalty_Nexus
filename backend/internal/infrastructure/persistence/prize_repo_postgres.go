@@ -2,6 +2,8 @@ package persistence
 
 import (
 	"context"
+	"time"
+
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"github.com/google/uuid"
@@ -29,9 +31,10 @@ func (r *postgresPrizeRepository) ListActivePrizesMaxValue(ctx context.Context, 
 
 func (r *postgresPrizeRepository) GetDailyInventoryUsed(ctx context.Context, prizeID uuid.UUID) (int, error) {
 	var count int64
+	today := time.Now().UTC().Truncate(24 * time.Hour)
 	r.db.WithContext(ctx).Table("spin_results").
 		Joins("JOIN prize_pool ON prize_pool.name = spin_results.prize_type").
-		Where("prize_pool.id = ? AND spin_results.created_at >= CURRENT_DATE", prizeID).
+		Where("prize_pool.id = ? AND spin_results.created_at >= ?", prizeID, today).
 		Count(&count)
 	return int(count), nil
 }
@@ -71,7 +74,8 @@ func (r *postgresPrizeRepository) ListPendingFulfillments(ctx context.Context, l
 
 func (r *postgresPrizeRepository) CountUserSpinsToday(ctx context.Context, userID uuid.UUID) (int, error) {
 	var count int64
+	today := time.Now().UTC().Truncate(24 * time.Hour)
 	r.db.WithContext(ctx).Table("spin_results").
-		Where("user_id = ? AND created_at >= CURRENT_DATE", userID).Count(&count)
+		Where("user_id = ? AND created_at >= ?", userID, today).Count(&count)
 	return int(count), nil
 }

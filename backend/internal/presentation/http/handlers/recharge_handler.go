@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 
 	"loyalty-nexus/internal/application/services"
 	"loyalty-nexus/internal/infrastructure/queue"
+	"loyalty-nexus/internal/pkg/safe"
 )
 
 // RechargeHandler processes incoming payment / recharge webhooks.
@@ -65,12 +67,12 @@ func (h *RechargeHandler) PaystackWebhook(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	go func() {
-		ctx := r.Context()
+	safe.Go(func() {
+		ctx := context.Background() // Use background context for async processing
 		if err := h.rechargeSvc.ProcessRechargeWebhook(ctx, event); err != nil {
 			log.Printf("[paystack] ProcessRechargeWebhook: %v", err)
 		}
-	}()
+	})
 }
 
 // ── MNO BSS Webhook (Integrated Mode) ────────────────────────────────────────
@@ -120,11 +122,11 @@ func (h *RechargeHandler) MNOWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if qErr := h.eventQueue.Publish(r.Context(), eventMap); qErr != nil {
 		log.Printf("[mno_webhook] queue failed (%v) — processing inline", qErr)
-		go func() {
-			if err := h.rechargeSvc.ProcessRechargeWebhook(r.Context(), event); err != nil {
+		safe.Go(func() {
+			if err := h.rechargeSvc.ProcessRechargeWebhook(context.Background(), event); err != nil {
 				log.Printf("[mno_webhook] inline process: %v", err)
 			}
-		}()
+		})
 	}
 }
 

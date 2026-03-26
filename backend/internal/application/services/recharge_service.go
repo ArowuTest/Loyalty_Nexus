@@ -16,6 +16,7 @@ import (
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
+	"loyalty-nexus/internal/pkg/safe"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -146,13 +147,20 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 		newCounter = newCounter % spinTriggerKobo
 
 		// --- Update wallet ---
+		// Use dbTx directly to ensure it's part of the transaction, and use gorm.Expr for atomic increments.
+		if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).Updates(map[string]interface{}{
+			"pulse_points":     gorm.Expr("pulse_points + ?", ptsEarned),
+			"lifetime_points":  gorm.Expr("lifetime_points + ?", ptsEarned),
+			"spin_credits":     gorm.Expr("spin_credits + ?", spinCreditsEarned),
+			"recharge_counter": newCounter,
+		}).Error; err != nil {
+			return fmt.Errorf("wallet update failed: %w", err)
+		}
+		// Update the in-memory struct for subsequent use in this function
 		wallet.PulsePoints += ptsEarned
 		wallet.LifetimePoints += ptsEarned
 		wallet.SpinCredits += spinCreditsEarned
 		wallet.RechargeCounter = newCounter
-		if err := s.userRepo.UpdateWallet(ctx, wallet); err != nil {
-			return fmt.Errorf("wallet update failed: %w", err)
-		}
 
 		// --- Update streak ---
 		streakHours := s.cfg.GetInt("streak_expiry_hours", 36)
@@ -236,7 +244,9 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 		}
 
 		// First recharge bonus (async — outside DB tx to avoid blocking)
-		go s.checkFirstRechargeBonus(context.Background(), user, ptsEarned)
+		safe.Go(func() {
+			s.checkFirstRechargeBonus(context.Background(), user, ptsEarned)
+		})
 
 		log.Printf("[RECHARGE] Processed %s: ₦%d -> +%d pts, +%d spins (streak: %d)",
 			user.PhoneNumber, amountNaira, ptsEarned, spinCreditsEarned, newStreak)

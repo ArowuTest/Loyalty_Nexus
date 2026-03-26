@@ -17,6 +17,7 @@ import (
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
+	"loyalty-nexus/internal/pkg/safe"
 )
 
 // AdminHandler handles all /api/v1/admin/* endpoints.
@@ -826,7 +827,7 @@ func (h *AdminHandler) BroadcastNotification(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Background: push to all users (simplified — production would use a queue)
-	go func() {
+	safe.Go(func() {
 		var phoneNumbers []string
 		if len(body.Targets) > 0 {
 			phoneNumbers = body.Targets
@@ -835,7 +836,7 @@ func (h *AdminHandler) BroadcastNotification(w http.ResponseWriter, r *http.Requ
 		}
 		h.db.Exec("UPDATE notification_broadcasts SET target_count = ?, status = 'sent', sent_at = NOW() WHERE id = ?",
 			len(phoneNumbers), broadcastID)
-	}()
+	})
 
 	w.WriteHeader(http.StatusAccepted)
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
