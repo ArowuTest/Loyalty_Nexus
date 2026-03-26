@@ -47,8 +47,8 @@ func main() {
 	warsRepo   := persistence.NewPostgresWarsRepository(db)
 
 	// ─── Services ─────────────────────────────────────────────
-	notifySvc := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
-	drawSvc   := services.NewDrawService(db)
+	notifySvc  := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
+	drawSvc    := services.NewDrawService(db)
 	fulfillSvc := services.NewPrizeFulfillmentService(
 		prizeRepo, userRepo,
 		external.NewVTPassAdapter(),
@@ -64,6 +64,15 @@ func main() {
 		log.Printf("[WORKER] EnsureActiveWar: %v", err)
 	}
 
+	// ─── Ghost Nudge + Wallet Sync Worker ─────────────────────
+	// Runs every 5 minutes: finds at-risk streaks, fires SMS via Termii,
+	// and pushes wallet pass updates to Apple/Google Wallet.
+	passportSvc      := services.NewPassportService(db)
+	ghostNudgeWorker := services.NewGhostNudgeWorker(db, passportSvc, notifySvc)
+	ghostNudgeWorker.Start()
+	defer ghostNudgeWorker.Stop()
+
+	// ─── Lifecycle Worker ─────────────────────────────────────
 	worker := services.NewLifecycleWorker(
 		db,
 		userRepo, studioRepo, prizeRepo, authRepo, chatRepo,

@@ -186,12 +186,23 @@ func main() {
 
 	// Passport routes (spec §6)
 	mux.Handle("GET  /api/v1/passport",              auth(http.HandlerFunc(passportH.GetPassport)))
+	mux.Handle("GET  /api/v1/passport/profile",      auth(http.HandlerFunc(passportH.GetPassport)))      // alias for frontend
 	mux.Handle("GET  /api/v1/passport/badges",       auth(http.HandlerFunc(passportH.GetBadges)))
 	mux.Handle("GET  /api/v1/passport/qr",           auth(http.HandlerFunc(passportH.GetQR)))
 	mux.Handle("POST /api/v1/passport/qr/verify",    auth(http.HandlerFunc(passportH.VerifyQR)))
 	mux.Handle("GET  /api/v1/passport/pkpass",       auth(http.HandlerFunc(passportH.DownloadPKPass)))
+	mux.Handle("GET  /api/v1/passport/wallet-urls",  auth(http.HandlerFunc(passportH.GetWalletPassURLs)))
 	mux.Handle("GET  /api/v1/passport/events",       auth(http.HandlerFunc(passportH.GetEvents)))
 	mux.Handle("GET  /api/v1/passport/share",        auth(http.HandlerFunc(passportH.GetShareCard)))
+	// Apple Wallet web service callbacks (called by iOS)
+	mux.Handle("POST /api/v1/passport/apple/v1/devices/{deviceID}/registrations/{passTypeID}/{serialNumber}",
+		http.HandlerFunc(passportH.RegisterAppleDevice))
+	mux.Handle("DELETE /api/v1/passport/apple/v1/devices/{deviceID}/registrations/{passTypeID}/{serialNumber}",
+		http.HandlerFunc(passportH.UnregisterAppleDevice))
+	mux.Handle("GET /api/v1/passport/apple/v1/devices/{deviceID}/registrations/{passTypeID}",
+		http.HandlerFunc(passportH.GetUpdatedSerials))
+	// Wire passport service into USSD handler for Passport menu (option 6)
+	ussdH.SetPassportService(passportSvc)
 
 	// Draws (public results)
 	mux.Handle("GET  /api/v1/draws",             auth(http.HandlerFunc(drawH.ListUpcoming)))
@@ -254,6 +265,10 @@ func main() {
 	// System health (REQ-5.8.3)
 	mux.Handle("GET    /api/v1/admin/health",                 adminAuth(http.HandlerFunc(adminH.GetHealth)))
 	mux.Handle("GET    /api/v1/admin/ai-health",              adminAuth(http.HandlerFunc(adminH.GetAIHealth)))
+	// Passport & USSD admin monitoring
+	mux.Handle("GET    /api/v1/admin/passport/stats",         adminAuth(http.HandlerFunc(adminH.GetPassportStats)))
+	mux.Handle("GET    /api/v1/admin/passport/nudge-log",     adminAuth(http.HandlerFunc(adminH.GetGhostNudgeLog)))
+	mux.Handle("GET    /api/v1/admin/ussd/sessions",          adminAuth(http.HandlerFunc(adminH.GetUSSDSessions)))
 
 	// ─── HTTP Server ──────────────────────────────────────────
 	port := cfg.GetString("port", "8080")

@@ -334,9 +334,7 @@ func (h *USSDHandler) processMenu(ctx context.Context, phone, text string) strin
 			}
 			return fmt.Sprintf("END 🏅 Your Badges (%d earned)\n\n%s", len(passport.Badges), badgeLines)
 		case "3":
-			return fmt.Sprintf(
-				"END 🌍 State Leaderboard\n\nCheck the Loyalty Nexus app for the full leaderboard and your current rank!\n\nKeep recharging to climb the ranks.",
-			)
+			return "END 🌍 State Leaderboard\n\nCheck the Loyalty Nexus app for the full leaderboard and your current rank!\n\nKeep recharging to climb the ranks."
 		case "0":
 			return h.processMenu(ctx, phone, "")
 		default:
