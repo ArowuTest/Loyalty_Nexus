@@ -1331,7 +1331,9 @@ func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audi
 	var result struct {
 		Text string `json:"text"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if decErr := json.NewDecoder(resp.Body).Decode(&result); decErr != nil {
+		return "", fmt.Errorf("Groq Whisper decode: %w", decErr)
+	}
 	if result.Text == "" {
 		return "", fmt.Errorf("Groq Whisper: no transcription returned")
 	}
