@@ -1357,21 +1357,48 @@ func (o *AIStudioOrchestrator) callAssemblyAI(ctx context.Context, apiKey, audio
 
 // callGroqWhisper uses Groq's Whisper for transcription (fast fallback).
 func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audioURL string) (string, error) {
-	// Groq Whisper accepts a URL for audio files
-	payload := map[string]interface{}{
-		"model":     "whisper-large-v3",
-		"url":       audioURL,
-		"language":  "en",
-		"response_format": "json",
+	// Groq Whisper requires multipart/form-data with a binary file upload.
+	// It does NOT accept a JSON body with a "url" field.
+	// Step 1: Download the audio file from the URL.
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, audioURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("Groq Whisper download request: %w", err)
 	}
-	body, _ := json.Marshal(payload)
+	dlResp, err := o.httpClient.Do(dlReq)
+	if err != nil {
+		return "", fmt.Errorf("Groq Whisper download: %w", err)
+	}
+	defer dlResp.Body.Close()
+	if dlResp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Groq Whisper: audio download failed with status %d", dlResp.StatusCode)
+	}
+	audioBytes, err := io.ReadAll(dlResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("Groq Whisper: read audio bytes: %w", err)
+	}
+
+	// Step 2: POST as multipart/form-data with the file bytes.
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("model", "whisper-large-v3")
+	_ = w.WriteField("language", "en")
+	_ = w.WriteField("response_format", "json")
+	fw, err := w.CreateFormFile("file", "audio.mp3")
+	if err != nil {
+		return "", fmt.Errorf("Groq Whisper form: %w", err)
+	}
+	if _, err = fw.Write(audioBytes); err != nil {
+		return "", fmt.Errorf("Groq Whisper write form: %w", err)
+	}
+	w.Close()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.groq.com/openai/v1/audio/transcriptions", bytes.NewReader(body))
+		"https://api.groq.com/openai/v1/audio/transcriptions", &buf)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -1379,10 +1406,14 @@ func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audi
 	}
 	defer resp.Body.Close()
 
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Groq Whisper %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
 	var result struct {
 		Text string `json:"text"`
 	}
-	if decErr := json.NewDecoder(resp.Body).Decode(&result); decErr != nil {
+	if decErr := json.Unmarshal(raw, &result); decErr != nil {
 		return "", fmt.Errorf("Groq Whisper decode: %w", decErr)
 	}
 	if result.Text == "" {
@@ -1695,14 +1726,29 @@ func (o *AIStudioOrchestrator) callMubert(ctx context.Context, apiKey, prompt st
 	}
 
 	var result struct {
+		Status int    `json:"status"` // 1 = success, 0 = error
+		Error  *struct {
+			Code int    `json:"code"`
+			Text string `json:"text"`
+		} `json:"error"`
 		Data struct {
 			Tasks []struct {
 				MusicURL string `json:"music_url"`
 			} `json:"tasks"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(raw, &result); err != nil || len(result.Data.Tasks) == 0 || result.Data.Tasks[0].MusicURL == "" {
-		return "", fmt.Errorf("Mubert: no track URL returned — check API key and plan")
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("Mubert parse: %w", err)
+	}
+	if result.Status != 1 {
+		errText := "unknown error"
+		if result.Error != nil {
+			errText = fmt.Sprintf("code %d: %s", result.Error.Code, result.Error.Text)
+		}
+		return "", fmt.Errorf("Mubert API error — %s", errText)
+	}
+	if len(result.Data.Tasks) == 0 || result.Data.Tasks[0].MusicURL == "" {
+		return "", fmt.Errorf("Mubert: no track URL in response")
 	}
 	return result.Data.Tasks[0].MusicURL, nil
 }
