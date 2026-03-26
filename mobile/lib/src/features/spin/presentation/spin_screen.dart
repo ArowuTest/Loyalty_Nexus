@@ -29,7 +29,6 @@ class _State extends ConsumerState<SpinScreen> with SingleTickerProviderStateMix
   Future<void> spin() async {
     if (spinning) return;
     setState(() { spinning = true; prizeLabel = null; });
-    final target = 6 + math.Random().nextDouble() * 4;
     _ctrl.reset();
     _ctrl.animateTo(1.0, duration: const Duration(milliseconds: 3500));
     try {

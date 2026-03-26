@@ -1,0 +1,23 @@
+# analysis_options.yaml — Nexus Mobile
+# 
+# Flutter Lints 5 is included but we relax a few rules that are not yet
+# relevant for scaffold/prototype Dart screens. Rules will be tightened
+# progressively as each feature screen matures.
+
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    # Raw types (Map, List without type params) — relax until API layer is fully typed
+    strict_raw_types: ignore
+    # Unnecessary casts on dynamic responses from Dio
+    unnecessary_cast: ignore
+    # avoid_dynamic_calls — relax for dynamic JSON maps from REST API
+    avoid_dynamic_calls: ignore
+
+linter:
+  rules:
+    # These are too strict for scaffold screens that are not yet production-complete
+    prefer_const_constructors: false
+    prefer_const_literals_to_create_immutables: false
+    avoid_print: false
