@@ -6,19 +6,26 @@ import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 
 const DEFAULT_STYLE_TAGS = [
-  'Smooth motion', 'Dramatic',  'Slow motion', 'Zoom in', 'Zoom out',
-  'Pan left',      'Pan right', 'Parallax',   'Vibrant',  'Cinematic',
+  'Smooth motion', 'Dramatic', 'Slow motion', 'Zoom in', 'Zoom out',
+  'Pan left',      'Pan right', 'Parallax',  'Vibrant',  'Cinematic',
 ];
 
-export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
-  const cfg = tool.ui_config ?? {};
-  const styleTags = cfg.style_tags ?? DEFAULT_STYLE_TAGS;
+const DEFAULT_DURATIONS = [5, 8, 10];
 
-  const [imageUrl,   setImageUrl]   = useState('');
-  const [imageFile,  setImageFile]  = useState<File | null>(null);
-  const [preview,    setPreview]    = useState<string | null>(null);
-  const [motionPrompt, setMotionPrompt] = useState('');
-  const [selStyles,  setSelStyles]  = useState<string[]>([]);
+const INTENSITY_LABELS = ['Subtle', 'Moderate', 'Strong'] as const;
+
+export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
+  const cfg       = tool.ui_config ?? {};
+  const styleTags = cfg.style_tags       ?? DEFAULT_STYLE_TAGS;
+  const durations = cfg.duration_options ?? DEFAULT_DURATIONS;
+
+  const [imageUrl,      setImageUrl]      = useState('');
+  const [imageFile,     setImageFile]     = useState<File | null>(null);
+  const [preview,       setPreview]       = useState<string | null>(null);
+  const [motionPrompt,  setMotionPrompt]  = useState('');
+  const [selStyles,     setSelStyles]     = useState<string[]>([]);
+  const [duration,      setDuration]      = useState<number>(cfg.default_duration ?? 5);
+  const [intensity,     setIntensity]     = useState<number>(1); // 0=Subtle, 1=Moderate, 2=Strong
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
@@ -51,12 +58,18 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
 
   function handleSubmit() {
     if (!isValid || isLoading || !canAfford) return;
-    const finalUrl = imageFile && preview ? preview : imageUrl.trim();
-    const stylePrefix = selStyles.length > 0 ? `[${selStyles.join(', ')}] ` : '';
+    const finalUrl     = imageFile && preview ? preview : imageUrl.trim();
+    const stylePrefix  = selStyles.length > 0 ? `[${selStyles.join(', ')}] ` : '';
+    const intensityLabel = INTENSITY_LABELS[intensity];
+    const intensityCue = intensityLabel !== 'Moderate' ? ` ${intensityLabel} motion.` : '';
     const payload: GeneratePayload = {
-      prompt:     stylePrefix + (motionPrompt.trim() || 'Animate this image with natural motion'),
+      prompt:     stylePrefix + (motionPrompt.trim() || 'Animate this image with natural motion') + intensityCue,
       image_url:  finalUrl,
+      duration,
       style_tags: selStyles.length > 0 ? selStyles : undefined,
+      extra_params: {
+        intensity: intensityLabel,
+      },
     };
     onSubmit(payload);
   }
@@ -72,11 +85,14 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
         </div>
       )}
 
-      {/* ── Image upload ── */}
+      {/* ── Step 1: Image upload ── */}
       <div>
-        <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">
-          {cfg.upload_label ?? 'Source Image (required)'}
-        </label>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="w-5 h-5 rounded-full bg-cyan-600/30 text-cyan-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">1</span>
+          <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
+            {cfg.upload_label ?? 'Photo or image to animate'}
+          </label>
+        </div>
 
         {!preview && !imageUrl ? (
           <>
@@ -92,7 +108,7 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
               </div>
               <div>
                 <p className="text-white/65 text-sm font-medium">Upload the image to animate</p>
-                <p className="text-white/30 text-xs mt-1">PNG, JPG, WebP · up to {cfg.max_file_mb ?? 10} MB</p>
+                <p className="text-white/30 text-xs mt-1">PNG, JPG, WebP · up to {cfg.max_file_mb ?? 20} MB</p>
               </div>
             </div>
             <input
@@ -107,7 +123,7 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
               type="url"
               value={imageUrl}
               onChange={(e) => setImageUrl(e.target.value)}
-              placeholder="https://example.com/image.jpg"
+              placeholder="https://example.com/photo.jpg"
               className="nexus-input w-full text-sm mt-1"
             />
           </>
@@ -128,41 +144,102 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
         )}
       </div>
 
-      {/* ── Motion style tags ── */}
-      <div>
-        <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Motion style</label>
-        <div className="flex flex-wrap gap-1.5">
-          {styleTags.map((s) => (
-            <button
-              key={s}
-              onClick={() => toggleStyle(s)}
-              className={cn(
-                'text-xs px-3 py-1.5 rounded-full border font-medium transition-all',
-                selStyles.includes(s)
-                  ? 'bg-cyan-600 text-white border-cyan-500'
-                  : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
-              )}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* ── Step 2: Motion options (revealed once image is loaded) ── */}
+      {hasImage && (
+        <>
+          {/* Duration */}
+          <div>
+            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Duration</label>
+            <div className="flex gap-2 flex-wrap">
+              {durations.map((d: number) => (
+                <button
+                  key={d}
+                  onClick={() => setDuration(d)}
+                  className={cn(
+                    'text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
+                    duration === d
+                      ? 'bg-cyan-600 text-white border-cyan-500'
+                      : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
+                  )}
+                >
+                  {d}s
+                </button>
+              ))}
+            </div>
+          </div>
 
-      {/* ── Motion prompt (optional) ── */}
-      <div>
-        <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
-          Motion description <span className="text-white/25 normal-case font-normal">(optional)</span>
-        </label>
-        <textarea
-          value={motionPrompt}
-          onChange={(e) => setMotionPrompt(e.target.value)}
-          placeholder={cfg.prompt_placeholder ?? 'Describe how to animate it — e.g. Camera slowly zooms in, trees sway in wind, water ripples…'}
-          rows={3}
-          autoFocus={!!preview}
-          className="nexus-input resize-none w-full text-sm leading-relaxed"
-        />
-      </div>
+          {/* Motion intensity slider */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Motion Intensity</label>
+              <span className={cn(
+                'text-xs font-bold px-2 py-0.5 rounded-full',
+                intensity === 0 ? 'bg-blue-500/20 text-blue-300'
+                : intensity === 1 ? 'bg-cyan-500/20 text-cyan-300'
+                : 'bg-orange-500/20 text-orange-300',
+              )}>
+                {INTENSITY_LABELS[intensity]}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={1}
+              value={intensity}
+              onChange={(e) => setIntensity(Number(e.target.value))}
+              className="w-full h-1.5 rounded-full appearance-none cursor-pointer
+                         bg-gradient-to-r from-blue-600 via-cyan-500 to-orange-500
+                         [&::-webkit-slider-thumb]:appearance-none
+                         [&::-webkit-slider-thumb]:w-4
+                         [&::-webkit-slider-thumb]:h-4
+                         [&::-webkit-slider-thumb]:rounded-full
+                         [&::-webkit-slider-thumb]:bg-white
+                         [&::-webkit-slider-thumb]:shadow-md"
+            />
+            <div className="flex justify-between mt-1">
+              <span className="text-white/20 text-[9px]">Subtle</span>
+              <span className="text-white/20 text-[9px]">Strong</span>
+            </div>
+          </div>
+
+          {/* Motion style tags */}
+          <div>
+            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Motion Style</label>
+            <div className="flex flex-wrap gap-1.5">
+              {styleTags.map((s: string) => (
+                <button
+                  key={s}
+                  onClick={() => toggleStyle(s)}
+                  className={cn(
+                    'text-xs px-3 py-1.5 rounded-full border font-medium transition-all',
+                    selStyles.includes(s)
+                      ? 'bg-cyan-600 text-white border-cyan-500'
+                      : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Motion description */}
+          <div>
+            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
+              Motion description <span className="text-white/25 normal-case font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={motionPrompt}
+              onChange={(e) => setMotionPrompt(e.target.value)}
+              placeholder={cfg.prompt_placeholder ?? 'Describe how to animate it — e.g. Camera slowly zooms in, trees sway in wind, water ripples…'}
+              rows={3}
+              autoFocus
+              className="nexus-input resize-none w-full text-sm leading-relaxed"
+            />
+          </div>
+        </>
+      )}
 
       {/* ── Generate button ── */}
       <button

@@ -100,6 +100,25 @@ export interface UIConfig {
   output_format?: 'text' | 'document' | 'audio';
   // chat
   show_history?: boolean;
+  // music v2
+  show_bpm?: boolean;
+  show_energy?: boolean;
+  max_duration?: number;
+  // image v2
+  show_quality_toggle?: boolean;
+  // image editor v2
+  edit_suggestions?: string[];
+  // video v2
+  camera_movements?: Array<{ label: string; icon?: string; value: string }>;
+  // voice v2
+  show_speed_control?: boolean;
+  show_format_selector?: boolean;
+  // transcribe v2
+  show_output_format?: boolean;
+  // vision v2
+  example_questions?: string[];
+  // translate
+  translate_languages?: LanguageOption[];
 }
 
 export interface StudioTool {

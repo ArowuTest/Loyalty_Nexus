@@ -1,31 +1,44 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Loader2, Upload, X, Mic, FileAudio, Sparkles } from 'lucide-react';
+import { Loader2, Upload, X, Mic, FileAudio, Sparkles, Users } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 
 const DEFAULT_LANGUAGES = [
-  { code: 'en',    label: 'English' },
-  { code: 'fr',    label: 'French' },
-  { code: 'es',    label: 'Spanish' },
-  { code: 'pt',    label: 'Portuguese' },
-  { code: 'sw',    label: 'Swahili' },
-  { code: 'yo',    label: 'Yoruba' },
-  { code: 'ha',    label: 'Hausa' },
-  { code: 'ar',    label: 'Arabic' },
-  { code: 'auto',  label: 'Auto-detect' },
+  { code: 'auto', label: 'Auto-detect' },
+  { code: 'en',   label: 'English' },
+  { code: 'yo',   label: 'Yoruba' },
+  { code: 'ha',   label: 'Hausa' },
+  { code: 'ig',   label: 'Igbo' },
+  { code: 'fr',   label: 'French' },
+  { code: 'pcm',  label: 'Pidgin' },
 ];
 
-export default function Transcribe({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
-  const cfg       = tool.ui_config ?? {};
-  const languages = cfg.languages ?? DEFAULT_LANGUAGES;
-  const showLang  = cfg.show_language_selector ?? true;
-  const maxMins   = cfg.max_duration_mins ?? 60;
+const OUTPUT_FORMATS = [
+  { value: 'plain',       label: 'Plain text',   desc: 'Clean transcript, no timestamps' },
+  { value: 'timestamped', label: 'Timestamped',  desc: 'With time markers per sentence' },
+  { value: 'srt',         label: 'SRT Subtitles', desc: 'Ready to use as subtitles' },
+];
 
-  const [audioUrl,  setAudioUrl]  = useState('');
-  const [audioFile, setAudioFile] = useState<File | null>(null);
-  const [language,  setLanguage]  = useState(cfg.default_language ?? 'auto');
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export default function Transcribe({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
+  const cfg        = tool.ui_config ?? {};
+  const languages  = cfg.languages  ?? DEFAULT_LANGUAGES;
+  const showLang   = cfg.show_language_selector ?? true;
+  const showSpeakers = cfg.show_speaker_labels  ?? true;
+  const showFormat = cfg.show_output_format     ?? true;
+  const maxMins    = cfg.max_duration_mins      ?? 60;
+
+  const [audioUrl,     setAudioUrl]     = useState('');
+  const [audioFile,    setAudioFile]    = useState<File | null>(null);
+  const [language,     setLanguage]     = useState<string>(cfg.default_language ?? 'auto');
+  const [speakLabels,  setSpeakLabels]  = useState<boolean>(true);
+  const [outFormat,    setOutFormat]    = useState<string>('plain');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
@@ -54,22 +67,31 @@ export default function Transcribe({ tool, onSubmit, isLoading, userPoints }: Te
     const payload: GeneratePayload = {
       prompt:   finalUrl,
       language: showLang ? language : undefined,
-      extra_params: audioFile ? { file_name: audioFile.name, file_type: audioFile.type } : undefined,
+      extra_params: {
+        speaker_labels: showSpeakers ? speakLabels : false,
+        output_format:  outFormat,
+        file_name:      audioFile?.name,
+        file_type:      audioFile?.type,
+        file_size:      audioFile?.size,
+      },
     };
     onSubmit(payload);
   }
 
-  const acceptTypes = (cfg.upload_accept ?? ['audio/mp3', 'audio/wav', 'audio/m4a', 'audio/ogg', 'video/mp4']).join(',');
+  const acceptTypes = (cfg.upload_accept ?? [
+    'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/m4a',
+    'audio/ogg', 'audio/flac', 'video/mp4',
+  ]).join(',');
 
   return (
     <div className="space-y-5">
 
-      {/* ── Language selector ── */}
+      {/* ── Language selector (first — set BEFORE uploading) ── */}
       {showLang && (
         <div>
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Language</label>
           <div className="flex flex-wrap gap-1.5">
-            {languages.map((l) => (
+            {(languages as { code: string; label: string }[]).map((l) => (
               <button
                 key={l.code}
                 onClick={() => setLanguage(l.code)}
@@ -84,6 +106,58 @@ export default function Transcribe({ tool, onSubmit, isLoading, userPoints }: Te
               </button>
             ))}
           </div>
+          <p className="text-white/25 text-[11px] mt-1">
+            Select <strong className="text-white/40">Auto-detect</strong> if unsure — or pick the language for better accuracy
+          </p>
+        </div>
+      )}
+
+      {/* ── Output format ── */}
+      {showFormat && (
+        <div>
+          <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Output Format</label>
+          <div className="grid grid-cols-3 gap-2">
+            {OUTPUT_FORMATS.map((f) => (
+              <button
+                key={f.value}
+                onClick={() => setOutFormat(f.value)}
+                className={cn(
+                  'flex flex-col gap-0.5 p-2.5 rounded-xl border text-left transition-all',
+                  outFormat === f.value
+                    ? 'bg-orange-600/20 border-orange-500/60 text-orange-200'
+                    : 'border-white/10 text-white/45 hover:border-white/25 hover:text-white/70',
+                )}
+              >
+                <span className="text-[11px] font-semibold">{f.label}</span>
+                <span className="text-[9px] opacity-60">{f.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Speaker labels toggle ── */}
+      {showSpeakers && (
+        <div className="flex items-center justify-between bg-white/3 border border-white/8 rounded-xl px-4 py-3">
+          <div className="flex items-center gap-2.5">
+            <Users size={14} className="text-white/40" />
+            <div>
+              <p className="text-white/70 text-xs font-semibold">Speaker labels</p>
+              <p className="text-white/30 text-[10px]">Identify who is talking (Speaker A, Speaker B…)</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setSpeakLabels((v) => !v)}
+            className={cn(
+              'w-10 h-5.5 rounded-full transition-all relative flex-shrink-0',
+              speakLabels ? 'bg-orange-600' : 'bg-white/15',
+            )}
+          >
+            <span className={cn(
+              'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all',
+              speakLabels ? 'left-5.5' : 'left-0.5',
+            )} />
+          </button>
         </div>
       )}
 
@@ -106,8 +180,8 @@ export default function Transcribe({ tool, onSubmit, isLoading, userPoints }: Te
                 <Mic size={22} className="text-white/40" />
               </div>
               <div>
-                <p className="text-white/65 text-sm font-medium">Drop an audio file here or click to browse</p>
-                <p className="text-white/30 text-xs mt-1">MP3, WAV, M4A, OGG, MP4 · up to {maxMins} min</p>
+                <p className="text-white/65 text-sm font-medium">Drop your audio here or click to browse</p>
+                <p className="text-white/30 text-xs mt-1">MP3, WAV, M4A, FLAC, OGG · up to {maxMins} min</p>
               </div>
             </div>
             <input
@@ -122,21 +196,26 @@ export default function Transcribe({ tool, onSubmit, isLoading, userPoints }: Te
               type="url"
               value={audioUrl}
               onChange={(e) => setAudioUrl(e.target.value)}
-              placeholder="https://example.com/audio.mp3"
+              placeholder="https://example.com/recording.mp3"
               className="nexus-input w-full text-sm mt-1"
             />
           </>
         ) : (
-          /* File selected */
+          /* File selected card */
           <div className="flex items-center gap-3 bg-orange-500/8 border border-orange-500/20 rounded-xl px-4 py-3">
             <div className="p-2 rounded-lg bg-orange-500/15">
               <FileAudio size={18} className="text-orange-400" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-white/80 text-sm font-medium truncate">{audioFile?.name ?? 'URL audio'}</p>
-              {audioFile && (
-                <p className="text-white/35 text-xs">{(audioFile.size / (1024 * 1024)).toFixed(1)} MB</p>
-              )}
+              <div className="flex items-center gap-2 mt-0.5">
+                {audioFile && (
+                  <p className="text-white/35 text-xs">{formatFileSize(audioFile.size)}</p>
+                )}
+                {audioFile && (
+                  <p className="text-white/25 text-xs">· {audioFile.type.split('/')[1]?.toUpperCase()}</p>
+                )}
+              </div>
             </div>
             <button
               onClick={clearAudio}
@@ -167,7 +246,7 @@ export default function Transcribe({ tool, onSubmit, isLoading, userPoints }: Te
 
       {/* Output hint */}
       {cfg.output_hint && (
-        <p className="text-white/30 text-xs text-center">{cfg.output_hint}</p>
+        <p className="text-white/30 text-xs text-center leading-relaxed">{cfg.output_hint}</p>
       )}
     </div>
   );

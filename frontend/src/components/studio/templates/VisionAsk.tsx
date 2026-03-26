@@ -1,32 +1,41 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Loader2, Upload, X, ImageIcon, Sparkles, Eye } from 'lucide-react';
+import { Loader2, Upload, X, ImageIcon, Sparkles, Eye, Search } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 
-const EXAMPLE_QUESTIONS = [
+const DEFAULT_EXAMPLE_QUESTIONS = [
   'What do you see in this image?',
-  'Describe this image in detail',
+  'Describe this image in full detail',
   'What text is visible?',
-  'Identify objects and their locations',
+  'Identify all objects and their locations',
   'Explain what is happening in this scene',
-  'What emotions does this convey?',
+  'What emotions does this image convey?',
+  'Are there any brand logos present?',
+  'What is the approximate location?',
 ];
 
 export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
-  const cfg = tool.ui_config ?? {};
+  const cfg          = tool.ui_config ?? {};
   const promptOptional = cfg.prompt_optional ?? false;
+  // Example questions from ui_config (so they can be customised per tool from DB)
+  const exampleQuestions = cfg.example_questions ?? DEFAULT_EXAMPLE_QUESTIONS;
 
-  const [imageUrl,   setImageUrl]   = useState('');
-  const [imageFile,  setImageFile]  = useState<File | null>(null);
-  const [preview,    setPreview]    = useState<string | null>(null);
-  const [question,   setQuestion]   = useState('');
+  // When prompt_optional=true the tool auto-generates a full description
+  const autoMode = promptOptional;
+
+  const [imageUrl,  setImageUrl]  = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [preview,   setPreview]   = useState<string | null>(null);
+  const [question,  setQuestion]  = useState('');
+  const [qSearch,   setQSearch]   = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
   const hasImage  = imageUrl.trim() || imageFile;
-  const isValid   = !!hasImage && (promptOptional || question.trim().length >= 3);
+  // In auto mode (image-analyser) a question is not needed
+  const isValid   = !!hasImage && (autoMode || question.trim().length >= 3);
 
   function handleFile(file: File) {
     setImageFile(file);
@@ -52,11 +61,16 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
     if (!isValid || isLoading || !canAfford) return;
     const finalUrl = imageFile && preview ? preview : imageUrl.trim();
     const payload: GeneratePayload = {
-      prompt:    question.trim() || 'Describe this image in detail',
+      prompt:    question.trim() || 'Describe this image in full detail — objects, people, text, setting, mood, and any notable elements.',
       image_url: finalUrl,
     };
     onSubmit(payload);
   }
+
+  // Filter example questions
+  const filteredQuestions = qSearch
+    ? exampleQuestions.filter((q: string) => q.toLowerCase().includes(qSearch.toLowerCase()))
+    : exampleQuestions;
 
   return (
     <div className="space-y-5">
@@ -64,7 +78,7 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
       {/* ── Image upload ── */}
       <div>
         <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">
-          {cfg.upload_label ?? 'Image to Analyse'}
+          {cfg.upload_label ?? 'Image to analyse'}
         </label>
 
         {!preview && !imageUrl ? (
@@ -80,18 +94,18 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
                 <Eye size={22} className="text-white/40" />
               </div>
               <div>
-                <p className="text-white/65 text-sm font-medium">Drop an image here or click to browse</p>
-                <p className="text-white/30 text-xs mt-1">PNG, JPG, WebP · up to {cfg.max_file_mb ?? 10} MB</p>
+                <p className="text-white/65 text-sm font-medium">Drop your image here or click to browse</p>
+                <p className="text-white/30 text-xs mt-1">PNG, JPG, WebP, GIF · up to {cfg.max_file_mb ?? 20} MB</p>
               </div>
             </div>
             <input
               ref={fileRef}
               type="file"
-              accept={(cfg.upload_accept ?? ['image/png', 'image/jpeg', 'image/webp']).join(',')}
+              accept={(cfg.upload_accept ?? ['image/png', 'image/jpeg', 'image/webp', 'image/gif']).join(',')}
               className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
             />
-            <p className="text-white/30 text-[11px] text-center mt-2">— or paste a URL —</p>
+            <p className="text-white/30 text-[11px] text-center mt-2">— or paste a public image URL —</p>
             <input
               type="url"
               value={imageUrl}
@@ -102,7 +116,7 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
           </>
         ) : (
           <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/30">
-            <img src={preview ?? imageUrl} alt="Source" className="w-full max-h-48 object-cover" />
+            <img src={preview ?? imageUrl} alt="Source" className="w-full max-h-52 object-cover" />
             <button
               onClick={clearImage}
               className="absolute top-2 right-2 p-1.5 bg-black/70 rounded-full text-white/60 hover:text-white transition-colors"
@@ -117,33 +131,67 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
         )}
       </div>
 
-      {/* ── Question ── */}
-      <div>
-        <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
-          Your question
-          {promptOptional && <span className="text-white/25 normal-case font-normal ml-1">(optional)</span>}
-        </label>
-        <textarea
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          placeholder={cfg.prompt_placeholder ?? 'What would you like to know about this image?'}
-          rows={3}
-          autoFocus={!!preview}
-          className="nexus-input resize-none w-full text-sm leading-relaxed"
-        />
-        <p className="text-white/30 text-xs mb-1.5 mt-2">Examples:</p>
-        <div className="flex flex-wrap gap-1.5">
-          {EXAMPLE_QUESTIONS.map((q) => (
-            <button
-              key={q}
-              onClick={() => setQuestion(q)}
-              className="text-xs px-2.5 py-1 rounded-full border border-white/12 text-white/45 hover:text-white/75 hover:border-white/25 transition-all"
-            >
-              {q}
-            </button>
-          ))}
+      {/* ── Auto-mode banner (image-analyser) ── */}
+      {autoMode && hasImage && (
+        <div className="flex items-center gap-2 bg-rose-500/8 border border-rose-500/20 rounded-xl px-3 py-2.5">
+          <Eye size={13} className="text-rose-400 flex-shrink-0" />
+          <p className="text-rose-300/80 text-xs">
+            AI will automatically describe everything visible — objects, text, colours, and scene context.
+            Or type a specific question below.
+          </p>
         </div>
-      </div>
+      )}
+
+      {/* ── Question input ── */}
+      {hasImage && (
+        <div>
+          <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
+            {autoMode ? 'Ask a specific question' : 'Your question'}
+            {autoMode && <span className="text-white/25 normal-case font-normal ml-1">(optional)</span>}
+            {!autoMode && <span className="text-red-400 ml-1">*</span>}
+          </label>
+
+          <textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder={cfg.prompt_placeholder ?? 'What would you like to know about this image?'}
+            rows={3}
+            autoFocus
+            className="nexus-input resize-none w-full text-sm leading-relaxed"
+          />
+
+          {/* Question filter + examples */}
+          {exampleQuestions.length > 4 && (
+            <div className="relative mt-2 mb-1.5">
+              <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
+              <input
+                type="text"
+                value={qSearch}
+                onChange={(e) => setQSearch(e.target.value)}
+                placeholder="Filter examples…"
+                className="nexus-input w-full text-xs pl-7 py-1.5"
+              />
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-1.5">
+            {filteredQuestions.map((q: string) => (
+              <button
+                key={q}
+                onClick={() => setQuestion(q)}
+                className={cn(
+                  'text-xs px-2.5 py-1 rounded-full border font-medium transition-all',
+                  question === q
+                    ? 'bg-rose-600 text-white border-rose-500'
+                    : 'text-white/45 border-white/12 hover:text-white/75 hover:border-white/25',
+                )}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Generate button ── */}
       <button
@@ -158,7 +206,9 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
       >
         {isLoading
           ? <><Loader2 size={15} className="animate-spin" /> Analysing…</>
-          : <><Sparkles size={15} /> Analyse Image →</>
+          : autoMode
+            ? <><Eye size={15} /> Analyse Image →</>
+            : <><Sparkles size={15} /> Ask About Image →</>
         }
       </button>
     </div>

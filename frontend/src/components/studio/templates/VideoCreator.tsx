@@ -13,28 +13,47 @@ const DEFAULT_ASPECT_RATIOS = [
 ];
 
 const DEFAULT_STYLE_TAGS = [
-  'Cinematic', 'Documentary', 'Slow motion', 'Time-lapse', 'Aerial drone',
-  'Dark', 'Vibrant', 'Vintage film', 'Sci-Fi', 'Fantasy',
+  'Cinematic', 'Documentary', 'Slow motion', 'Time-lapse',
+  'Aerial drone', 'Dark', 'Vibrant', 'Vintage film', 'Sci-Fi', 'Fantasy',
 ];
 
-const DEFAULT_DURATIONS = [5, 8, 10, 15];
+const DEFAULT_DURATIONS = [5, 8, 10, 15, 30];
+
+// Camera movement presets — appended to prompt for best results
+const CAMERA_MOVEMENTS = [
+  { label: 'Slow zoom in',  icon: '🔍', value: 'slow zoom in' },
+  { label: 'Slow zoom out', icon: '🔭', value: 'slow zoom out' },
+  { label: 'Pan left',      icon: '⬅️', value: 'camera panning left' },
+  { label: 'Pan right',     icon: '➡️', value: 'camera panning right' },
+  { label: 'Tilt up',       icon: '⬆️', value: 'camera tilting up' },
+  { label: 'Orbit shot',    icon: '🔄', value: '360 orbit around subject' },
+  { label: 'Tracking',      icon: '🎯', value: 'tracking shot following subject' },
+  { label: 'Handheld',      icon: '📷', value: 'handheld camera, slight shake' },
+  { label: 'Static',        icon: '📌', value: 'static camera, no movement' },
+];
 
 export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
-  const cfg = tool.ui_config ?? {};
-  const aspectRatios = cfg.aspect_ratios            ?? DEFAULT_ASPECT_RATIOS;
-  const styleTags    = cfg.style_tags               ?? DEFAULT_STYLE_TAGS;
-  const durations    = cfg.duration_options_video   ?? DEFAULT_DURATIONS;
-  const showNeg      = cfg.show_negative_prompt ?? true;
+  const cfg          = tool.ui_config ?? {};
+  const aspectRatios = cfg.aspect_ratios           ?? DEFAULT_ASPECT_RATIOS;
+  const styleTags    = cfg.style_tags              ?? DEFAULT_STYLE_TAGS;
+  const durations    = cfg.duration_options        ?? DEFAULT_DURATIONS;
+  const showNeg      = cfg.show_negative_prompt    ?? true;
+  // Allow max duration override per tool (video-veo supports 30s)
+  const maxDuration  = cfg.max_duration            ?? 15;
+  const cameraPresets = cfg.camera_movements       ?? CAMERA_MOVEMENTS;
 
-  const [prompt,     setPrompt]     = useState('');
-  const [aspect,     setAspect]     = useState(cfg.default_aspect ?? '16:9');
-  const [duration,   setDuration]   = useState(cfg.default_duration_video ?? 5);
-  const [selStyles,  setSelStyles]  = useState<string[]>([]);
-  const [negPrompt,  setNegPrompt]  = useState('');
-  const [showNegBox, setShowNegBox] = useState(false);
+  const [prompt,       setPrompt]      = useState('');
+  const [aspect,       setAspect]      = useState(cfg.default_aspect ?? '16:9');
+  const [duration,     setDuration]    = useState(cfg.default_duration ?? 5);
+  const [selStyles,    setSelStyles]   = useState<string[]>([]);
+  const [negPrompt,    setNegPrompt]   = useState('');
+  const [showNegBox,   setShowNegBox]  = useState(false);
+  const [cameraMove,   setCameraMove]  = useState<string | null>(null);
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
   const isValid   = prompt.trim().length >= 3;
+
+  const filteredDurations = durations.filter((d: number) => d <= maxDuration);
 
   function toggleStyle(s: string) {
     setSelStyles((prev) => prev.includes(s) ? prev.filter((t) => t !== s) : [...prev, s]);
@@ -42,13 +61,17 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
 
   function handleSubmit() {
     if (!isValid || isLoading || !canAfford) return;
-    const stylePrefix = selStyles.length > 0 ? `[${selStyles.join(', ')}] ` : '';
+    const stylePrefix  = selStyles.length > 0 ? `[${selStyles.join(', ')}] ` : '';
+    const cameraSuffix = cameraMove ? `. Camera movement: ${cameraMove}.` : '';
     const payload: GeneratePayload = {
-      prompt:          stylePrefix + prompt.trim(),
+      prompt:          stylePrefix + prompt.trim() + cameraSuffix,
       aspect_ratio:    aspect,
       duration:        duration,
       style_tags:      selStyles.length > 0 ? selStyles : undefined,
       negative_prompt: negPrompt.trim() || undefined,
+      extra_params: {
+        camera_movement: cameraMove ?? undefined,
+      },
     };
     onSubmit(payload);
   }
@@ -68,7 +91,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
       <div>
         <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Aspect Ratio</label>
         <div className="grid grid-cols-4 gap-2">
-          {aspectRatios.map((ar) => (
+          {aspectRatios.map((ar: { value: string; label: string; icon?: string }) => (
             <button
               key={ar.value}
               onClick={() => setAspect(ar.value)}
@@ -79,7 +102,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
                   : 'border-white/10 text-white/45 hover:border-white/25 hover:text-white/70',
               )}
             >
-              <span className="text-base leading-none">{ar.icon}</span>
+              {ar.icon && <span className="text-base leading-none">{ar.icon}</span>}
               <span className="text-[10px] font-semibold">{ar.label}</span>
               <span className="text-[9px] text-white/30">{ar.value}</span>
             </button>
@@ -91,7 +114,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
       <div>
         <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Duration</label>
         <div className="flex gap-2 flex-wrap">
-          {durations.map((d) => (
+          {(filteredDurations.length > 0 ? filteredDurations : durations).map((d: number) => (
             <button
               key={d}
               onClick={() => setDuration(d)}
@@ -112,7 +135,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
       <div>
         <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Style</label>
         <div className="flex flex-wrap gap-1.5">
-          {styleTags.map((s) => (
+          {styleTags.map((s: string) => (
             <button
               key={s}
               onClick={() => toggleStyle(s)}
@@ -129,6 +152,30 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
         </div>
       </div>
 
+      {/* ── Camera movement presets ── */}
+      <div>
+        <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">
+          Camera Movement <span className="text-white/25 normal-case font-normal">(optional)</span>
+        </label>
+        <div className="grid grid-cols-3 gap-1.5">
+          {cameraPresets.map((cm: { label: string; icon?: string; value: string }) => (
+            <button
+              key={cm.value}
+              onClick={() => setCameraMove(cameraMove === cm.value ? null : cm.value)}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs font-medium transition-all text-left',
+                cameraMove === cm.value
+                  ? 'bg-blue-600/25 border-blue-500/60 text-blue-200'
+                  : 'border-white/10 text-white/45 hover:border-white/25 hover:text-white/70',
+              )}
+            >
+              {cm.icon && <span className="text-sm leading-none">{cm.icon}</span>}
+              <span className="text-[11px] truncate">{cm.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ── Scene prompt ── */}
       <div>
         <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
@@ -139,7 +186,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
           onChange={(e) => setPrompt(e.target.value)}
           placeholder={
             cfg.prompt_placeholder ??
-            'Describe the scene in detail — subject, setting, motion, lighting, camera movement…\ne.g. A hawk soaring over Lagos skyline at dusk, slow zoom out, golden light, cinematic'
+            'Describe the scene — subject, setting, lighting, atmosphere…\ne.g. A hawk soaring over Lagos skyline at dusk, golden light, cinematic'
           }
           rows={4}
           autoFocus
@@ -161,7 +208,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
             <textarea
               value={negPrompt}
               onChange={(e) => setNegPrompt(e.target.value)}
-              placeholder="Things to avoid: shaky camera, blurry, text overlays, watermark…"
+              placeholder={cfg.negative_prompt_placeholder ?? 'Things to avoid: shaky camera, blurry, text overlays, watermark…'}
               rows={2}
               className="nexus-input resize-none w-full text-sm leading-relaxed mt-2"
             />
