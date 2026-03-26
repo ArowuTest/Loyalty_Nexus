@@ -648,7 +648,7 @@ export default function AIProvidersPage() {
   const totalMissingKey = data?.providers.filter(p => !p.has_key).length ?? 0;
 
   return (
-    <AdminShell title="AI Providers">
+    <AdminShell>
       {/* Spinner overlay on initial load */}
       {loading && !data && (
         <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
