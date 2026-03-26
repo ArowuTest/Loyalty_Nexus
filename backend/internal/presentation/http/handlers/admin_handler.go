@@ -254,12 +254,62 @@ func (h *AdminHandler) AdjustPoints(w http.ResponseWriter, r *http.Request) {
 // ─── Prize Pool (Spin Wheel) ──────────────────────────────────────────────
 
 func (h *AdminHandler) GetPrizePool(w http.ResponseWriter, r *http.Request) {
-	prizes, err := h.spinSvc.GetAllPrizes(r.Context())
+	// Admin always sees all prizes (active + inactive) unless ?active_only=true
+	includeInactive := r.URL.Query().Get("active_only") != "true"
+	prizes, err := h.spinSvc.GetAllPrizes(r.Context(), includeInactive)
 	if err != nil {
 		jsonError(w, "failed to get prizes: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	jsonOK(w, prizes)
+}
+
+func (h *AdminHandler) GetPrize(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	prizeID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid prize id", http.StatusBadRequest)
+		return
+	}
+	prize, err := h.spinSvc.GetPrize(r.Context(), prizeID)
+	if err != nil {
+		jsonError(w, "prize not found", http.StatusNotFound)
+		return
+	}
+	jsonOK(w, prize)
+}
+
+func (h *AdminHandler) GetPrizeSummary(w http.ResponseWriter, r *http.Request) {
+	summary, err := h.spinSvc.GetPrizeProbabilitySummary(r.Context())
+	if err != nil {
+		jsonError(w, "failed to get prize summary: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, summary)
+}
+
+func (h *AdminHandler) ReorderPrizes(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		OrderedIDs []string `json:"ordered_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.OrderedIDs) == 0 {
+		jsonError(w, "ordered_ids array is required", http.StatusBadRequest)
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(body.OrderedIDs))
+	for _, s := range body.OrderedIDs {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			jsonError(w, "invalid prize id: "+s, http.StatusBadRequest)
+			return
+		}
+		ids = append(ids, id)
+	}
+	if err := h.spinSvc.ReorderPrizes(r.Context(), ids); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]string{"status": "reordered"})
 }
 
 func (h *AdminHandler) CreatePrize(w http.ResponseWriter, r *http.Request) {
@@ -319,41 +369,35 @@ func (h *AdminHandler) DeletePrize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) GetSpinConfig(w http.ResponseWriter, r *http.Request) {
-	// Returns the full spin configuration (prize table + global limits from network_configs)
-	prizes, _ := h.spinSvc.GetAllPrizes(r.Context())
+	// Returns the full spin configuration (all prizes + tiers + stats)
+	prizes, _ := h.spinSvc.GetAllPrizes(r.Context(), true) // include inactive
+	tiers, _ := h.spinSvc.GetAllSpinTiers(r.Context())
+	summary, _ := h.spinSvc.GetPrizeProbabilitySummary(r.Context())
 	spinStats, _ := h.spinSvc.GetStats(r.Context())
 	jsonOK(w, map[string]interface{}{
-		"prizes":               prizes,
-		"max_spins_per_day":    h.cfg.GetInt("spin_max_per_user_per_day", 3),
-		"spin_trigger_naira":   h.cfg.GetInt64("spin_trigger_naira", 1000),
-		"liability_cap_naira":  h.cfg.GetInt64("daily_prize_liability_cap_naira", 500000),
-		"stats":                spinStats,
+		"prizes":              prizes,
+		"tiers":               tiers,
+		"probability_summary": summary,
+		"liability_cap_naira": h.cfg.GetInt64("daily_prize_liability_cap_naira", 500000),
+		"stats":               spinStats,
 	})
 }
 
+// UpdateSpinConfig updates global spin configuration keys.
+// Note: daily spin caps are now controlled per-tier via /admin/spin/tiers.
+// This endpoint only manages the daily prize liability cap.
 func (h *AdminHandler) UpdateSpinConfig(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		MaxSpinsPerDay    *int   `json:"max_spins_per_day"`
-		SpinTriggerNaira  *int64 `json:"spin_trigger_naira"`
 		LiabilityCapNaira *int64 `json:"liability_cap_naira"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	updates := map[string]string{}
-	if body.MaxSpinsPerDay != nil {
-		updates["spin_max_per_user_per_day"] = strconv.Itoa(*body.MaxSpinsPerDay)
-	}
-	if body.SpinTriggerNaira != nil {
-		updates["spin_trigger_naira"] = strconv.FormatInt(*body.SpinTriggerNaira, 10)
-	}
 	if body.LiabilityCapNaira != nil {
-		updates["daily_prize_liability_cap_naira"] = strconv.FormatInt(*body.LiabilityCapNaira, 10)
-	}
-	for k, v := range updates {
 		h.db.WithContext(r.Context()).Exec(
-			"UPDATE network_configs SET value = ?, updated_at = NOW() WHERE key = ?", v, k)
+			"UPDATE network_configs SET value = ?, updated_at = NOW() WHERE key = ?",
+			strconv.FormatInt(*body.LiabilityCapNaira, 10), "daily_prize_liability_cap_naira")
 	}
 	jsonOK(w, map[string]string{"status": "ok"})
 }
@@ -1319,4 +1363,41 @@ func (h *AdminHandler) RejectClaim(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonOK(w, claim)
+}
+
+// GetPendingClaims returns all claims in PENDING_ADMIN_REVIEW status.
+func (h *AdminHandler) GetPendingClaims(w http.ResponseWriter, r *http.Request) {
+	claims, err := h.claimSvc.GetPendingClaims(r.Context())
+	if err != nil {
+		jsonError(w, "failed to get pending claims: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"data":  claims,
+		"total": len(claims),
+	})
+}
+
+// GetClaimStatistics returns aggregate claim stats for the admin dashboard.
+func (h *AdminHandler) GetClaimStatistics(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.claimSvc.GetStatistics(r.Context())
+	if err != nil {
+		jsonError(w, "failed to get claim statistics: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, stats)
+}
+
+// ExportClaims returns a CSV export of claims, optionally filtered by status.
+func (h *AdminHandler) ExportClaims(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	csv, err := h.claimSvc.ExportCSV(r.Context(), status)
+	if err != nil {
+		jsonError(w, "export failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"claims_export.csv\"")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(csv))
 }

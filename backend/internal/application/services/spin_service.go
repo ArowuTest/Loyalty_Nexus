@@ -368,14 +368,82 @@ func (s *SpinService) buildWinMessage(o *SpinOutcome, phone string) string {
 
 // ─── Admin Prize CRUD ─────────────────────────────────────────────────────
 
-// GetAllPrizes returns all prizes from the prize_pool table.
-func (s *SpinService) GetAllPrizes(ctx context.Context) ([]entities.PrizePoolEntry, error) {
+// GetAllPrizes returns prizes from the prize_pool table.
+// When includeInactive is true, inactive prizes are included (admin view).
+func (s *SpinService) GetAllPrizes(ctx context.Context, includeInactive ...bool) ([]entities.PrizePoolEntry, error) {
 	var prizes []entities.PrizePoolEntry
-	err := s.db.WithContext(ctx).
-		Table("prize_pool").
-		Order("win_probability_weight DESC").
-		Find(&prizes).Error
+	q := s.db.WithContext(ctx).Table("prize_pool")
+	if len(includeInactive) == 0 || !includeInactive[0] {
+		q = q.Where("is_active = ?", true)
+	}
+	err := q.Order("sort_order ASC, win_probability_weight DESC").Find(&prizes).Error
 	return prizes, err
+}
+
+// PrizeProbabilitySummary is returned by GetPrizeProbabilitySummary.
+type PrizeProbabilitySummary struct {
+	TotalWeight    int                    `json:"total_weight"`     // sum of all active weights (max 10000)
+	RemainingBudget int                   `json:"remaining_budget"` // 10000 - TotalWeight
+	PercentUsed    float64                `json:"percent_used"`     // TotalWeight / 100.0
+	Prizes         []PrizeProbabilityItem `json:"prizes"`
+}
+
+// PrizeProbabilityItem is one row in the probability summary.
+type PrizeProbabilityItem struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	PrizeType   string  `json:"prize_type"`
+	Weight      int     `json:"weight"`
+	Percent     float64 `json:"percent"`     // weight / 100.0
+	IsActive    bool    `json:"is_active"`
+	IsNoWin     bool    `json:"is_no_win"`
+	ColorScheme string  `json:"color_scheme"`
+	SortOrder   int     `json:"sort_order"`
+}
+
+// GetPrizeProbabilitySummary returns the probability budget breakdown for the admin wheel editor.
+func (s *SpinService) GetPrizeProbabilitySummary(ctx context.Context) (*PrizeProbabilitySummary, error) {
+	prizes, err := s.GetAllPrizes(ctx, true) // include inactive
+	if err != nil {
+		return nil, err
+	}
+	totalWeight := 0
+	items := make([]PrizeProbabilityItem, 0, len(prizes))
+	for _, p := range prizes {
+		if p.IsActive {
+			totalWeight += p.ProbWeight
+		}
+		items = append(items, PrizeProbabilityItem{
+			ID:          p.ID.String(),
+			Name:        p.Name,
+			PrizeType:   string(p.PrizeType),
+			Weight:      p.ProbWeight,
+			Percent:     float64(p.ProbWeight) / 100.0,
+			IsActive:    p.IsActive,
+			IsNoWin:     p.IsNoWin,
+			ColorScheme: p.ColorScheme,
+			SortOrder:   p.SortOrder,
+		})
+	}
+	return &PrizeProbabilitySummary{
+		TotalWeight:     totalWeight,
+		RemainingBudget: 10000 - totalWeight,
+		PercentUsed:     float64(totalWeight) / 100.0,
+		Prizes:          items,
+	}, nil
+}
+
+// ReorderPrizes updates the sort_order of prizes in bulk.
+// orderedIDs is a slice of prize UUIDs in the desired display order (index 0 = first on wheel).
+func (s *SpinService) ReorderPrizes(ctx context.Context, orderedIDs []uuid.UUID) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i, id := range orderedIDs {
+			if err := tx.Table("prize_pool").Where("id = ?", id).Update("sort_order", i).Error; err != nil {
+				return fmt.Errorf("reorder prize %s: %w", id, err)
+			}
+		}
+		return nil
+	})
 }
 
 // GetPrize returns a single prize by ID.
@@ -448,6 +516,18 @@ func (s *SpinService) CreatePrize(ctx context.Context, data map[string]interface
 		minRechargeInt := int64(minRecharge)
 		prize.MinimumRecharge = minRechargeInt
 	}
+	if iconName, ok := data["icon_name"].(string); ok {
+		prize.IconName = iconName
+	}
+	if terms, ok := data["terms_and_conditions"].(string); ok {
+		prize.TermsAndConditions = terms
+	}
+	if prizeCode, ok := data["prize_code"].(string); ok {
+		prize.PrizeCode = prizeCode
+	}
+	if variationCode, ok := data["variation_code"].(string); ok {
+		prize.VariationCode = variationCode
+	}
 
 	if err := s.db.WithContext(ctx).Table("prize_pool").Create(&prize).Error; err != nil {
 		return nil, fmt.Errorf("create prize: %w", err)
@@ -519,6 +599,22 @@ func (s *SpinService) UpdatePrize(ctx context.Context, prizeID uuid.UUID, data m
 	if v, ok := data["minimum_recharge"].(float64); ok {
 		updates["minimum_recharge"] = int64(v)
 		prize.MinimumRecharge = int64(v)
+	}
+	if v, ok := data["icon_name"].(string); ok {
+		updates["icon_name"] = v
+		prize.IconName = v
+	}
+	if v, ok := data["terms_and_conditions"].(string); ok {
+		updates["terms_and_conditions"] = v
+		prize.TermsAndConditions = v
+	}
+	if v, ok := data["prize_code"].(string); ok {
+		updates["prize_code"] = v
+		prize.PrizeCode = v
+	}
+	if v, ok := data["variation_code"].(string); ok {
+		updates["variation_code"] = v
+		prize.VariationCode = v
 	}
 
 	if len(updates) == 0 {

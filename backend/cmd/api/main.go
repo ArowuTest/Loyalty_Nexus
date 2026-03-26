@@ -250,17 +250,31 @@ func main() {
 	mux.Handle("POST   /api/v1/admin/draws/{id}/execute",     adminAuth(http.HandlerFunc(adminH.ExecuteDraw)))
 	mux.Handle("GET    /api/v1/admin/draws/{id}/winners",     adminAuth(http.HandlerFunc(adminH.GetDrawWinners)))
 	mux.Handle("GET    /api/v1/admin/draws/{id}/export",      adminAuth(http.HandlerFunc(adminH.ExportDrawEntries)))
-	// Prize / Spin Wheel CRUD
-	mux.Handle("GET    /api/v1/admin/prizes",                 adminAuth(http.HandlerFunc(adminH.GetPrizePool)))
-	mux.Handle("POST   /api/v1/admin/prizes",                 adminAuth(http.HandlerFunc(adminH.CreatePrize)))
-	mux.Handle("PUT    /api/v1/admin/prizes/{id}",            adminAuth(http.HandlerFunc(adminH.UpdatePrize)))
-	mux.Handle("DELETE /api/v1/admin/prizes/{id}",            adminAuth(http.HandlerFunc(adminH.DeletePrize)))
-	// Spin configuration
-	mux.Handle("GET    /api/v1/admin/spin/config",            adminAuth(http.HandlerFunc(adminH.GetSpinConfig)))
-	mux.Handle("PUT    /api/v1/admin/spin/config",            adminAuth(http.HandlerFunc(adminH.UpdateSpinConfig)))
-	// Spin Claims
-	mux.Handle("GET    /api/v1/admin/spin/claims",            adminAuth(http.HandlerFunc(adminH.ListClaims)))
-	mux.Handle("GET    /api/v1/admin/spin/claims/{id}",       adminAuth(http.HandlerFunc(adminH.GetClaimDetails)))
+	// ─── Prize / Spin Wheel CRUD ─────────────────────────────────────────────
+	// NOTE: /prizes/summary and /prizes/reorder must be registered BEFORE /prizes/{id}
+	// so the Go 1.22 mux does not treat "summary" and "reorder" as {id} values.
+	mux.Handle("GET    /api/v1/admin/prizes",                  adminAuth(http.HandlerFunc(adminH.GetPrizePool)))
+	mux.Handle("POST   /api/v1/admin/prizes",                  adminAuth(http.HandlerFunc(adminH.CreatePrize)))
+	mux.Handle("GET    /api/v1/admin/prizes/summary",           adminAuth(http.HandlerFunc(adminH.GetPrizeSummary)))
+	mux.Handle("POST   /api/v1/admin/prizes/reorder",           adminAuth(http.HandlerFunc(adminH.ReorderPrizes)))
+	mux.Handle("GET    /api/v1/admin/prizes/{id}",              adminAuth(http.HandlerFunc(adminH.GetPrize)))
+	mux.Handle("PUT    /api/v1/admin/prizes/{id}",              adminAuth(http.HandlerFunc(adminH.UpdatePrize)))
+	mux.Handle("DELETE /api/v1/admin/prizes/{id}",              adminAuth(http.HandlerFunc(adminH.DeletePrize)))
+	// ─── Spin Tiers ────────────────────────────────────────────────────────────
+	mux.Handle("GET    /api/v1/admin/spin/tiers",               adminAuth(http.HandlerFunc(adminH.GetSpinTiers)))
+	mux.Handle("POST   /api/v1/admin/spin/tiers",               adminAuth(http.HandlerFunc(adminH.CreateSpinTier)))
+	mux.Handle("PUT    /api/v1/admin/spin/tiers/{id}",          adminAuth(http.HandlerFunc(adminH.UpdateSpinTier)))
+	mux.Handle("DELETE /api/v1/admin/spin/tiers/{id}",          adminAuth(http.HandlerFunc(adminH.DeleteSpinTier)))
+	// ─── Spin Configuration ────────────────────────────────────────────────────
+	mux.Handle("GET    /api/v1/admin/spin/config",              adminAuth(http.HandlerFunc(adminH.GetSpinConfig)))
+	mux.Handle("PUT    /api/v1/admin/spin/config",              adminAuth(http.HandlerFunc(adminH.UpdateSpinConfig)))
+	// ─── Spin Claims ───────────────────────────────────────────────────────────
+	// NOTE: /claims/pending, /claims/statistics, /claims/export must be before /claims/{id}
+	mux.Handle("GET    /api/v1/admin/spin/claims",              adminAuth(http.HandlerFunc(adminH.ListClaims)))
+	mux.Handle("GET    /api/v1/admin/spin/claims/pending",      adminAuth(http.HandlerFunc(adminH.GetPendingClaims)))
+	mux.Handle("GET    /api/v1/admin/spin/claims/statistics",   adminAuth(http.HandlerFunc(adminH.GetClaimStatistics)))
+	mux.Handle("GET    /api/v1/admin/spin/claims/export",       adminAuth(http.HandlerFunc(adminH.ExportClaims)))
+	mux.Handle("GET    /api/v1/admin/spin/claims/{id}",         adminAuth(http.HandlerFunc(adminH.GetClaimDetails)))
 	mux.Handle("POST   /api/v1/admin/spin/claims/{id}/approve", adminAuth(http.HandlerFunc(adminH.ApproveClaim)))
 	mux.Handle("POST   /api/v1/admin/spin/claims/{id}/reject",  adminAuth(http.HandlerFunc(adminH.RejectClaim)))
 	// Points ledger audit
