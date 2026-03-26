@@ -1,22 +1,20 @@
 run:
   timeout: 5m
 
-linters:
-  disable-all: true
-  enable:
-    - govet
-    - errcheck
-    - staticcheck
+# Note: linter selection is controlled entirely by the CI workflow flags:
+#   --disable=typecheck --enable=govet,errcheck,staticcheck
+# This config file only provides settings and issue exclusions — no linter
+# enable/disable directives here to avoid conflicting with CLI flags.
 
 linters-settings:
   staticcheck:
-    # SA1019 is suppressed per-call with //nolint:staticcheck in wars_ws.go
     checks: ["all"]
 
 issues:
   exclude-rules:
-    # wars_ws.go uses nhooyr.io/websocket which is the same as coder/websocket
-    # All deprecated call sites already have //nolint:staticcheck inline comments
+    # wars_ws.go uses nhooyr.io/websocket which is maintained as
+    # github.com/coder/websocket (same library, different import path).
+    # All deprecated call sites have //nolint:staticcheck inline.
     - path: wars_ws\.go
       linters:
         - staticcheck
