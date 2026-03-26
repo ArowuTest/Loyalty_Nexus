@@ -157,11 +157,13 @@ jobs:
 
       - name: Analyse (static checks)
         working-directory: mobile
-        # --no-fatal-infos : hints/info messages do not fail the build
-        # --no-fatal-warnings: warnings do not fail the build (only true errors do)
-        # This is correct for a project where screens are scaffold/prototype stage.
-        # Tighten to --fatal-warnings once feature screens are production-complete.
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        # The mobile project contains only the Dart lib/ layer — no platform
+        # scaffolds (android/ ios/) yet. These are generated when mobile dev starts.
+        # Federated plugins (firebase_*, local_auth, permission_handler) cannot be
+        # resolved without platform directories, so full 'flutter analyze' fails.
+        # We use 'dart analyze lib/' which analyses only our Dart code (correct for
+        # this stage). Tighten to 'flutter analyze' once platform dirs are generated.
+        run: dart analyze lib/ --no-fatal-infos
 
       - name: Unit tests
         working-directory: mobile
