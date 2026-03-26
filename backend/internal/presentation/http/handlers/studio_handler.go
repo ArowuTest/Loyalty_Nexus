@@ -47,11 +47,6 @@ func NewStudioHandler(
 	return &StudioHandler{studioSvc: ss, llmOrch: lo, worker: kb, cfg: cfg}
 }
 
-// chatUsageKey returns the Redis key for the user's daily chat message counter.
-func chatUsageKey(uid string) string {
-	return fmt.Sprintf("nexus:chat:daily:%s:%s", uid, time.Now().UTC().Format("2006-01-02"))
-}
-
 // ─── GET /api/v1/studio/tools ─────────────────────────────────────────────────
 
 func (h *StudioHandler) ListTools(w http.ResponseWriter, r *http.Request) {
