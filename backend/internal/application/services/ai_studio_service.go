@@ -517,44 +517,56 @@ func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL s
 
 // ─── Video dispatch ────────────────────────────────────────────────────────────
 // Handles: animate-photo, video-premium, video-jingle, video-cinematic, video-veo
+//
+// Pollinations video model pricing (confirmed 2026-03-26):
+//   FREE:  wan-fast (Wan 2.2, 15 pollen input), ltx-2 (LTX-2, 15 pollen input)
+//   PAID:  seedance (1.8/M pollen), seedance-pro (1.0/M), veo (0.150/sec), wan (0.050/sec)
+//
+// Strategy:
+//   video-cinematic  → wan-fast FREE primary, ltx-2 FREE fallback  (was using paid seedance — FIXED)
+//   video-veo        → veo PAID primary, wan-fast FREE fallback    (was falling back to paid seedance — FIXED)
+//   animate-photo    → FAL LTX-Video → wan-fast FREE → ltx-2 FREE (never use paid seedance)
 
 func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
-	// video-cinematic: Seedance (image + motion prompt, paid)
-	// Frontend sends: { prompt: motionPrompt, image_url: imgURL } via buildEnrichedPrompt
+	// video-cinematic: high-quality cinematic image-to-video
+	// Primary: wan-fast (Wan 2.2) — FREE, 15 pollen input, ~50s, image-to-video
+	// Fallback: ltx-2 (LTX-2)   — FREE, 15 pollen input, NEW model
 	if slug == "video-cinematic" {
 		imgURL := env.ImageURL
 		motionPrompt := env.Prompt
 		if imgURL == "" {
 			return nil, fmt.Errorf("video-cinematic: image_url is required")
 		}
-		vidURL, err := o.callPollinationsSeedance(ctx, imgURL, motionPrompt)
+		// Tier 1: wan-fast — FREE
+		vidURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imgURL, motionPrompt, 180)
 		if err == nil {
-			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/seedance", CostMicros: 200000}, nil
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 		}
-		log.Printf("[AIStudio] Seedance failed for video-cinematic: %v — falling back to wan-fast", err)
-		// Fallback: wan-fast (Wan 2.2) — slower (~50s) but same image-to-video capability
-		vidURL, err = o.callPollinationsVideoModel(ctx, "wan-fast", imgURL, motionPrompt, 180)
+		log.Printf("[AIStudio] wan-fast failed for video-cinematic: %v — trying ltx-2", err)
+		// Tier 2: ltx-2 — FREE
+		vidURL, err = o.callPollinationsVideoModel(ctx, "ltx-2", imgURL, motionPrompt, 180)
 		if err == nil {
-			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 150000}, nil
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/ltx-2", CostMicros: 0}, nil
 		}
-		log.Printf("[AIStudio] wan-fast failed for video-cinematic: %v", err)
+		log.Printf("[AIStudio] ltx-2 failed for video-cinematic: %v", err)
 		return nil, fmt.Errorf("video-cinematic: all providers failed")
 	}
 
-	// video-veo: Google Veo text-to-video (paid, highest quality)
+	// video-veo: Google Veo 3.1 text-to-video (PAID, highest quality, 0.150/sec)
+	// Fallback: wan-fast FREE (not seedance — also paid)
 	if slug == "video-veo" {
 		prompt := env.Prompt
 		vidURL, err := o.callPollinationsVeo(ctx, prompt)
 		if err == nil {
-			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo2", CostMicros: 400000}, nil
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo", CostMicros: 400000}, nil
 		}
-		log.Printf("[AIStudio] Veo failed for video-veo: %v — falling back to seedance", err)
-		// Fallback: seedance text-to-video
-		vidURL, err = o.callPollinationsVideoModel(ctx, "seedance", "", prompt, 180)
+		log.Printf("[AIStudio] Veo failed for video-veo: %v — falling back to wan-fast (FREE)", err)
+		// Fallback: wan-fast text-to-video (FREE) — NOT seedance (also paid)
+		vidURL, err = o.callPollinationsVideoModel(ctx, "wan-fast", "", prompt, 180)
 		if err == nil {
-			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/seedance", CostMicros: 200000}, nil
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 		}
-		log.Printf("[AIStudio] Seedance fallback failed for video-veo: %v", err)
+		log.Printf("[AIStudio] wan-fast fallback failed for video-veo: %v", err)
 		return nil, fmt.Errorf("video-veo: all providers failed")
 	}
 
@@ -602,18 +614,19 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		log.Printf("[AIStudio] FAL video failed: %v", err)
 	}
 
-	// Tier 2: Pollinations seedance (image-to-video, ~28s)
-	if videoURL, err := o.callPollinationsVideo(ctx, imageURL, "animate this image with subtle cinematic motion"); err == nil {
-		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/seedance", CostMicros: 50000}, nil
+	// Tier 2: Pollinations wan-fast / Wan 2.2 — FREE (15 pollen input, ~50s)
+	// NOTE: seedance is PAID (1.8 pollen/M) — never use as a free fallback
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, "animate this image with subtle cinematic motion", 180); err == nil {
+		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 	} else {
-		log.Printf("[AIStudio] Pollinations seedance failed: %v — falling back to wan-fast", err)
+		log.Printf("[AIStudio] Pollinations wan-fast failed: %v — trying ltx-2", err)
 	}
 
-	// Tier 3: Pollinations wan-fast / Wan 2.2 (image-to-video, ~50s — slower but reliable fallback)
-	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, "animate this image with subtle cinematic motion", 180); err == nil {
-		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 30000}, nil
+	// Tier 3: Pollinations ltx-2 / LTX-2 — FREE (15 pollen input, NEW model)
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "ltx-2", imageURL, "animate this image with subtle cinematic motion", 180); err == nil {
+		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/ltx-2", CostMicros: 0}, nil
 	} else {
-		log.Printf("[AIStudio] Pollinations wan-fast failed: %v", err)
+		log.Printf("[AIStudio] Pollinations ltx-2 failed: %v", err)
 	}
 
 	return nil, fmt.Errorf("video generation unavailable: all providers failed")
@@ -1741,12 +1754,13 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 	return publicURL, nil
 }
 
-// callPollinationsVideo generates a short video using Pollinations seedance.
-// NOTE (2026-03-26): wan-fast has been REMOVED from Pollinations video models.
-// Current video models: seedance (image-to-video + text-to-video), veo (text-to-video only).
-// imageURL is passed as the `image` query param for image-to-video; empty = text-to-video.
+// callPollinationsVideo generates a short video using wan-fast (FREE).
+// Pollinations video pricing (2026-03-26):
+//   FREE: wan-fast (Wan 2.2), ltx-2 (LTX-2)
+//   PAID: seedance, seedance-pro, veo, wan
+// Using wan-fast as the default free option.
 func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageURL, prompt string) (string, error) {
-	return o.callPollinationsVideoModel(ctx, "seedance", imageURL, prompt, 180)
+	return o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, prompt, 180)
 }
 
 // callPollinationsVideoModel is the shared GET-based video caller for any video model.
@@ -2373,9 +2387,9 @@ func (o *AIStudioOrchestrator) callPollinationsElevenMusic(ctx context.Context, 
 	return o.uploadOrDataURI(ctx, raw, "audio/mpeg", key), nil
 }
 
-// callPollinationsSeedance generates a cinematic image-to-video using Pollinations Seedance.
-// Official documented endpoint: GET gen.pollinations.ai/image/{prompt}?model=seedance&image={srcURL}
-// Paid model (~$0.20/video). Uses sk_ key via Bearer header. Timeout: 180s.
+// callPollinationsSeedance is kept for backward compatibility (e.g. admin DB rows that use seedance).
+// NOTE: seedance is a PAID model (1.8 pollen/M). Use callPollinationsVideo (wan-fast, FREE) for
+// cost-effective generation. Only call this when the user explicitly selected a paid seedance plan.
 func (o *AIStudioOrchestrator) callPollinationsSeedance(ctx context.Context, imageURL, prompt string) (string, error) {
 	return o.callPollinationsVideoModel(ctx, "seedance", imageURL, prompt, 180)
 }

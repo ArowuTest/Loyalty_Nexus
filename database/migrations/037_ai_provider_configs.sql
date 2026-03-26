@@ -71,8 +71,9 @@ VALUES
 -- ── VIDEO ─────────────────────────────────────────────────────────────────────
 ('FAL Kling v1.5',       'fal-kling',           'video', 'fal-video',          'FAL_API_KEY',             'fal-ai/kling-video/v1.5/standard/image-to-video', 1, true, true, 56000, 0, 'FAL Kling v1.5 — premium quality'),
 ('FAL LTX Video',        'fal-ltx',             'video', 'fal-video',          'FAL_API_KEY',             'fal-ai/ltx-video',                2, false, true, 14500, 0,  'FAL LTX — faster/cheaper option'),
-('Pollinations Seedance','pollinations-seedance','video', 'pollinations-video', 'POLLINATIONS_SECRET_KEY', 'seedance',                        3, false, true, 50000, 0,  'Pollinations Seedance — ~28s generation'),
-('Pollinations Wan-Fast','pollinations-wan-fast','video', 'pollinations-video', 'POLLINATIONS_SECRET_KEY', 'wan-fast',                        4, false, true, 30000, 0,  'Wan 2.2 — slower ~50s backup'),
+('Pollinations Wan-Fast','pollinations-wan-fast','video', 'pollinations-video', 'POLLINATIONS_SECRET_KEY', 'wan-fast',                        3, true,  true, 0,     0,  'Wan 2.2 — FREE (15 pollen input), ~50s image-to-video'),
+('Pollinations LTX-2',   'pollinations-ltx-2',  'video', 'pollinations-video', 'POLLINATIONS_SECRET_KEY', 'ltx-2',                           4, true,  true, 0,     0,  'LTX-2 — FREE (15 pollen input), new model backup'),
+('Pollinations Seedance','pollinations-seedance','video', 'pollinations-video', 'POLLINATIONS_SECRET_KEY', 'seedance',                        5, false, true, 200000,0,  'Seedance Lite — PAID (1.8 pollen/M), do not use as free fallback'),
 
 -- ── TTS ───────────────────────────────────────────────────────────────────────
 ('Google Cloud TTS',     'google-cloud-tts',    'tts', 'google-tts',           'GOOGLE_CLOUD_TTS_KEY',    '',                                1, true,  true, 0,     0,  'Google TTS — 1M chars/month free'),
