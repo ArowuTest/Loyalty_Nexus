@@ -317,6 +317,13 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 
 	systemPrompt, userPrompt := buildTextPrompts(slug, prompt)
 
+	// ── DB-first: admin can override/reorder providers per category ──────────
+	in := providerInput{SystemPrompt: systemPrompt, UserPrompt: userPrompt}
+	if url, text, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryText, in); err == nil {
+		return &studioProviderResult{OutputText: text, OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain (active when DB has no text providers) ──────
 	providers := []struct {
 		name string
 		fn   func(ctx context.Context, sys, user string) (string, error)
@@ -440,6 +447,12 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 		return &studioProviderResult{OutputURL: url, Provider: "pollinations/kontext", CostMicros: 15000}, nil
 
 	default: // ai-photo
+		// ── DB-first ────────────────────────────────────────────────────────
+		in := providerInput{Prompt: prompt}
+		if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryImage, in); err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+		}
+		// ── Hardcoded fallback ───────────────────────────────────────────────
 		// tier 1: HuggingFace FLUX.1-Schnell (free, uses HF_TOKEN)
 		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
 			url, err := o.callHFFluxSchnell(ctx, hfKey, prompt)
@@ -465,6 +478,13 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 }
 
 func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL string) (*studioProviderResult, error) {
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	in := providerInput{ImageURL: imageURL}
+	if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryBGRemove, in); err == nil {
+		return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	// Primary: self-hosted rembg microservice
 	if rembgURL := os.Getenv("REMBG_SERVICE_URL"); rembgURL != "" {
 		result, err := o.callRembgService(ctx, rembgURL, imageURL)
@@ -545,6 +565,13 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		imageURL = env.Prompt // legacy fallback: older rows stored imageURL in prompt
 	}
 
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	vidIn := providerInput{Prompt: env.Prompt, ImageURL: imageURL}
+	if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryVideo, vidIn); err == nil {
+		return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	// Tier 1: FAL.AI (Kling v1.5 for premium, LTX for standard)
 	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
 		var model string
@@ -627,6 +654,13 @@ func (o *AIStudioOrchestrator) dispatchTranslate(ctx context.Context, env prompt
 		targetLang = "yo"
 	}
 
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	dbIn := providerInput{UserPrompt: text, TargetLang: targetLang}
+	if _, translated, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryTranslate, dbIn); err == nil {
+		return &studioProviderResult{OutputText: translated, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	if apiKey := os.Getenv("GOOGLE_TRANSLATE_API_KEY"); apiKey != "" {
 		translated, err := o.callGoogleTranslate(ctx, apiKey, text, targetLang)
 		if err == nil {
@@ -650,6 +684,13 @@ func (o *AIStudioOrchestrator) dispatchTranslate(ctx context.Context, env prompt
 }
 
 func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*studioProviderResult, error) {
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	in := providerInput{Text: text}
+	if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryTTS, in); err == nil {
+		return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	// Primary: Google Cloud TTS (free tier: 1M chars/month standard)
 	if gcpKey := os.Getenv("GOOGLE_CLOUD_TTS_KEY"); gcpKey != "" {
 		audioURL, err := o.callGoogleCloudTTS(ctx, gcpKey, text)
@@ -689,6 +730,13 @@ func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*s
 }
 
 func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, audioURL string) (*studioProviderResult, error) {
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	in := providerInput{AudioURL: audioURL}
+	if _, text, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryTranscribe, in); err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	// Primary: AssemblyAI (free $50 credit on signup)
 	if aaiKey := os.Getenv("ASSEMBLY_AI_KEY"); aaiKey != "" {
 		text, err := o.callAssemblyAI(ctx, aaiKey, audioURL)
@@ -759,10 +807,14 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 		return nil, fmt.Errorf("marketing jingle requires ELEVENLABS_API_KEY")
 
 	default: // bg-music
+		// ── DB-first ──────────────────────────────────────────────────────────
+		dbIn := providerInput{Prompt: prompt, Instrumental: true, DurationSecs: 30}
+		if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryMusic, dbIn); err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+		}
+		// ── Hardcoded fallback chain ───────────────────────────────────────────
 		// Primary: Pollinations ElevenMusic (instrumental mode — no vocals, pure background track)
 		// HuggingFace MusicGen was removed from HF serverless (410 Gone) — replaced by Pollinations.
-		// Pollinations ElevenMusic: GET /audio/{prompt}?model=elevenmusic&instrumental=true
-		// Cost: pollen credits (~$0.005/s). sk_ key required since 2026-03-26.
 		if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
 			audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, true)
 			if err == nil {
@@ -1856,6 +1908,13 @@ func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug string, 
 		question = ""
 	}
 
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	vIn := providerInput{ImageURL: imageURL, UserPrompt: question}
+	if _, text, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryVision, vIn); err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	// Primary: Pollinations Vision (OpenAI-compatible multimodal)
 	text, err := o.callPollinationsVision(ctx, imageURL, question)
 	if err == nil {

@@ -91,19 +91,10 @@ func decryptProviderKey(enc string) (string, error) {
 	return string(plaintext), err
 }
 
-// resolveProviderKey returns the usable API key for a provider:
-// 1. Decrypts api_key_enc if present.
-// 2. Falls back to the named env var.
+// resolveProviderKey returns the usable API key for a provider.
+// Delegates to the entity method so key resolution logic lives in one place.
 func resolveProviderKey(p *entities.AIProviderConfig) string {
-	if p.APIKeyEnc != "" {
-		if key, err := decryptProviderKey(p.APIKeyEnc); err == nil && key != "" {
-			return key
-		}
-	}
-	if p.EnvKey != "" {
-		return os.Getenv(p.EnvKey)
-	}
-	return ""
+	return p.ResolveKey()
 }
 
 // ── Provider ping ─────────────────────────────────────────────────────────────
