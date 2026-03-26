@@ -111,6 +111,7 @@ func (svc *PassportService) GetWalletPassURLs(ctx context.Context, userID uuid.U
 			Tier:           passport.Tier,
 			StreakCount:    passport.StreakCount,
 			LifetimePoints: passport.LifetimePoints,
+			SpinCredits:    passport.SpinCredits,
 			QRPayload:      qrPayload,
 		})
 		if buildErr != nil {
@@ -134,7 +135,8 @@ func (svc *PassportService) GetWalletPassURLs(ctx context.Context, userID uuid.U
 
 // BuildApplePKPassBytes returns the raw .pkpass zip bytes for the given user.
 // In production (cert configured) the pass is signed. In dev it is unsigned.
-func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uuid.UUID) ([]byte, string, error) {
+// isStreakExpiring=true triggers the REQ-4.4 visual "Streak Expiring Soon!" alert.
+func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uuid.UUID, isStreakExpiring bool) ([]byte, string, error) {
 	initWalletAdapters()
 
 	passport, err := svc.GetPassport(ctx, userID)
@@ -174,6 +176,11 @@ func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uu
 		streakLabel = "No streak"
 	}
 
+	// REQ-4.4: override background to urgent red-orange when streak is expiring.
+	if isStreakExpiring {
+		bgColour = "rgb(217, 79, 0)"
+	}
+
 	serialNumber := userID.String()
 
 	// Persist serial number on user for push notifications
@@ -182,36 +189,37 @@ func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uu
 	`, serialNumber, userID)
 
 	passObj := map[string]interface{}{
-		"formatVersion":      1,
-		"passTypeIdentifier": passTypeID,
-		"serialNumber":       serialNumber,
-		"teamIdentifier":     teamID,
-		"organizationName":   "Loyalty Nexus",
-		"description":        "Loyalty Nexus Digital Passport",
-		"logoText":           "Loyalty Nexus",
-		"backgroundColor":    bgColour,
-		"foregroundColor":    "rgb(255, 255, 255)",
-		"labelColor":         "rgba(255, 255, 255, 0.7)",
-		"webServiceURL":      os.Getenv("APP_BASE_URL") + "/api/v1/passport/apple",
+		"formatVersion":       1,
+		"passTypeIdentifier":  passTypeID,
+		"serialNumber":        serialNumber,
+		"teamIdentifier":      teamID,
+		"organizationName":    "Loyalty Nexus",
+		"description":         "Loyalty Nexus Digital Passport",
+		"logoText":            "Loyalty Nexus",
+		"backgroundColor":     bgColour,
+		"foregroundColor":     "rgb(255, 255, 255)",
+		"labelColor":          "rgba(255, 255, 255, 0.7)",
+		"webServiceURL":       os.Getenv("APP_BASE_URL") + "/api/v1/passport/apple",
 		"authenticationToken": generatePassAuthToken(userID),
 		"storeCard": map[string]interface{}{
 			"headerFields": []map[string]interface{}{
 				{"key": "tier", "label": "TIER", "value": passport.Tier},
 			},
 			"primaryFields": []map[string]interface{}{
-				{"key": "points", "label": "PULSE POINTS", "value": passport.LifetimePoints,
+				{"key": "points", "label": "PULSE POINTS", "value": passport.PulsePoints,
 					"numberStyle": "PKNumberStyleDecimal"},
 			},
 			"secondaryFields": []map[string]interface{}{
-				{"key": "streak", "label": "STREAK", "value": streakLabel},
-				{"key": "badges", "label": "BADGES", "value": len(passport.Badges)},
+				{"key": "streak",       "label": "STREAK",       "value": streakLabel},
+				{"key": "spin_credits", "label": "SPIN CREDITS", "value": passport.SpinCredits},
 			},
+			"auxiliaryFields": buildAppleAuxFields(isStreakExpiring),
 			"backFields": []map[string]interface{}{
-				{"key": "name",    "label": "ACCOUNT",  "value": displayName},
-				{"key": "next",    "label": "NEXT TIER", "value": fmt.Sprintf("%d pts to %s", passport.PointsToNext, passport.NextTier)},
-				{"key": "support", "label": "SUPPORT",  "value": "support@loyaltynexus.ng"},
+				{"key": "name",    "label": "ACCOUNT",   "value": displayName},
+				{"key": "next",    "label": "NEXT TIER",  "value": fmt.Sprintf("%d pts to %s", passport.PointsToNext, passport.NextTier)},
+				{"key": "support", "label": "SUPPORT",    "value": "support@loyaltynexus.ng"},
 				{"key": "info",    "label": "ABOUT",
-					"value": "Earn 1 Pulse Point per ₦200 recharge. Spin the wheel, access AI Studio, and compete in Regional Wars!"},
+					"value": "Earn 1 Pulse Point per \u20a6200 recharge. Spin the wheel, access AI Studio, and compete in Regional Wars!"},
 			},
 		},
 	}
@@ -275,6 +283,26 @@ func buildUnsignedPKPass(passJSON []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// buildAppleAuxFields returns the auxiliaryFields for the Apple PKPass storeCard.
+// When isStreakExpiring is true, a prominent "⚠️ STREAK EXPIRING SOON!" field is
+// prepended to satisfy REQ-4.4.
+func buildAppleAuxFields(isStreakExpiring bool) []map[string]interface{} {
+	fields := []map[string]interface{}{
+		{"key": "badges",    "label": "BADGES EARNED", "value": ""},
+	}
+	if isStreakExpiring {
+		alert := map[string]interface{}{
+			"key":             "expiry_alert",
+			"label":           "⚠️ ALERT",
+			"value":           "STREAK EXPIRING SOON!",
+			"textAlignment":   "PKTextAlignmentCenter",
+			"changeMessage":   "Your streak expires soon! %@",
+		}
+		fields = append([]map[string]interface{}{alert}, fields...)
+	}
+	return fields
+}
+
 func sha1Sum(data []byte) []byte {
 	h := sha1.New() //nolint:gosec
 	h.Write(data)
@@ -290,6 +318,19 @@ func generatePassAuthToken(userID uuid.UUID) string {
 	}
 	// Simple HMAC-based token (same approach as QR payload)
 	return fmt.Sprintf("nexus_%s_%d", userID.String()[:8], time.Now().Unix()/86400)
+}
+
+// IsStreakExpiryAlertActive returns true if the ghost nudge worker has flagged
+// a streak expiry alert for this user. Used by DownloadPKPass to serve the
+// correct visual variant of the .pkpass file (REQ-4.4).
+func (svc *PassportService) IsStreakExpiryAlertActive(ctx context.Context, userID uuid.UUID) bool {
+	var flag bool
+	svc.db.WithContext(ctx).Raw(`
+		SELECT COALESCE(streak_expiry_alert, false)
+		FROM google_wallet_objects
+		WHERE user_id = ?
+	`, userID).Scan(&flag)
+	return flag
 }
 
 // ─── Apple Wallet Web Service endpoints ──────────────────────────────────────

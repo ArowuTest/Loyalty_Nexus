@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"archive/zip"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -96,42 +94,29 @@ func (h *PassportHandler) VerifyQR(w http.ResponseWriter, r *http.Request) {
 }
 
 // ─── GET /api/v1/passport/pkpass ─────────────────────────────────────────
-// Returns a .pkpass file for Apple Wallet (spec §6.2).
-// NOTE: In production, pass.json must be signed with Apple cert.
-// This endpoint returns the unsigned manifest for dev/staging.
+// Returns a signed .pkpass file for Apple Wallet (REQ-4.1).
+// In production (APPLE_CERT_PEM + APPLE_CERT_KEY set) the pass is signed.
+// In dev it is unsigned (iOS will reject but useful for testing).
+// The isStreakExpiring flag is read from google_wallet_objects.streak_expiry_alert
+// so that Ghost Nudge APNs pushes trigger the correct visual alert (REQ-4.4).
 
 func (h *PassportHandler) DownloadPKPass(w http.ResponseWriter, r *http.Request) {
 	userID := mustUserID(r)
-	passData, err := h.passportSvc.BuildPKPass(r.Context(), userID)
+
+	// Check whether a streak expiry alert is active for this user.
+	// This is set by GhostNudgeWorker.pushStreakExpiryWalletPass.
+	isStreakExpiring := h.passportSvc.IsStreakExpiryAlertActive(r.Context(), userID)
+
+	pkpassBytes, serialNumber, err := h.passportSvc.BuildApplePKPassBytes(r.Context(), userID, isStreakExpiring)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "pkpass build failed"})
 		return
 	}
 
-	passJSON, err := json.MarshalIndent(passData, "", "  ")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "pkpass marshal failed"})
-		return
-	}
-
-	// Build a minimal .pkpass zip (pass.json only; icon/logo need CDN assets in prod)
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	pf, createErr := zw.Create("pass.json")
-	if createErr != nil {
-		log.Printf("[Passport] zip Create error: %v", createErr)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if _, writeErr := pf.Write(passJSON); writeErr != nil {
-		log.Printf("[Passport] zip Write error: %v", writeErr)
-	}
-	zw.Close()
-
 	w.Header().Set("Content-Type", "application/vnd.apple.pkpass")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=nexus_passport_%s.pkpass", userID.String()[:8]))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=nexus_passport_%s.pkpass", serialNumber[:8]))
 	w.WriteHeader(http.StatusOK)
-	if _, writeErr := w.Write(buf.Bytes()); writeErr != nil {
+	if _, writeErr := w.Write(pkpassBytes); writeErr != nil {
 		log.Printf("[Passport] response Write error: %v", writeErr)
 	}
 }

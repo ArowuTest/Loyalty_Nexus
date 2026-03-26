@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"loyalty-nexus/internal/domain/entities"
+
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -59,13 +61,15 @@ var badgeCatalogue = []BadgeDefinition{
 
 // UserPassport is the full profile returned to the client.
 type UserPassport struct {
-	UserID        uuid.UUID         `json:"user_id"`
-	Tier          string            `json:"tier"`
-	StreakCount   int               `json:"streak_count"`
-	LifetimePoints int64            `json:"lifetime_points"`
-	Badges        []BadgeDefinition `json:"badges"`
-	NextTier      string            `json:"next_tier"`
-	PointsToNext  int64             `json:"points_to_next_tier"`
+	UserID         uuid.UUID         `json:"user_id"`
+	Tier           string            `json:"tier"`
+	StreakCount    int               `json:"streak_count"`
+	LifetimePoints int64             `json:"lifetime_points"`
+	PulsePoints    int64             `json:"pulse_points"`
+	SpinCredits    int               `json:"spin_credits"`
+	Badges         []BadgeDefinition `json:"badges"`
+	NextTier       string            `json:"next_tier"`
+	PointsToNext   int64             `json:"points_to_next_tier"`
 }
 
 // GetPassport returns the full passport for a user.
@@ -81,6 +85,10 @@ func (svc *PassportService) GetPassport(ctx context.Context, userID uuid.UUID) (
 		Where("id = ?", userID).First(&u).Error; err != nil {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
+
+	// Load wallet for pulse_points and spin_credits (REQ-4.1, REQ-4.2)
+	var wallet entities.Wallet
+	_ = svc.db.WithContext(ctx).Where("user_id = ?", userID).First(&wallet).Error
 
 	// Load earned badge keys
 	var earnedKeys []string
@@ -112,6 +120,8 @@ func (svc *PassportService) GetPassport(ctx context.Context, userID uuid.UUID) (
 		Tier:           u.Tier,
 		StreakCount:    u.StreakCount,
 		LifetimePoints: u.LifetimePoints,
+		PulsePoints:    wallet.PulsePoints,
+		SpinCredits:    wallet.SpinCredits,
 		Badges:         badges,
 		NextTier:       nextTier,
 		PointsToNext:   pointsToNext,

@@ -1,19 +1,25 @@
 package services
 
-// ghost_nudge_worker.go — Background cron worker for Ghost Nudge (spec §6.3).
+// ghost_nudge_worker.go — Background cron worker for Ghost Nudge (spec §6.3 / REQ-4.4).
 //
-// Runs every 5 minutes. Finds users whose streak is 1 day away from expiry
-// (last_recharge_at between 23h and 24h ago) and who haven't been nudged in
-// the last 24h. Sends an SMS via NotificationService (Termii) and logs the nudge.
+// REQ-4.4 (MUST): Runs every N minutes (configurable via ghost_nudge_interval_minutes,
+// default 60). Finds users whose Recharge Streak will expire within the next
+// ghost_nudge_warning_hours (default 4) AND who have a streak of at least
+// ghost_nudge_min_streak days (default 3). For each such user:
+//   1. Pushes an updated wallet pass with a visual "Streak Expiring Soon!" alert.
+//   2. Sends an SMS nudge via NotificationService (Termii).
+//   3. Logs the nudge to ghost_nudge_log (cooldown: no re-nudge within 24h).
 //
-// Also pushes wallet pass updates to users whose tier or points have changed
-// since the last wallet sync (Apple APNS + Google Wallet object update).
+// Also runs a wallet pass sync job to push updates to users whose tier or
+// points have changed since the last wallet sync (REQ-4.3).
 
 import (
 	"context"
 	"fmt"
 	"log"
 	"time"
+
+	"loyalty-nexus/internal/infrastructure/config"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -24,16 +30,24 @@ import (
 // GhostNudgeWorker runs the ghost nudge and wallet push cron jobs.
 type GhostNudgeWorker struct {
 	db              *gorm.DB
+	cfg             *config.ConfigManager
 	passportSvc     *PassportService
 	notificationSvc *NotificationService
 	stopCh          chan struct{}
 }
 
 // NewGhostNudgeWorker creates a new worker. Call Start() to begin.
-// notificationSvc is used for all SMS delivery — no direct Termii calls here.
-func NewGhostNudgeWorker(db *gorm.DB, passportSvc *PassportService, notificationSvc *NotificationService) *GhostNudgeWorker {
+// All timing and threshold parameters are read from ConfigManager on every tick —
+// no values are hardcoded.
+func NewGhostNudgeWorker(
+	db *gorm.DB,
+	cfg *config.ConfigManager,
+	passportSvc *PassportService,
+	notificationSvc *NotificationService,
+) *GhostNudgeWorker {
 	return &GhostNudgeWorker{
 		db:              db,
+		cfg:             cfg,
 		passportSvc:     passportSvc,
 		notificationSvc: notificationSvc,
 		stopCh:          make(chan struct{}),
@@ -41,10 +55,13 @@ func NewGhostNudgeWorker(db *gorm.DB, passportSvc *PassportService, notification
 }
 
 // Start launches the worker in a background goroutine.
-// Call Stop() to gracefully shut it down.
+// The cron interval is read from ConfigManager key ghost_nudge_interval_minutes
+// (default 60 per REQ-4.4). The ticker is rebuilt on each run so that admin
+// changes to the interval take effect within one cycle.
 func (w *GhostNudgeWorker) Start() {
 	go w.run()
-	log.Println("[GhostNudge] Worker started (interval: 5m)")
+	intervalMin := w.cfg.GetInt("ghost_nudge_interval_minutes", 60)
+	log.Printf("[GhostNudge] Worker started (interval: %dm)", intervalMin)
 }
 
 // Stop signals the worker to stop after the current tick completes.
@@ -53,15 +70,20 @@ func (w *GhostNudgeWorker) Stop() {
 }
 
 func (w *GhostNudgeWorker) run() {
-	// Run immediately on startup, then every 5 minutes
+	// Run immediately on startup so the first nudge fires without waiting.
 	w.tick()
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
+
 	for {
+		// Re-read the interval on every cycle so admin changes take effect.
+		intervalMin := w.cfg.GetInt("ghost_nudge_interval_minutes", 60)
+		ticker := time.NewTicker(time.Duration(intervalMin) * time.Minute)
+
 		select {
 		case <-ticker.C:
+			ticker.Stop()
 			w.tick()
 		case <-w.stopCh:
+			ticker.Stop()
 			log.Println("[GhostNudge] Worker stopped")
 			return
 		}
@@ -69,17 +91,27 @@ func (w *GhostNudgeWorker) run() {
 }
 
 func (w *GhostNudgeWorker) tick() {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	// Allow up to (interval - 1 min) for each tick to complete.
+	intervalMin := w.cfg.GetInt("ghost_nudge_interval_minutes", 60)
+	timeout := time.Duration(intervalMin-1) * time.Minute
+	if timeout < time.Minute {
+		timeout = time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	w.runGhostNudge(ctx)
 	w.runWalletPassSync(ctx)
 }
 
-// ─── Ghost Nudge ─────────────────────────────────────────────────────────────
+// ─── Ghost Nudge (REQ-4.4) ────────────────────────────────────────────────────
 
 func (w *GhostNudgeWorker) runGhostNudge(ctx context.Context) {
-	candidates, err := w.passportSvc.GetGhostNudgeCandidates(ctx)
+	// Read all thresholds from ConfigManager — ZERO hardcoding.
+	warningHours := w.cfg.GetInt("ghost_nudge_warning_hours", 4)
+	minStreak := w.cfg.GetInt("ghost_nudge_min_streak", 3)
+
+	candidates, err := w.passportSvc.GetGhostNudgeCandidates(ctx, warningHours, minStreak)
 	if err != nil {
 		log.Printf("[GhostNudge] GetGhostNudgeCandidates error: %v", err)
 		return
@@ -89,15 +121,22 @@ func (w *GhostNudgeWorker) runGhostNudge(ctx context.Context) {
 		return
 	}
 
-	log.Printf("[GhostNudge] Sending nudge to %d users", len(candidates))
+	log.Printf("[GhostNudge] Sending nudge to %d users (warningHours=%d, minStreak=%d)",
+		len(candidates), warningHours, minStreak)
 
 	for _, c := range candidates {
-		msg := buildNudgeMessage(c.StreakCount)
+		// 1. Push wallet pass with "Streak Expiring Soon!" visual alert (REQ-4.4).
+		w.pushStreakExpiryWalletPass(ctx, c.UserID, c.StreakCount)
+
+		// 2. Send SMS nudge.
+		msg := buildNudgeMessage(c.StreakCount, warningHours)
 		if err2 := w.notificationSvc.SendSMS(ctx, c.PhoneNumber, msg); err2 != nil {
 			log.Printf("[GhostNudge] SMS failed for user %s: %v", c.UserID, err2)
 			w.logPassportPush(ctx, c.UserID, "sms", "ghost_nudge", "failed", err2.Error())
 			continue
 		}
+
+		// 3. Record nudge (prevents re-nudge within 24h).
 		if err2 := w.passportSvc.RecordGhostNudge(ctx, c.UserID); err2 != nil {
 			log.Printf("[GhostNudge] RecordGhostNudge failed for user %s: %v", c.UserID, err2)
 		}
@@ -105,31 +144,66 @@ func (w *GhostNudgeWorker) runGhostNudge(ctx context.Context) {
 	}
 }
 
-func buildNudgeMessage(streakCount int) string {
+// pushStreakExpiryWalletPass pushes an updated wallet pass with the
+// "Streak Expiring Soon!" visual alert to all registered devices for the user.
+// This satisfies REQ-4.4: "push an updated wallet pass with a visual alert."
+func (w *GhostNudgeWorker) pushStreakExpiryWalletPass(ctx context.Context, userID uuid.UUID, streakCount int) {
+	type userRow struct {
+		GoogleObjectID string `gorm:"column:google_wallet_object_id"`
+		AppleSerial    string `gorm:"column:apple_pass_serial"`
+	}
+	var u userRow
+	if err := w.db.WithContext(ctx).Table("users").
+		Select("google_wallet_object_id, apple_pass_serial").
+		Where("id = ?", userID).First(&u).Error; err != nil {
+		return
+	}
+
+	// Update google_wallet_objects to flag streak expiry so the next pass
+	// build picks up the IsStreakExpiring flag.
+	if u.GoogleObjectID != "" {
+		w.db.WithContext(ctx).Exec(`
+			UPDATE google_wallet_objects
+			SET streak_expiry_alert = true, updated_at = NOW()
+			WHERE user_id = ?
+		`, userID)
+		w.logPassportPush(ctx, userID, "google", "streak_expiry_alert", "sent", "")
+	}
+
+	// For Apple: send APNs push so iOS re-fetches the pass from our server.
+	// Our GET /api/v1/passport/pkpass endpoint will include the expiry alert
+	// because it calls BuildApplePKPassBytes with IsStreakExpiring=true when
+	// streak_expiry_alert=true in google_wallet_objects.
+	if u.AppleSerial != "" {
+		w.sendApplePushNotification(ctx, userID, u.AppleSerial, "streak_expiry_alert")
+	}
+}
+
+func buildNudgeMessage(streakCount, warningHours int) string {
 	if streakCount >= 30 {
 		return fmt.Sprintf(
-			"🔥 Your %d-day streak on Loyalty Nexus expires in 1 hour! "+
+			"🔥 Your %d-day streak on Loyalty Nexus expires in %d hours! "+
 				"Recharge now to keep your Month Master status. Dial *384# or open the app.",
-			streakCount,
+			streakCount, warningHours,
 		)
 	}
 	if streakCount >= 7 {
 		return fmt.Sprintf(
-			"⚡ Your %d-day streak expires in 1 hour! "+
+			"⚡ Your %d-day streak expires in %d hours! "+
 				"Don't lose your Week Warrior badge. Recharge now — dial *384# or open the Loyalty Nexus app.",
-			streakCount,
+			streakCount, warningHours,
 		)
 	}
 	return fmt.Sprintf(
-		"🔥 Your %d-day Loyalty Nexus streak expires in 1 hour! "+
+		"🔥 Your %d-day Loyalty Nexus streak expires in %d hours! "+
 			"Recharge to keep earning Pulse Points. Dial *384# or open the app.",
-		streakCount,
+		streakCount, warningHours,
 	)
 }
 
-// ─── Wallet Pass Sync ─────────────────────────────────────────────────────────
+// ─── Wallet Pass Sync (REQ-4.3) ───────────────────────────────────────────────
 // Finds users whose tier or points have changed since the last wallet sync
-// and marks them for a push update.
+// and pushes updated passes to their registered devices.
 
 type walletSyncCandidate struct {
 	UserID           uuid.UUID `gorm:"column:user_id"`

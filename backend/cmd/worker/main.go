@@ -55,20 +55,23 @@ func main() {
 		external.NewMTNMomoAdapter(),
 		notifySvc, cfg,
 	)
-	winnerSvc  := services.NewWinnerService(db, userRepo, prizeRepo, notifySvc)
-	studioSvc  := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
-	warsSvc    := services.NewRegionalWarsService(warsRepo, userRepo, txRepo, cfg, db)
+	winnerSvc := services.NewWinnerService(db, userRepo, prizeRepo, notifySvc)
+	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
+	warsSvc   := services.NewRegionalWarsService(warsRepo, userRepo, txRepo, cfg, db)
 
 	// Bootstrap current month's war
-	if err := warsSvc.EnsureActiveWar(context.Background(), 50_000_000); err != nil {
-		log.Printf("[WORKER] EnsureActiveWar: %v", err)
+	if bootstrapErr := warsSvc.EnsureActiveWar(context.Background(), 50_000_000); bootstrapErr != nil {
+		log.Printf("[WORKER] EnsureActiveWar: %v", bootstrapErr)
 	}
 
-	// ─── Ghost Nudge + Wallet Sync Worker ─────────────────────
-	// Runs every 5 minutes: finds at-risk streaks, fires SMS via Termii,
-	// and pushes wallet pass updates to Apple/Google Wallet.
+	// ─── Ghost Nudge + Wallet Sync Worker (REQ-4.4) ───────────
+	// Interval, warning hours, and min streak are all read from ConfigManager:
+	//   ghost_nudge_interval_minutes  (default 60)
+	//   ghost_nudge_warning_hours     (default 4)
+	//   ghost_nudge_min_streak        (default 3)
+	// Zero values are never hardcoded — all come from platform_config table.
 	passportSvc      := services.NewPassportService(db)
-	ghostNudgeWorker := services.NewGhostNudgeWorker(db, passportSvc, notifySvc)
+	ghostNudgeWorker := services.NewGhostNudgeWorker(db, cfg, passportSvc, notifySvc)
 	ghostNudgeWorker.Start()
 	defer ghostNudgeWorker.Stop()
 
