@@ -481,7 +481,13 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/seedance", CostMicros: 200000}, nil
 		}
-		log.Printf("[AIStudio] Seedance failed for video-cinematic: %v", err)
+		log.Printf("[AIStudio] Seedance failed for video-cinematic: %v — falling back to wan-fast", err)
+		// Fallback: wan-fast (Wan 2.2) — slower (~50s) but same image-to-video capability
+		vidURL, err = o.callPollinationsVideoModel(ctx, "wan-fast", imgURL, motionPrompt, 180)
+		if err == nil {
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 150000}, nil
+		}
+		log.Printf("[AIStudio] wan-fast failed for video-cinematic: %v", err)
 		return nil, fmt.Errorf("video-cinematic: all providers failed")
 	}
 
@@ -492,7 +498,13 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo2", CostMicros: 400000}, nil
 		}
-		log.Printf("[AIStudio] Veo failed for video-veo: %v", err)
+		log.Printf("[AIStudio] Veo failed for video-veo: %v — falling back to seedance", err)
+		// Fallback: seedance text-to-video
+		vidURL, err = o.callPollinationsVideoModel(ctx, "seedance", "", prompt, 180)
+		if err == nil {
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/seedance", CostMicros: 200000}, nil
+		}
+		log.Printf("[AIStudio] Seedance fallback failed for video-veo: %v", err)
 		return nil, fmt.Errorf("video-veo: all providers failed")
 	}
 
@@ -533,12 +545,21 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		log.Printf("[AIStudio] FAL video failed: %v", err)
 	}
 
-	// Tier 2: Pollinations.ai seedance (image-to-video, sk_ key required)
+	// Tier 2: Pollinations seedance (image-to-video, ~28s)
 	if videoURL, err := o.callPollinationsVideo(ctx, imageURL, "animate this image with subtle cinematic motion"); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/seedance", CostMicros: 50000}, nil
+	} else {
+		log.Printf("[AIStudio] Pollinations seedance failed: %v — falling back to wan-fast", err)
 	}
 
-	return nil, fmt.Errorf("video generation unavailable: configure FAL_API_KEY for premium video")
+	// Tier 3: Pollinations wan-fast / Wan 2.2 (image-to-video, ~50s — slower but reliable fallback)
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, "animate this image with subtle cinematic motion", 180); err == nil {
+		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 30000}, nil
+	} else {
+		log.Printf("[AIStudio] Pollinations wan-fast failed: %v", err)
+	}
+
+	return nil, fmt.Errorf("video generation unavailable: all providers failed")
 }
 
 // ─── Voice / Translate dispatch ───────────────────────────────────────────────
