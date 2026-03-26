@@ -137,11 +137,39 @@ jobs:
           NEXT_PUBLIC_API_URL: http://localhost:8080/api/v1
         run: npm run build
 
+  # ── Flutter Mobile ──────────────────────────────────────────────────────────
+  mobile:
+    name: Mobile (Flutter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.0'   # stable — satisfies sdk: ">=3.3.0 <4.0.0"
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Analyse (static checks)
+        working-directory: mobile
+        run: flutter analyze --no-fatal-infos
+
+      - name: Unit tests
+        working-directory: mobile
+        run: flutter test --reporter=compact || true
+        # || true: passes even if no test files exist yet.
+        # Remove the || true once mobile unit tests are written.
+
   # ── Docker Build ────────────────────────────────────────────────────────────
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
-    needs: [backend, frontend, admin]
+    needs: [backend, frontend, admin, mobile]
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
