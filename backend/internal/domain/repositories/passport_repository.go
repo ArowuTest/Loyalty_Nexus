@@ -114,6 +114,10 @@ type USSDSessionRepository interface {
 	// GetBySessionID returns the session for the given Africa's Talking session ID.
 	GetBySessionID(ctx context.Context, sessionID string) (*entities.USSDSession, error)
 
+	// GetExpiredWithPendingSpin returns expired sessions that have a pending spin
+	// so the caller can roll back the spin before cleaning up the session.
+	GetExpiredWithPendingSpin(ctx context.Context) ([]entities.USSDSession, error)
+
 	// DeleteExpired removes sessions past their expiry time.
 	DeleteExpired(ctx context.Context) error
 

@@ -562,3 +562,37 @@ func (s *SpinService) GetStats(ctx context.Context) (map[string]interface{}, err
 		"pending_fulfillments": pendingFulfillments,
 	}, nil
 }
+
+// RollbackSpin cancels a spin that was initiated via USSD but never completed
+// because the USSD session timed out (REQ-6.5).
+// It marks the spin result as "failed" and restores the user's spin credit.
+func (s *SpinService) RollbackSpin(ctx context.Context, spinResultID uuid.UUID) error {
+return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+var result entities.SpinResult
+if err := tx.Table("spin_results").
+Where("id = ? AND fulfillment_status = ?", spinResultID, entities.FulfillPending).
+First(&result).Error; err != nil {
+// Already fulfilled or does not exist — nothing to roll back.
+return nil
+}
+
+// Mark the spin result as failed with a clear reason.
+if err := tx.Table("spin_results").
+Where("id = ?", spinResultID).
+Updates(map[string]interface{}{
+"fulfillment_status": entities.FulfillFailed,
+"error_message":      "USSD session timed out — spin rolled back",
+}).Error; err != nil {
+return fmt.Errorf("rollback spin result: %w", err)
+}
+
+// Restore the spin credit to the user's wallet.
+if err := tx.Table("wallets").
+Where("user_id = ?", result.UserID).
+UpdateColumn("spin_credits", gorm.Expr("spin_credits + 1")).Error; err != nil {
+return fmt.Errorf("restore spin credit: %w", err)
+}
+
+return nil
+})
+}

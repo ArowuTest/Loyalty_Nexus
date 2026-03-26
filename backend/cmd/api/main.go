@@ -50,7 +50,8 @@ func main() {
 	chatRepo   := persistence.NewPostgresChatRepository(db)
 	authRepo   := persistence.NewPostgresAuthRepository(db)
 	prizeRepo  := persistence.NewPostgresPrizeRepository(db)
-	warsRepo   := persistence.NewPostgresWarsRepository(db)
+	warsRepo        := persistence.NewPostgresWarsRepository(db)
+	ussdSessionRepo := persistence.NewPostgresUSSDSessionRepository(db)
 
 	// ─── External Adapters ────────────────────────────────────
 	vtpass    := external.NewVTPassAdapter()
@@ -108,7 +109,10 @@ func main() {
 	// kbWorker no longer needs a back-link — orch is injected directly
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
 	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc, studioSvc, rdb)
-	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, cfg)
+	// ─── USSD Knowledge Service (REQ-6.4) ─────────────────────
+	ussdKnowledgeSvc := services.NewUSSDKnowledgeService(studioSvc, kbWorker, notifySvc, cfg)
+
+	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, ussdSessionRepo, cfg)
 	// ─── WebSocket Hub (Regional Wars real-time leaderboard) ────
 	leaderboardHub := handlers.NewLeaderboardHub()
 	handlers.StartLeaderboardPoller(ctx, leaderboardHub, warssSvc, 30*time.Second)
@@ -203,6 +207,8 @@ func main() {
 		http.HandlerFunc(passportH.GetUpdatedSerials))
 	// Wire passport service into USSD handler for Passport menu (option 6)
 	ussdH.SetPassportService(passportSvc)
+	// Wire knowledge service into USSD handler for AI Knowledge Tools menu (option 7)
+	ussdH.SetKnowledgeService(ussdKnowledgeSvc)
 
 	// Draws (public results)
 	mux.Handle("GET  /api/v1/draws",             auth(http.HandlerFunc(drawH.ListUpcoming)))

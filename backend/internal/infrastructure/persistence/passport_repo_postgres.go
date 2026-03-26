@@ -277,7 +277,7 @@ func (r *postgresUSSDSessionRepository) Upsert(ctx context.Context, session *ent
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "session_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"menu_state", "input_buffer", "expires_at", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"menu_state", "input_buffer", "pending_spin_id", "expires_at", "updated_at"}),
 		}).
 		Create(session).Error
 }
@@ -291,6 +291,14 @@ func (r *postgresUSSDSessionRepository) GetBySessionID(ctx context.Context, sess
 		return nil, nil
 	}
 	return &session, err
+}
+
+func (r *postgresUSSDSessionRepository) GetExpiredWithPendingSpin(ctx context.Context) ([]entities.USSDSession, error) {
+	var sessions []entities.USSDSession
+	err := r.db.WithContext(ctx).
+		Where("expires_at < ? AND pending_spin_id IS NOT NULL", time.Now()).
+		Find(&sessions).Error
+	return sessions, err
 }
 
 func (r *postgresUSSDSessionRepository) DeleteExpired(ctx context.Context) error {
