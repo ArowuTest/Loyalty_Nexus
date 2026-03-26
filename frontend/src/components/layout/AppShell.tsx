@@ -6,15 +6,15 @@ import Link from "next/link";
 import { useStore } from "@/store/useStore";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Zap, Wand2, Globe, Gift, Ticket, Settings, LogOut
+  LayoutDashboard, Zap, Wand2, Gift, Ticket, Settings, LogOut, Shield
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/dashboard",  icon: LayoutDashboard, label: "Home" },
   { href: "/spin",       icon: Zap,             label: "Spin" },
   { href: "/studio",     icon: Wand2,           label: "Studio" },
+  { href: "/passport",   icon: Shield,          label: "Passport" },
   { href: "/draws",      icon: Ticket,          label: "Draws" },
-  { href: "/prizes",     icon: Gift,            label: "Prizes" },
 ];
 
 export default function AppShell({ children }: { children: ReactNode }) {
@@ -52,6 +52,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
               {item.label}
             </Link>
           ))}
+          {/* Prizes in desktop nav only (not in mobile bottom bar to save space) */}
+          <Link
+            href="/prizes"
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all",
+              pathname === "/prizes"
+                ? "bg-nexus-600/20 text-nexus-400"
+                : "text-[rgb(130_140_180)] hover:text-white hover:bg-white/5"
+            )}
+          >
+            <Gift size={16} />
+            Prizes
+          </Link>
         </nav>
         <div className="flex items-center gap-3">
           <span className={cn("tier-badge", `tier-${user?.tier || "BRONZE"}`)}>{user?.tier || "BRONZE"}</span>
@@ -70,7 +83,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       {/* Main content */}
       <main className="flex-1 pb-24 md:pb-8">{children}</main>
 
-      {/* Bottom nav (mobile) */}
+      {/* Bottom nav (mobile) — 5 items max for readability */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 glass border-t border-nexus-600/10 flex justify-around py-2 z-50">
         {NAV_ITEMS.map((item) => (
           <Link

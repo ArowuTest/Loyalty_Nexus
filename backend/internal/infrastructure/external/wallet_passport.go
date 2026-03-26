@@ -1,5 +1,9 @@
 package external
 
+// wallet_passport.go — Apple Wallet pass generation + unified WalletPassportAdapter.
+// Google Wallet JWT generation lives in google_wallet.go (GoogleWalletAdapter).
+// This file owns: ApplePassAdapter, WalletPassportAdapter, RebitesWalletAdapter.
+
 import (
 	"bytes"
 	"context"
@@ -11,10 +15,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
-// ─── ApplePassAdapter ─────────────────────────────────────────────────────
+// ─── ApplePassAdapter ─────────────────────────────────────────────────────────
 
 // ApplePassAdapter generates Apple Wallet .pkpass descriptors.
 // In development (no certificate configured) it returns a base64-encoded JSON
@@ -48,14 +52,14 @@ func (a *ApplePassAdapter) IssueApplePass(ctx context.Context, userID string, po
 	}
 
 	passObj := map[string]interface{}{
-		"formatVersion":    1,
+		"formatVersion":      1,
 		"passTypeIdentifier": "pass.ai.nexus.loyalty",
-		"serialNumber":     userID,
-		"teamIdentifier":   teamID,
-		"organizationName": "Loyalty Nexus",
-		"description":      "Loyalty Nexus Digital Passport",
-		"logoText":         "Nexus",
-		"backgroundColor":  "rgb(255, 200, 0)",
+		"serialNumber":       userID,
+		"teamIdentifier":     teamID,
+		"organizationName":   "Loyalty Nexus",
+		"description":        "Loyalty Nexus Digital Passport",
+		"logoText":           "Nexus",
+		"backgroundColor":    "rgb(255, 200, 0)",
 		"storeCard": map[string]interface{}{
 			"primaryFields": []map[string]interface{}{
 				{"key": "points", "label": "PULSE POINTS", "value": points},
@@ -94,96 +98,28 @@ func (a *ApplePassAdapter) IssueApplePass(ctx context.Context, userID string, po
 	return "data:application/vnd.apple.pkpass;base64," + encoded, nil
 }
 
-// ─── GoogleWalletAdapter ──────────────────────────────────────────────────
-
-// GoogleWalletAdapter generates Google Wallet save links using a signed JWT.
-type GoogleWalletAdapter struct {
-	IssuerID           string // GOOGLE_WALLET_ISSUER_ID
-	ServiceAccountJSON string // GOOGLE_WALLET_SERVICE_ACCOUNT_JSON (raw JSON string)
-}
-
-// NewGoogleWalletAdapter reads credentials from environment variables.
-func NewGoogleWalletAdapter() *GoogleWalletAdapter {
-	return &GoogleWalletAdapter{
-		IssuerID:           os.Getenv("GOOGLE_WALLET_ISSUER_ID"),
-		ServiceAccountJSON: os.Getenv("GOOGLE_WALLET_SERVICE_ACCOUNT_JSON"),
-	}
-}
-
-// IssueGooglePass returns a Google Wallet "Add to Google Wallet" URL.
-// When credentials are not configured a placeholder URL is returned for
-// graceful degradation.
-func (a *GoogleWalletAdapter) IssueGooglePass(ctx context.Context, userID string, points int64) (string, error) {
-	if a.IssuerID == "" || a.ServiceAccountJSON == "" {
-		return fmt.Sprintf("https://pay.google.com/gp/v/save/%s", userID), nil
-	}
-
-	issuerID := a.IssuerID
-	classID := fmt.Sprintf("%s.loyalty_nexus_class", issuerID)
-	objectID := fmt.Sprintf("%s.user_%s", issuerID, userID)
-
-	loyaltyObject := map[string]interface{}{
-		"id":      objectID,
-		"classId": classID,
-		"state":   "ACTIVE",
-		"loyaltyPoints": map[string]interface{}{
-			"balance": map[string]interface{}{
-				"int": points,
-			},
-			"label": "Pulse Points",
-		},
-		"accountId":   userID,
-		"accountName": "Loyalty Nexus Member",
-	}
-
-	// Parse service account to extract private_key and client_email
-	var sa struct {
-		ClientEmail string `json:"client_email"`
-		PrivateKey  string `json:"private_key"`
-	}
-	if err := json.Unmarshal([]byte(a.ServiceAccountJSON), &sa); err != nil {
-		return fmt.Sprintf("https://pay.google.com/gp/v/save/%s", userID), nil
-	}
-
-	claims := jwt.MapClaims{
-		"iss": sa.ClientEmail,
-		"aud": "google",
-		"typ": "savetowallet",
-		"iat": time.Now().Unix(),
-		"payload": map[string]interface{}{
-			"loyaltyObjects": []interface{}{loyaltyObject},
-		},
-		"origins": []string{"https://loyalty-nexus.ai"},
-	}
-
-	key, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(sa.PrivateKey))
-	if err != nil {
-		return fmt.Sprintf("https://pay.google.com/gp/v/save/%s", userID), nil
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	signed, err := token.SignedString(key)
-	if err != nil {
-		return fmt.Sprintf("https://pay.google.com/gp/v/save/%s", userID), nil
-	}
-
-	return "https://pay.google.com/gp/v/save/" + signed, nil
-}
-
-// ─── WalletPassportAdapter (unified) ─────────────────────────────────────
+// ─── WalletPassportAdapter (unified) ─────────────────────────────────────────
 
 // WalletPassportAdapter unifies Apple and Google pass issuance and implements
-// the WalletPassport interface.
+// the WalletPassport interface. Google Wallet is handled by GoogleWalletAdapter
+// (defined in google_wallet.go) which uses the full loyalty object JWT approach.
 type WalletPassportAdapter struct {
 	apple  *ApplePassAdapter
 	google *GoogleWalletAdapter
 }
 
 // NewWalletPassportAdapter constructs the unified adapter.
+// GoogleWalletAdapter is initialised via NewGoogleWalletAdapter (google_wallet.go).
+// If Google Wallet env vars are not set, the adapter gracefully degrades.
 func NewWalletPassportAdapter(uploader S3Uploader) *WalletPassportAdapter {
+	gwa, err := NewGoogleWalletAdapter()
+	if err != nil {
+		log.Printf("[WalletPassport] Google Wallet not configured (%v) — degraded mode", err)
+		gwa = nil
+	}
 	return &WalletPassportAdapter{
 		apple:  NewApplePassAdapter(uploader),
-		google: NewGoogleWalletAdapter(),
+		google: gwa,
 	}
 }
 
@@ -192,9 +128,28 @@ func (w *WalletPassportAdapter) IssueApplePass(ctx context.Context, userID strin
 	return w.apple.IssueApplePass(ctx, userID, points)
 }
 
-// IssueGooglePass delegates to GoogleWalletAdapter.
+// IssueGooglePass delegates to GoogleWalletAdapter.BuildSaveURL.
+// Falls back to a placeholder URL if Google Wallet is not configured.
 func (w *WalletPassportAdapter) IssueGooglePass(ctx context.Context, userID string, points int64) (string, error) {
-	return w.google.IssueGooglePass(ctx, userID, points)
+	if w.google == nil || !w.google.IsConfigured() {
+		return fmt.Sprintf("https://pay.google.com/gp/v/save/%s", userID), nil
+	}
+	// Parse the userID string to uuid.UUID
+	uid, parseErr := uuid.Parse(userID)
+	if parseErr != nil {
+		return fmt.Sprintf("https://pay.google.com/gp/v/save/%s", userID), nil
+	}
+	saveURL, _, err := w.google.BuildSaveURL(GoogleWalletPassInput{
+		UserID:         uid,
+		LifetimePoints: points,
+		Tier:           "member",
+		StreakCount:    0,
+	})
+	if err != nil {
+		log.Printf("[WalletPassport] IssueGooglePass error: %v", err)
+		return fmt.Sprintf("https://pay.google.com/gp/v/save/%s", userID), nil
+	}
+	return saveURL, nil
 }
 
 // PushUpdate sends a points-updated push payload to a configurable webhook
@@ -216,7 +171,7 @@ func (w *WalletPassportAdapter) PushUpdate(ctx context.Context, userID string, p
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[WalletPassport] PushUpdate: HTTP error: %v", err)
@@ -229,7 +184,7 @@ func (w *WalletPassportAdapter) PushUpdate(ctx context.Context, userID string, p
 	return nil
 }
 
-// ─── RebitesWalletAdapter (legacy — kept for backwards compatibility) ─────
+// ─── RebitesWalletAdapter (legacy — kept for backwards compatibility) ─────────
 
 // RebitesWalletAdapter is the original stub adapter. It now delegates to
 // WalletPassportAdapter for real pass generation.
@@ -272,7 +227,7 @@ func (a *RebitesWalletAdapter) PushUpdate(ctx context.Context, userID string, po
 	return nil
 }
 
-// ─── helpers ──────────────────────────────────────────────────────────────
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
 // newPushRequestBody builds the push notification payload sent to
 // WALLET_PUSH_ENDPOINT when a user's points balance changes.

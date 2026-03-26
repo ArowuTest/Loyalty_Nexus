@@ -27,6 +27,7 @@ const NAV = [
   ]},
   { group: "Platform", items: [
     { href: "/regional-wars",  label: "🌍 Regional Wars" },
+    { href: "/passport",       label: "🪪 Passport & USSD" },
     { href: "/config",         label: "⚙️  Config" },
   ]},
 ];

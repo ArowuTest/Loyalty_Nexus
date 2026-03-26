@@ -1,5 +1,38 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
 
+// ─── Passport Types ───────────────────────────────────────────────────────────
+
+export interface BadgeDefinition {
+  key: string;
+  name: string;
+  description: string;
+  icon: string;
+}
+
+export interface PassportData {
+  user_id: string;
+  tier: string;
+  streak_count: number;
+  lifetime_points: number;
+  badges: BadgeDefinition[];
+  next_tier: string;
+  points_to_next_tier: number;
+}
+
+export interface WalletPassURLs {
+  apple_pkpass_url: string;
+  google_wallet_url: string;
+  apple_signed: boolean;
+  google_configured: boolean;
+}
+
+export interface QRData {
+  qr_data_url: string;
+  qr_payload: string;
+}
+
+// ─── API Client ───────────────────────────────────────────────────────────────
+
 class APIClient {
   private token: string | null = null;
 
@@ -54,7 +87,7 @@ class APIClient {
     return data as T;
   }
 
-  // Auth
+  // ── Auth ──────────────────────────────────────────────────────────────────
   sendOTP(phone: string, purpose = "login") {
     return this.request("POST", "/auth/otp/send", { phone_number: phone, purpose }, true);
   }
@@ -64,7 +97,7 @@ class APIClient {
     );
   }
 
-  // User
+  // ── User ──────────────────────────────────────────────────────────────────
   getProfile() { return this.request("GET", "/user/profile"); }
   getWallet() { return this.request("GET", "/user/wallet"); }
   getTransactions() { return this.request("GET", "/user/transactions"); }
@@ -74,20 +107,40 @@ class APIClient {
   verifyMoMo(momoNumber: string) {
     return this.request("POST", "/user/momo/verify", { momo_number: momoNumber });
   }
+  /** @deprecated Use getPassport() instead */
   getPassportURLs() { return this.request("GET", "/user/passport"); }
 
-  // Spin
+  // ── Passport ──────────────────────────────────────────────────────────────
+  /** Returns the full passport profile: tier, streak, badges, lifetime points */
+  getPassport() {
+    return this.request<PassportData>("GET", "/passport/profile");
+  }
+  /** Returns a QR code data URL and the raw payload for display */
+  getPassportQR() {
+    return this.request<QRData>("GET", "/passport/qr");
+  }
+  /** Returns Apple Wallet .pkpass download URL and Google Wallet save URL */
+  getWalletPassURLs() {
+    return this.request<WalletPassURLs>("GET", "/passport/wallet-urls");
+  }
+  /** Returns the direct URL to download the Apple .pkpass file (with auth token) */
+  getApplePKPassURL(): string {
+    const token = this.getToken();
+    return `${BASE_URL}/passport/pkpass${token ? `?token=${token}` : ""}`;
+  }
+
+  // ── Spin ──────────────────────────────────────────────────────────────────
   getWheelConfig() { return this.request("GET", "/spin/wheel"); }
   playSpin() { return this.request("POST", "/spin/play", {}); }
   getSpinHistory() { return this.request("GET", "/spin/history"); }
 
-  // Studio
+  // ── Studio ────────────────────────────────────────────────────────────────
   getStudioTools() { return this.request("GET", "/studio/tools"); }
   sendChat(message: string, sessionId?: string, toolSlug?: string) {
     return this.request("POST", "/studio/chat", {
       message,
       session_id: sessionId,
-      tool_slug:  toolSlug,   // routes to web-search-ai or code-helper
+      tool_slug:  toolSlug,
     });
   }
   generateTool(
@@ -107,10 +160,7 @@ class APIClient {
     }
   ) {
     return this.request<{ generation_id: string; status: string }>(
-      'POST', '/studio/generate', {
-        tool_id: toolId,
-        ...payload,
-      }
+      "POST", "/studio/generate", { tool_id: toolId, ...payload }
     );
   }
   getGenerationStatus(id: string) {
@@ -118,16 +168,16 @@ class APIClient {
   }
   getGallery() { return this.request("GET", "/studio/gallery"); }
 
-  // Draws (user-facing)
+  // ── Draws (user-facing) ───────────────────────────────────────────────────
   getDraws() { return this.request("GET", "/draws"); }
   getDrawWinners(id: string) { return this.request("GET", `/draws/${id}/winners`); }
 
-  // Chat usage quota
+  // ── Chat usage quota ──────────────────────────────────────────────────────
   getChatUsage() { return this.request("GET", "/studio/chat/usage"); }
 
-  // Dispute & Session
+  // ── Dispute & Session ─────────────────────────────────────────────────────
   disputeGeneration(genId: string): Promise<{ message: string; refunded: boolean }> {
-    return this.request('POST', `/studio/generate/${genId}/dispute`, {});
+    return this.request("POST", `/studio/generate/${genId}/dispute`, {});
   }
   getSessionUsage(): Promise<{
     active: boolean;
@@ -137,7 +187,7 @@ class APIClient {
     started_at?: string;
     last_active_at?: string;
   }> {
-    return this.request('GET', '/studio/session');
+    return this.request("GET", "/studio/session");
   }
 }
 

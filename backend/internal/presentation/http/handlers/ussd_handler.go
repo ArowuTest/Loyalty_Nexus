@@ -44,6 +44,7 @@ type USSDHandler struct {
 	spinSvc     *services.SpinService
 	rechargeSvc *services.RechargeService
 	drawSvc     *services.DrawService
+	passportSvc *services.PassportService
 	userRepo    repositories.UserRepository
 	cfg         *config.ConfigManager
 }
@@ -55,6 +56,11 @@ func NewUSSDHandler(
 	cfg *config.ConfigManager,
 ) *USSDHandler {
 	return &USSDHandler{spinSvc: ss, rechargeSvc: rs, userRepo: ur, cfg: cfg}
+}
+
+// SetPassportService allows lazy-wiring the passport service.
+func (h *USSDHandler) SetPassportService(ps *services.PassportService) {
+	h.passportSvc = ps
 }
 
 // SetDrawService allows lazy-wiring the draw service (avoids circular deps).
@@ -92,6 +98,7 @@ func (h *USSDHandler) processMenu(ctx context.Context, phone, text string) strin
 			"3. Monthly Draw\n" +
 			"4. Redeem Points\n" +
 			"5. My Streak\n" +
+			"6. My Passport\n" +
 			"0. Exit"
 	}
 
@@ -280,7 +287,63 @@ func (h *USSDHandler) processMenu(ctx context.Context, phone, text string) strin
 		streakMsg := buildStreakMessage(user.StreakCount, wallet.PulsePoints)
 		return "END " + streakMsg
 
-	// ─── 0: Exit ─────────────────────────────────────────────────────────
+	// ─── 6: My Digital Passport ────────────────────────────────────────────
+	case "6":
+		if h.passportSvc == nil {
+			return "END Passport service unavailable. Please try again later."
+		}
+		user, _, err := h.lookupUser(ctx, phone)
+		if err != nil {
+			return "END " + err.Error()
+		}
+		if len(parts) == 1 {
+			return fmt.Sprintf(
+				"CON 🪹 My Digital Passport\nTier: %s\n\n1. View Passport\n2. My Badges\n3. State Leaderboard\n0. Back",
+				user.Tier,
+			)
+		}
+		switch parts[1] {
+		case "1":
+			passport, passErr := h.passportSvc.GetPassport(ctx, user.ID)
+			if passErr != nil {
+				return "END Unable to load passport. Please try again."
+			}
+			nextTierMsg := ""
+			if passport.NextTier != "" {
+				nextTierMsg = fmt.Sprintf("\nNext: %s (%d pts away)", passport.NextTier, passport.PointsToNext)
+			}
+			return fmt.Sprintf(
+				"END 🪹 Your Digital Passport\n\nTier: %s\nLifetime Pts: %d\nStreak: 🔥 %d days\nBadges: %d earned%s\n\nDownload the app for your full passport!",
+				passport.Tier, passport.LifetimePoints, passport.StreakCount, len(passport.Badges), nextTierMsg,
+			)
+		case "2":
+			passport, passErr := h.passportSvc.GetPassport(ctx, user.ID)
+			if passErr != nil {
+				return "END Unable to load badges. Please try again."
+			}
+			if len(passport.Badges) == 0 {
+				return "END 🏅 No badges yet!\n\nRecharge daily, spin the wheel, and use AI Studio to earn badges."
+			}
+			badgeLines := ""
+			for i, b := range passport.Badges {
+				if i >= 4 {
+					badgeLines += fmt.Sprintf("...+%d more in the app", len(passport.Badges)-4)
+					break
+				}
+				badgeLines += fmt.Sprintf("%s %s\n", b.Icon, b.Name)
+			}
+			return fmt.Sprintf("END 🏅 Your Badges (%d earned)\n\n%s", len(passport.Badges), badgeLines)
+		case "3":
+			return fmt.Sprintf(
+				"END 🌍 State Leaderboard\n\nCheck the Loyalty Nexus app for the full leaderboard and your current rank!\n\nKeep recharging to climb the ranks.",
+			)
+		case "0":
+			return h.processMenu(ctx, phone, "")
+		default:
+			return "END Invalid option."
+		}
+
+	// ─── 0: Exit ────────────────────────────────────────────────────
 	case "0":
 		return "END Thank you for using Loyalty Nexus! 🎯\nKeep recharging to earn more rewards."
 
