@@ -50,11 +50,13 @@ interface SessionUsage {
   started_at?: string;
   last_active_at?: string;
 }
+type ChatMode = 'general' | 'search' | 'code';
 interface Message {
   role: "user" | "assistant";
   content: string;
   provider?: string;
   ts?: number;
+  mode?: ChatMode;
 }
 interface Generation {
   id: string;
@@ -621,29 +623,118 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
   );
 }
 
+// ─── Markdown / code renderer for chat bubbles ──────────────────────────────
+function RichMessage({ content, mode }: { content: string; mode: ChatMode }) {
+  const [copied, setCopied] = useState<number | null>(null);
+
+  function copyCode(text: string, idx: number) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(idx);
+      setTimeout(() => setCopied(null), 1800);
+    });
+  }
+
+  // Split by fenced code blocks ```lang\n...code...\n```
+  const parts = content.split(/(```[\s\S]*?```)/g);
+
+  return (
+    <div className="space-y-2">
+      {parts.map((part, i) => {
+        if (part.startsWith('```')) {
+          const firstNewline = part.indexOf('\n');
+          const lang = part.slice(3, firstNewline).trim() || 'code';
+          const code = part.slice(firstNewline + 1, part.lastIndexOf('```')).trim();
+          return (
+            <div key={i} className="rounded-xl overflow-hidden border border-white/10">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-white/5">
+                <span className="text-[10px] font-mono text-white/40 uppercase tracking-wider">{lang}</span>
+                <button
+                  onClick={() => copyCode(code, i)}
+                  className="flex items-center gap-1 text-[10px] text-white/40 hover:text-white/70 transition-colors"
+                >
+                  {copied === i ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
+                  {copied === i ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <pre className="bg-gray-950 text-green-200 text-[11px] font-mono p-4 overflow-x-auto whitespace-pre leading-relaxed max-h-72 overflow-y-auto">
+                <code>{code}</code>
+              </pre>
+            </div>
+          );
+        }
+        // Plain text: render inline bold (**text**) and backtick `code`
+        const lines = part.split('\n');
+        return (
+          <div key={i} className="space-y-1.5">
+            {lines.map((line, j) => {
+              if (!line.trim()) return <div key={j} className="h-1" />;
+              // Inline formatting: **bold** and `code`
+              const chunks = line.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+              return (
+                <p key={j} className={cn(
+                  'text-sm leading-relaxed',
+                  mode === 'code' ? 'text-green-100/90' : 'text-white/85',
+                )}>
+                  {chunks.map((chunk, k) => {
+                    if (chunk.startsWith('**') && chunk.endsWith('**'))
+                      return <strong key={k} className="text-white font-semibold">{chunk.slice(2, -2)}</strong>;
+                    if (chunk.startsWith('`') && chunk.endsWith('`'))
+                      return <code key={k} className="bg-white/10 text-green-300 text-[11px] font-mono px-1.5 py-0.5 rounded">{chunk.slice(1, -1)}</code>;
+                    return chunk;
+                  })}
+                </p>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Chat bubble ──────────────────────────────────────────────────────────────
+const MODE_META: Record<ChatMode, { label: string; color: string; icon: React.ReactNode }> = {
+  general: { label: 'Nexus AI',    color: 'text-nexus-300',  icon: <Brain size={14} className="text-nexus-300" /> },
+  search:  { label: 'Web Search',  color: 'text-sky-300',    icon: <Globe size={14} className="text-sky-300" /> },
+  code:    { label: 'Code Helper', color: 'text-green-300',  icon: <Code2 size={14} className="text-green-300" /> },
+};
+
 function ChatBubble({ msg }: { msg: Message }) {
   const isUser = msg.role === "user";
+  const mode   = msg.mode ?? 'general';
+  const meta   = MODE_META[mode];
   return (
     <div className={cn("flex gap-2.5", isUser && "flex-row-reverse")}>
       <div className={cn(
         "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5",
         isUser ? "bg-gradient-to-br from-purple-600/40 to-nexus-600/40"
-               : "bg-gradient-to-br from-nexus-600/30 to-blue-600/30"
+               : mode === 'search' ? "bg-sky-600/20 border border-sky-500/20"
+               : mode === 'code'   ? "bg-green-600/20 border border-green-500/20"
+               :                     "bg-gradient-to-br from-nexus-600/30 to-blue-600/30"
       )}>
-        {isUser ? <User size={14} className="text-purple-300" /> : <Brain size={14} className="text-nexus-300" />}
+        {isUser ? <User size={14} className="text-purple-300" /> : meta.icon}
       </div>
-      <div className={cn("max-w-[78%] space-y-1", isUser && "items-end flex flex-col")}>
+      <div className={cn("max-w-[80%] space-y-1", isUser && "items-end flex flex-col")}>
         <div className={cn(
-          "px-4 py-2.5 text-sm leading-relaxed",
+          "px-4 py-2.5",
           isUser
-            ? "bg-gradient-to-br from-nexus-600 to-purple-700 text-white rounded-2xl rounded-tr-sm"
-            : "bg-[rgb(32_38_68)] text-white/90 rounded-2xl rounded-tl-sm border border-white/5"
+            ? "bg-gradient-to-br from-nexus-600 to-purple-700 text-white rounded-2xl rounded-tr-sm text-sm leading-relaxed"
+            : mode === 'code'
+              ? "bg-gray-950/80 border border-green-500/15 rounded-2xl rounded-tl-sm"
+              : mode === 'search'
+              ? "bg-sky-950/40 border border-sky-500/15 rounded-2xl rounded-tl-sm"
+              : "bg-[rgb(32_38_68)] rounded-2xl rounded-tl-sm border border-white/5"
         )}>
-          {msg.content}
+          {isUser
+            ? <p className="text-sm leading-relaxed">{msg.content}</p>
+            : <RichMessage content={msg.content} mode={mode} />
+          }
         </div>
-        {msg.provider && !isUser && (
-          <p className="text-white/20 text-[9px] px-1">via {msg.provider}</p>
+        {!isUser && (
+          <p className="text-white/20 text-[9px] px-1 flex items-center gap-1">
+            {meta.label}
+            {msg.provider && <span>· {msg.provider}</span>}
+          </p>
         )}
       </div>
     </div>
@@ -1345,7 +1436,7 @@ function ToolDrawer({
 export default function StudioPage() {
   const { data: toolsData, isLoading: toolsLoading } = useSWR("/studio/tools",   fetchTools);
   const { data: galleryData, mutate: mutateGallery }  = useSWR("/studio/gallery", fetchGallery, {
-    refreshInterval: 8000,
+    refreshInterval: 15000,
   });
   const user       = useStore((s) => s.user);
   const wallet     = useStore((s) => s.wallet);
@@ -1355,7 +1446,16 @@ export default function StudioPage() {
   const gallery = galleryData?.items ?? [];
   const recentGens = gallery.slice(0, 8);
 
+  // Auto-poll gallery every 4s when there are pending/processing items
+  useEffect(() => {
+    const hasPending = gallery.some((g) => g.status === 'pending' || g.status === 'processing');
+    if (!hasPending) return;
+    const iv = setInterval(() => mutateGallery(), 4000);
+    return () => clearInterval(iv);
+  }, [gallery, mutateGallery]);
+
   const [activeTab,      setActiveTab]      = useState<"chat" | "tools" | "gallery">("chat");
+  const [chatMode,        setChatMode]        = useState<ChatMode>('general');
   const [messages,       setMessages]       = useState<Message[]>([{
     role: "assistant",
     content: "Hey! 👋 I'm Nexus AI — your personal AI assistant. I can help with business ideas, explain anything, draft content, and more. What's on your mind?",
@@ -1363,7 +1463,16 @@ export default function StudioPage() {
   }]);
   const [input,          setInput]          = useState("");
   const [sending,        setSending]        = useState(false);
-  const [sessionId]                         = useState(() => `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+  // Persist session ID across page loads for memory continuity
+  const [sessionId]                         = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem('nexus_chat_session');
+      if (stored) return stored;
+    } catch { /* ignore */ }
+    const fresh = `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    try { localStorage.setItem('nexus_chat_session', fresh); } catch { /* ignore */ }
+    return fresh;
+  });
   const [selectedTool,   setSelectedTool]   = useState<Tool | null>(null);
   const [searchQuery,    setSearchQuery]    = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -1415,26 +1524,37 @@ export default function StudioPage() {
   const handleChat = useCallback(async () => {
     if (!input.trim() || sending) return;
     const msg = input.trim();
+    const currentMode = chatMode;
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: msg, ts: Date.now() }]);
+    setMessages((m) => [...m, { role: "user", content: msg, ts: Date.now(), mode: currentMode }]);
     setSending(true);
     try {
-      const resp = await api.sendChat(msg, sessionId) as { response: string; provider?: string };
-      setMessages((m) => [...m, { role: "assistant", content: resp.response, provider: resp.provider, ts: Date.now() }]);
-      // Update usage counter
+      // Route to correct tool based on mode
+      let toolSlug: string | undefined;
+      if (currentMode === 'search') toolSlug = 'web-search-ai';
+      if (currentMode === 'code')   toolSlug = 'code-helper';
+      const resp = await api.sendChat(msg, sessionId, toolSlug) as { response: string; provider?: string; session_id?: string };
+      // If backend returns a new session_id, update localStorage
+      if (resp.session_id && resp.session_id !== sessionId) {
+        try { localStorage.setItem('nexus_chat_session', resp.session_id); } catch { /* ignore */ }
+      }
+      setMessages((m) => [...m, { role: "assistant", content: resp.response, provider: resp.provider, ts: Date.now(), mode: currentMode }]);
       setChatUsage((prev) => prev ? { ...prev, used: prev.used + 1 } : null);
     } catch {
       setMessages((m) => [...m, {
         role: "assistant",
         content: "I'm having trouble connecting right now. Please try again in a moment. 🔄",
         ts: Date.now(),
+        mode: currentMode,
       }]);
     } finally {
       setSending(false);
     }
-  }, [input, sending, sessionId]);
+  }, [input, sending, sessionId, chatMode]);
 
   const handleClearChat = useCallback(() => {
+    // Clear session from localStorage so a fresh one starts
+    try { localStorage.removeItem('nexus_chat_session'); } catch { /* ignore */ }
     setMessages([{
       role: "assistant",
       content: "Hey! 👋 I'm Nexus AI — your personal AI assistant. I can help with business ideas, explain anything, draft content, and more. What's on your mind?",
@@ -1442,10 +1562,15 @@ export default function StudioPage() {
     }]);
   }, []);
 
-  const pendingCount = gallery.filter((g) => ["pending","processing"].includes(g.status)).length;
+  const handleSummariseChat = useCallback(async () => {
+    if (messages.length < 4) return;
+    const userMsgs = messages.filter((m) => m.role === 'user').map((m) => m.content);
+    const summary = `Please summarise our conversation so far in 3-5 bullet points. Focus on topics covered and decisions made.`;
+    setInput(summary);
+    inputRef.current?.focus();
+  }, [messages]);
 
-  // Suppress unused variable warning
-  void user;
+  const pendingCount = gallery.filter((g) => ["pending","processing"].includes(g.status)).length;
 
   return (
     <AppShell>
@@ -1522,30 +1647,64 @@ export default function StudioPage() {
           {activeTab === "chat" && (
             <motion.div key="chat" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
 
-              {/* Chat header bar */}
-              <div className="flex items-center justify-between mb-2 px-1">
-                <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-green-500/15 text-green-300 border border-green-500/25">
-                    <CheckCircle2 size={11} /> Free
-                  </span>
-                  <span className="text-white/30 text-xs">No points used</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  {chatUsage && (
-                    <span className="text-white/30 text-[10px] flex items-center gap-1">
-                      <MessageSquare size={9} />
-                      {chatUsage.used}/{chatUsage.limit} msgs today
-                    </span>
-                  )}
-                </div>
+              {/* ── Chat mode switcher ── */}
+              <div className="flex gap-1.5 mb-3">
+                {([
+                  { id: 'general', label: 'General',    icon: <Brain size={12} />,  color: 'from-nexus-600 to-purple-600',    badge: 'Free' },
+                  { id: 'search',  label: 'Web Search', icon: <Globe size={12} />,  color: 'from-sky-600 to-blue-600',        badge: 'Free' },
+                  { id: 'code',    label: 'Code',       icon: <Code2 size={12} />,  color: 'from-green-600 to-emerald-600',   badge: 'Free' },
+                ] as const).map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setChatMode(m.id)}
+                    className={cn(
+                      'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all',
+                      chatMode === m.id
+                        ? `bg-gradient-to-r ${m.color} text-white shadow-sm`
+                        : 'bg-white/5 text-white/40 hover:bg-white/8 hover:text-white/65',
+                    )}
+                  >
+                    {m.icon} {m.label}
+                    {chatMode === m.id && (
+                      <span className="text-[9px] bg-white/20 px-1.5 py-0.5 rounded-full">{m.badge}</span>
+                    )}
+                  </button>
+                ))}
               </div>
 
-              <div className="nexus-card h-[400px] overflow-y-auto p-4 space-y-4 scroll-smooth">
+              {/* Mode description strip */}
+              <div className="flex items-center justify-between mb-2 px-1">
+                <p className="text-white/30 text-[10px]">
+                  {chatMode === 'general' && '🤖 General assistant — business, ideas, content, advice'}
+                  {chatMode === 'search'  && '🔍 Live internet — current news, prices, real-time data'}
+                  {chatMode === 'code'    && '💻 Qwen Coder — write, explain, debug any programming language'}
+                </p>
+                {chatUsage && (
+                  <span className="text-white/25 text-[10px] flex items-center gap-1">
+                    <MessageSquare size={8} />
+                    {chatUsage.used}/{chatUsage.limit}
+                  </span>
+                )}
+              </div>
+
+              {/* Messages window */}
+              <div className={cn(
+                'nexus-card h-[380px] overflow-y-auto p-4 space-y-4 scroll-smooth',
+                chatMode === 'code'   && 'bg-gray-950/60',
+                chatMode === 'search' && 'bg-sky-950/20',
+              )}>
                 {messages.map((msg, i) => <ChatBubble key={i} msg={msg} />)}
                 {sending && (
                   <div className="flex gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-nexus-600/30 to-blue-600/30 flex items-center justify-center flex-shrink-0">
-                      <Brain size={14} className="text-nexus-300" />
+                    <div className={cn(
+                      'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0',
+                      chatMode === 'code'   ? 'bg-green-600/20' :
+                      chatMode === 'search' ? 'bg-sky-600/20' :
+                                             'bg-gradient-to-br from-nexus-600/30 to-blue-600/30',
+                    )}>
+                      {chatMode === 'code'   ? <Code2 size={14} className="text-green-300" /> :
+                       chatMode === 'search' ? <Globe size={14} className="text-sky-300" /> :
+                                              <Brain size={14} className="text-nexus-300" />}
                     </div>
                     <div className="nexus-card px-4 py-2.5 rounded-2xl rounded-tl-sm border border-white/5 flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 bg-nexus-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
@@ -1557,38 +1716,54 @@ export default function StudioPage() {
                 <div ref={messagesEndRef} />
               </div>
 
+              {/* Input row */}
               <div className="flex gap-2 mt-2">
                 <input
                   ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChat()}
-                  placeholder="Ask Nexus anything…"
-                  className="nexus-input flex-1 text-sm"
+                  placeholder={
+                    chatMode === 'search' ? 'Search the web — ask about news, prices, facts…' :
+                    chatMode === 'code'   ? 'Describe what code you need or paste code to explain…' :
+                                           'Ask Nexus anything…'
+                  }
+                  className={cn(
+                    'nexus-input flex-1 text-sm',
+                    chatMode === 'code'   && 'font-mono',
+                  )}
                   disabled={sending}
                 />
                 <button
                   onClick={handleChat}
                   disabled={sending || !input.trim()}
                   className={cn(
-                    "px-4 py-3 rounded-xl transition-all",
+                    'px-4 py-3 rounded-xl transition-all',
                     input.trim() && !sending
-                      ? "bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-95"
-                      : "bg-white/5 text-white/20 cursor-not-allowed"
+                      ? chatMode === 'code'   ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:opacity-90 active:scale-95'
+                      : chatMode === 'search' ? 'bg-gradient-to-r from-sky-600 to-blue-600 text-white hover:opacity-90 active:scale-95'
+                      :                         'bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-95'
+                      : 'bg-white/5 text-white/20 cursor-not-allowed',
                   )}
                 >
                   {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                 </button>
               </div>
+
+              {/* Footer actions */}
               <div className="flex items-center justify-between mt-2 px-0.5">
-                <p className="text-white/25 text-[10px]">
-                  💬 Nexus Chat — always free · Powered by Groq / Gemini
-                </p>
+                <button
+                  onClick={handleSummariseChat}
+                  disabled={messages.length < 4}
+                  className="text-white/25 hover:text-white/55 text-[10px] flex items-center gap-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <Sparkles size={9} /> Summarise chat
+                </button>
                 <button
                   onClick={handleClearChat}
                   className="text-white/25 hover:text-white/55 text-[10px] flex items-center gap-1 transition-colors"
                 >
-                  <RotateCcw size={9} /> Clear chat
+                  <RotateCcw size={9} /> New chat
                 </button>
               </div>
             </motion.div>

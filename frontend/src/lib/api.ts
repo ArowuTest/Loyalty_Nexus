@@ -83,8 +83,12 @@ class APIClient {
 
   // Studio
   getStudioTools() { return this.request("GET", "/studio/tools"); }
-  sendChat(message: string, sessionId?: string) {
-    return this.request("POST", "/studio/chat", { message, session_id: sessionId });
+  sendChat(message: string, sessionId?: string, toolSlug?: string) {
+    return this.request("POST", "/studio/chat", {
+      message,
+      session_id: sessionId,
+      tool_slug:  toolSlug,   // routes to web-search-ai or code-helper
+    });
   }
   generateTool(
     toolId: string,
