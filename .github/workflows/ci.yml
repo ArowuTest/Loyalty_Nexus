@@ -185,7 +185,19 @@ jobs:
     environment: staging
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check staging secrets
+        id: secrets_check
+        run: |
+          if [ -z "${{ secrets.STAGING_HOST }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "⚠️  STAGING_HOST secret not set — skipping deployment"
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Deploy via SSH
+        if: steps.secrets_check.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.STAGING_HOST }}
