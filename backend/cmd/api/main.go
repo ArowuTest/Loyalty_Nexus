@@ -207,6 +207,8 @@ func main() {
 		http.HandlerFunc(passportH.GetUpdatedSerials))
 	// Wire passport service into USSD handler for Passport menu (option 6)
 	ussdH.SetPassportService(passportSvc)
+	// Wire draw service into USSD handler for Monthly Draw menu (option 3)
+	ussdH.SetDrawService(drawSvc)
 	// Wire knowledge service into USSD handler for AI Knowledge Tools menu (option 7)
 	ussdH.SetKnowledgeService(ussdKnowledgeSvc)
 

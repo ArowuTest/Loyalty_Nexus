@@ -93,7 +93,9 @@ func (h *USSDHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	text      := r.FormValue("text")
 
 	// REQ-6.5: Rollback any expired sessions with pending spins before processing.
-	go h.rollbackExpiredSessions(r.Context())
+	// Use context.Background() so the goroutine is not cancelled when the HTTP
+	// request context ends (e.g. client disconnects or test finishes).
+	go h.rollbackExpiredSessions(context.Background())
 
 	// REQ-6.5: Load or create the session record.
 	session := h.loadOrCreateSession(r.Context(), sessionID, phone)
