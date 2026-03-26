@@ -13,7 +13,7 @@ import {
   AlertTriangle, CheckCircle2, Clock, ExternalLink, RefreshCw,
   Brain, Video, X, Info, Play, LayoutGrid, MessageSquare, History,
   Code2, Copy, Check, Download, RotateCcw, Zap, CreditCard,
-  TrendingUp, Timer, ChevronDown, Lock, Activity, Flag, ShieldAlert,
+  TrendingUp, Timer, ChevronDown, Lock, Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -551,24 +551,14 @@ function ConfirmModal({
               </div>
             )}
 
-            {/* Refund / dispute notice */}
+            {/* Refund notice */}
             {canAfford && !isFree && (
-              <div className="flex items-start gap-2.5 bg-nexus-600/10 border border-nexus-500/20 rounded-xl p-3 space-y-1">
+              <div className="flex items-start gap-2.5 bg-nexus-600/10 border border-nexus-500/20 rounded-xl p-3">
                 <Info size={15} className="text-nexus-400 flex-shrink-0 mt-0.5" />
-                <div className="text-xs leading-relaxed space-y-1">
-                  <p className="text-nexus-300">
-                    {tool.point_cost} pts deducted once when generation starts.
-                    If the AI fails, points are automatically refunded within seconds.
-                  </p>
-                  {tool.refund_window_mins > 0 ? (
-                    <p className="text-nexus-300/60">
-                      ⟲ You can dispute within {tool.refund_window_mins} min if the output is unsatisfactory
-                      {tool.refund_pct < 100 ? ` (${tool.refund_pct}% refund)` : " (full refund)"}.
-                    </p>
-                  ) : (
-                    <p className="text-white/30">⚠ Non-refundable after generation starts.</p>
-                  )}
-                </div>
+                <p className="text-nexus-300 text-xs leading-relaxed">
+                  {tool.point_cost} pts deducted once when generation starts.
+                  If the AI fails, your points are automatically refunded within seconds.
+                </p>
               </div>
             )}
 
@@ -1018,25 +1008,8 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
         </div>
       )}
 
-      {/* ── Dispute row (completed only, within window) ── */}
-      {gen.status === "completed" && (() => {
-        if (gen.disputed_at) {
-          return (
-            <div className="flex items-center gap-1.5 text-[10px] text-amber-300/70 pt-1">
-              <Flag size={9} className="text-amber-400" />
-              Disputed — {gen.refund_pts && gen.refund_pts > 0 ? `${gen.refund_pts} pts refunded` : "under review"}
-            </div>
-          );
-        }
-        if (!gen.refund_window_mins || gen.refund_window_mins === 0) return null;
-        const windowMs  = gen.refund_window_mins * 60 * 1000;
-        const createdMs = new Date(gen.created_at).getTime();
-        const withinWindow = Date.now() < createdMs + windowMs;
-        if (!withinWindow) return null;
-        return (
-          <DisputeButton gen={gen} />
-        );
-      })()}
+      {/* Dispute UI intentionally hidden — admin review flow not yet built.
+           Backend endpoints (POST /dispute) are dormant but preserved for phase 2. */}
 
       {/* ── Footer ── */}
       {gen.status === "completed" && (
@@ -1056,63 +1029,8 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
   );
 }
 
-// ─── Dispute button (shown within refund window) ─────────────────────────────
-function DisputeButton({ gen }: { gen: Generation }) {
-  const [confirming, setConfirming] = useState(false);
-  const [done,       setDone]       = useState(false);
-  const [busy,       setBusy]       = useState(false);
-
-  if (done) return (
-    <div className="flex items-center gap-1.5 text-[10px] text-green-300 pt-1">
-      <CheckCircle2 size={9} className="text-green-400" /> Points refunded
-    </div>
-  );
-
-  const refundAmt = gen.point_cost && gen.refund_pct
-    ? Math.round((gen.point_cost * gen.refund_pct) / 100)
-    : gen.point_cost ?? 0;
-
-  return confirming ? (
-    <div className="bg-amber-500/8 border border-amber-500/20 rounded-xl p-3 space-y-2">
-      <p className="text-amber-200 text-xs font-semibold">Dispute this generation?</p>
-      <p className="text-amber-200/60 text-[10px]">
-        You&apos;ll receive <strong>{refundAmt} pts</strong> back ({gen.refund_pct ?? 100}% refund).
-        This cannot be undone.
-      </p>
-      <div className="flex gap-2">
-        <button
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await (api as any).disputeGeneration(gen.id);
-              toast.success(`✓ ${refundAmt} pts refunded to your wallet`);
-              setDone(true);
-            } catch (e: unknown) {
-              toast.error(e instanceof Error ? e.message : "Dispute failed");
-            } finally { setBusy(false); setConfirming(false); }
-          }}
-          disabled={busy}
-          className="text-[10px] font-semibold px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-all"
-        >
-          {busy ? <Loader2 size={9} className="animate-spin inline" /> : "Confirm dispute"}
-        </button>
-        <button
-          onClick={() => setConfirming(false)}
-          className="text-[10px] px-3 py-1.5 rounded-lg text-white/40 hover:text-white/70 transition-all"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  ) : (
-    <button
-      onClick={() => setConfirming(true)}
-      className="flex items-center gap-1 text-[10px] text-white/25 hover:text-amber-300/70 transition-colors pt-1"
-    >
-      <ShieldAlert size={9} /> This didn&apos;t work
-    </button>
-  );
-}
+// DisputeButton — removed pending admin review infrastructure (phase 2)
+// Backend POST /api/v1/studio/generate/{id}/dispute is dormant but preserved.
 
 // ─── Tool drawer ──────────────────────────────────────────────────────────────
 function ToolDrawer({
