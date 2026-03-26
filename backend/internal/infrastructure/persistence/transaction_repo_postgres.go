@@ -66,9 +66,10 @@ func (r *postgresTransactionRepository) CountByPhoneAndTypeSince(ctx context.Con
 
 func (r *postgresTransactionRepository) SumAmountByUserSince(ctx context.Context, userID uuid.UUID, sinceEpoch int64) (int64, error) {
 	var total int64
-	sinceTime := time.Unix(sinceEpoch, 0)
+	// Use date() so the comparison works on both Postgres (timestamptz) and SQLite (text datetime).
+	sinceDate := time.Unix(sinceEpoch, 0).UTC().Format("2006-01-02")
 	r.db.WithContext(ctx).Table("transactions").
-		Where("user_id = ? AND created_at >= ?", userID, sinceTime).
+		Where("user_id = ? AND type = ? AND date(created_at) >= ?", userID, entities.TxTypeRecharge, sinceDate).
 		Select("COALESCE(SUM(amount), 0)").Scan(&total)
 	return total, nil
 }

@@ -18,6 +18,7 @@ import (
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/pkg/safe"
+	"loyalty-nexus/internal/presentation/http/middleware"
 )
 
 // AdminHandler handles all /api/v1/admin/* endpoints.
@@ -31,6 +32,7 @@ type AdminHandler struct {
 	fraudSvc  *services.FraudService
 	warsSvc   *services.RegionalWarsService
 	studioSvc *services.StudioService
+	claimSvc  *services.AdminClaimService
 	rdb       *redis.Client
 }
 
@@ -42,6 +44,7 @@ func NewAdminHandler(
 	fraudSvc *services.FraudService,
 	warsSvc *services.RegionalWarsService,
 	studioSvc *services.StudioService,
+	claimSvc  *services.AdminClaimService,
 	rdb *redis.Client,
 ) *AdminHandler {
 	return &AdminHandler{
@@ -52,6 +55,7 @@ func NewAdminHandler(
 		fraudSvc:  fraudSvc,
 		warsSvc:   warsSvc,
 		studioSvc: studioSvc,
+		claimSvc:  claimSvc,
 		rdb:       rdb,
 	}
 }
@@ -1151,4 +1155,168 @@ func (h *AdminHandler) GetAIHealth(w http.ResponseWriter, r *http.Request) {
 		"studio_tools":         studioTools,
 		"checked_at":           time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// ─── Spin Tiers ───────────────────────────────────────────────────────────
+
+func (h *AdminHandler) GetSpinTiers(w http.ResponseWriter, r *http.Request) {
+	tiers, err := h.spinSvc.GetAllSpinTiers(r.Context())
+	if err != nil {
+		jsonError(w, "failed to get spin tiers: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, tiers)
+}
+
+func (h *AdminHandler) CreateSpinTier(w http.ResponseWriter, r *http.Request) {
+	var data map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		jsonError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	tier, err := h.spinSvc.CreateSpinTier(r.Context(), data)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(tier)
+}
+
+func (h *AdminHandler) UpdateSpinTier(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	tierID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid tier id", http.StatusBadRequest)
+		return
+	}
+	var data map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		jsonError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	tier, err := h.spinSvc.UpdateSpinTier(r.Context(), tierID, data)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	jsonOK(w, tier)
+}
+
+func (h *AdminHandler) DeleteSpinTier(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	tierID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid tier id", http.StatusBadRequest)
+		return
+	}
+	if err := h.spinSvc.DeleteSpinTier(r.Context(), tierID); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]string{"status": "deleted"})
+}
+
+// ─── Claims ───────────────────────────────────────────────────────────────
+
+func (h *AdminHandler) ListClaims(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	limit := 50
+	offset := 0
+
+	claims, total, err := h.claimSvc.ListClaims(r.Context(), status, limit, offset)
+	if err != nil {
+		jsonError(w, "failed to list claims: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	jsonOK(w, map[string]interface{}{
+		"data":  claims,
+		"total": total,
+	})
+}
+
+func (h *AdminHandler) GetClaimDetails(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	claimID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid claim id", http.StatusBadRequest)
+		return
+	}
+
+	claim, err := h.claimSvc.GetClaimDetails(r.Context(), claimID)
+	if err != nil {
+		jsonError(w, "claim not found", http.StatusNotFound)
+		return
+	}
+
+	jsonOK(w, claim)
+}
+
+func (h *AdminHandler) ApproveClaim(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	claimID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid claim id", http.StatusBadRequest)
+		return
+	}
+
+	uidStr, ok := r.Context().Value(middleware.ContextUserID).(string)
+	if !ok {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	adminID, err := uuid.Parse(uidStr)
+	if err != nil {
+		jsonError(w, "invalid admin id", http.StatusUnauthorized)
+		return
+	}
+
+	var req services.ApproveClaimRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	claim, err := h.claimSvc.ApproveClaim(r.Context(), claimID, adminID, req)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	jsonOK(w, claim)
+}
+
+func (h *AdminHandler) RejectClaim(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	claimID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid claim id", http.StatusBadRequest)
+		return
+	}
+
+	uidStr, ok := r.Context().Value(middleware.ContextUserID).(string)
+	if !ok {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	adminID, err := uuid.Parse(uidStr)
+	if err != nil {
+		jsonError(w, "invalid admin id", http.StatusUnauthorized)
+		return
+	}
+
+	var req services.RejectClaimRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	claim, err := h.claimSvc.RejectClaim(r.Context(), claimID, adminID, req)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	jsonOK(w, claim)
 }

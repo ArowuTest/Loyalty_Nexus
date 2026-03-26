@@ -94,6 +94,47 @@ func newTestDB(t *testing.T) *gorm.DB {
 	// Seed a Knowledge Tool (Study Guide, 5 pts).
 	db.Exec(`INSERT OR IGNORE INTO studio_tools (id, slug, name, point_cost, is_active) VALUES (?, 'study-guide', 'Study Guide', 5, 1)`, uuid.New())
 
+	// transactions table — needed by SumAmountByUserSince for tier-based spin eligibility.
+	db.Exec(`CREATE TABLE IF NOT EXISTS transactions (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL,
+		phone_number TEXT NOT NULL DEFAULT '',
+		type TEXT NOT NULL,
+		points_delta INTEGER NOT NULL DEFAULT 0,
+		spin_delta INTEGER NOT NULL DEFAULT 0,
+		amount INTEGER NOT NULL DEFAULT 0,
+		balance_after INTEGER NOT NULL DEFAULT 0,
+		reference TEXT NOT NULL DEFAULT '',
+		metadata TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+
+	// spin_tiers table — needed by GetSpinTierFromDB for tier-based daily cap.
+	db.Exec(`CREATE TABLE IF NOT EXISTS spin_tiers (
+		id TEXT PRIMARY KEY,
+		tier_name TEXT NOT NULL,
+		tier_display_name TEXT NOT NULL DEFAULT '',
+		min_daily_amount INTEGER NOT NULL DEFAULT 0,
+		max_daily_amount INTEGER NOT NULL DEFAULT 0,
+		spins_per_day INTEGER NOT NULL DEFAULT 1,
+		tier_color TEXT NOT NULL DEFAULT '',
+		tier_icon TEXT NOT NULL DEFAULT '',
+		tier_badge TEXT NOT NULL DEFAULT '',
+		description TEXT NOT NULL DEFAULT '',
+		sort_order INTEGER NOT NULL DEFAULT 0,
+		is_active INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	db.Exec(`INSERT OR IGNORE INTO spin_tiers (id, tier_name, tier_display_name, min_daily_amount, max_daily_amount, spins_per_day, sort_order) VALUES (?,?,?,?,?,?,?)`,
+		uuid.New().String(), "Starter", "Starter", 100000, 199999, 1, 1)
+	db.Exec(`INSERT OR IGNORE INTO spin_tiers (id, tier_name, tier_display_name, min_daily_amount, max_daily_amount, spins_per_day, sort_order) VALUES (?,?,?,?,?,?,?)`,
+		uuid.New().String(), "Bronze", "Bronze", 200000, 499999, 2, 2)
+	db.Exec(`INSERT OR IGNORE INTO spin_tiers (id, tier_name, tier_display_name, min_daily_amount, max_daily_amount, spins_per_day, sort_order) VALUES (?,?,?,?,?,?,?)`,
+		uuid.New().String(), "Silver", "Silver", 500000, 999999, 3, 3)
+	db.Exec(`INSERT OR IGNORE INTO spin_tiers (id, tier_name, tier_display_name, min_daily_amount, max_daily_amount, spins_per_day, sort_order) VALUES (?,?,?,?,?,?,?)`,
+		uuid.New().String(), "Gold", "Gold", 1000000, 9999999999, 5, 4)
+
 	return db
 }
 
@@ -117,8 +158,10 @@ func newHandler(t *testing.T, db *gorm.DB) *handlers.USSDHandler {
 	return h
 }
 
-// seedUser inserts a user + wallet. Uses a unique phone per call to prevent cross-test
-// interference from the background rollbackExpiredSessions goroutine.
+// seedUser inserts a user + wallet, and seeds a qualifying ₦2,000 recharge transaction
+// for today so the tier-based spin eligibility check passes (Bronze tier = 2 spins/day).
+// Uses a unique phone per call to prevent cross-test interference from the background
+// rollbackExpiredSessions goroutine.
 func seedUser(db *gorm.DB, phone, tier string, streak int, pulsePoints, spinCredits int64) uuid.UUID {
 	userID := uuid.New()
 	db.Exec(
@@ -128,6 +171,12 @@ func seedUser(db *gorm.DB, phone, tier string, streak int, pulsePoints, spinCred
 	db.Exec(
 		`INSERT INTO wallets (id, user_id, pulse_points, spin_credits, recharge_counter) VALUES (?, ?, ?, ?, 0)`,
 		uuid.New(), userID, pulsePoints, spinCredits,
+	)
+	// Seed a ₦2,000 recharge today (200,000 kobo) → unlocks Bronze tier (2 spins/day).
+	// ISO8601 format is required so SQLite's date() function can parse it.
+	db.Exec(
+		`INSERT INTO transactions (id, user_id, phone_number, type, amount, reference, created_at) VALUES (?, ?, ?, 'recharge', 200000, ?, ?)`,
+		uuid.New(), userID, phone, "seed_recharge_"+userID.String(), time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 	)
 	return userID
 }

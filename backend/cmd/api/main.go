@@ -80,6 +80,8 @@ func main() {
 	drawSvc    := services.NewDrawService(db)
 	passportSvc := services.NewPassportService(db)
 	fraudSvc   := services.NewFraudService(db)
+	claimSvc   := services.NewClaimService(prizeRepo, userRepo, momoSvc, fulfillSvc)
+	adminClaimSvc := services.NewAdminClaimService(prizeRepo, momoSvc)
 
 	// Bootstrap current month's war if none exists
 	if err := warssSvc.EnsureActiveWar(context.Background(), 50_000_000); err != nil {
@@ -108,7 +110,8 @@ func main() {
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
 	// kbWorker no longer needs a back-link — orch is injected directly
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
-	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc, studioSvc, rdb)
+	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc, studioSvc, adminClaimSvc, rdb)
+	claimH   := handlers.NewClaimHandler(claimSvc)
 	// ─── USSD Knowledge Service (REQ-6.4) ─────────────────────
 	ussdKnowledgeSvc := services.NewUSSDKnowledgeService(studioSvc, kbWorker, notifySvc, cfg)
 
@@ -158,6 +161,9 @@ func main() {
 	mux.Handle("GET  /api/v1/spin/wheel",         auth(http.HandlerFunc(spinH.GetWheelConfig)))
 	mux.Handle("POST /api/v1/spin/play",          auth(http.HandlerFunc(spinH.Play)))
 	mux.Handle("GET  /api/v1/spin/history",       auth(http.HandlerFunc(spinH.GetHistory)))
+	mux.Handle("GET  /api/v1/spin/wins",          auth(http.HandlerFunc(claimH.GetMyWins)))
+	mux.Handle("POST /api/v1/spin/wins/{id}/claim", auth(http.HandlerFunc(claimH.ClaimPrize)))
+	mux.Handle("GET  /api/v1/spin/momo-check",    auth(http.HandlerFunc(claimH.CheckMoMoAccount)))
 
 	// ─── Notifications ────────────────────────────────────────────────────────
 	mux.Handle("GET /api/v1/notifications",                auth(http.HandlerFunc(notifyH.ListNotifications)))
@@ -252,6 +258,11 @@ func main() {
 	// Spin configuration
 	mux.Handle("GET    /api/v1/admin/spin/config",            adminAuth(http.HandlerFunc(adminH.GetSpinConfig)))
 	mux.Handle("PUT    /api/v1/admin/spin/config",            adminAuth(http.HandlerFunc(adminH.UpdateSpinConfig)))
+	// Spin Claims
+	mux.Handle("GET    /api/v1/admin/spin/claims",            adminAuth(http.HandlerFunc(adminH.ListClaims)))
+	mux.Handle("GET    /api/v1/admin/spin/claims/{id}",       adminAuth(http.HandlerFunc(adminH.GetClaimDetails)))
+	mux.Handle("POST   /api/v1/admin/spin/claims/{id}/approve", adminAuth(http.HandlerFunc(adminH.ApproveClaim)))
+	mux.Handle("POST   /api/v1/admin/spin/claims/{id}/reject",  adminAuth(http.HandlerFunc(adminH.RejectClaim)))
 	// Points ledger audit
 	mux.Handle("GET    /api/v1/admin/points/stats",           adminAuth(http.HandlerFunc(adminH.GetPointsStats)))
 	mux.Handle("GET    /api/v1/admin/points/history",         adminAuth(http.HandlerFunc(adminH.GetPointsHistory)))
