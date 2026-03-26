@@ -13,6 +13,95 @@ export type ToolCategory =
   | 'Build'
   | 'Create';
 
+// ── UIConfig type system ──────────────────────────────────────────────────────
+// The backend returns ui_template (string slug) and ui_config (JSON object)
+// for every tool. The frontend reads these to render the correct input form.
+
+export type UITemplate =
+  | 'chat'
+  | 'music-composer'
+  | 'image-creator'
+  | 'image-editor'
+  | 'video-creator'
+  | 'video-animator'
+  | 'voice-studio'
+  | 'transcribe'
+  | 'vision-ask'
+  | 'knowledge-doc';
+
+export interface AspectRatioOption {
+  label: string;
+  value: string;
+  icon?: string;
+}
+
+export interface VoiceOption {
+  id: string;
+  name: string;
+  tone: string;
+  category: string;
+}
+
+export interface LanguageOption {
+  code: string;
+  label: string;
+}
+
+export interface KnowledgeField {
+  key: string;
+  label: string;
+  type: 'text' | 'textarea' | 'select';
+  required: boolean;
+  placeholder?: string;
+  rows?: number;
+  options?: string[];
+  default?: string;
+}
+
+export interface UIConfig {
+  // shared
+  prompt_placeholder?: string;
+  output_hint?: string;
+  generation_warning?: string;
+  // music
+  genre_tags?: string[];
+  duration_options?: number[];
+  default_duration?: number;
+  show_vocals_toggle?: boolean;
+  default_vocals?: boolean;
+  show_lyrics_box?: boolean;
+  lyrics_placeholder?: string;
+  // image / video
+  aspect_ratios?: AspectRatioOption[];
+  default_aspect?: string;
+  style_tags?: string[];
+  show_negative_prompt?: boolean;
+  negative_prompt_placeholder?: string;
+  show_style_tags?: boolean;
+  duration_options_video?: number[];
+  default_duration_video?: number;
+  // upload
+  upload_label?: string;
+  upload_accept?: string[];
+  max_file_mb?: number;
+  max_duration_mins?: number;
+  // voice / transcribe
+  voices?: VoiceOption[];
+  default_voice?: string;
+  languages?: LanguageOption[];
+  default_language?: string;
+  show_language_selector?: boolean;
+  show_speaker_labels?: boolean;
+  max_chars?: number;
+  // vision
+  prompt_optional?: boolean;
+  // knowledge
+  fields?: KnowledgeField[];
+  output_format?: 'text' | 'document' | 'audio';
+  // chat
+  show_history?: boolean;
+}
+
 export interface StudioTool {
   id: string;
   slug: string;
@@ -28,6 +117,8 @@ export interface StudioTool {
   refund_window_mins: number;
   refund_pct: number;
   is_free: boolean;
+  ui_template: UITemplate;   // ← NEW
+  ui_config: UIConfig;       // ← NEW
 }
 
 export interface AIGeneration {

@@ -75,9 +75,24 @@ func (h *StudioHandler) GetTool(w http.ResponseWriter, r *http.Request) {
 // ─── POST /api/v1/studio/generate ────────────────────────────────────────────
 
 type generateRequest struct {
-	ToolID  string `json:"tool_id"`   // UUID of studio_tools row
+	ToolID   string `json:"tool_id"`   // UUID of studio_tools row
 	ToolSlug string `json:"tool_slug"` // alternative lookup by slug
-	Prompt  string `json:"prompt"`
+	Prompt   string `json:"prompt"`
+
+	// Template-specific extra parameters.
+	// These are forwarded to the AI provider via the Prompt field after being
+	// serialised into a structured prefix or separate payload fields.
+	// Frontend sends only the fields relevant to the active ui_template.
+	AspectRatio     string                 `json:"aspect_ratio,omitempty"`      // image / video: "1:1", "16:9", "9:16"
+	Duration        int                    `json:"duration,omitempty"`          // music (seconds) or video (seconds)
+	VoiceID         string                 `json:"voice_id,omitempty"`          // narrate-pro: ElevenLabs voice id
+	Language        string                 `json:"language,omitempty"`          // TTS / transcribe language code
+	Vocals          *bool                  `json:"vocals,omitempty"`            // music: true = with vocals
+	Lyrics          string                 `json:"lyrics,omitempty"`            // music: user-supplied lyrics
+	StyleTags       []string               `json:"style_tags,omitempty"`        // image / video: style hints
+	NegativePrompt  string                 `json:"negative_prompt,omitempty"`   // image / video: what to avoid
+	ImageURL        string                 `json:"image_url,omitempty"`         // image-editor / video-animator: source image (pre-uploaded URL)
+	ExtraParams     map[string]interface{} `json:"extra_params,omitempty"`      // catch-all for future template fields
 }
 
 func (h *StudioHandler) Generate(w http.ResponseWriter, r *http.Request) {
@@ -130,8 +145,13 @@ func (h *StudioHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enrich prompt with structured template params before dispatching.
+	// The AI orchestrator receives a single enriched prompt string; extra params
+	// are serialised into a structured prefix so the provider can parse them.
+	enrichedPrompt := buildEnrichedPrompt(req)
+
 	// Atomic: deduct PulsePoints + create job
-	gen, err := h.studioSvc.RequestGeneration(r.Context(), userID, toolID, req.Prompt)
+	gen, err := h.studioSvc.RequestGeneration(r.Context(), userID, toolID, enrichedPrompt)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -325,4 +345,50 @@ func (h *StudioHandler) GetSessionUsage(w http.ResponseWriter, r *http.Request) 
 		"generation_count": sess.GenerationCount,
 		"last_active_at":   sess.LastActiveAt,
 	})
+}
+
+// ─── buildEnrichedPrompt ──────────────────────────────────────────────────────
+// Serialises all template-specific parameters from a generateRequest into a
+// single structured JSON string that the AI orchestrator can parse.
+// Using a JSON envelope keeps the Prompt DB column as a single source of truth
+// while giving each dispatcher access to all structured params.
+func buildEnrichedPrompt(req generateRequest) string {
+	payload := map[string]interface{}{
+		"prompt": req.Prompt,
+	}
+	if req.AspectRatio != "" {
+		payload["aspect_ratio"] = req.AspectRatio
+	}
+	if req.Duration > 0 {
+		payload["duration"] = req.Duration
+	}
+	if req.VoiceID != "" {
+		payload["voice_id"] = req.VoiceID
+	}
+	if req.Language != "" {
+		payload["language"] = req.Language
+	}
+	if req.Vocals != nil {
+		payload["vocals"] = *req.Vocals
+	}
+	if req.Lyrics != "" {
+		payload["lyrics"] = req.Lyrics
+	}
+	if len(req.StyleTags) > 0 {
+		payload["style_tags"] = req.StyleTags
+	}
+	if req.NegativePrompt != "" {
+		payload["negative_prompt"] = req.NegativePrompt
+	}
+	if req.ImageURL != "" {
+		payload["image_url"] = req.ImageURL
+	}
+	if len(req.ExtraParams) > 0 {
+		payload["extra"] = req.ExtraParams
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return req.Prompt // safe fallback
+	}
+	return string(b)
 }

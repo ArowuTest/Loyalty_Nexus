@@ -86,9 +86,27 @@ class APIClient {
   sendChat(message: string, sessionId?: string) {
     return this.request("POST", "/studio/chat", { message, session_id: sessionId });
   }
-  generateTool(toolId: string, prompt: string, sources?: string[]) {
+  generateTool(
+    toolId: string,
+    payload: {
+      prompt: string;
+      aspect_ratio?: string;
+      duration?: number;
+      voice_id?: string;
+      language?: string;
+      vocals?: boolean;
+      lyrics?: string;
+      style_tags?: string[];
+      negative_prompt?: string;
+      image_url?: string;
+      extra_params?: Record<string, unknown>;
+    }
+  ) {
     return this.request<{ generation_id: string; status: string }>(
-      "POST", "/studio/generate", { tool_id: toolId, prompt, sources }
+      'POST', '/studio/generate', {
+        tool_id: toolId,
+        ...payload,
+      }
     );
   }
   getGenerationStatus(id: string) {

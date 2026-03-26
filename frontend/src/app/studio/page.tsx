@@ -8,13 +8,20 @@ import api from "@/lib/api";
 import { useStore } from "@/store/useStore";
 import toast, { Toaster } from "react-hot-toast";
 import {
-  Send, Bot, User, Loader2, Wand2, Image as ImageIcon, BookOpen,
+  Send, User, Loader2, Wand2, Image as ImageIcon, BookOpen,
   Mic, FileText, Music, Globe, ChevronRight, Sparkles,
   AlertTriangle, CheckCircle2, Clock, ExternalLink, RefreshCw,
   Brain, Video, X, Info, Play, LayoutGrid, MessageSquare, History,
   Code2, Copy, Check, Download, RotateCcw, Zap, CreditCard,
   TrendingUp, Timer, ChevronDown, Lock, Activity,
 } from "lucide-react";
+import {
+  MusicComposer, ImageCreator, ImageEditor,
+  VideoCreator, VideoAnimator, VoiceStudio,
+  Transcribe, VisionAsk, KnowledgeDoc,
+} from "../../components/studio/templates";
+import type { GeneratePayload } from "../../components/studio/templates";
+import type { UITemplate, UIConfig } from "../../types/studio";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
@@ -32,6 +39,8 @@ interface Tool {
   refund_window_mins: number;
   refund_pct: number;
   is_free: boolean;
+  ui_template?: UITemplate;
+  ui_config?: UIConfig;
 }
 interface SessionUsage {
   active: boolean;
@@ -1032,60 +1041,71 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
 // DisputeButton — removed pending admin review infrastructure (phase 2)
 // Backend POST /api/v1/studio/generate/{id}/dispute is dormant but preserved.
 
+// ─── Template router ─────────────────────────────────────────────────────────
+// Picks the purpose-built input component based on ui_template from the API.
+// Falls back to KnowledgeDoc for any unknown template.
+function renderTemplate(
+  tool: Tool,
+  onSubmit: (p: GeneratePayload) => void,
+  isLoading: boolean,
+  userPoints: number,
+) {
+  // Cast Tool → StudioTool-compatible shape (same fields, Tool just omits icon)
+  const t = tool as unknown as import("../../types/studio").StudioTool;
+  const props = { tool: t, onSubmit, isLoading, userPoints };
+  switch (tool.ui_template) {
+    case "music-composer":  return <MusicComposer  {...props} />;
+    case "image-creator":   return <ImageCreator   {...props} />;
+    case "image-editor":    return <ImageEditor    {...props} />;
+    case "video-creator":   return <VideoCreator   {...props} />;
+    case "video-animator":  return <VideoAnimator  {...props} />;
+    case "voice-studio":    return <VoiceStudio    {...props} />;
+    case "transcribe":      return <Transcribe     {...props} />;
+    case "vision-ask":      return <VisionAsk      {...props} />;
+    case "knowledge-doc":
+    default:                return <KnowledgeDoc   {...props} />;
+  }
+}
+
 // ─── Tool drawer ──────────────────────────────────────────────────────────────
 function ToolDrawer({
   tool, onClose, userPoints, onGenerated,
 }: {
   tool: Tool; onClose: () => void; userPoints: number; onGenerated?: () => void;
 }) {
-  const [prompt,       setPrompt]       = useState("");
-  const [secondInput,  setSecondInput]  = useState("");
-  const [selectedVoice,setSelectedVoice]= useState<string>("nova");
-  const [selectedLang, setSelectedLang] = useState<string>("en");
-  const [showConfirm,  setShowConfirm]  = useState(false);
-  const [generating,   setGenerating]   = useState(false);
-  const [genStartedAt, setGenStartedAt] = useState<number | null>(null);
+  // pendingPayload holds the GeneratePayload from the template until the user
+  // confirms in the ConfirmModal. null = no payload ready yet.
+  const [pendingPayload, setPendingPayload] = useState<GeneratePayload | null>(null);
+  const [showConfirm,    setShowConfirm]    = useState(false);
+  const [generating,     setGenerating]     = useState(false);
+  const [genStartedAt,   setGenStartedAt]   = useState<number | null>(null);
 
-  const cfg  = catCfg(tool.category);
-  const slug = tool.slug;
-  const meta = TOOL_META[slug];
+  const cfg        = catCfg(tool.category);
+  const slug       = tool.slug;
+  const meta       = TOOL_META[slug];
+  const isFree     = tool.is_free || tool.point_cost === 0;
+  const isPremium  = tool.point_cost >= 20;
+  const isNew      = NEW_TOOL_SLUGS.has(slug);
+  const canAfford  = isFree || userPoints >= tool.point_cost;
+  const after      = userPoints - tool.point_cost;
+  const entryLocked = !tool.is_free && tool.entry_point_cost > 0 && userPoints < tool.entry_point_cost;
+  const outType    = getOutputType(slug);
 
-  const isDual    = DUAL_INPUT_TOOLS.has(slug);
-  const isURL     = URL_INPUT_TOOLS.has(slug);
-  const isVoice   = VOICE_TOOLS.has(slug);
-  const isLang    = LANG_TOOLS.has(slug);
-  const isFree       = tool.is_free || tool.point_cost === 0;
-  const isPremium    = tool.point_cost >= 20;
-  const isNew        = NEW_TOOL_SLUGS.has(slug);
-  const canAfford    = isFree || userPoints >= tool.point_cost;
-  const after        = userPoints - tool.point_cost;
-  // Entry gate: user must hold entry_point_cost pts to even open the tool
-  const entryLocked  = !tool.is_free && tool.entry_point_cost > 0 && userPoints < tool.entry_point_cost;
-  const outType   = getOutputType(slug);
-
-  function buildPrompt(): string {
-    if (slug === "ask-my-photo")       return `${prompt.trim()}|||${secondInput.trim()}`;
-    if (slug === "photo-editor")       return `${prompt.trim()}|||${secondInput.trim()}`;
-    if (slug === "video-cinematic")    return `${prompt.trim()}|||${secondInput.trim()}`;
-    if (slug === "narrate-pro")        return `${selectedVoice}:${prompt.trim()}`;
-    if (slug === "transcribe-african") return `${selectedLang}:${prompt.trim()}`;
-    return prompt.trim();
+  // Called by a template component when the user clicks its Generate button.
+  // We stash the payload then open the confirmation modal.
+  function handleTemplateSubmit(payload: GeneratePayload) {
+    if (generating) return;
+    setPendingPayload(payload);
+    setShowConfirm(true);
   }
 
-  const finalPrompt = buildPrompt();
-
-  function isValid(): boolean {
-    if (!prompt.trim() || prompt.trim().length < 3) return false;
-    if (isDual && !secondInput.trim()) return false;
-    return true;
-  }
-
-  const handleStart = async () => {
-    if (!isValid()) return;
+  // Called when the user confirms in the ConfirmModal.
+  const handleConfirmedGenerate = async () => {
+    if (!pendingPayload) return;
     setGenerating(true);
     setGenStartedAt(Date.now());
     try {
-      const res = await api.generateTool(tool.id, finalPrompt) as { generation_id: string; status: string };
+      const res = await api.generateTool(tool.id, pendingPayload) as { generation_id: string; status: string };
       toast.success("⚡ Generating… check Gallery tab for result.");
       onClose();
       if (res?.generation_id) {
@@ -1093,7 +1113,7 @@ function ToolDrawer({
         let attempts = 0;
         const poll = setInterval(async () => {
           attempts++;
-          if (attempts > 45) { clearInterval(poll); return; }
+          if (attempts > 60) { clearInterval(poll); return; }
           try {
             const status = await api.getGenerationStatus(genId) as { status: string };
             if (status?.status === "completed" || status?.status === "failed") {
@@ -1118,13 +1138,19 @@ function ToolDrawer({
     }
   };
 
+  // The prompt shown in the confirm modal — extracted from the pending payload
+  const confirmPrompt = pendingPayload?.prompt ?? "";
+
   return (
     <>
+      {/* ── Backdrop ── */}
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
         onClick={onClose}
       />
+
+      {/* ── Drawer panel ── */}
       <motion.div
         initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
@@ -1132,9 +1158,10 @@ function ToolDrawer({
                    md:relative md:inset-auto md:max-h-none"
       >
         <div className="nexus-card m-2 md:m-0 overflow-hidden">
+          {/* Top colour stripe — maps to category colour */}
           <div className={cn("h-1 w-full bg-gradient-to-r", cfg.color.replace("/20","/70").replace("/10","/50"))} />
 
-          {/* ── Entry Gate ── shown instead of the full drawer when locked ── */}
+          {/* ── Entry Gate ── */}
           {entryLocked && (
             <div className="p-6 space-y-5 text-center">
               <div className="flex flex-col items-center gap-3">
@@ -1160,7 +1187,6 @@ function ToolDrawer({
                   <span className="text-white/50">You need</span>
                   <span className="font-bold text-red-300">{(tool.entry_point_cost - userPoints).toLocaleString()} more pts</span>
                 </div>
-                {/* Balance bar */}
                 <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-red-500 to-amber-500 transition-all"
@@ -1171,278 +1197,142 @@ function ToolDrawer({
               <p className="text-white/30 text-xs">Top up your PulsePoints to unlock this tool. Your points never expire.</p>
               <div className="flex gap-2">
                 <button onClick={onClose} className="flex-1 nexus-btn-outline text-sm py-3">Back</button>
-                <Link
-                  href="/subscription"
+                <Link href="/subscription"
                   className="flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2
-                             bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90"
-                >
+                             bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90">
                   <CreditCard size={15} /> Top Up Points
                 </Link>
               </div>
             </div>
           )}
 
-          {!entryLocked && <div className="p-5 space-y-4">
-            {/* Header */}
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className={cn("p-2.5 rounded-xl bg-gradient-to-br flex-shrink-0", cfg.color)}>{cfg.icon}</div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <h3 className="text-white font-bold text-base truncate">{tool.name}</h3>
-                    {isNew     && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/25 text-purple-300 border border-purple-500/30">NEW</span>}
-                    {isFree    && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">FREE</span>}
-                    {isPremium && !isFree && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">PREMIUM</span>}
-                    {slug === "web-search-ai"  && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">🌐 Live</span>}
-                    {slug === "video-veo"      && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">Veo</span>}
-                  </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-white/40 text-xs">{outType.emoji} Outputs 1 {outType.noun}</span>
-                    {meta && <span className="text-white/25 text-[10px] flex items-center gap-0.5"><Clock size={9} /> {meta.time}</span>}
+          {/* ── Main drawer body ── */}
+          {!entryLocked && (
+            <div className="p-5 space-y-5">
+
+              {/* Header row */}
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className={cn("p-2.5 rounded-xl bg-gradient-to-br flex-shrink-0", cfg.color)}>{cfg.icon}</div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h3 className="text-white font-bold text-base truncate">{tool.name}</h3>
+                      {isNew     && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/25 text-purple-300 border border-purple-500/30">NEW</span>}
+                      {isFree    && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">FREE</span>}
+                      {isPremium && !isFree && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">PREMIUM</span>}
+                      {slug === "web-search-ai" && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">🌐 Live</span>}
+                      {slug === "video-veo"     && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">Veo</span>}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-white/40 text-xs">{outType.emoji} Outputs 1 {outType.noun}</span>
+                      {meta && <span className="text-white/25 text-[10px] flex items-center gap-0.5"><Clock size={9} /> {meta.time}</span>}
+                    </div>
                   </div>
                 </div>
+                <button onClick={onClose} className="text-white/40 hover:text-white/80 transition-colors p-1 flex-shrink-0 ml-2">
+                  <X size={18} />
+                </button>
               </div>
-              <button onClick={onClose} className="text-white/40 hover:text-white/80 transition-colors p-1 flex-shrink-0 ml-2">
-                <X size={18} />
-              </button>
-            </div>
 
-            {/* Tip box */}
-            {meta?.tip && (
-              <div className="flex items-start gap-2 border border-amber-500/25 bg-amber-500/8 rounded-xl px-3 py-2.5">
-                <span className="text-amber-400 text-sm flex-shrink-0">💡</span>
-                <p className="text-amber-200/75 text-xs leading-relaxed">
-                  <span className="font-semibold">Tip: </span>{meta.tip}
-                </p>
-              </div>
-            )}
-
-            {/* Language selector */}
-            {isLang && (
-              <div>
-                <label className="text-white/60 text-xs font-medium mb-2 block uppercase tracking-wider">Language</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {LANGUAGES.map((lang) => (
-                    <button key={lang.code} onClick={() => setSelectedLang(lang.code)}
-                      className={cn(
-                        "text-xs px-3 py-1.5 rounded-full border font-medium transition-all",
-                        selectedLang === lang.code
-                          ? "bg-cyan-600 text-white border-cyan-500"
-                          : "text-white/55 border-white/15 hover:border-white/30 hover:text-white/80"
-                      )}>
-                      {lang.label}
-                    </button>
-                  ))}
+              {/* Tip box */}
+              {meta?.tip && (
+                <div className="flex items-start gap-2 border border-amber-500/25 bg-amber-500/8 rounded-xl px-3 py-2.5">
+                  <span className="text-amber-400 text-sm flex-shrink-0">💡</span>
+                  <p className="text-amber-200/75 text-xs leading-relaxed">
+                    <span className="font-semibold">Tip: </span>{meta.tip}
+                  </p>
                 </div>
-              </div>
-            )}
-
-            {/* Primary input */}
-            <div>
-              <label className="text-white/60 text-xs font-medium mb-1.5 block uppercase tracking-wider">
-                {isDual ? "Image URL" : isURL ? "Audio / File URL" : isVoice ? "Text to narrate" : "Describe what you want"}
-              </label>
-              {isURL || isDual ? (
-                <input type="url"
-                  placeholder={PLACEHOLDERS[slug] ?? "Paste URL here…"}
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  className="nexus-input w-full text-sm"
-                  autoFocus
-                />
-              ) : (
-                <textarea
-                  placeholder={PLACEHOLDERS[slug] ?? "Describe what you want to generate…"}
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  rows={4}
-                  className="nexus-input resize-none w-full text-sm leading-relaxed"
-                  autoFocus
-                />
               )}
-              {!isDual && !isURL && (
-                <p className="text-white/25 text-xs mt-1">{prompt.length}/500 characters</p>
-              )}
-            </div>
 
-            {/* Second input */}
-            {isDual && (
-              <div>
-                <label className="text-white/60 text-xs font-medium mb-1.5 block uppercase tracking-wider">
-                  {slug === "ask-my-photo" ? "Your question" : slug === "photo-editor" ? "Edit instruction" : "Motion prompt"}
-                </label>
-                <textarea
-                  placeholder={SECOND_PLACEHOLDERS[slug] ?? "Enter your instruction…"}
-                  value={secondInput}
-                  onChange={(e) => setSecondInput(e.target.value)}
-                  rows={3}
-                  className="nexus-input resize-none w-full text-sm leading-relaxed"
-                />
+              {/* ── Purpose-built template input ── */}
+              {/* Each template handles its own Generate button. When clicked it calls
+                  handleTemplateSubmit(payload) which stages the payload and opens
+                  the ConfirmModal before any API call is made.                       */}
+              <div className="min-h-0">
+                {renderTemplate(tool, handleTemplateSubmit, generating, userPoints)}
               </div>
-            )}
 
-            {/* Photo editor suggestions */}
-            {slug === "photo-editor" && (
-              <div>
-                <p className="text-white/35 text-xs mb-1.5">Try these edits:</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {["Remove the background","Add sunset lighting","Make it look like a painting","Add dramatic shadows","Convert to black & white"].map((s) => (
-                    <button key={s} onClick={() => setSecondInput(s)}
-                      className="text-xs px-2.5 py-1 rounded-full border border-white/15 text-white/50 hover:text-white/80 hover:border-white/30 transition-all">
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Voice selector */}
-            {isVoice && (
-              <div>
-                <label className="text-white/60 text-xs font-medium mb-2 block uppercase tracking-wider">Choose a voice</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {VOICES.map((v) => (
-                    <button key={v} onClick={() => setSelectedVoice(v)}
-                      className={cn(
-                        "text-xs px-3 py-1.5 rounded-full border font-medium transition-all capitalize",
-                        selectedVoice === v
-                          ? "bg-green-600 text-white border-green-500"
-                          : "text-white/55 border-white/15 hover:border-white/30 hover:text-white/80"
-                      )}>
-                      {v}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Genre chips */}
-            {(slug === "song-creator" || slug === "instrumental") && (
-              <div>
-                <p className="text-white/35 text-xs mb-1.5">
-                  {slug === "song-creator"
-                    ? '💡 Describe genre, mood, tempo — e.g. "upbeat Afrobeats, female vocals, love theme"'
-                    : '💡 Describe genre and mood — e.g. "calm piano background music for studying"'}
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {GENRE_CHIPS.map((g) => (
-                    <button key={g} onClick={() => setPrompt((p) => p ? `${p}, ${g}` : g)}
-                      className="text-xs px-2.5 py-1 rounded-full border border-white/15 text-white/50 hover:text-white/80 hover:border-white/30 transition-all">
-                      {g}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* ── Points summary box ── */}
-            <div className={cn(
-              "rounded-xl border p-3 space-y-1.5",
-              isFree
-                ? "border-green-500/25 bg-green-500/8"
-                : canAfford
-                  ? "border-nexus-500/20 bg-nexus-600/8"
-                  : "border-red-500/30 bg-red-500/8"
-            )}>
-              {isFree ? (
-                <div className="flex items-center gap-2 text-green-300 text-sm">
-                  <CheckCircle2 size={13} className="flex-shrink-0" />
-                  <span className="font-semibold">Free generation — no points used</span>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-white/50 flex items-center gap-1.5">
-                      <Zap size={11} className="text-nexus-400" /> Generation cost
-                    </span>
-                    <span className="font-bold text-white">{tool.point_cost} pts per generation</span>
+              {/* ── Points summary bar (always visible below template) ── */}
+              <div className={cn(
+                "rounded-xl border p-3 space-y-1.5",
+                isFree     ? "border-green-500/25 bg-green-500/8"
+                : canAfford ? "border-nexus-500/20 bg-nexus-600/8"
+                            : "border-red-500/30 bg-red-500/8",
+              )}>
+                {isFree ? (
+                  <div className="flex items-center gap-2 text-green-300 text-sm">
+                    <CheckCircle2 size={13} className="flex-shrink-0" />
+                    <span className="font-semibold">Free generation — no points used</span>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-white/50">Your balance</span>
-                    <span className="font-semibold text-nexus-300">{userPoints.toLocaleString()} pts</span>
-                  </div>
-                  <div className={cn("h-px w-full", canAfford ? "bg-nexus-500/20" : "bg-red-500/20")} />
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-white/50">After generation</span>
-                    <span className={cn("font-bold", canAfford ? "text-nexus-300" : "text-red-400")}>
-                      {canAfford ? `${after.toLocaleString()} pts remaining` : `Need ${(tool.point_cost - userPoints).toLocaleString()} more pts`}
-                    </span>
-                  </div>
-                  {!canAfford && (
-                    <p className="text-red-300/70 text-[11px] pt-0.5">
-                      You have {userPoints} pts. Need {tool.point_cost} pts. Top up to continue.
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* CTA button */}
-            {canAfford || isFree ? (
-              <button
-                onClick={() => setShowConfirm(true)}
-                disabled={!isValid()}
-                className={cn(
-                  "w-full py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm transition-all",
-                  isValid()
-                    ? "bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-nexus-900/30"
-                    : "bg-white/5 text-white/20 cursor-not-allowed"
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-white/50 flex items-center gap-1.5">
+                        <Zap size={11} className="text-nexus-400" /> Generation cost
+                      </span>
+                      <span className="font-bold text-white">{tool.point_cost} pts per generation</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-white/50">Your balance</span>
+                      <span className="font-semibold text-nexus-300">{userPoints.toLocaleString()} pts</span>
+                    </div>
+                    <div className={cn("h-px w-full", canAfford ? "bg-nexus-500/20" : "bg-red-500/20")} />
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-white/50">After generation</span>
+                      <span className={cn("font-bold", canAfford ? "text-nexus-300" : "text-red-400")}>
+                        {canAfford
+                          ? `${after.toLocaleString()} pts remaining`
+                          : `Need ${(tool.point_cost - userPoints).toLocaleString()} more pts`}
+                      </span>
+                    </div>
+                    {!canAfford && (
+                      <Link href="/subscription"
+                        className="mt-1 w-full py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 text-xs
+                                   bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90 transition-all">
+                        <CreditCard size={13} /> Top Up to Continue
+                      </Link>
+                    )}
+                  </>
                 )}
-              >
-                <Sparkles size={15} />
-                {isFree ? "Generate for free →" : `Generate — uses ${tool.point_cost} pts →`}
-              </button>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-red-400 text-xs bg-red-500/8 border border-red-500/20 rounded-xl px-3 py-2">
-                  <AlertTriangle size={13} className="flex-shrink-0" />
-                  <span>You need {tool.point_cost} pts. You have {userPoints} pts.</span>
-                </div>
-                <Link
-                  href="/subscription"
-                  className="w-full py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm
-                             bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90 transition-all"
+              </div>
+
+              {/* Live generating indicator */}
+              {generating && genStartedAt && (
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center justify-between bg-nexus-600/10 border border-nexus-500/20 rounded-xl px-4 py-3"
                 >
-                  <CreditCard size={15} /> Top Up to Continue
-                </Link>
-              </div>
-            )}
+                  <div className="flex items-center gap-2 text-nexus-300 text-sm">
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Generating your {outType.noun}…</span>
+                  </div>
+                  <ElapsedTimer startedAt={genStartedAt} />
+                </motion.div>
+              )}
 
-            {/* Loading state with elapsed time */}
-            {generating && genStartedAt && (
-              <motion.div
-                initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-                className="flex items-center justify-between bg-nexus-600/10 border border-nexus-500/20 rounded-xl px-4 py-3"
-              >
-                <div className="flex items-center gap-2 text-nexus-300 text-sm">
-                  <Loader2 size={14} className="animate-spin" />
-                  <span>Generating your {outType.noun}…</span>
+              {/* Time estimate row */}
+              {meta && !generating && (
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-white/25 text-[11px] flex items-center gap-1">
+                    <Clock size={10} /> Usually ready in {meta.time}
+                  </span>
+                  <span className="text-white/25 text-[11px]">{outType.emoji} {outType.label}</span>
                 </div>
-                <ElapsedTimer startedAt={genStartedAt} />
-              </motion.div>
-            )}
-
-            {/* Time + output row */}
-            {meta && !generating && (
-              <div className="flex items-center justify-between px-1">
-                <span className="text-white/25 text-[11px] flex items-center gap-1">
-                  <Clock size={10} /> Usually ready in {meta.time}
-                </span>
-                <span className="text-white/25 text-[11px]">{outType.emoji} {outType.label}</span>
-              </div>
-            )}
-          </div>}
+              )}
+            </div>
+          )}
         </div>
       </motion.div>
 
+      {/* ── Confirm Modal ── */}
       <AnimatePresence>
-        {showConfirm && (
+        {showConfirm && pendingPayload && (
           <ConfirmModal
             tool={tool}
-            prompt={finalPrompt}
+            prompt={confirmPrompt}
             userPoints={userPoints}
-            onConfirm={handleStart}
-            onCancel={() => setShowConfirm(false)}
+            onConfirm={handleConfirmedGenerate}
+            onCancel={() => { setShowConfirm(false); setPendingPayload(null); }}
             busy={generating}
           />
         )}
