@@ -481,11 +481,7 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/seedance", CostMicros: 200000}, nil
 		}
-		log.Printf("[AIStudio] Seedance failed for video-cinematic: %v — falling back to wan-fast", err)
-		vidURL, err = o.callPollinationsVideo(ctx, imgURL, motionPrompt)
-		if err == nil {
-			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
-		}
+		log.Printf("[AIStudio] Seedance failed for video-cinematic: %v", err)
 		return nil, fmt.Errorf("video-cinematic: all providers failed")
 	}
 
@@ -496,11 +492,7 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo2", CostMicros: 400000}, nil
 		}
-		log.Printf("[AIStudio] Veo failed for video-veo: %v — falling back to wan-fast", err)
-		vidURL, err = o.callPollinationsVideo(ctx, "", prompt)
-		if err == nil {
-			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
-		}
+		log.Printf("[AIStudio] Veo failed for video-veo: %v", err)
 		return nil, fmt.Errorf("video-veo: all providers failed")
 	}
 
@@ -541,9 +533,9 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		log.Printf("[AIStudio] FAL video failed: %v", err)
 	}
 
-	// Tier 2: Pollinations.ai wan-fast (FREE — 5-second video, no key needed)
+	// Tier 2: Pollinations.ai seedance (image-to-video, sk_ key required)
 	if videoURL, err := o.callPollinationsVideo(ctx, imageURL, "animate this image with subtle cinematic motion"); err == nil {
-		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
+		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/seedance", CostMicros: 50000}, nil
 	}
 
 	return nil, fmt.Errorf("video generation unavailable: configure FAL_API_KEY for premium video")
@@ -1529,7 +1521,7 @@ func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt
 
 // ─── Pollinations.ai callers (100% free, no API key required) ────────────────
 // Pollinations is an open-source Berlin-based AI platform. Their gen.pollinations.ai
-// unified endpoint provides free image, TTS, and video — powered by FLUX, wan-fast,
+// unified endpoint provides image, TTS, and video — powered by FLUX, seedance,
 // and ElevenLabs voices. No signup, no rate limit per IP (publishable tier).
 // Docs: https://github.com/pollinations/pollinations
 // Used as: zero-cost tier between HuggingFace (free with key) and FAL.AI (paid).
@@ -1537,7 +1529,8 @@ func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt
 // callPollinationsImage generates an image using Pollinations FLUX (free model).
 // Official documented endpoint: GET https://gen.pollinations.ai/image/{prompt}
 // Docs: https://gen.pollinations.ai  — Returns JPEG/PNG directly (not JSON).
-// Bearer sk_ key required for rate-limit-free access; key passed as Authorization header.
+// NOTE (2026-03-26): Pollinations removed anonymous access — sk_ key is now REQUIRED
+// for ALL models including free ones. Requests without a key return HTTP 401.
 func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt string) (string, error) {
 	encoded := url.PathEscape(prompt)
 	seed := time.Now().UnixNano() % 999983
@@ -1552,9 +1545,10 @@ func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt
 	}
 	req.Header.Set("User-Agent", "NexusAI/1.0")
 	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
-	if sk != "" {
-		req.Header.Set("Authorization", "Bearer "+sk)
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured (required since 2026-03-26)")
 	}
+	req.Header.Set("Authorization", "Bearer "+sk)
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -1592,7 +1586,7 @@ func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt
 }
 
 // callPollinationsTTS generates speech using Pollinations TTS (OpenAI-compatible).
-// Uses secret key (sk_...) when available — unlocks 13+ voices and no rate limits.
+// sk_ key is now REQUIRED (anonymous access removed 2026-03-26).
 // Endpoint: POST https://gen.pollinations.ai/v1/audio/speech
 func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, voice string) (string, error) {
 	if voice == "" {
@@ -1611,9 +1605,11 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "NexusAI/1.0")
-	if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
-		req.Header.Set("Authorization", "Bearer "+sk)
+	sk2 := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk2 == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured (required since 2026-03-26)")
 	}
+	req.Header.Set("Authorization", "Bearer "+sk2)
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -1640,13 +1636,12 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 	return publicURL, nil
 }
 
-// callPollinationsVideo generates a short video using Pollinations wan-fast (free tier).
-// Official documented endpoint: GET https://gen.pollinations.ai/image/{prompt}?model=wan-fast
-// Docs: https://gen.pollinations.ai — video models use the /image/{prompt} route.
-// The response is a raw MP4 binary (not JSON). sk_ key required via Bearer header.
+// callPollinationsVideo generates a short video using Pollinations seedance.
+// NOTE (2026-03-26): wan-fast has been REMOVED from Pollinations video models.
+// Current video models: seedance (image-to-video + text-to-video), veo (text-to-video only).
 // imageURL is passed as the `image` query param for image-to-video; empty = text-to-video.
 func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageURL, prompt string) (string, error) {
-	return o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, prompt, 120)
+	return o.callPollinationsVideoModel(ctx, "seedance", imageURL, prompt, 180)
 }
 
 // callPollinationsVideoModel is the shared GET-based video caller for any video model.
