@@ -41,6 +41,21 @@ import (
 	"loyalty-nexus/internal/presentation/http/middleware"
 )
 
+// ─── TestMain: set required env vars so tests run without manual injection ────
+
+func TestMain(m *testing.M) {
+	// JWT_SECRET and AES_256_KEY are required by NewAuthService at construction
+	// time. Set test-only values here so callers never need to export them.
+	if os.Getenv("JWT_SECRET") == "" {
+		os.Setenv("JWT_SECRET", "integration-test-jwt-secret-32ch!")
+	}
+	if os.Getenv("AES_256_KEY") == "" {
+		// 64 hex chars = 32 bytes
+		os.Setenv("AES_256_KEY", "0000000000000000000000000000000000000000000000000000000000000000")
+	}
+	os.Exit(m.Run())
+}
+
 // ─── Test DB Connection ───────────────────────────────────────────────────────
 
 func testDSN() string {
