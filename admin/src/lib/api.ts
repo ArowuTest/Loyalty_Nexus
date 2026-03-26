@@ -79,6 +79,10 @@ export interface StudioTool {
   id: string; name: string; slug?: string; category: string; provider: string;
   point_cost: number; is_active: boolean; description?: string; icon?: string;
   provider_tool?: string; sort_order?: number; generated_today?: number; success_rate?: number;
+  entry_point_cost: number;    // min wallet balance to open the tool (0 = no gate)
+  refund_window_mins: number;  // minutes user can dispute after generation (0 = no refunds)
+  refund_pct: number;          // % of pts returned on approved dispute (0-100)
+  is_free: boolean;            // true = bypass all point checks (e.g. chat)
 }
 export interface User { id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean; created_at: string; }
 export interface FraudEvent { id: string; user_id: string; event_type: string; severity: string; resolved: boolean; created_at: string; }

@@ -170,6 +170,8 @@ func main() {
 	mux.Handle("POST /api/v1/studio/generate",               auth(http.HandlerFunc(studioH.Generate)))
 	mux.Handle("GET  /api/v1/studio/generate/{id}",          auth(http.HandlerFunc(studioH.GetGenerationStatus)))
 	mux.Handle("GET  /api/v1/studio/gallery",                auth(http.HandlerFunc(studioH.GetGallery)))
+	mux.Handle("POST /api/v1/studio/generate/{id}/dispute",  auth(http.HandlerFunc(studioH.DisputeGeneration)))
+	mux.Handle("GET  /api/v1/studio/session",                auth(http.HandlerFunc(studioH.GetSessionUsage)))
 	// ── Nexus Chat ───────────────────────────────────────────────────────────
 	mux.Handle("POST /api/v1/studio/chat",                   auth(http.HandlerFunc(studioH.Chat)))
 	mux.Handle("GET  /api/v1/studio/chat/usage",             auth(http.HandlerFunc(studioH.GetChatUsage)))

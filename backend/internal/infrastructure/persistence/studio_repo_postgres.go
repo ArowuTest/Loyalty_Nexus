@@ -252,3 +252,63 @@ func (r *postgresStudioRepository) ListGenerations(ctx context.Context, filter r
 	err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&gens).Error
 	return gens, int(total), err
 }
+
+// ─── Session tracking ─────────────────────────────────────────────────────────
+
+func (r *postgresStudioRepository) GetOrCreateActiveSession(ctx context.Context, userID uuid.UUID) (*entities.StudioSession, error) {
+	var sess entities.StudioSession
+	// Look for open session active within last 30 minutes
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND ended_at IS NULL AND last_active_at > ?", userID, time.Now().Add(-30*time.Minute)).
+		Order("last_active_at DESC").
+		First(&sess).Error
+	if err == nil {
+		return &sess, nil
+	}
+	// Create new session
+	sess = entities.StudioSession{
+		ID:           uuid.New(),
+		UserID:       userID,
+		StartedAt:    time.Now(),
+		LastActiveAt: time.Now(),
+	}
+	if err := r.db.WithContext(ctx).Create(&sess).Error; err != nil {
+		return nil, err
+	}
+	return &sess, nil
+}
+
+func (r *postgresStudioRepository) UpdateSession(ctx context.Context, sessionID uuid.UUID, ptsUsed int64) error {
+	return r.db.WithContext(ctx).Model(&entities.StudioSession{}).
+		Where("id = ?", sessionID).
+		Updates(map[string]interface{}{
+			"total_pts_used":   gorm.Expr("total_pts_used + ?", ptsUsed),
+			"generation_count": gorm.Expr("generation_count + 1"),
+			"last_active_at":   time.Now(),
+		}).Error
+}
+
+func (r *postgresStudioRepository) GetSessionUsage(ctx context.Context, userID uuid.UUID) (*entities.StudioSession, error) {
+	var sess entities.StudioSession
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND ended_at IS NULL AND last_active_at > ?", userID, time.Now().Add(-30*time.Minute)).
+		Order("last_active_at DESC").
+		First(&sess).Error
+	if err != nil {
+		return nil, nil // no active session is not an error
+	}
+	return &sess, nil
+}
+
+// ─── Dispute flow ─────────────────────────────────────────────────────────────
+
+func (r *postgresStudioRepository) DisputeGeneration(ctx context.Context, genID uuid.UUID, refundPts int64) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).Model(&entities.AIGeneration{}).
+		Where("id = ?", genID).
+		Updates(map[string]interface{}{
+			"disputed_at":    now,
+			"refund_granted": true,
+			"refund_pts":     refundPts,
+		}).Error
+}

@@ -107,18 +107,56 @@ func (s *StudioService) RequestGeneration(
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 
+	// 3. Check IsFree — skip all wallet checks for free tools
+	if tool.IsFree {
+		// Build generation record with zero cost
+		now := time.Now()
+		gen := &entities.AIGeneration{
+			ID:             uuid.New(),
+			UserID:         userID,
+			ToolID:         toolID,
+			ToolSlug:       tool.Slug,
+			Prompt:         prompt,
+			Status:         "pending",
+			PointsDeducted: 0,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			ExpiresAt:      now.AddDate(0, 0, 30),
+		}
+		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := s.studioRepo.CreateGenerationTx(ctx, tx, gen); err != nil {
+				return fmt.Errorf("create generation: %w", err)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		// Best-effort session tracking for free tools
+		if sess, sessErr := s.studioRepo.GetOrCreateActiveSession(ctx, userID); sessErr == nil {
+			_ = s.studioRepo.UpdateSession(ctx, sess.ID, 0)
+		}
+		return gen, nil
+	}
+
 	wallet, err := s.userRepo.GetWalletForUpdate(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("wallet not found: %w", err)
 	}
 
-	// 3. Enforce PulsePoint balance (Financial Rule: PulsePoints ≠ SpinCredits)
+	// 4. Entry threshold check (minimum balance to open the tool)
+	if wallet.PulsePoints < tool.EntryPointCost {
+		return nil, fmt.Errorf("insufficient PulsePoints to access %q: need %d to unlock, have %d",
+			tool.Name, tool.EntryPointCost, wallet.PulsePoints)
+	}
+
+	// 5. Enforce PulsePoint balance for generation cost (Financial Rule: PulsePoints ≠ SpinCredits)
 	if wallet.PulsePoints < tool.PointCost {
 		return nil, fmt.Errorf("insufficient PulsePoints: need %d, have %d",
 			tool.PointCost, wallet.PulsePoints)
 	}
 
-	// 4. Build generation record
+	// 6. Build generation record
 	now := time.Now()
 	gen := &entities.AIGeneration{
 		ID:             uuid.New(),
@@ -133,36 +171,38 @@ func (s *StudioService) RequestGeneration(
 		ExpiresAt:      now.AddDate(0, 0, 30), // 30-day asset retention
 	}
 
-	// 5. Atomic: deduct wallet + ledger entry + create job
+	// 7. Atomic: deduct wallet + ledger entry + create job
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 
-		// Deduct PulsePoints
-		wallet.PulsePoints -= tool.PointCost
-		if err := tx.Save(wallet).Error; err != nil {
-			return fmt.Errorf("wallet update: %w", err)
-		}
+		if tool.PointCost > 0 {
+			// Deduct PulsePoints
+			wallet.PulsePoints -= tool.PointCost
+			if err := tx.Save(wallet).Error; err != nil {
+				return fmt.Errorf("wallet update: %w", err)
+			}
 
-		// Immutable ledger entry
-		ledgerTx := &entities.Transaction{
-			ID:          uuid.New(),
-			UserID:      userID,
-			PhoneNumber: user.PhoneNumber,
-			Type:        entities.TxTypeStudioSpend,
-			PointsDelta: -tool.PointCost,
-			Reference:   "studio_" + gen.ID.String()[:8],
-			Metadata: func() json.RawMessage {
-				b, _ := json.Marshal(map[string]any{
-					"tool_id":   toolID.String(),
-					"tool_slug": tool.Slug,
-					"tool_name": tool.Name,
-					"gen_id":    gen.ID.String(),
-				})
-				return b
-			}(),
-			CreatedAt: now,
-		}
-		if err := s.txRepo.SaveTx(ctx, tx, ledgerTx); err != nil {
-			return fmt.Errorf("ledger write: %w", err)
+			// Immutable ledger entry
+			ledgerTx := &entities.Transaction{
+				ID:          uuid.New(),
+				UserID:      userID,
+				PhoneNumber: user.PhoneNumber,
+				Type:        entities.TxTypeStudioSpend,
+				PointsDelta: -tool.PointCost,
+				Reference:   "studio_" + gen.ID.String()[:8],
+				Metadata: func() json.RawMessage {
+					b, _ := json.Marshal(map[string]any{
+						"tool_id":   toolID.String(),
+						"tool_slug": tool.Slug,
+						"tool_name": tool.Name,
+						"gen_id":    gen.ID.String(),
+					})
+					return b
+				}(),
+				CreatedAt: now,
+			}
+			if err := s.txRepo.SaveTx(ctx, tx, ledgerTx); err != nil {
+				return fmt.Errorf("ledger write: %w", err)
+			}
 		}
 
 		// Create job record
@@ -174,6 +214,11 @@ func (s *StudioService) RequestGeneration(
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Update session usage (best-effort — don't fail the job if session update fails)
+	if sess, sessErr := s.studioRepo.GetOrCreateActiveSession(ctx, userID); sessErr == nil {
+		_ = s.studioRepo.UpdateSession(ctx, sess.ID, tool.PointCost)
 	}
 
 	return gen, nil
@@ -303,4 +348,95 @@ func (s *StudioService) GetToolStats(ctx context.Context) ([]repositories.ToolSt
 // ListGenerations returns paginated generations with optional filters.
 func (s *StudioService) ListGenerations(ctx context.Context, filter repositories.GenerationFilter) ([]entities.AIGeneration, int, error) {
 	return s.studioRepo.ListGenerations(ctx, filter)
+}
+
+// ─── Dispute flow ─────────────────────────────────────────────────────────────
+
+// DisputeGeneration handles a user disputing an unsatisfactory generation output.
+// Validates the dispute window, calculates refund, restores wallet, writes ledger.
+func (s *StudioService) DisputeGeneration(ctx context.Context, genID uuid.UUID, userID uuid.UUID) error {
+	gen, err := s.studioRepo.FindGenerationByID(ctx, genID)
+	if err != nil {
+		return fmt.Errorf("generation not found: %w", err)
+	}
+	if gen.UserID != userID {
+		return fmt.Errorf("access denied")
+	}
+	if gen.Status != "completed" {
+		return fmt.Errorf("can only dispute completed generations")
+	}
+	if gen.DisputedAt != nil {
+		return fmt.Errorf("already disputed")
+	}
+	if gen.RefundGranted {
+		return fmt.Errorf("refund already granted")
+	}
+
+	// Check tool's refund window
+	tool, err := s.studioRepo.FindToolByID(ctx, gen.ToolID)
+	if err != nil {
+		return fmt.Errorf("tool not found: %w", err)
+	}
+	if tool.RefundWindowMins == 0 {
+		return fmt.Errorf("this tool does not support refunds")
+	}
+	windowEnd := gen.CreatedAt.Add(time.Duration(tool.RefundWindowMins) * time.Minute)
+	if time.Now().After(windowEnd) {
+		return fmt.Errorf("refund window expired (%d minutes after generation)", tool.RefundWindowMins)
+	}
+
+	// Calculate refund amount
+	refundPts := (gen.PointsDeducted * int64(tool.RefundPct)) / 100
+	if refundPts == 0 {
+		return fmt.Errorf("no refund applicable for this tool")
+	}
+
+	// Atomic: restore wallet + ledger + mark disputed
+	user, _ := s.userRepo.FindByID(ctx, userID)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Restore wallet
+		var wallet entities.Wallet
+		if err := tx.Where("user_id = ?", userID).First(&wallet).Error; err != nil {
+			return err
+		}
+		wallet.PulsePoints += refundPts
+		if err := tx.Save(&wallet).Error; err != nil {
+			return err
+		}
+
+		// Ledger entry
+		phone := ""
+		if user != nil {
+			phone = user.PhoneNumber
+		}
+		refundTx := &entities.Transaction{
+			ID:          uuid.New(),
+			UserID:      userID,
+			PhoneNumber: phone,
+			Type:        entities.TxTypeStudioRefund,
+			PointsDelta: refundPts,
+			Reference:   "dispute_" + gen.ID.String()[:8],
+			Metadata: func() json.RawMessage {
+				b, _ := json.Marshal(map[string]any{
+					"gen_id":     gen.ID.String(),
+					"tool_slug":  gen.ToolSlug,
+					"refund_pct": tool.RefundPct,
+					"reason":     "user_dispute",
+				})
+				return b
+			}(),
+			CreatedAt: time.Now(),
+		}
+		if err := tx.Create(refundTx).Error; err != nil {
+			return err
+		}
+
+		// Mark generation as disputed
+		return s.studioRepo.DisputeGeneration(ctx, genID, refundPts)
+	})
+}
+
+// GetSessionUsage returns the active session for a user (nil if none within 30 min).
+func (s *StudioService) GetSessionUsage(ctx context.Context, userID uuid.UUID) (*entities.StudioSession, error) {
+	return s.studioRepo.GetSessionUsage(ctx, userID)
 }

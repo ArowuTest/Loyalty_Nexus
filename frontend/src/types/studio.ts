@@ -24,6 +24,10 @@ export interface StudioTool {
   icon?: string;
   provider?: string;
   sort_order?: number;
+  entry_point_cost: number;
+  refund_window_mins: number;
+  refund_pct: number;
+  is_free: boolean;
 }
 
 export interface AIGeneration {
@@ -42,6 +46,9 @@ export interface AIGeneration {
   created_at: string;
   updated_at: string;
   expires_at?: string;
+  disputed_at?: string;
+  refund_granted: boolean;
+  refund_pts: number;
 }
 
 export interface UserBalance {

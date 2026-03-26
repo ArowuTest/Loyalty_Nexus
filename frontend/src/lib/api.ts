@@ -102,6 +102,21 @@ class APIClient {
 
   // Chat usage quota
   getChatUsage() { return this.request("GET", "/studio/chat/usage"); }
+
+  // Dispute & Session
+  disputeGeneration(genId: string): Promise<{ message: string; refunded: boolean }> {
+    return this.request('POST', `/studio/generate/${genId}/dispute`, {});
+  }
+  getSessionUsage(): Promise<{
+    active: boolean;
+    session_id?: string;
+    total_pts_used: number;
+    generation_count: number;
+    started_at?: string;
+    last_active_at?: string;
+  }> {
+    return this.request('GET', '/studio/session');
+  }
 }
 
 export const api = new APIClient();

@@ -273,3 +273,56 @@ func max(a, b int) int {
 	}
 	return b
 }
+
+// ─── POST /api/v1/studio/generate/{id}/dispute ────────────────────────────────
+
+func (h *StudioHandler) DisputeGeneration(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, err := uuid.Parse(uid)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid user"})
+		return
+	}
+	genID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid generation id"})
+		return
+	}
+	if err := h.studioSvc.DisputeGeneration(r.Context(), genID, userID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":  "Dispute recorded. Points have been refunded to your wallet.",
+		"refunded": true,
+	})
+}
+
+// ─── GET /api/v1/studio/session ───────────────────────────────────────────────
+
+func (h *StudioHandler) GetSessionUsage(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uid)
+
+	sess, err := h.studioSvc.GetSessionUsage(r.Context(), userID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load session"})
+		return
+	}
+	if sess == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"active":           false,
+			"total_pts_used":   0,
+			"generation_count": 0,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"active":           true,
+		"session_id":       sess.ID,
+		"started_at":       sess.StartedAt,
+		"total_pts_used":   sess.TotalPtsUsed,
+		"generation_count": sess.GenerationCount,
+		"last_active_at":   sess.LastActiveAt,
+	})
+}

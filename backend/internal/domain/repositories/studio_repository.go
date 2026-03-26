@@ -83,6 +83,23 @@ type StudioRepository interface {
 
 	// ListGenerations returns paginated generations with optional filters.
 	ListGenerations(ctx context.Context, filter GenerationFilter) ([]entities.AIGeneration, int, error)
+
+	// ─── Session tracking ─────────────────────────────────────────────────────────
+
+	// GetOrCreateActiveSession returns the user's current open session (ended_at IS NULL
+	// and last_active_at within last 30 min), or creates a new one.
+	GetOrCreateActiveSession(ctx context.Context, userID uuid.UUID) (*entities.StudioSession, error)
+
+	// UpdateSession increments total_pts_used and generation_count, updates last_active_at.
+	UpdateSession(ctx context.Context, sessionID uuid.UUID, ptsUsed int64) error
+
+	// GetSessionUsage returns the current open session for a user (nil if none).
+	GetSessionUsage(ctx context.Context, userID uuid.UUID) (*entities.StudioSession, error)
+
+	// ─── Dispute flow ─────────────────────────────────────────────────────────────
+
+	// DisputeGeneration marks a generation as disputed and records the refund.
+	DisputeGeneration(ctx context.Context, genID uuid.UUID, refundPts int64) error
 }
 
 // ToolStats holds 30-day aggregated usage figures for a single studio tool.

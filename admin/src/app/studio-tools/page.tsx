@@ -112,11 +112,13 @@ interface CreateForm {
   name: string; slug: string; description: string; category: string;
   point_cost: string; provider: string; provider_tool: string;
   icon: string; sort_order: string;
+  entry_point_cost: string; refund_window_mins: string; refund_pct: string; is_free: boolean;
 }
 
 const EMPTY_FORM: CreateForm = {
   name: "", slug: "", description: "", category: "Chat",
   point_cost: "10", provider: "", provider_tool: "", icon: "✨", sort_order: "100",
+  entry_point_cost: "0", refund_window_mins: "5", refund_pct: "100", is_free: false,
 };
 
 function CreateModal({ onClose, onCreated }: {
@@ -147,6 +149,10 @@ function CreateModal({ onClose, onCreated }: {
         provider_tool: form.provider_tool, icon: form.icon,
         sort_order: parseInt(form.sort_order, 10) || 100,
         is_active: true,
+        entry_point_cost: parseInt(form.entry_point_cost, 10) || 0,
+        refund_window_mins: parseInt(form.refund_window_mins, 10) || 0,
+        refund_pct: Math.min(100, Math.max(0, parseInt(form.refund_pct, 10) || 100)),
+        is_free: form.is_free,
       });
       onCreated(tool);
       onClose();
@@ -245,6 +251,39 @@ function CreateModal({ onClose, onCreated }: {
             <input type="number" min={0} style={inp()} value={form.sort_order}
               onChange={e => set("sort_order", e.target.value)} />
           </label>
+
+          {/* Session token fields */}
+          <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 14 }}>
+            <p style={{ color: MUTED, fontSize: 11, fontWeight: 700, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1 }}>
+              Session Token Settings
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ color: MUTED, fontSize: 11, fontWeight: 600 }}>ENTRY THRESHOLD (pts)</span>
+                <input type="number" min={0} style={inp()} value={form.entry_point_cost}
+                  onChange={e => set("entry_point_cost", e.target.value)} />
+                <span style={{ color: MUTED, fontSize: 10 }}>Min balance to open. 0 = no gate.</span>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ color: MUTED, fontSize: 11, fontWeight: 600 }}>REFUND WINDOW (mins)</span>
+                <input type="number" min={0} style={inp()} value={form.refund_window_mins}
+                  onChange={e => set("refund_window_mins", e.target.value)} />
+                <span style={{ color: MUTED, fontSize: 10 }}>0 = no disputes allowed.</span>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ color: MUTED, fontSize: 11, fontWeight: 600 }}>REFUND % ON DISPUTE</span>
+                <input type="number" min={0} max={100} style={inp()} value={form.refund_pct}
+                  onChange={e => set("refund_pct", e.target.value)} />
+                <span style={{ color: MUTED, fontSize: 10 }}>% of pts returned (0-100).</span>
+              </label>
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input type="checkbox" checked={form.is_free}
+                onChange={e => setForm(prev => ({ ...prev, is_free: e.target.checked }))}
+                style={{ width: 15, height: 15, accentColor: PRIMARY }} />
+              <span style={{ color: TEXT, fontSize: 13 }}>Free Tool (bypass all point checks)</span>
+            </label>
+          </div>
 
           {err && (
             <div style={{
@@ -484,6 +523,10 @@ interface EditState {
   provider: string;
   description: string;
   icon: string;
+  entry_point_cost: string;
+  refund_window_mins: string;
+  refund_pct: string;
+  is_free: boolean;
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -539,6 +582,10 @@ export default function StudioToolsPage() {
       provider: t.provider || "",
       description: t.description || "",
       icon: t.icon || "",
+      entry_point_cost: String(t.entry_point_cost ?? 0),
+      refund_window_mins: String(t.refund_window_mins ?? 0),
+      refund_pct: String(t.refund_pct ?? 100),
+      is_free: t.is_free ?? false,
     });
     setError(null);
   };
@@ -557,6 +604,10 @@ export default function StudioToolsPage() {
         provider: editState.provider,
         description: editState.description,
         icon: editState.icon,
+        entry_point_cost: parseInt(editState.entry_point_cost, 10) || 0,
+        refund_window_mins: parseInt(editState.refund_window_mins, 10) || 0,
+        refund_pct: Math.min(100, Math.max(0, parseInt(editState.refund_pct, 10) || 100)),
+        is_free: editState.is_free,
       });
       setSavedId(tool.id);
       setEditId(null); setEditState(null);
@@ -690,7 +741,7 @@ export default function StudioToolsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
-                  {["Tool", "Category", "Provider / Model", "Point Cost", "Status", "Gen Today", "Success", "Actions"].map(h => (
+                  {["Tool", "Category", "Provider / Model", "Point Cost", "Entry Gate", "Status", "Gen Today", "Success", "Actions"].map(h => (
                     <th key={h} style={{
                       padding: "12px 16px", textAlign: "left",
                       color: MUTED, fontSize: 10, fontWeight: 700,
@@ -761,10 +812,45 @@ export default function StudioToolsPage() {
                               onChange={e => setEditState(prev => prev ? { ...prev, point_cost: e.target.value } : prev)}
                             />
                           ) : (
-                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                              <Zap size={11} style={{ color: "#f59e0b" }} />
-                              <span style={{ color: TEXT, fontWeight: 600, fontSize: 13 }}>{t.point_cost}</span>
+                            <div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <Zap size={11} style={{ color: "#f59e0b" }} />
+                                <span style={{ color: TEXT, fontWeight: 600, fontSize: 13 }}>{t.point_cost} pts/gen</span>
+                              </div>
+                              {(t.entry_point_cost ?? 0) > 0 && (
+                                <div style={{ color: MUTED, fontSize: 10, marginTop: 2 }}>Entry: {t.entry_point_cost} pts</div>
+                              )}
                             </div>
+                          )}
+                        </td>
+
+                        {/* Entry Gate */}
+                        <td style={{ padding: "13px 16px" }}>
+                          {isEditing && editState ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              <input
+                                type="number" min={0} placeholder="Entry pts"
+                                style={inp({ width: 70, padding: "5px 8px" })}
+                                value={editState.entry_point_cost}
+                                onChange={e => setEditState(prev => prev ? { ...prev, entry_point_cost: e.target.value } : prev)}
+                              />
+                              <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                                <input type="checkbox" checked={editState.is_free}
+                                  onChange={e => setEditState(prev => prev ? { ...prev, is_free: e.target.checked } : prev)}
+                                  style={{ accentColor: PRIMARY }} />
+                                <span style={{ color: MUTED, fontSize: 10 }}>Free</span>
+                              </label>
+                            </div>
+                          ) : (
+                            <span style={{
+                              fontSize: 11, fontWeight: 600,
+                              color: t.is_free ? "#34d399" : (t.entry_point_cost ?? 0) > 0 ? "#f59e0b" : MUTED,
+                              background: t.is_free ? "rgba(52,211,153,0.1)" : (t.entry_point_cost ?? 0) > 0 ? "rgba(245,158,11,0.1)" : "rgba(255,255,255,0.04)",
+                              border: `1px solid ${t.is_free ? "rgba(52,211,153,0.25)" : (t.entry_point_cost ?? 0) > 0 ? "rgba(245,158,11,0.25)" : "rgba(255,255,255,0.08)"}`,
+                              borderRadius: 20, padding: "3px 10px",
+                            }}>
+                              {t.is_free ? "FREE" : (t.entry_point_cost ?? 0) > 0 ? `${t.entry_point_cost} pts` : "None"}
+                            </span>
                           )}
                         </td>
 

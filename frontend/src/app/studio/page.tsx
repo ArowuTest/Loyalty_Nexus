@@ -13,7 +13,7 @@ import {
   AlertTriangle, CheckCircle2, Clock, ExternalLink, RefreshCw,
   Brain, Video, X, Info, Play, LayoutGrid, MessageSquare, History,
   Code2, Copy, Check, Download, RotateCcw, Zap, CreditCard,
-  TrendingUp, Timer, ChevronDown,
+  TrendingUp, Timer, ChevronDown, Lock, Activity, Flag, ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -28,6 +28,18 @@ interface Tool {
   point_cost: number;
   is_active: boolean;
   provider?: string;
+  entry_point_cost: number;
+  refund_window_mins: number;
+  refund_pct: number;
+  is_free: boolean;
+}
+interface SessionUsage {
+  active: boolean;
+  session_id?: string;
+  total_pts_used: number;
+  generation_count: number;
+  started_at?: string;
+  last_active_at?: string;
 }
 interface Message {
   role: "user" | "assistant";
@@ -46,6 +58,11 @@ interface Generation {
   created_at: string;
   point_cost?: number;
   error_message?: string;
+  disputed_at?: string;
+  refund_granted?: boolean;
+  refund_pts?: number;
+  refund_window_mins?: number;
+  refund_pct?: number;
 }
 
 // ─── Tool Meta ─────────────────────────────────────────────────────────────────
@@ -316,6 +333,64 @@ function WalletBar({ userPoints }: { userPoints: number }) {
   );
 }
 
+// ─── Session utilisation bar ─────────────────────────────────────────────────
+function SessionBar({ userPoints }: { userPoints: number }) {
+  const [session, setSession] = useState<{
+    active: boolean; total_pts_used: number; generation_count: number;
+    started_at?: string; session_id?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const fetchSession = async () => {
+      try {
+        const data = await (api as any).getSessionUsage();
+        if (data?.active) setSession(data);
+        else setSession(null);
+      } catch { /* silent */ }
+    };
+    fetchSession();
+    const iv = setInterval(fetchSession, 30000);
+    return () => clearInterval(iv);
+  }, []);
+
+  if (!session?.active || session.total_pts_used === 0) return null;
+
+  // Colour the bar based on % of starting balance used
+  const pct = userPoints > 0
+    ? Math.min(100, (session.total_pts_used / (userPoints + session.total_pts_used)) * 100)
+    : 0;
+  const barColor = pct < 30 ? "from-green-500 to-emerald-400"
+    : pct < 60 ? "from-amber-500 to-yellow-400"
+    : "from-red-500 to-rose-400";
+  const textColor = pct < 30 ? "text-green-300" : pct < 60 ? "text-amber-300" : "text-red-300";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+      className="nexus-card p-2.5 border-white/5 bg-white/[0.02]"
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-1.5">
+          <Activity size={11} className={textColor} />
+          <span className="text-white/40 text-[10px] uppercase tracking-wider">Session usage</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={cn("text-[10px] font-bold tabular-nums", textColor)}>
+            {session.total_pts_used} pts used
+          </span>
+          <span className="text-white/20 text-[10px]">{session.generation_count} gen{session.generation_count !== 1 ? "s" : ""}</span>
+        </div>
+      </div>
+      <div className="h-1 w-full rounded-full bg-white/8 overflow-hidden">
+        <div
+          className={cn("h-full rounded-full bg-gradient-to-r transition-all duration-700", barColor)}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── Copy-code button ─────────────────────────────────────────────────────────
 function CopyButton({ text, label = "Copy Code" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -476,14 +551,24 @@ function ConfirmModal({
               </div>
             )}
 
-            {/* Refund notice */}
+            {/* Refund / dispute notice */}
             {canAfford && !isFree && (
-              <div className="flex items-start gap-2.5 bg-nexus-600/10 border border-nexus-500/20 rounded-xl p-3">
+              <div className="flex items-start gap-2.5 bg-nexus-600/10 border border-nexus-500/20 rounded-xl p-3 space-y-1">
                 <Info size={15} className="text-nexus-400 flex-shrink-0 mt-0.5" />
-                <p className="text-nexus-300 text-xs leading-relaxed">
-                  {tool.point_cost} pts deducted once when generation starts.
-                  If the AI fails, points are automatically refunded within seconds.
-                </p>
+                <div className="text-xs leading-relaxed space-y-1">
+                  <p className="text-nexus-300">
+                    {tool.point_cost} pts deducted once when generation starts.
+                    If the AI fails, points are automatically refunded within seconds.
+                  </p>
+                  {tool.refund_window_mins > 0 ? (
+                    <p className="text-nexus-300/60">
+                      ⟲ You can dispute within {tool.refund_window_mins} min if the output is unsatisfactory
+                      {tool.refund_pct < 100 ? ` (${tool.refund_pct}% refund)` : " (full refund)"}.
+                    </p>
+                  ) : (
+                    <p className="text-white/30">⚠ Non-refundable after generation starts.</p>
+                  )}
+                </div>
               </div>
             )}
 
@@ -567,19 +652,28 @@ function ChatBubble({ msg }: { msg: Message }) {
 }
 
 // ─── Tool Card ────────────────────────────────────────────────────────────────
-function ToolCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
-  const cfg     = catCfg(tool.category);
-  const isFree  = tool.point_cost === 0;
-  const isNew   = NEW_TOOL_SLUGS.has(tool.slug);
-  const meta    = TOOL_META[tool.slug];
-  const outType = getOutputType(tool.slug);
+function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () => void; userPoints?: number }) {
+  const cfg          = catCfg(tool.category);
+  const isFree       = tool.is_free || tool.point_cost === 0;
+  const isNew        = NEW_TOOL_SLUGS.has(tool.slug);
+  const meta         = TOOL_META[tool.slug];
+  const outType      = getOutputType(tool.slug);
+  const entryLocked  = !tool.is_free && tool.entry_point_cost > 0 && userPoints < tool.entry_point_cost;
 
   return (
     <motion.button
       whileHover={{ scale: 1.012 }} whileTap={{ scale: 0.98 }}
       onClick={onClick}
-      className="w-full nexus-card p-4 text-left group hover:border-white/20 transition-all"
+      className="w-full nexus-card p-4 text-left group hover:border-white/20 transition-all relative overflow-hidden"
     >
+      {/* Entry-locked overlay */}
+      {entryLocked && (
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] rounded-[inherit] flex items-center justify-end pr-3 z-10">
+          <div className="flex items-center gap-1 text-amber-300/80 text-[10px] font-semibold bg-amber-500/15 border border-amber-500/20 rounded-lg px-2 py-1">
+            <Lock size={9} /> {tool.entry_point_cost} pts to unlock
+          </div>
+        </div>
+      )}
       <div className="flex items-start gap-3.5">
         <div className={cn(
           "p-2.5 rounded-xl bg-gradient-to-br flex-shrink-0 transition-transform group-hover:scale-110 mt-0.5",
@@ -595,6 +689,11 @@ function ToolCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
             {isNew && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/25 text-purple-300 border border-purple-500/30 leading-none">
                 NEW
+              </span>
+            )}
+            {isFree && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30 leading-none">
+                FREE
               </span>
             )}
           </div>
@@ -919,6 +1018,26 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
         </div>
       )}
 
+      {/* ── Dispute row (completed only, within window) ── */}
+      {gen.status === "completed" && (() => {
+        if (gen.disputed_at) {
+          return (
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-300/70 pt-1">
+              <Flag size={9} className="text-amber-400" />
+              Disputed — {gen.refund_pts && gen.refund_pts > 0 ? `${gen.refund_pts} pts refunded` : "under review"}
+            </div>
+          );
+        }
+        if (!gen.refund_window_mins || gen.refund_window_mins === 0) return null;
+        const windowMs  = gen.refund_window_mins * 60 * 1000;
+        const createdMs = new Date(gen.created_at).getTime();
+        const withinWindow = Date.now() < createdMs + windowMs;
+        if (!withinWindow) return null;
+        return (
+          <DisputeButton gen={gen} />
+        );
+      })()}
+
       {/* ── Footer ── */}
       {gen.status === "completed" && (
         <div className="flex items-center justify-between pt-1 border-t border-white/5">
@@ -934,6 +1053,64 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Dispute button (shown within refund window) ─────────────────────────────
+function DisputeButton({ gen }: { gen: Generation }) {
+  const [confirming, setConfirming] = useState(false);
+  const [done,       setDone]       = useState(false);
+  const [busy,       setBusy]       = useState(false);
+
+  if (done) return (
+    <div className="flex items-center gap-1.5 text-[10px] text-green-300 pt-1">
+      <CheckCircle2 size={9} className="text-green-400" /> Points refunded
+    </div>
+  );
+
+  const refundAmt = gen.point_cost && gen.refund_pct
+    ? Math.round((gen.point_cost * gen.refund_pct) / 100)
+    : gen.point_cost ?? 0;
+
+  return confirming ? (
+    <div className="bg-amber-500/8 border border-amber-500/20 rounded-xl p-3 space-y-2">
+      <p className="text-amber-200 text-xs font-semibold">Dispute this generation?</p>
+      <p className="text-amber-200/60 text-[10px]">
+        You&apos;ll receive <strong>{refundAmt} pts</strong> back ({gen.refund_pct ?? 100}% refund).
+        This cannot be undone.
+      </p>
+      <div className="flex gap-2">
+        <button
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await (api as any).disputeGeneration(gen.id);
+              toast.success(`✓ ${refundAmt} pts refunded to your wallet`);
+              setDone(true);
+            } catch (e: unknown) {
+              toast.error(e instanceof Error ? e.message : "Dispute failed");
+            } finally { setBusy(false); setConfirming(false); }
+          }}
+          disabled={busy}
+          className="text-[10px] font-semibold px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-all"
+        >
+          {busy ? <Loader2 size={9} className="animate-spin inline" /> : "Confirm dispute"}
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          className="text-[10px] px-3 py-1.5 rounded-lg text-white/40 hover:text-white/70 transition-all"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  ) : (
+    <button
+      onClick={() => setConfirming(true)}
+      className="flex items-center gap-1 text-[10px] text-white/25 hover:text-amber-300/70 transition-colors pt-1"
+    >
+      <ShieldAlert size={9} /> This didn&apos;t work
+    </button>
   );
 }
 
@@ -959,11 +1136,13 @@ function ToolDrawer({
   const isURL     = URL_INPUT_TOOLS.has(slug);
   const isVoice   = VOICE_TOOLS.has(slug);
   const isLang    = LANG_TOOLS.has(slug);
-  const isFree    = tool.point_cost === 0;
-  const isPremium = tool.point_cost >= 20;
-  const isNew     = NEW_TOOL_SLUGS.has(slug);
-  const canAfford = userPoints >= tool.point_cost;
-  const after     = userPoints - tool.point_cost;
+  const isFree       = tool.is_free || tool.point_cost === 0;
+  const isPremium    = tool.point_cost >= 20;
+  const isNew        = NEW_TOOL_SLUGS.has(slug);
+  const canAfford    = isFree || userPoints >= tool.point_cost;
+  const after        = userPoints - tool.point_cost;
+  // Entry gate: user must hold entry_point_cost pts to even open the tool
+  const entryLocked  = !tool.is_free && tool.entry_point_cost > 0 && userPoints < tool.entry_point_cost;
   const outType   = getOutputType(slug);
 
   function buildPrompt(): string {
@@ -1037,7 +1216,55 @@ function ToolDrawer({
         <div className="nexus-card m-2 md:m-0 overflow-hidden">
           <div className={cn("h-1 w-full bg-gradient-to-r", cfg.color.replace("/20","/70").replace("/10","/50"))} />
 
-          <div className="p-5 space-y-4">
+          {/* ── Entry Gate ── shown instead of the full drawer when locked ── */}
+          {entryLocked && (
+            <div className="p-6 space-y-5 text-center">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/10 border border-amber-500/30 flex items-center justify-center">
+                  <Lock size={28} className="text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-lg">{tool.name}</h3>
+                  <p className="text-white/40 text-sm mt-1">Requires minimum balance to unlock</p>
+                </div>
+              </div>
+              <div className="bg-amber-500/8 border border-amber-500/20 rounded-2xl p-4 space-y-3 text-left">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-white/50">Required balance</span>
+                  <span className="font-bold text-amber-300">{tool.entry_point_cost.toLocaleString()} pts</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-white/50">Your balance</span>
+                  <span className="font-semibold text-red-400">{userPoints.toLocaleString()} pts</span>
+                </div>
+                <div className="h-px bg-white/10" />
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-white/50">You need</span>
+                  <span className="font-bold text-red-300">{(tool.entry_point_cost - userPoints).toLocaleString()} more pts</span>
+                </div>
+                {/* Balance bar */}
+                <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-red-500 to-amber-500 transition-all"
+                    style={{ width: `${Math.min(99, (userPoints / tool.entry_point_cost) * 100)}%` }}
+                  />
+                </div>
+              </div>
+              <p className="text-white/30 text-xs">Top up your PulsePoints to unlock this tool. Your points never expire.</p>
+              <div className="flex gap-2">
+                <button onClick={onClose} className="flex-1 nexus-btn-outline text-sm py-3">Back</button>
+                <Link
+                  href="/subscription"
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2
+                             bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90"
+                >
+                  <CreditCard size={15} /> Top Up Points
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {!entryLocked && <div className="p-5 space-y-4">
             {/* Header */}
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -1286,7 +1513,7 @@ function ToolDrawer({
                 <span className="text-white/25 text-[11px]">{outType.emoji} {outType.label}</span>
               </div>
             )}
-          </div>
+          </div>}
         </div>
       </motion.div>
 
@@ -1439,6 +1666,9 @@ export default function StudioPage() {
 
         {/* ── Wallet Bar ── */}
         <WalletBar userPoints={userPoints} />
+
+        {/* ── Session Utilisation Bar ── */}
+        <SessionBar userPoints={userPoints} />
 
         {/* ── How It Works banner ── */}
         <AnimatePresence>
@@ -1655,7 +1885,7 @@ export default function StudioPage() {
                       </div>
                       <div className="space-y-1.5">
                         {catTools.map((tool) => (
-                          <ToolCard key={tool.id} tool={tool} onClick={() => setSelectedTool(tool)} />
+                          <ToolCard key={tool.id} tool={tool} userPoints={userPoints} onClick={() => setSelectedTool(tool)} />
                         ))}
                       </div>
                     </div>
