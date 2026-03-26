@@ -15,7 +15,7 @@ ENV NODE_ENV=production
 RUN addgroup -S nexus && adduser -S nexus -G nexus
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public 2>/dev/null || true
+COPY --from=builder /app/public ./public
 USER nexus
 EXPOSE 3001
 ENV PORT=3001 HOSTNAME="0.0.0.0"
