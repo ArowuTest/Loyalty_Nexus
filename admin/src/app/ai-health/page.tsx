@@ -3,16 +3,16 @@
 import { useEffect, useState, useCallback } from "react";
 import AdminShell from "@/components/layout/AdminShell";
 import adminAPI, {
-  AIHealthReport, AIProviderStatus, ProviderSwitchEvent, StudioToolHealth,
+  AIHealthReport, AIProviderStatus, ProviderSwitchEvent, StudioToolHealth, Generation,
 } from "@/lib/api";
 import {
   RefreshCw, CheckCircle2, AlertTriangle, XCircle, Clock,
   Zap, ArrowRight, Activity, Brain, Wand2, BarChart3,
-  AlertCircle, WifiOff,
+  AlertCircle, WifiOff, Radio, TrendingDown,
 } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function timeAgo(isoOrNull: string | null): string {
+function timeAgo(isoOrNull: string | null | undefined): string {
   if (!isoOrNull) return "Never";
   const diff = Math.floor((Date.now() - new Date(isoOrNull).getTime()) / 1000);
   if (diff < 60) return `${diff}s ago`;
@@ -25,10 +25,15 @@ function switchTs(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function isLive(isoOrNull: string | null | undefined): boolean {
+  if (!isoOrNull) return false;
+  return (Date.now() - new Date(isoOrNull).getTime()) < 5 * 60 * 1000; // 5 minutes
+}
+
 const PROVIDER_META: Record<string, { label: string; model: string; limit: string; color: string; bgColor: string }> = {
-  GROQ:        { label: "Groq",        model: "Llama-4-Scout 17B", limit: "6,000 req/min free",     color: "text-green-600",  bgColor: "bg-green-50 border-green-200" },
-  GEMINI_LITE: { label: "Gemini",      model: "Flash-Lite 2.0",    limit: "1,500 req/day free",     color: "text-blue-600",   bgColor: "bg-blue-50 border-blue-200" },
-  DEEPSEEK:    { label: "DeepSeek",    model: "V3 (deepseek-chat)", limit: "Pay-per-use fallback",   color: "text-purple-600", bgColor: "bg-purple-50 border-purple-200" },
+  GROQ:        { label: "Groq",        model: "Llama-4-Scout 17B",   limit: "6,000 req/min free",   color: "text-green-600",  bgColor: "bg-green-50 border-green-200" },
+  GEMINI_LITE: { label: "Gemini",      model: "Flash-Lite 2.0",      limit: "1,500 req/day free",   color: "text-blue-600",   bgColor: "bg-blue-50 border-blue-200" },
+  DEEPSEEK:    { label: "DeepSeek",    model: "V3 (deepseek-chat)",  limit: "Pay-per-use fallback", color: "text-purple-600", bgColor: "bg-purple-50 border-purple-200" },
 };
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -57,16 +62,20 @@ function ActivePulse() {
 }
 
 // ─── Provider card ────────────────────────────────────────────────────────────
-function ProviderCard({
-  provider, isActive,
-}: { provider: AIProviderStatus; isActive: boolean }) {
-  const meta = PROVIDER_META[provider.name] ?? { label: provider.name, model: "—", limit: "—", color: "text-gray-600", bgColor: "bg-gray-50 border-gray-200" };
+function ProviderCard({ provider, isActive }: { provider: AIProviderStatus; isActive: boolean }) {
+  const meta = PROVIDER_META[provider.name] ?? {
+    label: provider.name, model: "—", limit: "—",
+    color: "text-gray-600", bgColor: "bg-gray-50 border-gray-200",
+  };
   const isDown = provider.status === "error" || provider.status === "limit_reached";
 
   return (
     <div className={`rounded-2xl border-2 p-5 space-y-4 transition-all ${
-      isActive ? "border-green-400 ring-2 ring-green-400/20 shadow-md" :
-      isDown ? "border-red-200 bg-red-50/30" : "border-gray-200 bg-white"
+      isActive
+        ? "border-green-400 ring-2 ring-green-400/20 shadow-md bg-white"
+        : isDown
+          ? "border-red-200 bg-red-50/30"
+          : "border-gray-200 bg-white"
     }`}>
       {/* Header row */}
       <div className="flex items-start justify-between gap-2">
@@ -105,13 +114,15 @@ function ProviderCard({
         </div>
       </div>
 
-      {/* Error message if any */}
+      {/* Error box — improved */}
       {provider.last_error && (
         <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl p-3">
           <AlertCircle size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-red-700 text-xs font-semibold mb-0.5">Last error</p>
-            <p className="text-red-600 text-xs font-mono leading-relaxed line-clamp-2">{provider.last_error}</p>
+          <div className="min-w-0">
+            <p className="text-red-700 text-xs font-semibold mb-1">Last error</p>
+            <p className="text-red-600 text-xs font-mono leading-relaxed break-words whitespace-pre-wrap">
+              {provider.last_error}
+            </p>
           </div>
         </div>
       )}
@@ -122,7 +133,7 @@ function ProviderCard({
 // ─── Switch event row ─────────────────────────────────────────────────────────
 function SwitchRow({ event, index }: { event: ProviderSwitchEvent; index: number }) {
   const fromMeta = PROVIDER_META[event.from];
-  const toMeta = PROVIDER_META[event.to];
+  const toMeta   = PROVIDER_META[event.to];
   const reasonLabel: Record<string, string> = {
     rate_limit: "Rate limit hit",
     error:      "Provider error",
@@ -143,29 +154,110 @@ function SwitchRow({ event, index }: { event: ProviderSwitchEvent; index: number
   );
 }
 
-// ─── Studio tool row ──────────────────────────────────────────────────────────
-function ToolRow({ tool }: { tool: StudioToolHealth }) {
+// ─── Studio tool health row ───────────────────────────────────────────────────
+function ToolHealthRow({ tool, index }: { tool: StudioToolHealth; index: number }) {
+  const live     = isLive(tool.last_used_at);
+  const errCount = tool.error_count_today ?? 0;
+  const errRate  = tool.requests_today > 0
+    ? ((errCount / tool.requests_today) * 100).toFixed(1)
+    : "0.0";
+  const errRateNum = parseFloat(errRate);
+
   return (
-    <div className="flex items-center gap-3 py-2 px-3">
+    <div className={`flex items-center gap-3 py-2.5 px-4 ${index % 2 === 0 ? "bg-gray-50/60" : ""}`}>
+      {/* Live indicator */}
+      <div className="w-5 flex-shrink-0 flex items-center justify-center">
+        {live ? (
+          <span className="relative flex h-2 w-2" title="Used in last 5 minutes">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+          </span>
+        ) : (
+          <span className="h-2 w-2 rounded-full bg-gray-200 flex-shrink-0" />
+        )}
+      </div>
+
+      {/* Slug */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-800 truncate">{tool.slug}</p>
-        <p className="text-xs text-gray-400">{tool.last_provider || "—"}</p>
+        <p className="text-sm font-medium text-gray-800 truncate font-mono">{tool.slug}</p>
+        <p className="text-[10px] text-gray-400 mt-0.5">
+          Provider: <span className="font-medium text-gray-500">{tool.last_provider || "—"}</span>
+        </p>
       </div>
-      <div className="text-right flex-shrink-0">
+
+      {/* Requests today */}
+      <div className="text-right flex-shrink-0 w-16">
         <p className="text-sm font-bold text-gray-700">{tool.requests_today.toLocaleString()}</p>
-        <p className="text-[10px] text-gray-400">{timeAgo(tool.last_used_at)}</p>
+        <p className="text-[10px] text-gray-400">req today</p>
       </div>
+
+      {/* Error rate */}
+      <div className="text-right flex-shrink-0 w-16">
+        <p className={`text-sm font-bold ${errRateNum > 10 ? "text-red-500" : errRateNum > 3 ? "text-amber-500" : "text-green-600"}`}>
+          {errRate}%
+        </p>
+        <p className="text-[10px] text-gray-400">err rate</p>
+      </div>
+
+      {/* Last error */}
+      <div className="text-right flex-shrink-0 w-20">
+        <p className="text-xs text-gray-500">{timeAgo(tool.last_error_at)}</p>
+        <p className="text-[10px] text-gray-400">last err</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Recent error feed row ────────────────────────────────────────────────────
+function ErrorFeedRow({ gen, index }: { gen: Generation; index: number }) {
+  return (
+    <div className={`px-4 py-3 ${index % 2 === 0 ? "bg-red-50/30" : ""} hover:bg-red-50/50 transition-colors`}>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[10px] bg-red-100 text-red-700 border border-red-200 px-2 py-0.5 rounded font-bold font-mono whitespace-nowrap">
+            {gen.tool_slug}
+          </span>
+          <span className="text-[10px] bg-gray-100 text-gray-600 border border-gray-200 px-2 py-0.5 rounded font-medium whitespace-nowrap">
+            {gen.provider || "unknown"}
+          </span>
+        </div>
+        <span className="text-[10px] text-gray-400 flex-shrink-0">{timeAgo(gen.created_at)}</span>
+      </div>
+      {/* Error message */}
+      <p className="text-xs text-red-700 font-mono leading-snug mb-1 line-clamp-2">
+        {gen.prompt
+          ? `"${gen.prompt.slice(0, 60)}${gen.prompt.length > 60 ? "…" : ""}"`
+          : <em className="not-italic text-gray-400">No prompt</em>
+        }
+      </p>
+      <p className="text-xs text-gray-500 truncate">
+        ⚠ {gen.status === "failed" ? "Generation failed" : gen.status}
+      </p>
     </div>
   );
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function AIHealthPage() {
-  const [report, setReport] = useState<AIHealthReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [report, setReport]           = useState<AIHealthReport | null>(null);
+  const [recentErrors, setRecentErrors] = useState<Generation[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [errorsLoading, setErrorsLoading] = useState(false);
+  const [error, setError]             = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+
+  const loadErrors = useCallback(async () => {
+    setErrorsLoading(true);
+    try {
+      const r = await adminAPI.getStudioGenerations({ status: "failed", limit: 10 });
+      setRecentErrors(r.items ?? []);
+    } catch {
+      // non-fatal — errors feed is bonus info
+    } finally {
+      setErrorsLoading(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -179,14 +271,16 @@ export default function AIHealthPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+    // load recent errors in parallel
+    loadErrors();
+  }, [loadErrors]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Auto-refresh every 15s
+  // Auto-refresh every 30s
   useEffect(() => {
     if (!autoRefresh) return;
-    const iv = setInterval(load, 15_000);
+    const iv = setInterval(load, 30_000);
     return () => clearInterval(iv);
   }, [autoRefresh, load]);
 
@@ -199,11 +293,13 @@ export default function AIHealthPage() {
   );
   const activeMeta = activeProvider ? PROVIDER_META[activeProvider.name] : null;
 
+  const sortedTools = [...(report?.studio_tools ?? [])].sort((a, b) => b.requests_today - a.requests_today);
+
   return (
     <AdminShell>
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
 
-        {/* Page header */}
+        {/* ── Page header ── */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow">
@@ -220,13 +316,23 @@ export default function AIHealthPage() {
             {/* Auto-refresh toggle */}
             <button
               onClick={() => setAutoRefresh((v) => !v)}
-              className={`text-xs px-3 py-2 rounded-lg border font-medium transition-colors ${
+              className={`text-xs px-3 py-2 rounded-lg border font-medium transition-colors flex items-center gap-1.5 ${
                 autoRefresh
-                  ? "bg-green-50 text-green-700 border-green-200"
-                  : "bg-gray-50 text-gray-500 border-gray-200"
+                  ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                  : "bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100"
               }`}
             >
-              {autoRefresh ? "⏸ Auto-refresh on" : "▶ Auto-refresh off"}
+              {autoRefresh ? (
+                <>
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
+                  </span>
+                  Auto-refresh on (30s)
+                </>
+              ) : (
+                <><Radio size={12} /> Auto-refresh off</>
+              )}
             </button>
             <button
               onClick={load}
@@ -239,7 +345,7 @@ export default function AIHealthPage() {
           </div>
         </div>
 
-        {/* Alert banner */}
+        {/* ── Alert banner ── */}
         {hasAlert && (
           <div className="flex items-center gap-3 bg-amber-50 border border-amber-300 rounded-2xl p-4">
             <AlertTriangle size={20} className="text-amber-600 flex-shrink-0" />
@@ -253,7 +359,7 @@ export default function AIHealthPage() {
           </div>
         )}
 
-        {/* No connection error */}
+        {/* ── Connection error ── */}
         {error && (
           <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-2xl p-4">
             <WifiOff size={18} className="text-red-500 flex-shrink-0" />
@@ -261,10 +367,11 @@ export default function AIHealthPage() {
           </div>
         )}
 
-        {/* Last refresh */}
+        {/* ── Last refresh ── */}
         {lastRefresh && (
           <p className="text-gray-400 text-xs text-right -mt-4">
-            Last refreshed: {lastRefresh.toLocaleTimeString()} · {autoRefresh ? "auto-refreshes every 15s" : "auto-refresh paused"}
+            Last refreshed: {lastRefresh.toLocaleTimeString()} ·{" "}
+            {autoRefresh ? "auto-refreshes every 30s" : "auto-refresh paused"}
           </p>
         )}
 
@@ -272,7 +379,7 @@ export default function AIHealthPage() {
         {report && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {/* Active provider */}
-            <div className="col-span-2 md:col-span-2 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-5 text-white">
+            <div className="col-span-2 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-5 text-white">
               <div className="flex items-center gap-2 mb-3">
                 <Activity size={16} className="opacity-80" />
                 <span className="text-xs font-medium uppercase tracking-wider opacity-80">Active Chat Provider</span>
@@ -335,7 +442,92 @@ export default function AIHealthPage() {
           )}
         </section>
 
-        {/* ── Two-column bottom section ── */}
+        {/* ── Studio Tool Health table ── */}
+        <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <Wand2 size={15} className="text-purple-500" />
+              <h3 className="font-semibold text-gray-800 text-sm">Studio Tool Health</h3>
+              <span className="text-[10px] bg-purple-100 text-purple-700 border border-purple-200 px-2 py-0.5 rounded-full font-medium">
+                {sortedTools.length} tools
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                <span className="relative flex h-1.5 w-1.5"><span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" /></span>
+                Live = used in last 5m
+              </div>
+              <div className="flex items-center gap-1 text-xs text-gray-400">
+                <BarChart3 size={12} />
+                {report?.studio_tools.reduce((s, t) => s + t.requests_today, 0) ?? 0} req today
+              </div>
+            </div>
+          </div>
+
+          {/* Column headers */}
+          <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+            <div className="w-5 flex-shrink-0" />
+            <div className="flex-1">Tool slug</div>
+            <div className="w-16 text-right">Req today</div>
+            <div className="w-16 text-right">Err rate</div>
+            <div className="w-20 text-right">Last error</div>
+          </div>
+
+          <div className="divide-y divide-gray-50/80 max-h-80 overflow-y-auto">
+            {sortedTools.length === 0 ? (
+              <div className="py-10 text-center">
+                <Wand2 size={24} className="mx-auto text-gray-300 mb-2" />
+                <p className="text-gray-400 text-sm">No studio tool usage today</p>
+              </div>
+            ) : (
+              sortedTools.map((tool, i) => <ToolHealthRow key={tool.slug} tool={tool} index={i} />)
+            )}
+          </div>
+        </section>
+
+        {/* ── Recent Generation Errors feed ── */}
+        <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <TrendingDown size={15} className="text-red-500" />
+              <h3 className="font-semibold text-gray-800 text-sm">Recent Generation Failures</h3>
+              {recentErrors.length > 0 && (
+                <span className="text-[10px] bg-red-100 text-red-700 border border-red-200 px-2 py-0.5 rounded-full font-bold">
+                  {recentErrors.length} shown
+                </span>
+              )}
+            </div>
+            <button
+              onClick={loadErrors}
+              disabled={errorsLoading}
+              className="text-xs text-gray-400 hover:text-indigo-600 transition-colors flex items-center gap-1"
+            >
+              <RefreshCw size={11} className={errorsLoading ? "animate-spin" : ""} />
+              Reload
+            </button>
+          </div>
+
+          <div className="divide-y divide-gray-100 max-h-80 overflow-y-auto">
+            {errorsLoading && (
+              <div className="py-8 text-center">
+                <RefreshCw size={18} className="mx-auto text-gray-300 mb-2 animate-spin" />
+                <p className="text-gray-400 text-xs">Loading failures…</p>
+              </div>
+            )}
+            {!errorsLoading && recentErrors.length === 0 && (
+              <div className="py-10 text-center">
+                <CheckCircle2 size={24} className="mx-auto text-green-400 mb-2" />
+                <p className="text-gray-400 text-sm">No generation failures in the feed</p>
+                <p className="text-gray-300 text-xs mt-1">All recent generations completed successfully ✓</p>
+              </div>
+            )}
+            {!errorsLoading && recentErrors.map((gen, i) => (
+              <ErrorFeedRow key={gen.id} gen={gen} index={i} />
+            ))}
+          </div>
+        </section>
+
+        {/* ── Two-column: Switch Log + Tools ── */}
         <div className="grid md:grid-cols-2 gap-4">
 
           {/* Provider switch log */}
@@ -365,29 +557,42 @@ export default function AIHealthPage() {
             </div>
           </section>
 
-          {/* Studio tool usage */}
+          {/* Studio tool request totals */}
           <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
               <div className="flex items-center gap-2">
-                <Wand2 size={15} className="text-purple-500" />
-                <h3 className="font-semibold text-gray-800 text-sm">Studio Tool Usage Today</h3>
+                <BarChart3 size={15} className="text-indigo-500" />
+                <h3 className="font-semibold text-gray-800 text-sm">Studio Req Volume (Today)</h3>
               </div>
               <div className="flex items-center gap-1 text-xs text-gray-400">
-                <BarChart3 size={12} />
+                <Activity size={12} />
                 {report?.studio_tools.reduce((s, t) => s + t.requests_today, 0) ?? 0} total
               </div>
             </div>
-            <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
-              {(report?.studio_tools ?? []).length === 0 ? (
+            <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto px-4 py-2 space-y-1">
+              {sortedTools.length === 0 ? (
                 <div className="py-8 text-center">
                   <Wand2 size={24} className="mx-auto text-gray-300 mb-2" />
                   <p className="text-gray-400 text-sm">No studio tool usage today</p>
                 </div>
-              ) : (
-                [...(report?.studio_tools ?? [])]
-                  .sort((a, b) => b.requests_today - a.requests_today)
-                  .map((tool) => <ToolRow key={tool.slug} tool={tool} />)
-              )}
+              ) : sortedTools.map((tool) => {
+                const max = sortedTools[0]?.requests_today || 1;
+                const pct = Math.max(2, (tool.requests_today / max) * 100);
+                return (
+                  <div key={tool.slug} className="flex items-center gap-3 py-1.5">
+                    <span className="text-xs font-mono text-gray-700 w-32 truncate flex-shrink-0">{tool.slug}</span>
+                    <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-purple-500"
+                        style={{ width: `${pct}%`, transition: "width 0.5s ease" }}
+                      />
+                    </div>
+                    <span className="text-xs font-bold text-gray-700 w-10 text-right flex-shrink-0">
+                      {tool.requests_today.toLocaleString()}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </section>
 

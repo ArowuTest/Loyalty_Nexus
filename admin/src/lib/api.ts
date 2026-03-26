@@ -26,27 +26,33 @@ class AdminAPI {
   getPrizePool()   { return this.req<{ prizes: Prize[] }>("GET", "/admin/prize-pool"); }
   updatePrize(id: string, payload: Partial<Prize>) { return this.req("PUT", `/admin/prizes/${id}`, payload); }
   createPrize(payload: Omit<Prize,"id">) { return this.req("POST", "/admin/prizes", payload); }
-  deletePrize(id: string) { return this.req("DELETE", `/admin/prizes/${id}`, {}); }
-  getStudioTools() { return this.req<{ tools: StudioTool[] }>("GET", "/admin/studio-tools"); }
-  updateStudioTool(id: string, payload: { point_cost?: number; is_active?: boolean }) {
-    return this.req("PUT", `/admin/studio-tools/${id}`, payload);
-  }
-  getUsers(page = 0) { return this.req<{ users: User[] }>("GET", `/admin/users?offset=${page * 50}`); }
-  getUser(id: string) { return this.req<User>("GET", `/admin/users/${id}`); }
-  suspendUser(id: string) { return this.req("PUT", `/admin/users/${id}/suspend`, {}); }
-  adjustPoints(userId: string, delta: number, reason: string) {
-    return this.req("POST", "/admin/points/adjust", { user_id: userId, delta, reason });
-  }
+  deletePrize(id: string) { return this.req("DELETE", `/admin/prizes/${id}`); }
+  getUsers(page = 0, q = "") { return this.req<{ users: User[]; total: number }>("GET", `/admin/users?offset=${page * 50}${q ? `&q=${encodeURIComponent(q)}` : ""}`); }
+  getFraud()       { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud"); }
+  getFraudEvents() { return this.getFraud(); }
+  resolveFraud(id: string) { return this.req("POST", `/admin/fraud/${id}/resolve`, {}); }
+  getRegionalStats() { return this.req<{ stats: RegionalStat[] }>("GET", "/admin/regional-stats"); }
   getPointsStats() { return this.req<PointsStats>("GET", "/admin/points/stats"); }
-  getPointsHistory(page = 0) { return this.req<{ items: PointsHistoryItem[] }>("GET", `/admin/points/history?page=${page}`); }
-  getFraudEvents() { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud-events"); }
-  getRegionalWars(){ return this.req<{ leaderboard: RegionalStat[] }>("GET", "/admin/regional-wars"); }
-  // Notifications & Broadcasts
-  broadcastNotification(payload: BroadcastPayload) { return this.req("POST", "/admin/notifications/broadcast", payload); }
-  getNotificationHistory(page = 0) { return this.req<{ broadcasts: Broadcast[] }>("GET", `/admin/notifications/broadcasts?offset=${page * 20}`); }
-  // Subscription management
-  getSubscriptions(page = 0, status = "") {
-    const qs = status ? `&status=${status}` : "";
+  getPointsHistory(page = 0) { return this.req<{ items: PointsHistoryItem[]; total: number }>("GET", `/admin/points/history?offset=${page * 50}`); }
+  getStudioTools() { return this.req<{ tools: StudioTool[] }>("GET", "/admin/studio-tools"); }
+  updateStudioTool(id: string, payload: Partial<StudioTool>) { return this.req("PUT", `/admin/studio-tools/${id}`, payload); }
+  // New Studio Tool CRUD methods
+  createStudioTool(data: Partial<StudioTool>): Promise<StudioTool> { return this.req<StudioTool>("POST", "/admin/studio-tools", data); }
+  disableStudioTool(id: string): Promise<void> { return this.req<void>("DELETE", `/admin/studio-tools/${id}`); }
+  getStudioToolErrors(id: string): Promise<{ errors: GenerationError[]; count: number }> { return this.req<{ errors: GenerationError[]; count: number }>("GET", `/admin/studio-tools/${id}/errors`); }
+  getStudioToolStats(): Promise<{ stats: ToolStat[] }> { return this.req<{ stats: ToolStat[] }>("GET", "/admin/studio-tools/stats"); }
+  getStudioGenerations(params?: { status?: string; tool_slug?: string; limit?: number; offset?: number }): Promise<{ items: Generation[]; total: number }> {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.tool_slug) qs.set("tool_slug", params.tool_slug);
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+    if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return this.req<{ items: Generation[]; total: number }>("GET", `/admin/studio-generations${q ? `?${q}` : ""}`);
+  }
+  getBroadcasts() { return this.req<{ broadcasts: Broadcast[] }>("GET", "/admin/broadcasts"); }
+  createBroadcast(payload: BroadcastPayload) { return this.req<{ id: string }>("POST", "/admin/broadcasts", payload); }
+  getSubscriptions(page = 0, qs = "") {
     return this.req<{ users: SubscriptionUser[] }>("GET", `/admin/subscriptions?offset=${page * 50}${qs}`);
   }
   updateSubscription(userId: string, payload: UpdateSubPayload) { return this.req("PUT", `/admin/users/${userId}/subscription`, payload); }
@@ -55,7 +61,13 @@ class AdminAPI {
   createDraw(d: CreateDrawPayload) { return this.req<Draw>("POST", "/admin/draws", d); }
   executeDraw(id: string)  { return this.req("POST", `/admin/draws/${id}/execute`, {}); }
   getDrawWinners(id: string){ return this.req<{ winners: DrawWinner[] }>("GET", `/admin/draws/${id}/winners`); }
-  // Regional Wars admin
+  // Notification aliases
+  getNotificationHistory() { return this.getBroadcasts(); }
+  broadcastNotification(payload: BroadcastPayload) { return this.createBroadcast(payload); }
+  // Users
+  suspendUser(id: string) { return this.req("POST", `/admin/users/${id}/suspend`, {}); }
+  // Regional Wars
+  getRegionalWars() { return this.req<{ leaderboard: RegionalStat[] }>("GET", "/admin/regional-wars"); }
   resolveWar(period: string) { return this.req("POST", "/admin/wars/resolve", { period }); }
   getHealth() { return this.req<HealthReport>("GET", "/admin/health"); }
   getAIHealth() { return this.req<AIHealthReport>("GET", "/admin/ai-health"); }
@@ -63,7 +75,11 @@ class AdminAPI {
 export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
 export interface Prize { id: string; name: string; prize_type: string; base_value: number; probability: number; daily_inventory: number; is_active: boolean; }
-export interface StudioTool { id: string; name: string; category: string; provider: string; point_cost: number; is_active: boolean; }
+export interface StudioTool {
+  id: string; name: string; slug?: string; category: string; provider: string;
+  point_cost: number; is_active: boolean; description?: string; icon?: string;
+  provider_tool?: string; sort_order?: number; generated_today?: number; success_rate?: number;
+}
 export interface User { id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean; created_at: string; }
 export interface FraudEvent { id: string; user_id: string; event_type: string; severity: string; resolved: boolean; created_at: string; }
 export interface RegionalStat { state: string; total_points: number; active_members: number; rank: number; }
@@ -141,6 +157,8 @@ export interface StudioToolHealth {
   requests_today: number;
   last_provider: string;
   last_used_at: string | null;
+  error_count_today?: number;
+  last_error_at?: string | null;
 }
 export interface AIHealthReport {
   active_chat_provider: string;
@@ -161,5 +179,33 @@ export interface PointsHistoryItem {
   phone_number: string;
   type: string;
   points_delta: number;
+  created_at: string;
+}
+
+// ─── New Studio Tool types ─────────────────────────────────────────────────────
+export interface GenerationError {
+  id: string;
+  user_id: string;
+  prompt: string;
+  error_message: string;
+  provider: string;
+  created_at: string;
+}
+export interface ToolStat {
+  tool_id: string;
+  tool_slug: string;
+  total: number;
+  completed: number;
+  failed: number;
+  points_consumed: number;
+}
+export interface Generation {
+  id: string;
+  user_id: string;
+  tool_slug: string;
+  status: string;
+  provider: string;
+  prompt: string;
+  points_deducted: number;
   created_at: string;
 }

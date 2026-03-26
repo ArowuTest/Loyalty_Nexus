@@ -289,3 +289,18 @@ func (s *StudioService) UpsertTool(ctx context.Context, tool *entities.StudioToo
 func (s *StudioService) ListStalePendingJobs(ctx context.Context, staleSeconds, limit int) ([]entities.AIGeneration, error) {
 	return s.studioRepo.ListPendingGenerations(ctx, staleSeconds, limit)
 }
+
+// GetToolErrors returns recent failed ai_generations for a specific tool.
+func (s *StudioService) GetToolErrors(ctx context.Context, toolID uuid.UUID, limit int) ([]entities.AIGeneration, error) {
+	return s.studioRepo.GetToolErrors(ctx, toolID, limit)
+}
+
+// GetToolStats returns 30-day aggregated stats per tool.
+func (s *StudioService) GetToolStats(ctx context.Context) ([]repositories.ToolStats, error) {
+	return s.studioRepo.GetToolStats(ctx)
+}
+
+// ListGenerations returns paginated generations with optional filters.
+func (s *StudioService) ListGenerations(ctx context.Context, filter repositories.GenerationFilter) ([]entities.AIGeneration, int, error) {
+	return s.studioRepo.ListGenerations(ctx, filter)
+}

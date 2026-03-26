@@ -192,3 +192,63 @@ func (r *postgresStudioRepository) ListPendingGenerations(ctx context.Context, s
 		Find(&gens).Error
 	return gens, err
 }
+
+// ─── Admin analytics ──────────────────────────────────────────────────────────
+
+// GetToolErrors returns recent failed ai_generations for the given tool.
+func (r *postgresStudioRepository) GetToolErrors(ctx context.Context, toolID uuid.UUID, limit int) ([]entities.AIGeneration, error) {
+	var gens []entities.AIGeneration
+	err := r.db.WithContext(ctx).
+		Where("tool_id = ? AND status = 'failed'", toolID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&gens).Error
+	return gens, err
+}
+
+// GetToolStats returns 30-day aggregated stats grouped by tool.
+func (r *postgresStudioRepository) GetToolStats(ctx context.Context) ([]repositories.ToolStats, error) {
+	var stats []repositories.ToolStats
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT
+			tool_id::text                                                     AS tool_id,
+			tool_slug,
+			COUNT(*)                                                          AS total,
+			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END)            AS completed,
+			SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END)            AS failed,
+			COALESCE(SUM(points_deducted), 0)                                 AS points_consumed
+		FROM ai_generations
+		WHERE created_at > NOW() - INTERVAL '30 days'
+		GROUP BY tool_id, tool_slug
+	`).Scan(&stats).Error
+	return stats, err
+}
+
+// ListGenerations returns paginated generations with optional status/slug filters.
+func (r *postgresStudioRepository) ListGenerations(ctx context.Context, filter repositories.GenerationFilter) ([]entities.AIGeneration, int, error) {
+	q := r.db.WithContext(ctx).Model(&entities.AIGeneration{})
+	if filter.Status != "" {
+		q = q.Where("status = ?", filter.Status)
+	}
+	if filter.ToolSlug != "" {
+		q = q.Where("tool_slug = ?", filter.ToolSlug)
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	limit := filter.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	var gens []entities.AIGeneration
+	err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&gens).Error
+	return gens, int(total), err
+}

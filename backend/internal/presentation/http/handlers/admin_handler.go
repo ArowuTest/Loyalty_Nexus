@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,8 @@ import (
 	"gorm.io/gorm"
 
 	"loyalty-nexus/internal/application/services"
+	"loyalty-nexus/internal/domain/entities"
+	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
 )
 
@@ -20,13 +23,14 @@ import (
 // Zero-hardcoding: every business parameter is read from network_configs,
 // editable live via PUT /api/v1/admin/config/:key.
 type AdminHandler struct {
-	db       *gorm.DB
-	cfg      *config.ConfigManager
-	spinSvc  *services.SpinService
-	drawSvc  *services.DrawService
-	fraudSvc *services.FraudService
-	warsSvc  *services.RegionalWarsService
-	rdb      *redis.Client
+	db        *gorm.DB
+	cfg       *config.ConfigManager
+	spinSvc   *services.SpinService
+	drawSvc   *services.DrawService
+	fraudSvc  *services.FraudService
+	warsSvc   *services.RegionalWarsService
+	studioSvc *services.StudioService
+	rdb       *redis.Client
 }
 
 func NewAdminHandler(
@@ -36,16 +40,18 @@ func NewAdminHandler(
 	drawSvc *services.DrawService,
 	fraudSvc *services.FraudService,
 	warsSvc *services.RegionalWarsService,
+	studioSvc *services.StudioService,
 	rdb *redis.Client,
 ) *AdminHandler {
 	return &AdminHandler{
-		db:       db,
-		cfg:      cfg,
-		spinSvc:  spinSvc,
-		drawSvc:  drawSvc,
-		fraudSvc: fraudSvc,
-		warsSvc:  warsSvc,
-		rdb:      rdb,
+		db:        db,
+		cfg:       cfg,
+		spinSvc:   spinSvc,
+		drawSvc:   drawSvc,
+		fraudSvc:  fraudSvc,
+		warsSvc:   warsSvc,
+		studioSvc: studioSvc,
+		rdb:       rdb,
 	}
 }
 
@@ -531,6 +537,207 @@ func (h *AdminHandler) UpdateStudioTool(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	jsonOK(w, map[string]string{"status": "ok"})
+}
+
+// ─── Studio Tools — extended admin CRUD & analytics ──────────────────────────
+
+// CreateStudioTool creates a new studio tool.
+// POST /api/v1/admin/studio-tools
+func (h *AdminHandler) CreateStudioTool(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name         string `json:"name"`
+		Slug         string `json:"slug"`
+		Description  string `json:"description"`
+		Category     string `json:"category"`
+		PointCost    int64  `json:"point_cost"`
+		Provider     string `json:"provider"`
+		ProviderTool string `json:"provider_tool"`
+		Icon         string `json:"icon"`
+		SortOrder    int    `json:"sort_order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.Name == "" || body.Slug == "" || body.Category == "" {
+		jsonError(w, "name, slug, and category are required", http.StatusBadRequest)
+		return
+	}
+	if body.PointCost < 0 {
+		jsonError(w, "point_cost must be >= 0", http.StatusBadRequest)
+		return
+	}
+
+	tool := entities.StudioTool{
+		ID:           uuid.New(),
+		Name:         body.Name,
+		Slug:         body.Slug,
+		Description:  body.Description,
+		Category:     entities.ToolCategory(body.Category),
+		PointCost:    body.PointCost,
+		Provider:     body.Provider,
+		ProviderTool: body.ProviderTool,
+		Icon:         body.Icon,
+		SortOrder:    body.SortOrder,
+		IsActive:     true,
+	}
+
+	if err := h.studioSvc.UpsertTool(r.Context(), &tool); err != nil {
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+			jsonError(w, "slug already exists", http.StatusConflict)
+			return
+		}
+		jsonError(w, "failed to create tool: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if encErr := json.NewEncoder(w).Encode(tool); encErr != nil {
+		log.Printf("[Admin] CreateStudioTool encode error: %v", encErr)
+	}
+}
+
+// DisableStudioTool soft-deletes a tool by setting is_active = false.
+// DELETE /api/v1/admin/studio-tools/{id}
+func (h *AdminHandler) DisableStudioTool(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	toolID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid tool id", http.StatusBadRequest)
+		return
+	}
+	if err := h.studioSvc.SetToolEnabled(r.Context(), toolID, false); err != nil {
+		jsonError(w, "failed to disable tool: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]string{"message": "tool disabled"})
+}
+
+// GetStudioToolErrors returns recent failed generations for a specific tool.
+// GET /api/v1/admin/studio-tools/{id}/errors?limit=20
+func (h *AdminHandler) GetStudioToolErrors(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	toolID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid tool id", http.StatusBadRequest)
+		return
+	}
+
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, parseErr := strconv.Atoi(l); parseErr == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	gens, err := h.studioSvc.GetToolErrors(r.Context(), toolID, limit)
+	if err != nil {
+		jsonError(w, "failed to fetch errors: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Project only the fields the spec requests
+	type errorRow struct {
+		ID           uuid.UUID `json:"id"`
+		UserID       uuid.UUID `json:"user_id"`
+		Prompt       string    `json:"prompt"`
+		ErrorMessage string    `json:"error_message"`
+		Provider     string    `json:"provider"`
+		CreatedAt    time.Time `json:"created_at"`
+	}
+	rows := make([]errorRow, 0, len(gens))
+	for _, g := range gens {
+		rows = append(rows, errorRow{
+			ID:           g.ID,
+			UserID:       g.UserID,
+			Prompt:       g.Prompt,
+			ErrorMessage: g.ErrorMessage,
+			Provider:     g.Provider,
+			CreatedAt:    g.CreatedAt,
+		})
+	}
+
+	jsonOK(w, map[string]interface{}{"errors": rows, "count": len(rows)})
+}
+
+// GetStudioToolStats returns 30-day aggregated usage stats per tool.
+// GET /api/v1/admin/studio-tools/stats
+func (h *AdminHandler) GetStudioToolStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.studioSvc.GetToolStats(r.Context())
+	if err != nil {
+		jsonError(w, "failed to fetch stats: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{"stats": stats})
+}
+
+// GetStudioGenerations lists all ai_generations for admin oversight.
+// GET /api/v1/admin/studio-generations?limit=50&offset=0&status=failed&tool_slug=...
+func (h *AdminHandler) GetStudioGenerations(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	limit := 50
+	if l := q.Get("limit"); l != "" {
+		if parsed, parseErr := strconv.Atoi(l); parseErr == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	offset := 0
+	if o := q.Get("offset"); o != "" {
+		if parsed, parseErr := strconv.Atoi(o); parseErr == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	filter := repositories.GenerationFilter{
+		Status:   q.Get("status"),
+		ToolSlug: q.Get("tool_slug"),
+		Limit:    limit,
+		Offset:   offset,
+	}
+
+	gens, total, err := h.studioSvc.ListGenerations(r.Context(), filter)
+	if err != nil {
+		jsonError(w, "failed to fetch generations: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Project and truncate prompt to 80 chars
+	type genRow struct {
+		ID             uuid.UUID `json:"id"`
+		UserID         uuid.UUID `json:"user_id"`
+		ToolSlug       string    `json:"tool_slug"`
+		Status         string    `json:"status"`
+		Provider       string    `json:"provider"`
+		Prompt         string    `json:"prompt"`
+		PointsDeducted int64     `json:"points_deducted"`
+		CreatedAt      time.Time `json:"created_at"`
+	}
+	rows := make([]genRow, 0, len(gens))
+	for _, g := range gens {
+		prompt := g.Prompt
+		if len(prompt) > 80 {
+			prompt = prompt[:80]
+		}
+		rows = append(rows, genRow{
+			ID:             g.ID,
+			UserID:         g.UserID,
+			ToolSlug:       g.ToolSlug,
+			Status:         g.Status,
+			Provider:       g.Provider,
+			Prompt:         prompt,
+			PointsDeducted: g.PointsDeducted,
+			CreatedAt:      g.CreatedAt,
+		})
+	}
+
+	jsonOK(w, map[string]interface{}{
+		"generations": rows,
+		"total":       total,
+		"limit":       limit,
+		"offset":      offset,
+	})
 }
 
 // ─── Points config / ledger audit ────────────────────────────────────────

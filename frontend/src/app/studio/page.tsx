@@ -12,9 +12,11 @@ import {
   Mic, FileText, Music, Globe, ChevronRight, Sparkles,
   AlertTriangle, CheckCircle2, Clock, ExternalLink, RefreshCw,
   Brain, Video, X, Info, Play, LayoutGrid, MessageSquare, History,
-  Code2, Copy, Check, Download, RotateCcw,
+  Code2, Copy, Check, Download, RotateCcw, Zap, CreditCard,
+  TrendingUp, Timer, ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Tool {
@@ -43,6 +45,7 @@ interface Generation {
   prompt?: string;
   created_at: string;
   point_cost?: number;
+  error_message?: string;
 }
 
 // ─── Tool Meta ─────────────────────────────────────────────────────────────────
@@ -81,13 +84,21 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "podcast":            { time: "~90 sec",  output: "2-host AI podcast audio",       tip: "Give a clear topic — the AI writes the full script" },
 };
 
-// ─── Output type label helper ─────────────────────────────────────────────────
-function getOutputLabel(slug: string): string {
-  if (VIDEO_SLUGS.has(slug))  return "🎬 Video MP4";
-  if (AUDIO_SLUGS.has(slug))  return "🎵 Audio MP3";
-  if (IMAGE_SLUGS.has(slug))  return "🖼️ Image file";
-  if (CODE_SLUGS.has(slug))   return "💻 Code output";
-  return "📄 Text output";
+// ─── Output type helpers ──────────────────────────────────────────────────────
+const IMAGE_SLUGS  = new Set(["ai-photo","ai-photo-pro","ai-photo-max","ai-photo-dream","photo-editor","animate-photo","infographic"]);
+const AUDIO_SLUGS  = new Set(["narrate","narrate-pro","bg-music","jingle","song-creator","instrumental","transcribe","transcribe-african","podcast"]);
+const VIDEO_SLUGS  = new Set(["animate-photo","video-premium","video-cinematic","video-veo"]);
+const CODE_SLUGS   = new Set(["code-helper"]);
+const VISION_SLUGS = new Set(["image-analyser","ask-my-photo"]);
+const WEB_SLUGS    = new Set(["web-search-ai"]);
+const JSON_SLUGS   = new Set(["quiz","mindmap","slide-deck"]);
+
+function getOutputType(slug: string): { label: string; emoji: string; noun: string } {
+  if (VIDEO_SLUGS.has(slug))  return { label: "Video MP4",  emoji: "🎬", noun: "video" };
+  if (AUDIO_SLUGS.has(slug))  return { label: "Audio MP3",  emoji: "🎵", noun: "audio" };
+  if (IMAGE_SLUGS.has(slug))  return { label: "Image file", emoji: "🖼️", noun: "image" };
+  if (CODE_SLUGS.has(slug))   return { label: "Code output",emoji: "💻", noun: "code" };
+  return { label: "Text output", emoji: "📄", noun: "text" };
 }
 
 // ─── Category config ──────────────────────────────────────────────────────────
@@ -149,7 +160,7 @@ const CAT = {
   },
 } as const;
 
-// ─── New tool slugs (for badge decoration) ────────────────────────────────────
+// ─── New tool slugs ──────────────────────────────────────────────────────────
 const NEW_TOOL_SLUGS = new Set([
   "web-search-ai","image-analyser","ask-my-photo","code-helper",
   "narrate-pro","transcribe-african",
@@ -173,15 +184,6 @@ const LANGUAGES = [
 ] as const;
 
 const GENRE_CHIPS = ["Afrobeats","Gospel","Hip Hop","Amapiano","Jazz","Classical"] as const;
-
-// ─── Output type helpers ──────────────────────────────────────────────────────
-const IMAGE_SLUGS  = new Set(["ai-photo","ai-photo-pro","ai-photo-max","ai-photo-dream","photo-editor","animate-photo","infographic"]);
-const AUDIO_SLUGS  = new Set(["narrate","narrate-pro","bg-music","jingle","song-creator","instrumental","transcribe","transcribe-african"]);
-const VIDEO_SLUGS  = new Set(["animate-photo","video-premium","video-cinematic","video-veo"]);
-const CODE_SLUGS   = new Set(["code-helper"]);
-const VISION_SLUGS = new Set(["image-analyser","ask-my-photo"]);
-const WEB_SLUGS    = new Set(["web-search-ai"]);
-const JSON_SLUGS   = new Set(["quiz","mindmap","slide-deck"]);
 
 // ─── Placeholders ─────────────────────────────────────────────────────────────
 const PLACEHOLDERS: Record<string, string> = {
@@ -221,8 +223,6 @@ const SECOND_PLACEHOLDERS: Record<string, string> = {
   "video-cinematic": "Describe the motion — e.g. 'Slow zoom in with lens flare, cinematic movement'",
 };
 
-// ─── Provider labels hidden from users — Nexus AI is the brand ───────────────
-
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
 const fetchTools   = () => api.getStudioTools()  as Promise<{ tools: Tool[] }>;
 const fetchGallery = () => api.getGallery()       as Promise<{ items: Generation[] }>;
@@ -233,6 +233,87 @@ function catCfg(category: string) {
     icon: <Wand2 size={15} />, color: "from-gray-500/20 to-gray-600/10",
     badge: "bg-white/10 text-white/60 border border-white/10", dot: "bg-gray-400",
   };
+}
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins  = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days  = Math.floor(diff / 86400000);
+  if (mins  < 1)  return "just now";
+  if (mins  < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+}
+
+// ─── Points cost badge ────────────────────────────────────────────────────────
+function PointsBadge({ pointCost, size = "sm" }: { pointCost: number; size?: "xs" | "sm" }) {
+  const isFree    = pointCost === 0;
+  const isPremium = pointCost >= 20;
+  const base      = size === "xs" ? "text-[9px] px-1.5 py-0.5" : "text-xs px-2 py-0.5";
+  return (
+    <span className={cn(
+      "font-bold rounded-full border leading-none",
+      base,
+      isFree
+        ? "bg-green-500/20 text-green-300 border-green-500/30"
+        : isPremium
+          ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
+          : "bg-nexus-500/20 text-nexus-300 border-nexus-500/30"
+    )}>
+      {isFree ? "Free" : `${pointCost} pts/gen`}
+    </span>
+  );
+}
+
+// ─── Wallet bar ───────────────────────────────────────────────────────────────
+function WalletBar({ userPoints }: { userPoints: number }) {
+  const isLow = userPoints < 50;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn(
+        "nexus-card p-3 flex items-center justify-between gap-3",
+        isLow
+          ? "border-amber-500/30 bg-gradient-to-r from-amber-500/8 to-orange-500/5"
+          : "border-nexus-500/20 bg-gradient-to-r from-nexus-600/8 to-purple-600/5"
+      )}
+    >
+      <div className="flex items-center gap-2.5">
+        <div className={cn(
+          "w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0",
+          isLow ? "bg-amber-500/20" : "bg-nexus-500/20"
+        )}>
+          <Zap size={15} className={isLow ? "text-amber-400" : "text-nexus-400"} />
+        </div>
+        <div>
+          <div className="flex items-baseline gap-1.5">
+            <span className={cn("font-bold text-base leading-none", isLow ? "text-amber-300" : "text-white")}>
+              {userPoints.toLocaleString()}
+            </span>
+            <span className="text-white/40 text-xs">PulsePoints</span>
+          </div>
+          <p className="text-white/35 text-[10px] mt-0.5 leading-none">Each generation uses points once</p>
+        </div>
+      </div>
+      {isLow ? (
+        <Link
+          href="/subscription"
+          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl
+                     bg-amber-500/20 text-amber-300 border border-amber-500/30
+                     hover:bg-amber-500/30 transition-all flex-shrink-0"
+        >
+          <CreditCard size={12} /> Top Up
+        </Link>
+      ) : (
+        <div className="flex items-center gap-1 text-white/25 text-[10px] flex-shrink-0">
+          <TrendingUp size={10} />
+          <span>Good balance</span>
+        </div>
+      )}
+    </motion.div>
+  );
 }
 
 // ─── Copy-code button ─────────────────────────────────────────────────────────
@@ -264,8 +345,8 @@ function HowItWorksBanner({ onDismiss }: { onDismiss: () => void }) {
   const steps = [
     { icon: "🔍", label: "Choose a tool" },
     { icon: "✏️", label: "Describe what you want" },
-    { icon: "⚡", label: "Nexus AI creates it" },
-    { icon: "⬇", label: "Download or copy" },
+    { icon: "⚡", label: "Points deducted once" },
+    { icon: "⬇", label: "Download your output" },
   ];
   return (
     <motion.div
@@ -275,8 +356,11 @@ function HowItWorksBanner({ onDismiss }: { onDismiss: () => void }) {
       className="nexus-card p-4 border border-nexus-500/20 bg-gradient-to-r from-nexus-600/10 to-purple-600/10"
     >
       <div className="flex items-start justify-between gap-2 mb-3">
-        <p className="text-white/80 text-xs font-semibold uppercase tracking-wider">How It Works</p>
-        <button onClick={onDismiss} className="text-white/30 hover:text-white/70 transition-colors">
+        <div>
+          <p className="text-white/80 text-xs font-semibold uppercase tracking-wider">How It Works</p>
+          <p className="text-white/35 text-[10px] mt-0.5">One generation = one point deduction. Failures are auto-refunded.</p>
+        </div>
+        <button onClick={onDismiss} className="text-white/30 hover:text-white/70 transition-colors flex-shrink-0">
           <X size={14} />
         </button>
       </div>
@@ -292,16 +376,18 @@ function HowItWorksBanner({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-// ─── Confirmation modal ───────────────────────────────────────────────────────
+// ─── Confirm modal ────────────────────────────────────────────────────────────
 function ConfirmModal({
   tool, prompt, onConfirm, onCancel, busy, userPoints,
 }: {
   tool: Tool; prompt: string; onConfirm: () => void;
   onCancel: () => void; busy: boolean; userPoints: number;
 }) {
-  const cfg = catCfg(tool.category);
-  const isFree    = tool.point_cost === 0;
-  const canAfford = userPoints >= tool.point_cost;
+  const cfg      = catCfg(tool.category);
+  const isFree   = tool.point_cost === 0;
+  const canAfford= userPoints >= tool.point_cost;
+  const after    = userPoints - tool.point_cost;
+  const outType  = getOutputType(tool.slug);
 
   return (
     <motion.div
@@ -316,79 +402,138 @@ function ConfirmModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="nexus-card overflow-hidden">
-          <div className={cn("h-1.5 w-full bg-gradient-to-r", cfg.color.replace("from-","from-").replace("/20","/60").replace("/10","/40"))} />
+          <div className={cn("h-1.5 w-full bg-gradient-to-r", cfg.color.replace("/20","/60").replace("/10","/40"))} />
           <div className="p-6 space-y-5">
+            {/* Tool header */}
             <div className="flex items-start gap-3">
               <div className={cn("p-2.5 rounded-xl bg-gradient-to-br", cfg.color)}>{cfg.icon}</div>
               <div>
                 <h3 className="text-white font-bold text-lg leading-tight">{tool.name}</h3>
-                <p className="text-white/50 text-sm mt-0.5">{tool.description}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-white/40 text-xs">{outType.emoji} Outputs 1 {outType.noun}</span>
+                </div>
               </div>
             </div>
 
+            {/* Prompt preview */}
             <div className="bg-white/5 border border-white/10 rounded-xl p-3">
               <p className="text-white/40 text-xs uppercase tracking-wider mb-1 font-medium">Your prompt</p>
               <p className="text-white/80 text-sm line-clamp-3">{prompt}</p>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between py-2 border-b border-white/10">
-                <span className="text-white/60 text-sm">Tool cost</span>
-                <span className={cn("font-bold text-sm", isFree ? "text-green-400" : "text-white")}>
-                  {isFree ? "FREE ✓" : `-${tool.point_cost} Pulse Points`}
-                </span>
-              </div>
-              <div className="flex items-center justify-between py-1">
-                <span className="text-white/60 text-sm">Your balance after</span>
-                <span className={cn("font-semibold text-sm", canAfford ? "text-nexus-300" : "text-red-400")}>
-                  {canAfford
-                    ? `${(userPoints - tool.point_cost).toLocaleString()} pts remaining`
-                    : "⚠ Insufficient points"}
-                </span>
-              </div>
+            {/* Points summary box */}
+            <div className={cn(
+              "rounded-xl border p-4 space-y-2",
+              !isFree && !canAfford
+                ? "border-red-500/30 bg-red-500/8"
+                : isFree
+                  ? "border-green-500/25 bg-green-500/8"
+                  : "border-nexus-500/25 bg-nexus-600/8"
+            )}>
+              {isFree ? (
+                <div className="flex items-center gap-2 text-green-300">
+                  <CheckCircle2 size={15} />
+                  <span className="font-semibold text-sm">Free generation — no points needed</span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-white/55 flex items-center gap-1.5">
+                      <Zap size={12} className="text-nexus-400" /> Generation cost
+                    </span>
+                    <span className="font-bold text-white">−{tool.point_cost} pts</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-white/55">Your balance</span>
+                    <span className="font-semibold text-nexus-300">{userPoints.toLocaleString()} pts</span>
+                  </div>
+                  <div className={cn(
+                    "h-px w-full",
+                    canAfford ? "bg-nexus-500/20" : "bg-red-500/20"
+                  )} />
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-white/55">Balance after</span>
+                    <span className={cn("font-bold", canAfford ? "text-nexus-300" : "text-red-400")}>
+                      {canAfford ? `${after.toLocaleString()} pts remaining` : "⚠ Insufficient"}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
 
+            {/* Insufficient points callout */}
             {!canAfford && !isFree && (
-              <div className="flex items-center gap-2.5 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
-                <AlertTriangle size={16} className="text-red-400 flex-shrink-0" />
-                <p className="text-red-300 text-sm">
-                  You need <strong>{(tool.point_cost - userPoints).toLocaleString()} more points</strong>. Recharge to continue.
-                </p>
+              <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                <AlertTriangle size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-red-300 text-sm font-semibold">
+                    You need {(tool.point_cost - userPoints).toLocaleString()} more points
+                  </p>
+                  <p className="text-red-300/60 text-xs mt-0.5">
+                    You have {userPoints} pts — need {tool.point_cost} pts. Top up to continue.
+                  </p>
+                </div>
               </div>
             )}
 
+            {/* Refund notice */}
             {canAfford && !isFree && (
               <div className="flex items-start gap-2.5 bg-nexus-600/10 border border-nexus-500/20 rounded-xl p-3">
                 <Info size={15} className="text-nexus-400 flex-shrink-0 mt-0.5" />
                 <p className="text-nexus-300 text-xs leading-relaxed">
-                  Points are deducted when generation starts. If the AI fails, points are automatically refunded within seconds.
+                  {tool.point_cost} pts deducted once when generation starts.
+                  If the AI fails, points are automatically refunded within seconds.
                 </p>
               </div>
             )}
 
+            {/* Actions */}
             <div className="flex gap-2 pt-1">
               <button onClick={onCancel} className="nexus-btn-outline flex-1 text-sm py-3">Cancel</button>
-              <button
-                onClick={onConfirm}
-                disabled={busy || (!canAfford && !isFree)}
-                className={cn(
-                  "flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
-                  canAfford || isFree
-                    ? "bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-[0.98]"
-                    : "bg-white/5 text-white/30 cursor-not-allowed"
-                )}
-              >
-                {busy ? (
-                  <><Loader2 size={16} className="animate-spin" /> Starting…</>
-                ) : (
-                  <><Sparkles size={16} /> {isFree ? "Generate (Free)" : `Use ${tool.point_cost} pts`}</>
-                )}
-              </button>
+              {!canAfford && !isFree ? (
+                <Link
+                  href="/subscription"
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2
+                             bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90"
+                >
+                  <CreditCard size={15} /> Top Up Points
+                </Link>
+              ) : (
+                <button
+                  onClick={onConfirm}
+                  disabled={busy}
+                  className={cn(
+                    "flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
+                    "bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-[0.98]",
+                    busy && "opacity-70 cursor-not-allowed"
+                  )}
+                >
+                  {busy ? (
+                    <><Loader2 size={16} className="animate-spin" /> Starting…</>
+                  ) : (
+                    <><Sparkles size={16} /> {isFree ? "Generate (Free)" : `Use ${tool.point_cost} pts → Generate`}</>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+// ─── Elapsed timer ────────────────────────────────────────────────────────────
+function ElapsedTimer({ startedAt }: { startedAt: number }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 500);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  return (
+    <span className="text-white/30 text-[10px] flex items-center gap-1 tabular-nums">
+      <Timer size={9} /> {elapsed}s elapsed
+    </span>
   );
 }
 
@@ -413,6 +558,9 @@ function ChatBubble({ msg }: { msg: Message }) {
         )}>
           {msg.content}
         </div>
+        {msg.provider && !isUser && (
+          <p className="text-white/20 text-[9px] px-1">via {msg.provider}</p>
+        )}
       </div>
     </div>
   );
@@ -420,59 +568,92 @@ function ChatBubble({ msg }: { msg: Message }) {
 
 // ─── Tool Card ────────────────────────────────────────────────────────────────
 function ToolCard({ tool, onClick }: { tool: Tool; onClick: () => void }) {
-  const cfg       = catCfg(tool.category);
-  const isFree    = tool.point_cost === 0;
-  const isPremium = tool.point_cost >= 20;
-  const isNew     = NEW_TOOL_SLUGS.has(tool.slug);
-  const meta      = TOOL_META[tool.slug];
+  const cfg     = catCfg(tool.category);
+  const isFree  = tool.point_cost === 0;
+  const isNew   = NEW_TOOL_SLUGS.has(tool.slug);
+  const meta    = TOOL_META[tool.slug];
+  const outType = getOutputType(tool.slug);
 
   return (
     <motion.button
-      whileHover={{ scale: 1.015 }} whileTap={{ scale: 0.98 }}
+      whileHover={{ scale: 1.012 }} whileTap={{ scale: 0.98 }}
       onClick={onClick}
-      className="w-full nexus-card p-4 flex items-center gap-3.5 text-left group hover:border-white/20 transition-all"
+      className="w-full nexus-card p-4 text-left group hover:border-white/20 transition-all"
     >
-      <div className={cn("p-2.5 rounded-xl bg-gradient-to-br flex-shrink-0 transition-transform group-hover:scale-110", cfg.color)}>
-        {cfg.icon}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <p className="text-white font-semibold text-sm truncate">{tool.name}</p>
-          {isNew && (
-            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/25 text-purple-300 border border-purple-500/30 leading-none">
-              NEW
-            </span>
-          )}
-        </div>
-        <p className="text-white/45 text-xs mt-0.5 line-clamp-1 leading-relaxed">{tool.description}</p>
-        {meta && (
-          <p className="text-white/30 text-[10px] mt-0.5 leading-none">{meta.output}</p>
-        )}
-      </div>
-      <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-        <span className={cn(
-          "text-xs font-bold px-2 py-0.5 rounded-full",
-          isFree
-            ? "bg-green-500/20 text-green-300 border border-green-500/30"
-            : isPremium
-              ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-              : "bg-nexus-500/20 text-nexus-300 border border-nexus-500/30"
+      <div className="flex items-start gap-3.5">
+        <div className={cn(
+          "p-2.5 rounded-xl bg-gradient-to-br flex-shrink-0 transition-transform group-hover:scale-110 mt-0.5",
+          cfg.color
         )}>
-          {isFree ? "Free" : isPremium ? `⭐ ${tool.point_cost} pts` : `${tool.point_cost} pts`}
-        </span>
-        {meta && (
-          <span className="text-[9px] text-white/30 flex items-center gap-0.5 font-medium">
-            <Clock size={9} />
-            {meta.time}
-          </span>
-        )}
-        <ChevronRight size={13} className="text-white/25 group-hover:text-white/60 transition-colors" />
+          {cfg.icon}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          {/* Name + badges row */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-white font-semibold text-sm">{tool.name}</p>
+            {isNew && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/25 text-purple-300 border border-purple-500/30 leading-none">
+                NEW
+              </span>
+            )}
+          </div>
+
+          {/* Description */}
+          <p className="text-white/45 text-xs mt-0.5 line-clamp-1 leading-relaxed">{tool.description}</p>
+
+          {/* Meta badges */}
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <PointsBadge pointCost={tool.point_cost} size="xs" />
+            <span className={cn(
+              "text-[9px] px-1.5 py-0.5 rounded-full border leading-none",
+              VIDEO_SLUGS.has(tool.slug) ? "bg-red-500/15 text-red-300 border-red-500/20"
+              : AUDIO_SLUGS.has(tool.slug) ? "bg-green-500/15 text-green-300 border-green-500/20"
+              : IMAGE_SLUGS.has(tool.slug) ? "bg-pink-500/15 text-pink-300 border-pink-500/20"
+              : CODE_SLUGS.has(tool.slug)  ? "bg-lime-500/15 text-lime-300 border-lime-500/20"
+              : "bg-white/8 text-white/40 border-white/10"
+            )}>
+              {outType.emoji} {outType.label}
+            </span>
+            {meta && (
+              <span className="text-[9px] text-white/30 flex items-center gap-0.5 font-medium">
+                <Clock size={9} /> {meta.time}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Use Tool CTA */}
+        <div className="flex-shrink-0 flex flex-col items-end gap-2 self-center">
+          <div className={cn(
+            "flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-xl transition-all",
+            "bg-nexus-600/20 text-nexus-300 border border-nexus-500/30",
+            "group-hover:bg-nexus-600 group-hover:text-white group-hover:border-nexus-500"
+          )}>
+            Use Tool <ChevronRight size={11} />
+          </div>
+        </div>
       </div>
     </motion.button>
   );
 }
 
-// ─── Generation status card ───────────────────────────────────────────────────
+// ─── Status pill ─────────────────────────────────────────────────────────────
+function StatusPill({ status }: { status: Generation["status"] }) {
+  const config = {
+    pending:    { icon: <Clock size={11} />,        label: "Queued",     cls: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30" },
+    processing: { icon: <Loader2 size={11} className="animate-spin" />, label: "Generating", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
+    completed:  { icon: <CheckCircle2 size={11} />, label: "Done",       cls: "bg-green-500/15 text-green-300 border-green-500/30" },
+    failed:     { icon: <AlertTriangle size={11} />,label: "Failed",     cls: "bg-red-500/15 text-red-300 border-red-500/30" },
+  }[status];
+  return (
+    <span className={cn("flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border flex-shrink-0", config.cls)}>
+      {config.icon}{config.label}
+    </span>
+  );
+}
+
+// ─── Generation card ──────────────────────────────────────────────────────────
 function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?: (gen: Generation) => void }) {
   const isImage  = IMAGE_SLUGS.has(gen.tool_slug);
   const isAudio  = AUDIO_SLUGS.has(gen.tool_slug);
@@ -482,8 +663,9 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
   const isWeb    = WEB_SLUGS.has(gen.tool_slug);
   const isJson   = JSON_SLUGS.has(gen.tool_slug);
   const meta     = TOOL_META[gen.tool_slug];
+  const outType  = getOutputType(gen.tool_slug);
 
-  // ── Quiz card renderer ──
+  // ── Quiz renderer ──
   function renderQuiz(text: string) {
     let parsed: { question?: string; options?: string[]; answer?: string }[] | null = null;
     try {
@@ -519,27 +701,43 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
   }
 
   return (
-    <div className="nexus-card p-4 space-y-3">
+    <div className={cn(
+      "nexus-card p-4 space-y-3",
+      gen.status === "failed" && "border-red-500/15"
+    )}>
       {/* Header row */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-white text-sm font-semibold truncate">{gen.tool_name}</span>
-          {isAudio && !isVideo && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-300 border border-green-500/20">🎵 Audio</span>}
-          {isVideo  && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/20">🎬 Video</span>}
-          {isCode   && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-lime-500/15 text-lime-300 border border-lime-500/20">💻 Code</span>}
-          {isWeb    && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/20">🔍 Live</span>}
+          <span className={cn(
+            "text-[9px] px-1.5 py-0.5 rounded-full border leading-none flex-shrink-0",
+            isVideo  ? "bg-red-500/15 text-red-300 border-red-500/20"
+            : isAudio ? "bg-green-500/15 text-green-300 border-green-500/20"
+            : isImage ? "bg-pink-500/15 text-pink-300 border-pink-500/20"
+            : isCode  ? "bg-lime-500/15 text-lime-300 border-lime-500/20"
+            : isWeb   ? "bg-cyan-500/15 text-cyan-300 border-cyan-500/20"
+            : "bg-white/8 text-white/35 border-white/10"
+          )}>
+            {outType.emoji} {outType.noun}
+          </span>
         </div>
-        <StatusPill status={gen.status} />
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-white/25 text-[10px]">{timeAgo(gen.created_at)}</span>
+          <StatusPill status={gen.status} />
+        </div>
       </div>
 
-      {/* ── Processing state — animated skeleton ── */}
+      {/* Prompt preview */}
+      {gen.prompt && (
+        <p className="text-white/30 text-[11px] italic line-clamp-1">"{gen.prompt}"</p>
+      )}
+
+      {/* ── Processing state ── */}
       {gen.status === "processing" && (
         <div className="space-y-3">
-          {/* Indeterminate progress bar */}
           <div className="h-1 w-full rounded-full bg-white/10 overflow-hidden">
             <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-nexus-500 to-purple-500 animate-[progress_1.6s_ease-in-out_infinite]" />
           </div>
-          {/* Skeleton lines */}
           <div className="space-y-2">
             <div className="h-3 rounded-lg bg-white/10 animate-pulse w-3/4" />
             <div className="h-3 rounded-lg bg-white/8 animate-pulse w-1/2" />
@@ -547,7 +745,7 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-nexus-400 text-xs">
               <Loader2 size={12} className="animate-spin" />
-              <span>Creating your {gen.tool_name}…</span>
+              <span>Generating your {outType.noun}…</span>
             </div>
             {meta && (
               <span className="text-white/30 text-[10px] flex items-center gap-1">
@@ -571,24 +769,14 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
             <div className="space-y-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={gen.output_url} alt={gen.tool_name} className="w-full rounded-xl object-cover" />
-              {gen.prompt && (
-                <p className="text-white/30 text-[10px] italic px-1 line-clamp-2">"{gen.prompt}"</p>
-              )}
               <div className="flex gap-2">
-                <a
-                  href={gen.output_url}
-                  download
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
-                >
+                <a href={gen.output_url} download target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
                   <Download size={11} /> Download Image
                 </a>
                 {onRegenerate && (
-                  <button
-                    onClick={() => onRegenerate(gen)}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
-                  >
+                  <button onClick={() => onRegenerate(gen)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
                     <RotateCcw size={11} /> Regenerate
                   </button>
                 )}
@@ -601,20 +789,13 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                 Your browser does not support audio.
               </audio>
               <div className="flex gap-2">
-                <a
-                  href={gen.output_url}
-                  download
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
-                >
+                <a href={gen.output_url} download target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
                   <Download size={11} /> Download Audio
                 </a>
                 {onRegenerate && (
-                  <button
-                    onClick={() => onRegenerate(gen)}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
-                  >
+                  <button onClick={() => onRegenerate(gen)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
                     <RotateCcw size={11} /> Regenerate
                   </button>
                 )}
@@ -627,20 +808,13 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                 Your browser does not support video.
               </video>
               <div className="flex gap-2">
-                <a
-                  href={gen.output_url}
-                  download
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
-                >
+                <a href={gen.output_url} download target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
                   <Download size={11} /> Download Video
                 </a>
                 {onRegenerate && (
-                  <button
-                    onClick={() => onRegenerate(gen)}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
-                  >
+                  <button onClick={() => onRegenerate(gen)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
                     <RotateCcw size={11} /> Regenerate
                   </button>
                 )}
@@ -697,10 +871,8 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                 </pre>
               )}
               {onRegenerate && (
-                <button
-                  onClick={() => onRegenerate(gen)}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
-                >
+                <button onClick={() => onRegenerate(gen)}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
                   <RotateCcw size={11} /> Regenerate
                 </button>
               )}
@@ -714,10 +886,8 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
               <div className="flex gap-2">
                 <CopyButton text={gen.output_text} label="📋 Copy Text" />
                 {onRegenerate && (
-                  <button
-                    onClick={() => onRegenerate(gen)}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
-                  >
+                  <button onClick={() => onRegenerate(gen)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
                     <RotateCcw size={11} /> Regenerate
                   </button>
                 )}
@@ -727,13 +897,38 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
         </div>
       )}
 
-      {/* ── Footer badge row ── */}
+      {/* ── Failed state ── */}
+      {gen.status === "failed" && (
+        <div className="space-y-2">
+          <div className="flex items-start gap-2.5 bg-red-500/8 border border-red-500/20 rounded-xl p-3">
+            <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red-300 text-xs font-semibold">Generation failed</p>
+              {gen.error_message && (
+                <p className="text-red-300/60 text-[11px] mt-0.5 leading-relaxed">{gen.error_message}</p>
+              )}
+            </div>
+          </div>
+          {gen.point_cost !== undefined && gen.point_cost > 0 && (
+            <div className="flex items-center gap-2 text-green-300 text-xs bg-green-500/8 border border-green-500/20 rounded-xl px-3 py-2">
+              <CheckCircle2 size={12} />
+              <span className="font-semibold">Points Refunded ✓</span>
+              <span className="text-green-300/60">{gen.point_cost} pts returned to your balance</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Footer ── */}
       {gen.status === "completed" && (
         <div className="flex items-center justify-between pt-1 border-t border-white/5">
-          <span className="text-white/25 text-[10px]">Generated by Nexus AI</span>
+          <span className="text-white/20 text-[10px]">Generated by Nexus AI</span>
           {gen.point_cost !== undefined && (
-            <span className="text-white/25 text-[10px]">
-              {gen.point_cost === 0 ? "✓ Free" : `Used ${gen.point_cost} pts`}
+            <span className="text-white/25 text-[10px] flex items-center gap-1">
+              <Zap size={9} />
+              {gen.point_cost === 0
+                ? "Free generation"
+                : `${gen.point_cost} pts deducted — 1 ${outType.noun} generated`}
             </span>
           )}
         </div>
@@ -742,21 +937,7 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
   );
 }
 
-function StatusPill({ status }: { status: Generation["status"] }) {
-  const config = {
-    pending:    { icon: <Clock size={11} />,        label: "Queued",     cls: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30" },
-    processing: { icon: <Loader2 size={11} className="animate-spin" />, label: "Generating", cls: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
-    completed:  { icon: <CheckCircle2 size={11} />, label: "Done",       cls: "bg-green-500/15 text-green-300 border-green-500/30" },
-    failed:     { icon: <AlertTriangle size={11} />,label: "Failed",     cls: "bg-red-500/15 text-red-300 border-red-500/30" },
-  }[status];
-  return (
-    <span className={cn("flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border flex-shrink-0", config.cls)}>
-      {config.icon}{config.label}
-    </span>
-  );
-}
-
-// ─── Tool prompt drawer ───────────────────────────────────────────────────────
+// ─── Tool drawer ──────────────────────────────────────────────────────────────
 function ToolDrawer({
   tool, onClose, userPoints, onGenerated,
 }: {
@@ -768,6 +949,8 @@ function ToolDrawer({
   const [selectedLang, setSelectedLang] = useState<string>("en");
   const [showConfirm,  setShowConfirm]  = useState(false);
   const [generating,   setGenerating]   = useState(false);
+  const [genStartedAt, setGenStartedAt] = useState<number | null>(null);
+
   const cfg  = catCfg(tool.category);
   const slug = tool.slug;
   const meta = TOOL_META[slug];
@@ -780,13 +963,14 @@ function ToolDrawer({
   const isPremium = tool.point_cost >= 20;
   const isNew     = NEW_TOOL_SLUGS.has(slug);
   const canAfford = userPoints >= tool.point_cost;
+  const after     = userPoints - tool.point_cost;
+  const outType   = getOutputType(slug);
 
-  // Build final prompt from composed fields
   function buildPrompt(): string {
-    if (slug === "ask-my-photo")    return `${prompt.trim()}|||${secondInput.trim()}`;
-    if (slug === "photo-editor")    return `${prompt.trim()}|||${secondInput.trim()}`;
-    if (slug === "video-cinematic") return `${prompt.trim()}|||${secondInput.trim()}`;
-    if (slug === "narrate-pro")     return `${selectedVoice}:${prompt.trim()}`;
+    if (slug === "ask-my-photo")       return `${prompt.trim()}|||${secondInput.trim()}`;
+    if (slug === "photo-editor")       return `${prompt.trim()}|||${secondInput.trim()}`;
+    if (slug === "video-cinematic")    return `${prompt.trim()}|||${secondInput.trim()}`;
+    if (slug === "narrate-pro")        return `${selectedVoice}:${prompt.trim()}`;
     if (slug === "transcribe-african") return `${selectedLang}:${prompt.trim()}`;
     return prompt.trim();
   }
@@ -802,11 +986,11 @@ function ToolDrawer({
   const handleStart = async () => {
     if (!isValid()) return;
     setGenerating(true);
+    setGenStartedAt(Date.now());
     try {
       const res = await api.generateTool(tool.id, finalPrompt) as { generation_id: string; status: string };
       toast.success("⚡ Generating… check Gallery tab for result.");
       onClose();
-      // Poll for result until complete (max 90 sec)
       if (res?.generation_id) {
         const genId = res.generation_id;
         let attempts = 0;
@@ -821,13 +1005,12 @@ function ToolDrawer({
               if (status.status === "completed") {
                 toast.success(`✅ ${tool.name} ready! Check Gallery.`, { duration: 5000 });
               } else {
-                toast.error(`${tool.name} generation failed. Please try again.`);
+                toast.error(`${tool.name} failed. Points refunded automatically.`);
               }
             }
           } catch { clearInterval(poll); }
         }, 2000);
       } else {
-        // No generation_id returned — just refresh gallery after 5 sec
         setTimeout(() => onGenerated?.(), 5000);
       }
     } catch (e: unknown) {
@@ -848,11 +1031,10 @@ function ToolDrawer({
       <motion.div
         initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
-        className="fixed bottom-0 left-0 right-0 z-40 max-h-[90vh] overflow-y-auto
+        className="fixed bottom-0 left-0 right-0 z-40 max-h-[92vh] overflow-y-auto
                    md:relative md:inset-auto md:max-h-none"
       >
         <div className="nexus-card m-2 md:m-0 overflow-hidden">
-          {/* Gradient top bar */}
           <div className={cn("h-1 w-full bg-gradient-to-r", cfg.color.replace("/20","/70").replace("/10","/50"))} />
 
           <div className="p-5 space-y-4">
@@ -863,16 +1045,16 @@ function ToolDrawer({
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <h3 className="text-white font-bold text-base truncate">{tool.name}</h3>
-                    {isNew    && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/25 text-purple-300 border border-purple-500/30">NEW</span>}
-                    {isFree   && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">FREE</span>}
+                    {isNew     && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/25 text-purple-300 border border-purple-500/30">NEW</span>}
+                    {isFree    && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">FREE</span>}
                     {isPremium && !isFree && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">PREMIUM</span>}
-                    {slug === "ai-photo-pro"   && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-nexus-500/25 text-nexus-300 border border-nexus-500/30">⚡ Premium</span>}
-                    {slug === "ai-photo-max"   && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">🌟 Max Quality</span>}
-                    {slug === "ai-photo-dream" && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30">🎨 Creative</span>}
-                    {slug === "web-search-ai"  && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">🌐 Live internet</span>}
-                    {slug === "video-veo"      && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">Google Veo</span>}
+                    {slug === "web-search-ai"  && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">🌐 Live</span>}
+                    {slug === "video-veo"      && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">Veo</span>}
                   </div>
-                  <p className="text-white/45 text-xs mt-0.5 leading-relaxed">{tool.description}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-white/40 text-xs">{outType.emoji} Outputs 1 {outType.noun}</span>
+                    {meta && <span className="text-white/25 text-[10px] flex items-center gap-0.5"><Clock size={9} /> {meta.time}</span>}
+                  </div>
                 </div>
               </div>
               <button onClick={onClose} className="text-white/40 hover:text-white/80 transition-colors p-1 flex-shrink-0 ml-2">
@@ -880,7 +1062,7 @@ function ToolDrawer({
               </button>
             </div>
 
-            {/* ── Tip box ── */}
+            {/* Tip box */}
             {meta?.tip && (
               <div className="flex items-start gap-2 border border-amber-500/25 bg-amber-500/8 rounded-xl px-3 py-2.5">
                 <span className="text-amber-400 text-sm flex-shrink-0">💡</span>
@@ -890,24 +1072,19 @@ function ToolDrawer({
               </div>
             )}
 
-            {/* ── Language pills (transcribe-african) ── */}
+            {/* Language selector */}
             {isLang && (
               <div>
-                <label className="text-white/60 text-xs font-medium mb-2 block uppercase tracking-wider">
-                  Language
-                </label>
+                <label className="text-white/60 text-xs font-medium mb-2 block uppercase tracking-wider">Language</label>
                 <div className="flex flex-wrap gap-1.5">
                   {LANGUAGES.map((lang) => (
-                    <button
-                      key={lang.code}
-                      onClick={() => setSelectedLang(lang.code)}
+                    <button key={lang.code} onClick={() => setSelectedLang(lang.code)}
                       className={cn(
                         "text-xs px-3 py-1.5 rounded-full border font-medium transition-all",
                         selectedLang === lang.code
                           ? "bg-cyan-600 text-white border-cyan-500"
                           : "text-white/55 border-white/15 hover:border-white/30 hover:text-white/80"
-                      )}
-                    >
+                      )}>
                       {lang.label}
                     </button>
                   ))}
@@ -915,14 +1092,13 @@ function ToolDrawer({
               </div>
             )}
 
-            {/* ── Primary input ── */}
+            {/* Primary input */}
             <div>
               <label className="text-white/60 text-xs font-medium mb-1.5 block uppercase tracking-wider">
                 {isDual ? "Image URL" : isURL ? "Audio / File URL" : isVoice ? "Text to narrate" : "Describe what you want"}
               </label>
               {isURL || isDual ? (
-                <input
-                  type="url"
+                <input type="url"
                   placeholder={PLACEHOLDERS[slug] ?? "Paste URL here…"}
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
@@ -944,7 +1120,7 @@ function ToolDrawer({
               )}
             </div>
 
-            {/* ── Second input (dual-input tools) ── */}
+            {/* Second input */}
             {isDual && (
               <div>
                 <label className="text-white/60 text-xs font-medium mb-1.5 block uppercase tracking-wider">
@@ -960,17 +1136,14 @@ function ToolDrawer({
               </div>
             )}
 
-            {/* ── Photo editor suggestions ── */}
+            {/* Photo editor suggestions */}
             {slug === "photo-editor" && (
               <div>
                 <p className="text-white/35 text-xs mb-1.5">Try these edits:</p>
                 <div className="flex flex-wrap gap-1.5">
                   {["Remove the background","Add sunset lighting","Make it look like a painting","Add dramatic shadows","Convert to black & white"].map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setSecondInput(s)}
-                      className="text-xs px-2.5 py-1 rounded-full border border-white/15 text-white/50 hover:text-white/80 hover:border-white/30 transition-all"
-                    >
+                    <button key={s} onClick={() => setSecondInput(s)}
+                      className="text-xs px-2.5 py-1 rounded-full border border-white/15 text-white/50 hover:text-white/80 hover:border-white/30 transition-all">
                       {s}
                     </button>
                   ))}
@@ -978,24 +1151,19 @@ function ToolDrawer({
               </div>
             )}
 
-            {/* ── Voice selector (narrate-pro) ── */}
+            {/* Voice selector */}
             {isVoice && (
               <div>
-                <label className="text-white/60 text-xs font-medium mb-2 block uppercase tracking-wider">
-                  Choose a voice
-                </label>
+                <label className="text-white/60 text-xs font-medium mb-2 block uppercase tracking-wider">Choose a voice</label>
                 <div className="flex flex-wrap gap-1.5">
                   {VOICES.map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => setSelectedVoice(v)}
+                    <button key={v} onClick={() => setSelectedVoice(v)}
                       className={cn(
                         "text-xs px-3 py-1.5 rounded-full border font-medium transition-all capitalize",
                         selectedVoice === v
                           ? "bg-green-600 text-white border-green-500"
                           : "text-white/55 border-white/15 hover:border-white/30 hover:text-white/80"
-                      )}
-                    >
+                      )}>
                       {v}
                     </button>
                   ))}
@@ -1003,21 +1171,18 @@ function ToolDrawer({
               </div>
             )}
 
-            {/* ── Song / Instrumental genre chips ── */}
+            {/* Genre chips */}
             {(slug === "song-creator" || slug === "instrumental") && (
               <div>
                 <p className="text-white/35 text-xs mb-1.5">
                   {slug === "song-creator"
-                    ? '💡 Tip: Describe genre, mood, tempo — e.g. "upbeat Afrobeats, female vocals, love theme"'
-                    : '💡 Tip: Describe genre and mood — e.g. "calm piano background music for studying"'}
+                    ? '💡 Describe genre, mood, tempo — e.g. "upbeat Afrobeats, female vocals, love theme"'
+                    : '💡 Describe genre and mood — e.g. "calm piano background music for studying"'}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {GENRE_CHIPS.map((g) => (
-                    <button
-                      key={g}
-                      onClick={() => setPrompt((p) => p ? `${p}, ${g}` : g)}
-                      className="text-xs px-2.5 py-1 rounded-full border border-white/15 text-white/50 hover:text-white/80 hover:border-white/30 transition-all"
-                    >
+                    <button key={g} onClick={() => setPrompt((p) => p ? `${p}, ${g}` : g)}
+                      className="text-xs px-2.5 py-1 rounded-full border border-white/15 text-white/50 hover:text-white/80 hover:border-white/30 transition-all">
                       {g}
                     </button>
                   ))}
@@ -1025,58 +1190,106 @@ function ToolDrawer({
               </div>
             )}
 
-            {/* ── Point cost confirmation row ── */}
+            {/* ── Points summary box ── */}
             <div className={cn(
-              "flex items-center gap-2 rounded-xl px-3 py-2 border text-xs",
+              "rounded-xl border p-3 space-y-1.5",
               isFree
-                ? "border-green-500/25 bg-green-500/8 text-green-300"
+                ? "border-green-500/25 bg-green-500/8"
                 : canAfford
-                  ? "border-white/10 bg-white/5 text-white/55"
-                  : "border-red-500/30 bg-red-500/8 text-red-400"
+                  ? "border-nexus-500/20 bg-nexus-600/8"
+                  : "border-red-500/30 bg-red-500/8"
             )}>
               {isFree ? (
-                <><CheckCircle2 size={13} className="flex-shrink-0" /> ✓ Free — no points needed</>
-              ) : canAfford ? (
-                <><Sparkles size={13} className="flex-shrink-0 text-nexus-400" />
-                  This will use <span className="font-bold text-white mx-1">{tool.point_cost}</span> Pulse Points from your{" "}
-                  <span className="font-bold text-nexus-300 ml-1">{userPoints.toLocaleString()} available</span>
-                </>
+                <div className="flex items-center gap-2 text-green-300 text-sm">
+                  <CheckCircle2 size={13} className="flex-shrink-0" />
+                  <span className="font-semibold">Free generation — no points used</span>
+                </div>
               ) : (
-                <><AlertTriangle size={13} className="flex-shrink-0" />
-                  You need <span className="font-bold mx-1">{(tool.point_cost - userPoints).toLocaleString()}</span> more points — recharge to continue
+                <>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/50 flex items-center gap-1.5">
+                      <Zap size={11} className="text-nexus-400" /> Generation cost
+                    </span>
+                    <span className="font-bold text-white">{tool.point_cost} pts per generation</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/50">Your balance</span>
+                    <span className="font-semibold text-nexus-300">{userPoints.toLocaleString()} pts</span>
+                  </div>
+                  <div className={cn("h-px w-full", canAfford ? "bg-nexus-500/20" : "bg-red-500/20")} />
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/50">After generation</span>
+                    <span className={cn("font-bold", canAfford ? "text-nexus-300" : "text-red-400")}>
+                      {canAfford ? `${after.toLocaleString()} pts remaining` : `Need ${(tool.point_cost - userPoints).toLocaleString()} more pts`}
+                    </span>
+                  </div>
+                  {!canAfford && (
+                    <p className="text-red-300/70 text-[11px] pt-0.5">
+                      You have {userPoints} pts. Need {tool.point_cost} pts. Top up to continue.
+                    </p>
+                  )}
                 </>
               )}
             </div>
 
-            {/* ── CTA button ── */}
-            <button
-              onClick={() => setShowConfirm(true)}
-              disabled={!isValid()}
-              className={cn(
-                "w-full py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm transition-all",
-                isValid()
-                  ? "bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-nexus-900/30"
-                  : "bg-white/5 text-white/20 cursor-not-allowed"
-              )}
-            >
-              <Sparkles size={15} />
-              {isFree ? "Generate for free" : `Review & use ${tool.point_cost} pts`}
-            </button>
+            {/* CTA button */}
+            {canAfford || isFree ? (
+              <button
+                onClick={() => setShowConfirm(true)}
+                disabled={!isValid()}
+                className={cn(
+                  "w-full py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm transition-all",
+                  isValid()
+                    ? "bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-nexus-900/30"
+                    : "bg-white/5 text-white/20 cursor-not-allowed"
+                )}
+              >
+                <Sparkles size={15} />
+                {isFree ? "Generate for free →" : `Generate — uses ${tool.point_cost} pts →`}
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-red-400 text-xs bg-red-500/8 border border-red-500/20 rounded-xl px-3 py-2">
+                  <AlertTriangle size={13} className="flex-shrink-0" />
+                  <span>You need {tool.point_cost} pts. You have {userPoints} pts.</span>
+                </div>
+                <Link
+                  href="/subscription"
+                  className="w-full py-3.5 rounded-xl font-semibold flex items-center justify-center gap-2 text-sm
+                             bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90 transition-all"
+                >
+                  <CreditCard size={15} /> Top Up to Continue
+                </Link>
+              </div>
+            )}
 
-            {/* ── Generation time + output type row ── */}
-            {meta && (
+            {/* Loading state with elapsed time */}
+            {generating && genStartedAt && (
+              <motion.div
+                initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+                className="flex items-center justify-between bg-nexus-600/10 border border-nexus-500/20 rounded-xl px-4 py-3"
+              >
+                <div className="flex items-center gap-2 text-nexus-300 text-sm">
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Generating your {outType.noun}…</span>
+                </div>
+                <ElapsedTimer startedAt={genStartedAt} />
+              </motion.div>
+            )}
+
+            {/* Time + output row */}
+            {meta && !generating && (
               <div className="flex items-center justify-between px-1">
-                <span className="text-white/30 text-[11px] flex items-center gap-1">
+                <span className="text-white/25 text-[11px] flex items-center gap-1">
                   <Clock size={10} /> Usually ready in {meta.time}
                 </span>
-                <span className="text-white/30 text-[11px]">{getOutputLabel(slug)}</span>
+                <span className="text-white/25 text-[11px]">{outType.emoji} {outType.label}</span>
               </div>
             )}
           </div>
         </div>
       </motion.div>
 
-      {/* Confirm modal sits above drawer */}
       <AnimatePresence>
         {showConfirm && (
           <ConfirmModal
@@ -1105,25 +1318,25 @@ export default function StudioPage() {
 
   const tools   = toolsData?.tools   ?? [];
   const gallery = galleryData?.items ?? [];
-  const recentGens = gallery.slice(0, 6);
+  const recentGens = gallery.slice(0, 8);
 
-  const [activeTab,       setActiveTab]       = useState<"chat" | "tools" | "gallery">("chat");
-  const [messages,        setMessages]        = useState<Message[]>([{
+  const [activeTab,      setActiveTab]      = useState<"chat" | "tools" | "gallery">("chat");
+  const [messages,       setMessages]       = useState<Message[]>([{
     role: "assistant",
     content: "Hey! 👋 I'm Nexus AI — your personal AI assistant. I can help with business ideas, explain anything, draft content, and more. What's on your mind?",
     ts: Date.now(),
   }]);
-  const [input,           setInput]           = useState("");
-  const [sending,         setSending]         = useState(false);
-  const [sessionId]                           = useState(() => `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`);
-  const [selectedTool,    setSelectedTool]    = useState<Tool | null>(null);
-  const [searchQuery,     setSearchQuery]     = useState("");
-  const [activeCategory,  setActiveCategory]  = useState<string | null>(null);
-  const [introDismissed,  setIntroDismissed]  = useState<boolean>(true); // start true, check localStorage
+  const [input,          setInput]          = useState("");
+  const [sending,        setSending]        = useState(false);
+  const [sessionId]                         = useState(() => `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+  const [selectedTool,   setSelectedTool]   = useState<Tool | null>(null);
+  const [searchQuery,    setSearchQuery]    = useState("");
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [introDismissed, setIntroDismissed] = useState<boolean>(true);
+  const [chatUsage,      setChatUsage]      = useState<{ used: number; limit: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef       = useRef<HTMLInputElement>(null);
 
-  // Check localStorage for intro banner
   useEffect(() => {
     try {
       const dismissed = localStorage.getItem("nexus_studio_intro_dismissed");
@@ -1131,11 +1344,19 @@ export default function StudioPage() {
     } catch { /* localStorage may not be available */ }
   }, []);
 
+  // Fetch chat usage on mount
+  useEffect(() => {
+    api.getChatUsage().then((res) => {
+      const r = res as { used?: number; limit?: number };
+      if (r?.used !== undefined && r?.limit !== undefined) {
+        setChatUsage({ used: r.used, limit: r.limit });
+      }
+    }).catch(() => { /* silent */ });
+  }, []);
+
   const handleDismissIntro = useCallback(() => {
     setIntroDismissed(true);
-    try {
-      localStorage.setItem("nexus_studio_intro_dismissed", "true");
-    } catch { /* ignore */ }
+    try { localStorage.setItem("nexus_studio_intro_dismissed", "true"); } catch { /* ignore */ }
   }, []);
 
   const categories    = [...new Set(tools.map((t) => t.category))];
@@ -1165,6 +1386,8 @@ export default function StudioPage() {
     try {
       const resp = await api.sendChat(msg, sessionId) as { response: string; provider?: string };
       setMessages((m) => [...m, { role: "assistant", content: resp.response, provider: resp.provider, ts: Date.now() }]);
+      // Update usage counter
+      setChatUsage((prev) => prev ? { ...prev, used: prev.used + 1 } : null);
     } catch {
       setMessages((m) => [...m, {
         role: "assistant",
@@ -1185,6 +1408,9 @@ export default function StudioPage() {
   }, []);
 
   const pendingCount = gallery.filter((g) => ["pending","processing"].includes(g.status)).length;
+
+  // Suppress unused variable warning
+  void user;
 
   return (
     <AppShell>
@@ -1209,13 +1435,12 @@ export default function StudioPage() {
               <p className="text-white/40 text-xs">{tools.length} AI-powered tools</p>
             </div>
           </div>
-          <div className="flex flex-col items-end">
-            <span className="text-nexus-300 font-bold text-sm">{userPoints.toLocaleString()}</span>
-            <span className="text-white/35 text-[10px] uppercase tracking-wider">Pulse pts</span>
-          </div>
         </div>
 
-        {/* ── How It Works banner (first visit only) ── */}
+        {/* ── Wallet Bar ── */}
+        <WalletBar userPoints={userPoints} />
+
+        {/* ── How It Works banner ── */}
         <AnimatePresence>
           {!introDismissed && (
             <HowItWorksBanner onDismiss={handleDismissIntro} />
@@ -1258,7 +1483,26 @@ export default function StudioPage() {
           {/* ── CHAT ── */}
           {activeTab === "chat" && (
             <motion.div key="chat" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-              <div className="nexus-card h-[420px] overflow-y-auto p-4 space-y-4 scroll-smooth">
+
+              {/* Chat header bar */}
+              <div className="flex items-center justify-between mb-2 px-1">
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-green-500/15 text-green-300 border border-green-500/25">
+                    <CheckCircle2 size={11} /> Free
+                  </span>
+                  <span className="text-white/30 text-xs">No points used</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  {chatUsage && (
+                    <span className="text-white/30 text-[10px] flex items-center gap-1">
+                      <MessageSquare size={9} />
+                      {chatUsage.used}/{chatUsage.limit} msgs today
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="nexus-card h-[400px] overflow-y-auto p-4 space-y-4 scroll-smooth">
                 {messages.map((msg, i) => <ChatBubble key={i} msg={msg} />)}
                 {sending && (
                   <div className="flex gap-2.5">
@@ -1300,7 +1544,7 @@ export default function StudioPage() {
               </div>
               <div className="flex items-center justify-between mt-2 px-0.5">
                 <p className="text-white/25 text-[10px]">
-                  💬 Nexus AI Chat is always free · No points used
+                  💬 Nexus Chat — always free · Powered by Groq / Gemini
                 </p>
                 <button
                   onClick={handleClearChat}
@@ -1315,6 +1559,8 @@ export default function StudioPage() {
           {/* ── TOOLS ── */}
           {activeTab === "tools" && (
             <motion.div key="tools" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+
+              {/* Search + category filters */}
               <div className="space-y-2.5">
                 <input
                   value={searchQuery}
@@ -1353,14 +1599,23 @@ export default function StudioPage() {
                 </div>
               </div>
 
+              {/* Per-generation model clarity banner */}
+              <div className="flex items-center gap-2.5 nexus-card p-3 border-nexus-500/20">
+                <Zap size={13} className="text-nexus-400 flex-shrink-0" />
+                <p className="text-white/45 text-xs leading-relaxed">
+                  <span className="text-white/70 font-semibold">Per-generation pricing:</span>{" "}
+                  Points are deducted once each time you click Generate — you get 1 output.
+                  If generation fails, points are automatically refunded.
+                </p>
+              </div>
+
               {toolsLoading ? (
                 <div className="space-y-2">
                   {[...Array(6)].map((_, i) => (
-                    <div key={i} className="nexus-card h-16 animate-pulse opacity-50" />
+                    <div key={i} className="nexus-card h-20 animate-pulse opacity-50" />
                   ))}
                 </div>
               ) : tools.length === 0 ? (
-                /* ── Empty state: no tools loaded at all ── */
                 <div className="text-center py-16 nexus-card space-y-4">
                   <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-nexus-600/20 to-purple-600/20 border border-white/10 flex items-center justify-center mx-auto">
                     <Sparkles size={28} className="text-nexus-400" />
@@ -1377,7 +1632,6 @@ export default function StudioPage() {
                   </button>
                 </div>
               ) : Object.keys(groupedTools).length === 0 ? (
-                /* ── Empty state: search / filter returns nothing ── */
                 <div className="text-center py-12 text-white/30 nexus-card space-y-3">
                   <Wand2 size={32} className="mx-auto mb-3 opacity-40" />
                   <p className="text-sm font-medium">No tools match your search</p>
@@ -1408,13 +1662,6 @@ export default function StudioPage() {
                   );
                 })
               )}
-
-              <div className="flex items-center gap-2 nexus-card p-3">
-                <Info size={13} className="text-nexus-400 flex-shrink-0" />
-                <p className="text-white/40 text-xs">
-                  Points are only deducted after you confirm. Failed generations are automatically refunded.
-                </p>
-              </div>
             </motion.div>
           )}
 
@@ -1422,8 +1669,11 @@ export default function StudioPage() {
           {activeTab === "gallery" && (
             <motion.div key="gallery" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-white/60 text-sm">Recent generations</p>
-                <button onClick={() => mutateGallery()} className="text-white/30 hover:text-white/60 transition-colors">
+                <div>
+                  <p className="text-white/70 text-sm font-semibold">Your generations</p>
+                  <p className="text-white/30 text-[10px]">Points deducted per generation · Failed items auto-refunded</p>
+                </div>
+                <button onClick={() => mutateGallery()} className="text-white/30 hover:text-white/60 transition-colors p-1">
                   <RefreshCw size={14} />
                 </button>
               </div>
@@ -1434,7 +1684,7 @@ export default function StudioPage() {
                     <Play size={24} className="text-white/30" />
                   </div>
                   <p className="text-white/40 text-sm font-medium">No generations yet</p>
-                  <p className="text-white/25 text-xs">Use a tool above to create something amazing</p>
+                  <p className="text-white/25 text-xs">Use a tool to create something amazing</p>
                   <button
                     onClick={() => setActiveTab("tools")}
                     className="nexus-btn-primary text-sm px-5 py-2.5 mx-auto flex items-center gap-1.5"
@@ -1443,10 +1693,19 @@ export default function StudioPage() {
                   </button>
                 </div>
               ) : (
-                recentGens.map((gen) => <GenerationCard key={gen.id} gen={gen} />)
+                recentGens.map((gen) => (
+                  <GenerationCard
+                    key={gen.id}
+                    gen={gen}
+                    onRegenerate={(g) => {
+                      const tool = tools.find((t) => t.slug === g.tool_slug);
+                      if (tool) { setSelectedTool(tool); setActiveTab("tools"); }
+                    }}
+                  />
+                ))
               )}
 
-              {gallery.length > 6 && (
+              {gallery.length > 8 && (
                 <a href="/studio/gallery" className="nexus-btn-outline w-full py-3 text-sm flex items-center justify-center gap-2">
                   View all {gallery.length} generations <ExternalLink size={13} />
                 </a>

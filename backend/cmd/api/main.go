@@ -107,7 +107,7 @@ func main() {
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
 	// kbWorker no longer needs a back-link — orch is injected directly
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
-	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc, rdb)
+	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc, studioSvc, rdb)
 	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, cfg)
 	// ─── WebSocket Hub (Regional Wars real-time leaderboard) ────
 	leaderboardHub := handlers.NewLeaderboardHub()
@@ -204,6 +204,11 @@ func main() {
 	mux.Handle("PUT    /api/v1/admin/prize-pool/{id}",    adminAuth(http.HandlerFunc(adminH.UpdatePrize)))
 	mux.Handle("GET    /api/v1/admin/studio-tools",       adminAuth(http.HandlerFunc(adminH.GetStudioTools)))
 	mux.Handle("PUT    /api/v1/admin/studio-tools/{id}",  adminAuth(http.HandlerFunc(adminH.UpdateStudioTool)))
+	mux.Handle("POST   /api/v1/admin/studio-tools",              adminAuth(http.HandlerFunc(adminH.CreateStudioTool)))
+	mux.Handle("DELETE /api/v1/admin/studio-tools/{id}",         adminAuth(http.HandlerFunc(adminH.DisableStudioTool)))
+	mux.Handle("GET    /api/v1/admin/studio-tools/stats",        adminAuth(http.HandlerFunc(adminH.GetStudioToolStats)))
+	mux.Handle("GET    /api/v1/admin/studio-tools/{id}/errors",  adminAuth(http.HandlerFunc(adminH.GetStudioToolErrors)))
+	mux.Handle("GET    /api/v1/admin/studio-generations",        adminAuth(http.HandlerFunc(adminH.GetStudioGenerations)))
 	mux.Handle("GET    /api/v1/admin/users",              adminAuth(http.HandlerFunc(adminH.ListUsers)))
 	mux.Handle("GET    /api/v1/admin/regional-wars",      adminAuth(http.HandlerFunc(adminH.GetRegionalWars)))
 	mux.Handle("POST /api/v1/admin/wars/resolve",          adminAuth(http.HandlerFunc(warsH.AdminResolve)))
@@ -233,8 +238,7 @@ func main() {
 	// User management
 	mux.Handle("GET    /api/v1/admin/users/{id}",             adminAuth(http.HandlerFunc(adminH.GetUser)))
 	mux.Handle("PUT    /api/v1/admin/users/{id}/suspend",     adminAuth(http.HandlerFunc(adminH.SuspendUser)))
-	// Studio tool enable/reprice
-	mux.Handle("PUT    /api/v1/admin/studio-tools/{key}",     adminAuth(http.HandlerFunc(adminH.UpdateStudioTool)))
+	// Studio tool enable/reprice — handled by PUT /api/v1/admin/studio-tools/{id} above
 	// Notification broadcast
 	mux.Handle("POST   /api/v1/admin/notifications/broadcast", adminAuth(http.HandlerFunc(adminH.BroadcastNotification)))
 	mux.Handle("GET    /api/v1/admin/notifications/broadcasts",adminAuth(http.HandlerFunc(adminH.GetBroadcastHistory)))

@@ -72,4 +72,33 @@ type StudioRepository interface {
 	// ListPendingGenerations returns jobs stuck in pending/processing state
 	// older than staleSeconds seconds (for watchdog/retry logic).
 	ListPendingGenerations(ctx context.Context, staleSeconds int, limit int) ([]entities.AIGeneration, error)
+
+	// ─── Admin analytics ──────────────────────────────────────────────────────
+
+	// GetToolErrors returns recent failed generations for a specific tool.
+	GetToolErrors(ctx context.Context, toolID uuid.UUID, limit int) ([]entities.AIGeneration, error)
+
+	// GetToolStats returns 30-day aggregated stats per tool.
+	GetToolStats(ctx context.Context) ([]ToolStats, error)
+
+	// ListGenerations returns paginated generations with optional filters.
+	ListGenerations(ctx context.Context, filter GenerationFilter) ([]entities.AIGeneration, int, error)
+}
+
+// ToolStats holds 30-day aggregated usage figures for a single studio tool.
+type ToolStats struct {
+	ToolID         string `json:"tool_id"`
+	ToolSlug       string `json:"tool_slug"`
+	Total          int    `json:"total"`
+	Completed      int    `json:"completed"`
+	Failed         int    `json:"failed"`
+	PointsConsumed int64  `json:"points_consumed"`
+}
+
+// GenerationFilter carries optional predicates for listing ai_generations.
+type GenerationFilter struct {
+	Status   string
+	ToolSlug string
+	Limit    int
+	Offset   int
 }
