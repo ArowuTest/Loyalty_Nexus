@@ -620,7 +620,7 @@ func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*s
 	if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 		voiceID := os.Getenv("ELEVENLABS_VOICE_ID")
 		if voiceID == "" {
-			voiceID = "21m00Tcm4TlvDq8ikWAM" // Rachel
+			voiceID = "EXAVITQu4vr4xnSDxMaL" // Sarah - premade voice, accessible on free tier
 		}
 		audioURL, err := o.callElevenLabsTTS(ctx, el11Key, voiceID, text)
 		if err == nil {
@@ -814,7 +814,7 @@ func (o *AIStudioOrchestrator) callGeminiFlash(ctx context.Context, systemPrompt
 		return "", fmt.Errorf("GEMINI_API_KEY not configured")
 	}
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", apiKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
 	payload := map[string]interface{}{
 		"system_instruction": map[string]interface{}{
 			"parts": []map[string]string{{"text": systemPrompt}},
@@ -878,7 +878,7 @@ func (o *AIStudioOrchestrator) callGroqLlama4(ctx context.Context, systemPrompt,
 	}
 
 	payload := map[string]interface{}{
-		"model": "llama-4-scout-17b-16e-instruct",
+		"model": "meta-llama/llama-4-scout-17b-16e-instruct",
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
@@ -1266,8 +1266,10 @@ func (o *AIStudioOrchestrator) callElevenLabsTTS(ctx context.Context, apiKey, vo
 func (o *AIStudioOrchestrator) callHuggingFaceTTS(ctx context.Context, hfKey, text string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"inputs": text})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		// HF deprecated api-inference.huggingface.co (410 Gone) — use router instead.
-	"https://router.huggingface.co/hf-inference/models/suno/bark",
+		// suno/bark is NOT available on HF serverless inference (no providers).
+	// Fallback to Google Cloud TTS via callGoogleCloudTTS if key is set, otherwise fail fast.
+	// This function is kept as a stub — it always returns an error so dispatchTTS skips it.
+	"https://router.huggingface.co/hf-inference/models/suno/bark", // intentionally unsupported — will 404
 		bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -1294,6 +1296,7 @@ func (o *AIStudioOrchestrator) callAssemblyAI(ctx context.Context, apiKey, audio
 	submitPayload := map[string]interface{}{
 		"audio_url":     audioURL,
 		"language_code": "en",
+		"speech_models": []string{"universal-2"}, // required since AssemblyAI deprecated speech_model (singular)
 	}
 	body, _ := json.Marshal(submitPayload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
