@@ -455,15 +455,25 @@ func (h *USSDHandler) processMenu(ctx context.Context, session *entities.USSDSes
 		if h.knowledgeSvc == nil {
 			return "END AI Knowledge Tools are currently unavailable. Please try again later."
 		}
-		// Sub-menu: pick a tool
+		// Sub-menu: pick a tool (REQ-6.4: show point cost per tool)
 		if len(parts) == 1 {
 			tools, toolErr := h.knowledgeSvc.ListKnowledgeTools(ctx)
 			if toolErr != nil || len(tools) == 0 {
 				return "END AI Knowledge Tools are currently unavailable."
 			}
-			menu := "CON 🤖 AI Knowledge Tools\nEnter a topic via SMS!\n\n"
+			// REQ-6.4: Read SMS number from ConfigManager for the instruction line
+			smsSendTo := h.cfg.GetString("ussd_sms_number", "")
+			smsLine := ""
+			if smsSendTo != "" {
+				smsLine = "\nSend topic via SMS to " + smsSendTo
+			}
+			menu := "CON 🤖 AI Knowledge Tools" + smsLine + "\n\n"
 			for i, t := range tools {
-				menu += fmt.Sprintf("%d. %s\n", i+1, t.Label)
+				if t.PointCost > 0 {
+					menu += fmt.Sprintf("%d. %s (%d pts)\n", i+1, t.Label, t.PointCost)
+				} else {
+					menu += fmt.Sprintf("%d. %s\n", i+1, t.Label)
+				}
 			}
 			menu += "0. Back"
 			return menu

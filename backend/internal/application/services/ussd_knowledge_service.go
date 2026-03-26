@@ -64,8 +64,9 @@ func NewUSSDKnowledgeService(
 
 // KnowledgeToolOption describes a knowledge tool for the USSD menu.
 type KnowledgeToolOption struct {
-	Slug  string
-	Label string
+	Slug      string
+	Label     string
+	PointCost int64 // Pulse Points required to use this tool
 }
 
 // ListKnowledgeTools returns the three knowledge tools available via USSD,
@@ -82,9 +83,14 @@ func (s *USSDKnowledgeService) ListKnowledgeTools(ctx context.Context) ([]Knowle
 		if err != nil || tool == nil || !tool.IsActive {
 			continue
 		}
+		// Read point cost from ConfigManager key e.g. "studio_cost_study-guide"
+		// Falls back to the tool's own PointCost field if set, else 0.
+		cfgKey := "studio_cost_" + slug
+		pointCost := s.cfg.GetInt64(cfgKey, tool.PointCost)
 		options = append(options, KnowledgeToolOption{
-			Slug:  slug,
-			Label: labels[slug],
+			Slug:      slug,
+			Label:     labels[slug],
+			PointCost: pointCost,
 		})
 	}
 	return options, nil

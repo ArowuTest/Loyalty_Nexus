@@ -171,9 +171,29 @@ func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uu
 		bgColour = "rgb(95, 114, 249)"
 	}
 
-	streakLabel := fmt.Sprintf("🔥 %d days", passport.StreakCount)
+	// Spec §9.1: Secondary field format is "Day 5 🔥"
+	streakLabel := fmt.Sprintf("Day %d 🔥", passport.StreakCount)
 	if passport.StreakCount == 0 {
-		streakLabel = "No streak"
+		streakLabel = "No streak yet"
+	}
+
+	// Spec §9.1: "₦650 to next spin" — read shortcode from env (zero-hardcoding via APP_BASE_URL)
+	nextSpinLabel := fmt.Sprintf("₦%d to next spin", passport.AmountToNextSpin)
+	if passport.AmountToNextSpin == 0 {
+		nextSpinLabel = "Spin credit ready! 🎡"
+	}
+
+	// Spec §9.1: Member Since date for auxiliary field
+	memberSince := passport.MemberSince.Format("Jan 2006")
+
+	// Spec §9.1: USSD shortcode for back of pass — read from env, fallback to default
+	ussdCode := os.Getenv("USSD_SHORTCODE")
+	if ussdCode == "" {
+		ussdCode = "*384#"
+	}
+	appBaseURL := os.Getenv("APP_BASE_URL")
+	if appBaseURL == "" {
+		appBaseURL = "https://app.loyaltynexus.ng"
 	}
 
 	// REQ-4.4: override background to urgent red-orange when streak is expiring.
@@ -209,16 +229,22 @@ func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uu
 				{"key": "points", "label": "PULSE POINTS", "value": passport.PulsePoints,
 					"numberStyle": "PKNumberStyleDecimal"},
 			},
+			// Spec §9.1: Secondary — Streak + Next Spin Progress
 			"secondaryFields": []map[string]interface{}{
-				{"key": "streak",       "label": "STREAK",       "value": streakLabel},
-				{"key": "spin_credits", "label": "SPIN CREDITS", "value": passport.SpinCredits},
+				{"key": "streak",    "label": "RECHARGE STREAK", "value": streakLabel},
+				{"key": "next_spin", "label": "NEXT SPIN",       "value": nextSpinLabel},
 			},
-			"auxiliaryFields": buildAppleAuxFields(isStreakExpiring),
+			// Spec §9.1: Auxiliary — Tier + Member Since + optional streak expiry alert
+			"auxiliaryFields": buildAppleAuxFields(isStreakExpiring, passport.Tier, memberSince),
+			// Spec §9.1: Back — account, next tier, points history link, USSD code, support
 			"backFields": []map[string]interface{}{
-				{"key": "name",    "label": "ACCOUNT",   "value": displayName},
-				{"key": "next",    "label": "NEXT TIER",  "value": fmt.Sprintf("%d pts to %s", passport.PointsToNext, passport.NextTier)},
-				{"key": "support", "label": "SUPPORT",    "value": "support@loyaltynexus.ng"},
-				{"key": "info",    "label": "ABOUT",
+				{"key": "account",  "label": "ACCOUNT",          "value": displayName},
+				{"key": "next",     "label": "NEXT TIER",         "value": fmt.Sprintf("%d pts to %s", passport.PointsToNext, passport.NextTier)},
+				{"key": "history",  "label": "POINTS HISTORY",   "value": appBaseURL + "/passport",
+					"attributedValue": "<a href='" + appBaseURL + "/passport'>View full history</a>"},
+				{"key": "ussd",     "label": "FEATURE PHONE",    "value": "Dial " + ussdCode + " to access via USSD"},
+				{"key": "support",  "label": "SUPPORT",           "value": "support@loyaltynexus.ng"},
+				{"key": "about",    "label": "ABOUT",
 					"value": "Earn 1 Pulse Point per \u20a6200 recharge. Spin the wheel, access AI Studio, and compete in Regional Wars!"},
 			},
 		},
@@ -284,19 +310,21 @@ func buildUnsignedPKPass(passJSON []byte) ([]byte, error) {
 }
 
 // buildAppleAuxFields returns the auxiliaryFields for the Apple PKPass storeCard.
+// Spec §9.1: Auxiliary Fields = Subscription Tier + Member Since date.
 // When isStreakExpiring is true, a prominent "⚠️ STREAK EXPIRING SOON!" field is
 // prepended to satisfy REQ-4.4.
-func buildAppleAuxFields(isStreakExpiring bool) []map[string]interface{} {
+func buildAppleAuxFields(isStreakExpiring bool, tier, memberSince string) []map[string]interface{} {
 	fields := []map[string]interface{}{
-		{"key": "badges",    "label": "BADGES EARNED", "value": ""},
+		{"key": "tier_aux",    "label": "TIER",         "value": tier},
+		{"key": "member_since", "label": "MEMBER SINCE", "value": memberSince},
 	}
 	if isStreakExpiring {
 		alert := map[string]interface{}{
-			"key":             "expiry_alert",
-			"label":           "⚠️ ALERT",
-			"value":           "STREAK EXPIRING SOON!",
-			"textAlignment":   "PKTextAlignmentCenter",
-			"changeMessage":   "Your streak expires soon! %@",
+			"key":           "expiry_alert",
+			"label":         "⚠️ ALERT",
+			"value":         "STREAK EXPIRING SOON!",
+			"textAlignment": "PKTextAlignmentCenter",
+			"changeMessage": "Your streak expires soon! %@",
 		}
 		fields = append([]map[string]interface{}{alert}, fields...)
 	}
