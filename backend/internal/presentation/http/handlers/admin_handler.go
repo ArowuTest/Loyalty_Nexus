@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -36,6 +37,7 @@ type AdminHandler struct {
 	claimSvc      *services.AdminClaimService
 	csvSvc        *services.MTNPushCSVService  // nil-safe; set via WithCSVService
 	bonusPulseSvc *services.BonusPulseService  // nil-safe; set via WithBonusPulseService
+	notifySvc     *services.NotificationService // for winner SMS notifications
 	rdb           *redis.Client
 }
 
@@ -67,6 +69,12 @@ func NewAdminHandler(
 
 // WithCSVService attaches the MTN push CSV upload service to the handler.
 // Called after construction in main.go to avoid changing the constructor signature.
+// WithNotificationService injects the notification service for winner SMS.
+func (h *AdminHandler) WithNotificationService(n *services.NotificationService) *AdminHandler {
+	h.notifySvc = n
+	return h
+}
+
 func (h *AdminHandler) WithCSVService(svc *services.MTNPushCSVService) *AdminHandler {
 	h.csvSvc = svc
 	return h
@@ -508,7 +516,56 @@ func (h *AdminHandler) ExecuteDraw(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "execution failed: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Notify winners asynchronously (non-blocking — draw execution already committed)
+	if h.notifySvc != nil {
+		go h.notifyDrawWinners(drawID)
+	}
+
 	jsonOK(w, map[string]string{"status": "completed"})
+}
+
+// notifyDrawWinners fetches the draw's winners from DB and sends an SMS to each.
+func (h *AdminHandler) notifyDrawWinners(drawID uuid.UUID) {
+	ctx := context.Background()
+	winners, err := h.drawSvc.GetDrawWinners(ctx, drawID)
+	if err != nil {
+		log.Printf("[Draw] notifyDrawWinners: failed to fetch winners for %s: %v", drawID, err)
+		return
+	}
+	for _, w := range winners {
+		if w.IsRunnerUp || w.PhoneNumber == "" {
+			continue
+		}
+		msg := fmt.Sprintf(
+			"🎉 Congratulations! You won the Loyalty Nexus draw! "+
+				"Prize: ₦%s. Your winnings will be disbursed within 24 hours. "+
+				"Ref: %s",
+			formatNaira(int64(w.PrizeValue * 100)),
+			drawID.String()[:8],
+		)
+		if err := h.notifySvc.SendSMS(ctx, w.PhoneNumber, msg); err != nil {
+			log.Printf("[Draw] SMS notification failed for %s: %v", w.PhoneNumber, err)
+		}
+	}
+	log.Printf("[Draw] ✅ Notified %d winners for draw %s", len(winners), drawID)
+}
+
+func formatNaira(kobo int64) string {
+	naira := kobo / 100
+	if naira == 0 {
+		return "0"
+	}
+	s := fmt.Sprintf("%d", naira)
+	// Insert commas every 3 digits from right
+	var result []byte
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, c)
+	}
+	return string(result)
 }
 
 func (h *AdminHandler) GetDrawWinners(w http.ResponseWriter, r *http.Request) {

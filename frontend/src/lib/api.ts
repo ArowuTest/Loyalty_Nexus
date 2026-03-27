@@ -216,6 +216,41 @@ class APIClient {
   getDraws() { return this.request("GET", "/draws"); }
   getDrawWinners(id: string) { return this.request("GET", `/draws/${id}/winners`); }
 
+  // ── Regional Wars ─────────────────────────────────────────────────────────
+  getWarsLeaderboard(limit = 37) {
+    return this.request<{
+      leaderboard: Array<{
+        state: string; total_points: number; active_members: number;
+        rank: number; prize_kobo: number; period: string;
+      }>;
+      count: number;
+      period: string;
+    }>("GET", `/wars/leaderboard?limit=${limit}`);
+  }
+  getMyWarRank() {
+    return this.request<{
+      ranked: boolean;
+      entry?: { state: string; total_points: number; rank: number; prize_kobo: number };
+      message?: string;
+    }>("GET", "/wars/my-rank");
+  }
+  getWarsHistory(limit = 12) {
+    return this.request<{
+      wars: Array<{
+        id: string; period: string; status: string;
+        total_prize_kobo: number; starts_at: string; ends_at: string;
+      }>;
+      count: number;
+    }>("GET", `/wars/history?limit=${limit}`);
+  }
+
+  // ── Notifications ────────────────────────────────────────────────────────
+  getNotifications() {
+    return this.request<{ notifications: Array<{ id: string; type: string; title: string; body: string; is_read: boolean; created_at: string }>; unread_count: number }>("GET", "/notifications");
+  }
+  markNotificationRead(id: string) { return this.request("PATCH", `/notifications/${id}/read`); }
+  markAllNotificationsRead() { return this.request("POST", "/notifications/read-all"); }
+
   // ── Chat usage quota ──────────────────────────────────────────────────────
   getChatUsage() { return this.request("GET", "/studio/chat/usage"); }
 

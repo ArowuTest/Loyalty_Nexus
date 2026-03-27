@@ -28,6 +28,7 @@ class AdminAPI {
   createPrize(payload: Omit<Prize,"id">) { return this.req("POST", "/admin/prizes", payload); }
   deletePrize(id: string) { return this.req("DELETE", `/admin/prizes/${id}`); }
   getUsers(page = 0, q = "") { return this.req<{ users: User[]; total: number }>("GET", `/admin/users?offset=${page * 50}${q ? `&q=${encodeURIComponent(q)}` : ""}`); }
+  getUser(id: string) { return this.req<User>("GET", `/admin/users/${id}`); }
   getFraud()       { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud"); }
   getFraudEvents() { return this.getFraud(); }
   resolveFraud(id: string) { return this.req("POST", `/admin/fraud/${id}/resolve`, {}); }
@@ -50,8 +51,8 @@ class AdminAPI {
     const q = qs.toString();
     return this.req<{ items: Generation[]; total: number }>("GET", `/admin/studio-generations${q ? `?${q}` : ""}`);
   }
-  getBroadcasts() { return this.req<{ broadcasts: Broadcast[] }>("GET", "/admin/broadcasts"); }
-  createBroadcast(payload: BroadcastPayload) { return this.req<{ id: string }>("POST", "/admin/broadcasts", payload); }
+  getBroadcasts() { return this.req<{ broadcasts: Broadcast[] }>("GET", "/admin/notifications/broadcasts"); }
+  createBroadcast(payload: BroadcastPayload) { return this.req<{ id: string }>("POST", "/admin/notifications/broadcast", payload); }
   getSubscriptions(page = 0, qs = "") {
     return this.req<{ users: SubscriptionUser[] }>("GET", `/admin/subscriptions?offset=${page * 50}${qs}`);
   }
@@ -107,6 +108,17 @@ class AdminAPI {
     return this.req<{ rows: CSVRowDetail[]; total: number }>("GET", `/admin/mtn-push/csv-upload/${id}/rows?limit=${limit}&offset=${offset}`);
   }
   // ─── Bonus Pulse Point Awards ─────────────────────────────────────────────
+  // ─── Passport Admin ──────────────────────────────────────────────────────
+  getPassportStats() { return this.req<PassportStats>("GET", "/admin/passport/stats"); }
+  getPassportNudgeLog(limit = 50) { return this.req<{ logs: GhostNudgeLog[] }>("GET", `/admin/passport/nudge-log?limit=${limit}`); }
+  getUSSDSessions(limit = 50) { return this.req<{ sessions: USSDSession[] }>("GET", `/admin/ussd/sessions?limit=${limit}`); }
+
+  // ─── Admin Auth ─────────────────────────────────────────────────────────
+  me() { return this.req<{ admin_id: string; email: string; role: string }>("GET", "/admin/auth/me"); }
+  changePassword(oldPassword: string, newPassword: string) {
+    return this.req("POST", "/admin/auth/change-password", { old_password: oldPassword, new_password: newPassword });
+  }
+
   awardBonusPulse(payload: { phone_number: string; points: number; campaign?: string; note?: string }) {
     return this.req<BonusPulseAwardResult>("POST", "/admin/bonus-pulse", payload);
   }

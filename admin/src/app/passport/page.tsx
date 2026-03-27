@@ -247,9 +247,9 @@ export default function PassportAdminPage() {
   const load = useCallback(async () => {
     try {
       const [s, n, u] = await Promise.all([
-        adminAPI.req<PassportStats>("GET", "/admin/passport/stats"),
-        adminAPI.req<{ logs: GhostNudgeLog[] }>("GET", "/admin/passport/nudge-log?limit=50"),
-        adminAPI.req<{ sessions: USSDSession[] }>("GET", "/admin/ussd/sessions?limit=50"),
+        adminAPI.getPassportStats(),
+        adminAPI.getPassportNudgeLog(50),
+        adminAPI.getUSSDSessions(50),
       ]);
       setStats(s);
       setNudgeLogs(n.logs ?? []);

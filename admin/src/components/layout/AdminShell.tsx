@@ -21,6 +21,8 @@ const NAV = [
     { href: "/draws",           label: "🎟 Draws" },
     { href: "/mtn-push-upload", label: "📤 MTN CSV Upload" },
     { href: "/bonus-pulse",     label: "🎁 Bonus Pulse Points" },
+    { href: "/team",            label: "👥 Admin Team (RBAC)" },
+    { href: "/generations",     label: "🎨 AI Generations" },
   ]},
   { group: "Content & AI", items: [
     { href: "/studio-tools",   label: "🧠 Studio Tools" },

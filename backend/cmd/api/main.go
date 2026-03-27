@@ -69,6 +69,7 @@ func main() {
 	// ─── Services ─────────────────────────────────────────────
 	notifySvc     := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
 	authSvc       := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
+	adminAuthSvc  := services.NewAdminAuthService(db)           // RBAC email+password auth for admins
 	fulfillSvc    := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
 	rechargeSvc   := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
 	drawSvc       := services.NewDrawService(db)
@@ -116,6 +117,7 @@ func main() {
 
 	// ─── HTTP Handlers ────────────────────────────────────────
 	authH    := handlers.NewAuthHandler(authSvc)
+	adminAuthH := handlers.NewAdminAuthHandler(adminAuthSvc)    // Admin RBAC
 	rechargeH := handlers.NewRechargeHandlerWithMTN(rechargeSvc, mtnPushSvc, eq)
 	spinH    := handlers.NewSpinHandler(spinSvc)
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
@@ -124,6 +126,7 @@ func main() {
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc).
 				WithBonusPulseService(bonusPulseSvc)
 	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, drawWindowSvc, fraudSvc, warssSvc, studioSvc, adminClaimSvc, rdb).
+			WithNotificationService(notifySvc).
 				WithCSVService(services.NewMTNPushCSVService(db, mtnPushSvc)).
 				WithBonusPulseService(bonusPulseSvc)
 	claimH   := handlers.NewClaimHandler(claimSvc)
@@ -156,6 +159,8 @@ func main() {
 	// ─── Auth (public) ────────────────────────────────────────
 	mux.HandleFunc("POST /api/v1/auth/otp/send", authH.SendOTP)
 	mux.HandleFunc("POST /api/v1/auth/otp/verify", authH.VerifyOTP)
+
+
 
 	// ─── Webhooks (public — signature-verified internally) ────
 	mux.HandleFunc("POST /api/v1/recharge/paystack-webhook", rechargeH.PaystackWebhook)
@@ -205,8 +210,8 @@ func main() {
 	mux.Handle("GET /api/v1/studio/gallery", auth(http.HandlerFunc(studioH.GetGallery)))
 	mux.Handle("POST /api/v1/studio/generate/{id}/dispute", auth(http.HandlerFunc(studioH.DisputeGeneration)))
 	mux.Handle("GET /api/v1/studio/session", auth(http.HandlerFunc(studioH.GetSessionUsage)))
+	mux.Handle("POST /api/v1/studio/upload", auth(http.HandlerFunc(studioH.UploadAsset)))			// REQ: VoiceToPlan + image-editor pre-upload
 
-	mux.Handle("POST /api/v1/studio/upload", auth(http.HandlerFunc(studioH.UploadAsset)))
 	// ─── Nexus Chat ───────────────────────────────────────────
 	mux.Handle("POST /api/v1/studio/chat", auth(http.HandlerFunc(studioH.Chat)))
 	mux.Handle("GET /api/v1/studio/chat/usage", auth(http.HandlerFunc(studioH.GetChatUsage)))
@@ -246,7 +251,16 @@ func main() {
 	mux.Handle("GET /api/v1/draws/{id}/winners", auth(http.HandlerFunc(drawH.GetWinners)))
 
 	// ─── Admin routes (admin JWT required) ───────────────────
-	adminAuth := middleware.AdminAuthMiddleware(authSvc)
+	adminAuth := middleware.AdminAuthMiddleware(adminAuthSvc)  // Uses AdminAuthService (email+pw+RBAC)
+
+	// ─── Admin Auth (email + password + RBAC) ────────────────────────────────
+	mux.HandleFunc("POST /api/v1/admin/auth/login",           adminAuthH.Login)
+	mux.Handle("GET    /api/v1/admin/auth/me",                adminAuth(http.HandlerFunc(adminAuthH.Me)))
+	mux.Handle("POST   /api/v1/admin/auth/change-password",   adminAuth(http.HandlerFunc(adminAuthH.ChangePassword)))
+	mux.Handle("GET    /api/v1/admin/auth/admins",            adminAuth(http.HandlerFunc(adminAuthH.ListAdmins)))
+	mux.Handle("POST   /api/v1/admin/auth/admins",            adminAuth(http.HandlerFunc(adminAuthH.CreateAdmin)))
+	mux.Handle("DELETE /api/v1/admin/auth/admins/{id}",       adminAuth(http.HandlerFunc(adminAuthH.DeactivateAdmin)))
+
 	mux.Handle("GET    /api/v1/admin/dashboard",          adminAuth(http.HandlerFunc(adminH.GetDashboard)))
 	mux.Handle("GET    /api/v1/admin/config",             adminAuth(http.HandlerFunc(adminH.GetConfig)))
 	mux.Handle("PUT    /api/v1/admin/config/{key}",       adminAuth(http.HandlerFunc(adminH.UpdateConfig)))
@@ -265,7 +279,7 @@ func main() {
 	mux.Handle("PUT  /api/v1/admin/wars/prize-pool",       adminAuth(http.HandlerFunc(warsH.AdminUpdatePrizePool)))
 	mux.Handle("GET    /api/v1/admin/fraud-events",        adminAuth(http.HandlerFunc(fraudH.ListEvents)))
 	mux.Handle("PUT    /api/v1/admin/fraud-events/{id}/resolve", adminAuth(http.HandlerFunc(fraudH.ResolveEvent)))
-	mux.Handle("PUT    /api/v1/admin/users/{id}/suspend",  adminAuth(http.HandlerFunc(fraudH.SuspendUser)))
+	// SuspendUser handled by adminH above — fraudH route removed to avoid mux panic
 	// Draws admin — full CRUD + execute + CSV export
 	mux.Handle("GET    /api/v1/admin/draws",                  adminAuth(http.HandlerFunc(adminH.GetDraws)))
 	mux.Handle("POST   /api/v1/admin/draws",                  adminAuth(http.HandlerFunc(adminH.CreateDraw)))
