@@ -25,15 +25,17 @@ import (
 // Zero-hardcoding: every business parameter is read from network_configs,
 // editable live via PUT /api/v1/admin/config/:key.
 type AdminHandler struct {
-	db        *gorm.DB
-	cfg       *config.ConfigManager
-	spinSvc   *services.SpinService
-	drawSvc   *services.DrawService
-	fraudSvc  *services.FraudService
-	warsSvc   *services.RegionalWarsService
-	studioSvc *services.StudioService
-	claimSvc  *services.AdminClaimService
-	rdb       *redis.Client
+	db            *gorm.DB
+	cfg           *config.ConfigManager
+	spinSvc       *services.SpinService
+	drawSvc       *services.DrawService
+	drawWindowSvc *services.DrawWindowService
+	fraudSvc      *services.FraudService
+	warsSvc       *services.RegionalWarsService
+	studioSvc     *services.StudioService
+	claimSvc      *services.AdminClaimService
+	csvSvc        *services.MTNPushCSVService // nil-safe; set via WithCSVService
+	rdb           *redis.Client
 }
 
 func NewAdminHandler(
@@ -41,6 +43,7 @@ func NewAdminHandler(
 	cfg *config.ConfigManager,
 	spinSvc *services.SpinService,
 	drawSvc *services.DrawService,
+	drawWindowSvc *services.DrawWindowService,
 	fraudSvc *services.FraudService,
 	warsSvc *services.RegionalWarsService,
 	studioSvc *services.StudioService,
@@ -48,16 +51,24 @@ func NewAdminHandler(
 	rdb *redis.Client,
 ) *AdminHandler {
 	return &AdminHandler{
-		db:        db,
-		cfg:       cfg,
-		spinSvc:   spinSvc,
-		drawSvc:   drawSvc,
-		fraudSvc:  fraudSvc,
-		warsSvc:   warsSvc,
-		studioSvc: studioSvc,
-		claimSvc:  claimSvc,
-		rdb:       rdb,
+		db:            db,
+		cfg:           cfg,
+		spinSvc:       spinSvc,
+		drawSvc:       drawSvc,
+		drawWindowSvc: drawWindowSvc,
+		fraudSvc:      fraudSvc,
+		warsSvc:       warsSvc,
+		studioSvc:     studioSvc,
+		claimSvc:      claimSvc,
+		rdb:           rdb,
 	}
+}
+
+// WithCSVService attaches the MTN push CSV upload service to the handler.
+// Called after construction in main.go to avoid changing the constructor signature.
+func (h *AdminHandler) WithCSVService(svc *services.MTNPushCSVService) *AdminHandler {
+	h.csvSvc = svc
+	return h
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────
@@ -1491,4 +1502,274 @@ func (h *AdminHandler) UpdateRechargeConfig(w http.ResponseWriter, r *http.Reque
 		MinAmountNaira:         h.cfg.GetInt64("mtn_push_min_amount_naira", 50),
 	}
 	jsonOK(w, resp)
+}
+
+// ─── Draw Schedule Config ─────────────────────────────────────────────────
+//
+// These endpoints let admin view and update the draw eligibility window rules
+// stored in the draw_schedules table. All fields are admin-configurable at
+// runtime with no deployment needed.
+
+// GetDrawSchedule returns all draw window rules.
+//
+// GET /api/v1/admin/draw/schedule
+func (h *AdminHandler) GetDrawSchedule(w http.ResponseWriter, r *http.Request) {
+	schedules, err := h.drawWindowSvc.GetAllSchedules(r.Context())
+	if err != nil {
+		jsonError(w, "failed to load draw schedules: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, schedules)
+}
+
+// UpdateDrawSchedule updates a single draw window rule by ID.
+//
+// PUT /api/v1/admin/draw/schedule/{id}
+// Body (all fields optional — only provided fields are updated):
+//
+//	{
+//	  "draw_type":            "DAILY",
+//	  "draw_day_of_week":     2,
+//	  "window_open_time":     "17:00:01",
+//	  "window_close_time":    "17:00:00",
+//	  "is_active":            true,
+//	  "draw_name":            "Tuesday Daily Draw"
+//	}
+func (h *AdminHandler) UpdateDrawSchedule(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid schedule id — must be a UUID", http.StatusBadRequest)
+		return
+	}
+	var req services.UpdateDrawScheduleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	updated, err := h.drawWindowSvc.UpdateSchedule(r.Context(), id, req)
+	if err != nil {
+		jsonError(w, "update failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, updated)
+}
+
+// CreateDrawSchedule adds a new draw window rule.
+//
+// POST /api/v1/admin/draw/schedule
+func (h *AdminHandler) CreateDrawSchedule(w http.ResponseWriter, r *http.Request) {
+	var req services.CreateDrawScheduleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	created, err := h.drawWindowSvc.CreateSchedule(r.Context(), req)
+	if err != nil {
+		jsonError(w, "create failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	jsonOK(w, created)
+}
+
+// DeleteDrawSchedule soft-deletes a draw window rule.
+//
+// DELETE /api/v1/admin/draw/schedule/{id}
+func (h *AdminHandler) DeleteDrawSchedule(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid schedule id — must be a UUID", http.StatusBadRequest)
+		return
+	}
+	if err := h.drawWindowSvc.DeleteSchedule(r.Context(), id); err != nil {
+		jsonError(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]string{"status": "deleted"})
+}
+
+// PreviewDrawWindow shows which draws a recharge at a given time would qualify for.
+// Useful for admin to test window rules before going live.
+//
+// GET /api/v1/admin/draw/schedule/preview?at=2025-05-14T16:30:00+01:00
+func (h *AdminHandler) PreviewDrawWindow(w http.ResponseWriter, r *http.Request) {
+	atStr := r.URL.Query().Get("at")
+	var at time.Time
+	if atStr == "" {
+		at = time.Now()
+	} else {
+		var err error
+		at, err = time.Parse(time.RFC3339, atStr)
+		if err != nil {
+			jsonError(w, "invalid 'at' timestamp — use RFC3339 format e.g. 2025-05-14T16:30:00+01:00", http.StatusBadRequest)
+			return
+		}
+	}
+	qualifying, err := h.drawWindowSvc.ResolveQualifyingDraws(r.Context(), at)
+	if err != nil {
+		jsonError(w, "preview failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"recharge_time":    at,
+		"qualifying_draws": qualifying,
+		"count":            len(qualifying),
+	})
+}
+
+// ─── MTN Push CSV Bulk Upload ─────────────────────────────────────────────────
+//
+// When the MTN push webhook API is unavailable, admins can upload a CSV file
+// to manually trigger the full recharge pipeline (spin credits, pulse points,
+// draw entries) for each subscriber row.
+//
+// CSV format (header row required):
+//
+//	msisdn,date,time,amount[,recharge_type]
+//
+// date:          YYYY-MM-DD
+// time:          HH:MM or HH:MM:SS  (WAT assumed)
+// amount:        naira value (e.g. 1000 or 1000.00)
+// recharge_type: optional; defaults to AIRTIME
+//
+// Routes:
+//   POST   /api/v1/admin/mtn-push/csv-upload          — upload & process
+//   GET    /api/v1/admin/mtn-push/csv-upload           — list batches
+//   GET    /api/v1/admin/mtn-push/csv-upload/{id}      — batch summary
+//   GET    /api/v1/admin/mtn-push/csv-upload/{id}/rows — per-row results
+
+// UploadMTNPushCSV handles multipart/form-data CSV uploads.
+// POST /api/v1/admin/mtn-push/csv-upload
+func (h *AdminHandler) UploadMTNPushCSV(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.csvSvc == nil {
+		jsonError(w, "CSV upload service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Extract admin identity from JWT context.
+	uploadedBy, _ := r.Context().Value(middleware.ContextUserID).(string)
+	if uploadedBy == "" {
+		uploadedBy = "unknown"
+	}
+
+	// Parse multipart form — limit to 10 MB.
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		jsonError(w, "failed to parse multipart form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, fileHeader, err := r.FormFile("file")
+	if err != nil {
+		jsonError(w, "field 'file' is required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	note := r.FormValue("note")
+
+	result, err := h.csvSvc.ProcessCSVUpload(ctx, services.CSVUploadRequest{
+		UploadedBy: uploadedBy,
+		Filename:   fileHeader.Filename,
+		Reader:     file,
+		Note:       note,
+	})
+	if err != nil {
+		jsonError(w, "upload processing failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return 207 Multi-Status when some rows failed, 200 when all succeeded.
+	code := http.StatusOK
+	if result.Status == "PARTIAL" || result.Status == "FAILED" {
+		code = http.StatusMultiStatus
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if encErr := json.NewEncoder(w).Encode(result); encErr != nil {
+		log.Printf("[Admin] UploadMTNPushCSV encode error: %v", encErr)
+	}
+}
+
+// ListMTNPushCSVUploads returns recent upload batches.
+// GET /api/v1/admin/mtn-push/csv-upload
+func (h *AdminHandler) ListMTNPushCSVUploads(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.csvSvc == nil {
+		jsonError(w, "CSV upload service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	uploads, total, err := h.csvSvc.ListUploads(ctx, limit, offset)
+	if err != nil {
+		jsonError(w, "failed to list uploads: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"total":   total,
+		"uploads": uploads,
+	})
+}
+
+// GetMTNPushCSVUpload returns the summary for a single upload batch.
+// GET /api/v1/admin/mtn-push/csv-upload/{id}
+func (h *AdminHandler) GetMTNPushCSVUpload(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.csvSvc == nil {
+		jsonError(w, "CSV upload service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	uploadID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid upload id", http.StatusBadRequest)
+		return
+	}
+
+	summary, err := h.csvSvc.GetUpload(ctx, uploadID)
+	if err != nil {
+		jsonError(w, "upload not found", http.StatusNotFound)
+		return
+	}
+	jsonOK(w, summary)
+}
+
+// GetMTNPushCSVUploadRows returns per-row results for a batch.
+// GET /api/v1/admin/mtn-push/csv-upload/{id}/rows
+func (h *AdminHandler) GetMTNPushCSVUploadRows(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.csvSvc == nil {
+		jsonError(w, "CSV upload service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	uploadID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid upload id", http.StatusBadRequest)
+		return
+	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	rows, total, err := h.csvSvc.GetUploadRows(ctx, uploadID, limit, offset)
+	if err != nil {
+		jsonError(w, "failed to get rows: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"total": total,
+		"rows":  rows,
+	})
 }

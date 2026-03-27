@@ -13,7 +13,7 @@ import (
 // which produces wrong names for acronym-prefixed fields like MoMoNumber
 // (→ mo_mo_number instead of momo_number).
 type User struct {
-	ID                    uuid.UUID  `db:"id"                     gorm:"column:id;primaryKey"            json:"id"`
+	ID                    uuid.UUID  `db:"id"                     gorm:"column:id;primaryKey;default:gen_random_uuid()"  json:"id"`
 	PhoneNumber           string     `db:"phone_number"            gorm:"column:phone_number"             json:"phone_number"`
 	UserCode              string     `db:"user_code"               gorm:"column:user_code"                json:"user_code"`
 	State                 string     `db:"state"                   gorm:"column:state"                    json:"state"`
@@ -61,7 +61,7 @@ type User struct {
 //   PulseCounter    — tracks kobo remainder for Pulse Point awards.
 //   RechargeCounter — legacy field, kept for backwards compatibility.
 type Wallet struct {
-	ID               uuid.UUID `db:"id"                gorm:"column:id;primaryKey"      json:"id"`
+	ID               uuid.UUID `db:"id"                gorm:"column:id;primaryKey;default:gen_random_uuid()"  json:"id"`
 	UserID           uuid.UUID `db:"user_id"            gorm:"column:user_id;uniqueIndex" json:"user_id"`
 	PulsePoints      int64     `db:"pulse_points"       gorm:"column:pulse_points"       json:"pulse_points"`
 	SpinCredits      int       `db:"spin_credits"       gorm:"column:spin_credits"       json:"spin_credits"`

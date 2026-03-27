@@ -33,6 +33,20 @@ func NewConfigManager(db *gorm.DB) *ConfigManager {
 	return cm
 }
 
+// NewConfigManagerNoRefresh creates a ConfigManager without starting the background
+// auto-refresh goroutine. Use this in integration tests to avoid lock contention
+// between the test transaction and the background SELECT on network_configs.
+func NewConfigManagerNoRefresh(db *gorm.DB) *ConfigManager {
+	cm := &ConfigManager{
+		db:    db,
+		cache: make(map[string]json.RawMessage),
+	}
+	if err := cm.Refresh(context.Background()); err != nil {
+		log.Printf("[CONFIG] Initial refresh failed: %v", err)
+	}
+	return cm
+}
+
 func (c *ConfigManager) autoRefresh() {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()

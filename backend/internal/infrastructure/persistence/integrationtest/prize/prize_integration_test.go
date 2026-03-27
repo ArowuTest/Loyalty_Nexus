@@ -108,9 +108,10 @@ func newAdminHandler(db *gorm.DB) *handlers.AdminHandler {
 	cfg       := config.NewConfigManager(db)
 	spinSvc   := services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db)
 	drawSvc   := services.NewDrawService(db)
-	fraudSvc  := services.NewFraudService(db)
-	claimSvc  := services.NewAdminClaimService(prizeRepo, nil)
-	return handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, nil, nil, claimSvc, nil)
+	fraudSvc      := services.NewFraudService(db)
+	claimSvc      := services.NewAdminClaimService(prizeRepo, nil)
+	drawWindowSvc := services.NewDrawWindowService(db)
+	return handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, drawWindowSvc, fraudSvc, nil, nil, claimSvc, nil)
 }
 
 // newAuthSvc builds an AuthService using the test JWT_SECRET env var.

@@ -59,6 +59,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ─── Request / Response types ─────────────────────────────────────────────────
@@ -115,19 +116,25 @@ func (mtnPushEvent) TableName() string { return "mtn_push_events" }
 
 // MTNPushService processes inbound MTN recharge push events.
 type MTNPushService struct {
-	db        *gorm.DB
-	userRepo  repositories.UserRepository
-	txRepo    repositories.TransactionRepository
-	drawSvc   drawService
-	notifySvc *NotificationService
-	cfg       *config.ConfigManager
+	db          *gorm.DB
+	userRepo    repositories.UserRepository
+	txRepo      repositories.TransactionRepository
+	drawSvc     drawService
+	drawWindows drawWindowResolver
+	notifySvc   *NotificationService
+	cfg         *config.ConfigManager
 }
 
 // drawService is the subset of DrawService used here.
 // Defined as an interface so tests can inject a mock.
 type drawService interface {
-	GetActiveDrawID(ctx context.Context) (uuid.UUID, error)
 	AddEntry(ctx context.Context, drawID, userID uuid.UUID, phone, source string, amount int64, tickets int) error
+}
+
+// drawWindowResolver resolves which draws a recharge qualifies for.
+// Defined as an interface so tests can inject a mock.
+type drawWindowResolver interface {
+	ResolveQualifyingDraws(ctx context.Context, rechargeTime time.Time) ([]QualifyingDraw, error)
 }
 
 // NewMTNPushService constructs the service.
@@ -136,16 +143,18 @@ func NewMTNPushService(
 	userRepo repositories.UserRepository,
 	txRepo repositories.TransactionRepository,
 	drawSvc drawService,
+	drawWindows drawWindowResolver,
 	notifySvc *NotificationService,
 	cfg *config.ConfigManager,
 ) *MTNPushService {
 	return &MTNPushService{
-		db:        db,
-		userRepo:  userRepo,
-		txRepo:    txRepo,
-		drawSvc:   drawSvc,
-		notifySvc: notifySvc,
-		cfg:       cfg,
+		db:          db,
+		userRepo:    userRepo,
+		txRepo:      txRepo,
+		drawSvc:     drawSvc,
+		drawWindows: drawWindows,
+		notifySvc:   notifySvc,
+		cfg:         cfg,
 	}
 }
 
@@ -220,8 +229,11 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 
 	txErr := s.db.WithContext(ctx).Transaction(func(dbTx *gorm.DB) error {
 		// Row-level lock on wallet — prevents concurrent double-award.
-		wallet, err := s.userRepo.GetWalletForUpdate(ctx, user.ID)
-		if err != nil {
+		// IMPORTANT: use dbTx for ALL operations inside this callback so they
+		// run on the same connection and participate in the same transaction.
+		var wallet entities.Wallet
+		if err := dbTx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ?", user.ID).First(&wallet).Error; err != nil {
 			return fmt.Errorf("wallet lock failed: %w", err)
 		}
 
@@ -329,22 +341,26 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 			}
 		}
 
-		// ── User streak + stats ───────────────────────────────────────────────
+		// ── User streak + stats (all on dbTx — same connection as the wallet lock) ──
 		streakHours := s.cfg.GetInt("streak_expiry_hours", 36)
 		newStreak := calcStreak(user, streakHours)
 		expiresAt := time.Now().Add(time.Duration(streakHours) * time.Hour)
-		if err := s.userRepo.UpdateStreak(ctx, user.ID, newStreak, expiresAt); err != nil {
+		if err := dbTx.Table("users").Where("id = ?", user.ID).
+			Updates(map[string]interface{}{
+				"streak_count":      newStreak,
+				"streak_expires_at": expiresAt,
+			}).Error; err != nil {
 			return err
 		}
 		now := time.Now()
 		user.TotalRechargeAmount += amountKobo
 		user.LastRechargeAt = &now
-		if err := s.userRepo.Update(ctx, user); err != nil {
+		if err := dbTx.Save(user).Error; err != nil {
 			return err
 		}
 		newTier := entities.TierFromLifetimePoints(wallet.LifetimePoints)
 		if newTier != user.Tier {
-			_ = s.userRepo.UpdateTier(ctx, user.ID, newTier)
+			_ = dbTx.Table("users").Where("id = ?", user.ID).Update("tier", newTier).Error
 		}
 		return nil // commit
 	})
@@ -360,27 +376,41 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 	safe.Go(func() {
 		bgCtx := context.Background()
 
-		// 7a. Draw entries — 1 entry per spin credit earned.
-		// (Spin credit and draw entry are always awarded together at the ₦200 threshold.)
-		if spinCreditsEarned > 0 {
-			drawID, err := s.drawSvc.GetActiveDrawID(bgCtx)
-			if err == nil {
-				addErr := s.drawSvc.AddEntry(
-					bgCtx,
-					drawID,
-					user.ID,
-					phone,
-					"recharge",
-					amountKobo,
-					spinCreditsEarned, // 1 draw entry per spin credit
-				)
-				if addErr != nil {
-					log.Printf("[MTN-PUSH] draw entry creation failed (non-fatal): %v", addErr)
-				} else {
-					drawEntriesCreated = spinCreditsEarned
+		// 7a. Draw entries — 1 entry per spin credit earned, inserted into EACH
+		// qualifying draw window (typically: 1 daily draw + 1 Saturday weekly mega).
+		//
+		// Window rules (from draw_schedules table, admin-configurable):
+		//   Recharges from 17:00:01 WAT yesterday → 17:00:00 WAT today qualify
+		//   for TOMORROW's daily draw AND for the Saturday weekly mega draw.
+		//
+		// Spin credits are SEPARATE and IMMEDIATE — they are not affected here.
+		if spinCreditsEarned > 0 && s.drawWindows != nil {
+			qualifyingDraws, wErr := s.drawWindows.ResolveQualifyingDraws(bgCtx, eventTime)
+			if wErr != nil {
+				log.Printf("[MTN-PUSH] draw window resolution failed (non-fatal): %v", wErr)
+			} else {
+				for _, qd := range qualifyingDraws {
+					addErr := s.drawSvc.AddEntry(
+						bgCtx,
+						qd.DrawID,
+						user.ID,
+						phone,
+						"recharge",
+						amountKobo,
+						spinCreditsEarned, // 1 draw entry per spin credit, per qualifying draw
+					)
+					if addErr != nil {
+						log.Printf("[MTN-PUSH] draw entry creation failed for draw %s (%s) (non-fatal): %v",
+							qd.DrawID, qd.DrawName, addErr)
+					} else {
+						drawEntriesCreated += spinCreditsEarned
+					}
 				}
 			}
-			// No active draw is fine — entries will be imported at draw time.
+			if len(qualifyingDraws) == 0 {
+				// No active draws in window — entries will be imported at draw creation time.
+				log.Printf("[MTN-PUSH] no qualifying draws for recharge at %s (non-fatal)", eventTime.Format(time.RFC3339))
+			}
 		}
 
 		// 7b. SMS notification.
@@ -398,7 +428,9 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 				msg += " You earned " + strings.Join(parts, " and ") + "."
 			}
 			msg += " Keep recharging to win big!"
-			s.notifySvc.SendSMS(bgCtx, phone, msg)
+			if smsErr := s.notifySvc.SendSMS(bgCtx, phone, msg); smsErr != nil {
+				log.Printf("[MTN-PUSH] SMS notification failed for %s (non-fatal): %v", phone, smsErr)
+			}
 		}
 
 		// 7c. Mark audit event as PROCESSED.
@@ -435,10 +467,15 @@ func (s *MTNPushService) resolveOrCreateUser(ctx context.Context, phone string) 
 		return user, nil
 	}
 	// Auto-create a minimal account.
-	referralCode := "MTN" + strings.ToUpper(uuid.New().String()[:6])
+	// Both user_code and referral_code have UNIQUE constraints — use UUID-derived
+	// values to guarantee uniqueness even under concurrent auto-creates.
+	uid := uuid.New()
+	userCode    := "MTN" + strings.ToUpper(uid.String()[:8])
+	referralCode := "REF" + strings.ToUpper(uuid.New().String()[:6])
 	newUser := &entities.User{
-		ID:           uuid.New(),
+		ID:           uid,
 		PhoneNumber:  phone,
+		UserCode:     userCode,
 		ReferralCode: referralCode,
 		Tier:         "BRONZE",
 		IsActive:     true,
@@ -447,8 +484,10 @@ func (s *MTNPushService) resolveOrCreateUser(ctx context.Context, phone string) 
 	if err := s.userRepo.Create(ctx, newUser); err != nil {
 		return nil, fmt.Errorf("auto-create user failed: %w", err)
 	}
-	// Create the wallet row.
+	// Create the wallet row. Explicitly set ID so GORM doesn't try to insert
+	// a zero UUID (which would violate the NOT NULL constraint on id).
 	if err := s.db.WithContext(ctx).Create(&entities.Wallet{
+		ID:          uuid.New(),
 		UserID:      newUser.ID,
 		PulsePoints: 0,
 		SpinCredits: 0,

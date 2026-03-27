@@ -72,7 +72,8 @@ func main() {
 	fulfillSvc    := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
 	rechargeSvc   := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
 	drawSvc       := services.NewDrawService(db)
-	mtnPushSvc    := services.NewMTNPushService(db, userRepo, txRepo, drawSvc, notifySvc, cfg)
+	drawWindowSvc := services.NewDrawWindowService(db)
+	mtnPushSvc    := services.NewMTNPushService(db, userRepo, txRepo, drawSvc, drawWindowSvc, notifySvc, cfg)
 	spinSvc       := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
 	studioSvc     := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
 	hlrSvc        := services.NewHLRService(hlrRepo)
@@ -108,7 +109,8 @@ func main() {
 	spinH    := handlers.NewSpinHandler(spinSvc)
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
-	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc, studioSvc, adminClaimSvc, rdb)
+	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, drawWindowSvc, fraudSvc, warssSvc, studioSvc, adminClaimSvc, rdb).
+				WithCSVService(services.NewMTNPushCSVService(db, mtnPushSvc))
 	claimH   := handlers.NewClaimHandler(claimSvc)
 	notifyH  := handlers.NewNotificationHandler(db)
 
@@ -264,7 +266,22 @@ func main() {
 	mux.Handle("PUT /api/v1/admin/users/{id}/suspend", adminAuth(http.HandlerFunc(fraudH.SuspendUser)))
 	mux.Handle("POST /api/v1/admin/fraud/{id}/resolve", adminAuth(http.HandlerFunc(adminH.ResolveFraudEvent)))
 
-	// Draws admin — full CRUD + execute + CSV export
+	// ─── Draw Schedule Config (admin-configurable window rules) ─────────────
+	// IMPORTANT: /preview must be before /{id} to avoid being matched as a UUID.
+	mux.Handle("GET /api/v1/admin/draw/schedule", adminAuth(http.HandlerFunc(adminH.GetDrawSchedule)))
+	mux.Handle("POST /api/v1/admin/draw/schedule", adminAuth(http.HandlerFunc(adminH.CreateDrawSchedule)))
+	mux.Handle("GET /api/v1/admin/draw/schedule/preview", adminAuth(http.HandlerFunc(adminH.PreviewDrawWindow)))
+	mux.Handle("PUT /api/v1/admin/draw/schedule/{id}", adminAuth(http.HandlerFunc(adminH.UpdateDrawSchedule)))
+	mux.Handle("DELETE /api/v1/admin/draw/schedule/{id}", adminAuth(http.HandlerFunc(adminH.DeleteDrawSchedule)))
+
+	// ─── MTN Push CSV Bulk Upload (fallback when MTN webhook API is down) ────────
+	// IMPORTANT: static sub-paths (/rows) MUST be before /{id} to avoid UUID match.
+	mux.Handle("POST /api/v1/admin/mtn-push/csv-upload", adminAuth(http.HandlerFunc(adminH.UploadMTNPushCSV)))
+	mux.Handle("GET /api/v1/admin/mtn-push/csv-upload", adminAuth(http.HandlerFunc(adminH.ListMTNPushCSVUploads)))
+	mux.Handle("GET /api/v1/admin/mtn-push/csv-upload/{id}/rows", adminAuth(http.HandlerFunc(adminH.GetMTNPushCSVUploadRows)))
+	mux.Handle("GET /api/v1/admin/mtn-push/csv-upload/{id}", adminAuth(http.HandlerFunc(adminH.GetMTNPushCSVUpload)))
+
+	// ─── Draws admin — full CRUD + execute + CSV export
 	mux.Handle("GET /api/v1/admin/draws", adminAuth(http.HandlerFunc(adminH.GetDraws)))
 	mux.Handle("POST /api/v1/admin/draws", adminAuth(http.HandlerFunc(adminH.CreateDraw)))
 	mux.Handle("PUT /api/v1/admin/draws/{id}", adminAuth(http.HandlerFunc(adminH.UpdateDraw)))

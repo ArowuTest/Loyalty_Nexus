@@ -71,6 +71,31 @@ class AdminAPI {
   resolveWar(period: string) { return this.req("POST", "/admin/wars/resolve", { period }); }
   getHealth() { return this.req<HealthReport>("GET", "/admin/health"); }
   getAIHealth() { return this.req<AIHealthReport>("GET", "/admin/ai-health"); }
+  // ─── MTN Push CSV Upload ──────────────────────────────────────────────────
+  // Upload a CSV file (multipart/form-data). Returns the upload batch summary.
+  async uploadMTNPushCSV(file: File, note?: string): Promise<CSVUploadResult> {
+    const form = new FormData();
+    form.append("file", file);
+    if (note) form.append("note", note);
+    const resp = await fetch(`${BASE_URL}/admin/mtn-push/csv-upload`, {
+      method: "POST",
+      headers: { ...(this.getToken() ? { Authorization: `Bearer ${this.getToken()}` } : {}) },
+      body: form,
+    });
+    if (resp.status === 401) { this.clearToken(); window.location.href = "/login"; throw new Error("Unauthorized"); }
+    const data = await resp.json();
+    if (!resp.ok) throw new Error((data as { error?: string }).error || "Upload failed");
+    return data as CSVUploadResult;
+  }
+  listMTNPushCSVUploads(limit = 20, offset = 0) {
+    return this.req<{ uploads: CSVUploadSummary[]; total: number }>("GET", `/admin/mtn-push/csv-upload?limit=${limit}&offset=${offset}`);
+  }
+  getMTNPushCSVUpload(id: string) {
+    return this.req<CSVUploadSummary>("GET", `/admin/mtn-push/csv-upload/${id}`);
+  }
+  getMTNPushCSVUploadRows(id: string, limit = 100, offset = 0) {
+    return this.req<{ rows: CSVRowDetail[]; total: number }>("GET", `/admin/mtn-push/csv-upload/${id}/rows?limit=${limit}&offset=${offset}`);
+  }
 }
 export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
@@ -212,4 +237,43 @@ export interface Generation {
   prompt: string;
   points_deducted: number;
   created_at: string;
+}
+
+// ─── MTN Push CSV Upload types ──────────────────────────────────────────────────
+export interface CSVUploadResult {
+  upload_id: string;
+  total_rows: number;
+  processed_rows: number;
+  skipped_rows: number;
+  failed_rows: number;
+  status: string; // DONE | PARTIAL | FAILED
+}
+export interface CSVUploadSummary {
+  id: string;
+  uploaded_by: string;
+  filename: string;
+  uploaded_at: string;
+  total_rows: number;
+  processed_rows: number;
+  skipped_rows: number;
+  failed_rows: number;
+  status: string; // DONE | PARTIAL | FAILED
+  note?: string;
+  completed_at?: string | null;
+}
+export interface CSVRowDetail {
+  row_number: number;
+  raw_msisdn: string;
+  raw_date: string;
+  raw_time: string;
+  raw_amount: string;
+  recharge_type: string;
+  status: string; // PROCESSED | SKIPPED | FAILED
+  skip_reason?: string;
+  error_msg?: string;
+  transaction_ref?: string;
+  spin_credits: number;
+  pulse_points: number;
+  draw_entries: number;
+  processed_at?: string | null;
 }

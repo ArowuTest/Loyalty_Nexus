@@ -15,10 +15,11 @@ const NAV = [
     { href: "/fraud",          label: "🛡 Fraud Alerts" },
   ]},
   { group: "Rewards Engine", items: [
-    { href: "/points-config",  label: "💎 Points Engine" },
-    { href: "/spin-config",    label: "🎡 Spin Wheel" },
-    { href: "/prizes",         label: "🏆 Prize Pool" },
-    { href: "/draws",          label: "🎟 Draws" },
+    { href: "/points-config",   label: "💎 Points Engine" },
+    { href: "/spin-config",     label: "🎡 Spin Wheel" },
+    { href: "/prizes",          label: "🏆 Prize Pool" },
+    { href: "/draws",           label: "🎟 Draws" },
+    { href: "/mtn-push-upload", label: "📤 MTN CSV Upload" },
   ]},
   { group: "Content & AI", items: [
     { href: "/studio-tools",   label: "🧠 Studio Tools" },
