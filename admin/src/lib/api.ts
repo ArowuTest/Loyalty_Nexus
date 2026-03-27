@@ -134,7 +134,22 @@ class AdminAPI {
 }
 export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
-export interface Prize { id: string; name: string; prize_type: string; base_value: number; probability: number; daily_inventory: number; is_active: boolean; }
+export interface Prize {
+  id: string;
+  name: string;
+  prize_code?: string;
+  prize_type: string;
+  base_value: number;
+  win_probability_weight: number;
+  daily_inventory_cap?: number;
+  is_active: boolean;
+  is_no_win?: boolean;
+  no_win_message?: string;
+  color_scheme?: string;
+  sort_order?: number;
+  minimum_recharge?: number;
+  icon_name?: string;
+}
 export interface StudioTool {
   id: string; name: string; slug?: string; category: string; provider: string;
   point_cost: number; is_active: boolean; description?: string; icon?: string;

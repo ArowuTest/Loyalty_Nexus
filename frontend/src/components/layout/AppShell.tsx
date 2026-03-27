@@ -6,15 +6,15 @@ import Link from "next/link";
 import { useStore } from "@/store/useStore";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Zap, Wand2, Gift, Ticket, Settings, LogOut, Shield, Bell
+  LayoutDashboard, Zap, Wand2, Gift, Ticket, Settings, LogOut, Shield, Bell, Globe
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/dashboard",  icon: LayoutDashboard, label: "Home" },
   { href: "/spin",       icon: Zap,             label: "Spin" },
+  { href: "/prizes",     icon: Gift,            label: "Prizes" },
   { href: "/studio",     icon: Wand2,           label: "Studio" },
-  { href: "/passport",   icon: Shield,          label: "Passport" },
-  { href: "/draws",      icon: Ticket,          label: "Draws" },
+  { href: "/wars",       icon: Globe,           label: "Wars" },
 ];
 
 export default function AppShell({ children }: { children: ReactNode }) {

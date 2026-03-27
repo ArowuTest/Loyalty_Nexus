@@ -255,6 +255,24 @@ class APIClient {
     return this.request("GET", `/wars/${period}/winners`);
   }
 
+  // ── Prizes / Claims ──────────────────────────────────────────────────────
+  getMyWins() {
+    return this.request<Array<{
+      id: string;
+      prize_type: string;
+      prize_value: number;
+      prize_label: string;
+      fulfillment_status: string;
+      claim_status: string;
+      created_at: string;
+      expires_at: string;
+      needs_momo_setup?: boolean;
+    }>>("GET", "/spin/wins");
+  }
+  claimPrize(id: string, payload: { momo_number?: string; bank_account_number?: string; bank_account_name?: string; bank_name?: string } = {}) {
+    return this.request<{ id: string; claim_status: string; fulfillment_status: string }>("POST", `/spin/wins/${id}/claim`, payload);
+  }
+
   // ── Notifications ────────────────────────────────────────────────────────
   getNotifications() {
     return this.request<{ notifications: Array<{ id: string; type: string; title: string; body: string; is_read: boolean; created_at: string }>; unread_count: number }>("GET", "/notifications");
