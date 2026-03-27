@@ -164,6 +164,12 @@ class AdminAPI {
     const q = qs.toString();
     return this.req<{ records: BonusPulseAwardRecord[]; total: number }>("GET", `/admin/bonus-pulse${q ? `?${q}` : ""}`);
   }
+
+  // ─── Recharge Reward Config ─────────────────────────────────────────────────
+  getRechargeConfig() { return this.req<RechargeConfig>("GET", "/admin/recharge/config"); }
+  updateRechargeConfig(payload: Partial<RechargeConfigPayload>) {
+    return this.req<RechargeConfig>("PUT", "/admin/recharge/config", payload);
+  }
 }
 export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
@@ -461,4 +467,16 @@ export interface CSVRowDetail {
   pulse_points: number;
   draw_entries: number;
   processed_at?: string | null;
+}
+
+// ─── Recharge Reward Config types ──────────────────────────────────────────────
+export interface RechargeConfig {
+  spin_draw_naira_per_credit: number;
+  pulse_naira_per_point: number;
+  min_amount_naira: number;
+}
+export interface RechargeConfigPayload {
+  spin_draw_naira_per_credit: number;
+  pulse_naira_per_point: number;
+  min_amount_naira: number;
 }
