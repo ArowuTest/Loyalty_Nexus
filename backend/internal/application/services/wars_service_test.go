@@ -97,6 +97,30 @@ func (r *mockWarsRepo) GetWinnersForWar(_ context.Context, warID uuid.UUID) ([]e
 
 func (r *mockWarsRepo) MarkWinnerPaid(_ context.Context, _ uuid.UUID) error { return nil }
 
+
+func (r *mockWarsRepo) CreateSecondaryDraw(_ context.Context, draw *entities.WarSecondaryDraw, _ []entities.WarSecondaryDrawWinner) error {
+	return nil
+}
+
+func (r *mockWarsRepo) GetSecondaryDrawsForWar(_ context.Context, _ uuid.UUID) ([]entities.WarSecondaryDraw, error) {
+	return nil, nil
+}
+
+func (r *mockWarsRepo) GetSecondaryDrawByID(_ context.Context, _ uuid.UUID) (*entities.WarSecondaryDraw, error) {
+	return nil, nil
+}
+
+func (r *mockWarsRepo) MarkSecondaryWinnerPaid(_ context.Context, _ uuid.UUID, _ string, _ uuid.UUID) error {
+	return nil
+}
+
+func (r *mockWarsRepo) ListActiveUsersInState(_ context.Context, _ string, _, _ time.Time) ([]entities.UserRef, error) {
+	return []entities.UserRef{
+		{UserID: uuid.New(), PhoneNumber: "08012345678"},
+		{UserID: uuid.New(), PhoneNumber: "08098765432"},
+	}, nil
+}
+
 // verify interface compliance at compile time
 var _ repositories.WarsRepository = (*mockWarsRepo)(nil)
 

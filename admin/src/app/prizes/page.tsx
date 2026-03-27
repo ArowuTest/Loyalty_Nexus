@@ -25,8 +25,8 @@ export default function PrizesPage() {
                 <td style={{ padding: "10px 16px", color: "#e2e8ff", fontWeight: 600 }}>{p.name}</td>
                 <td style={{ padding: "10px 16px", color: "#828cb4", fontSize: 12, textTransform: "uppercase" }}>{p.prize_type}</td>
                 <td style={{ padding: "10px 16px", color: "#f9c74f", fontWeight: 600 }}>₦{p.base_value.toLocaleString()}</td>
-                <td style={{ padding: "10px 16px", color: "#5f72f9" }}>{p.probability}%</td>
-                <td style={{ padding: "10px 16px", color: "#828cb4" }}>{p.daily_inventory === -1 ? "∞" : p.daily_inventory}</td>
+                <td style={{ padding: "10px 16px", color: "#5f72f9" }}>{((p.win_probability_weight / 100).toFixed(2))}%</td>
+                <td style={{ padding: "10px 16px", color: "#828cb4" }}>{p.daily_inventory_cap === -1 ? "∞" : p.daily_inventory_cap}</td>
                 <td style={{ padding: "10px 16px" }}>
                   <span style={{ color: p.is_active ? "#10b981" : "#f43f5e", fontSize: 12 }}>{p.is_active ? "Active" : "Disabled"}</span>
                 </td>

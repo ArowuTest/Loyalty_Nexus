@@ -114,19 +114,17 @@ func newAdminHandler(db *gorm.DB) *handlers.AdminHandler {
 	return handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, drawWindowSvc, fraudSvc, nil, nil, claimSvc, nil)
 }
 
-// newAuthSvc builds an AuthService using the test JWT_SECRET env var.
-func newAuthSvc(db *gorm.DB) *services.AuthService {
-	authRepo := persistence.NewPostgresAuthRepository(db)
-	userRepo := persistence.NewPostgresUserRepository(db)
-	return services.NewAuthService(authRepo, userRepo, nil, config.NewConfigManager(db))
+// newAdminAuthSvc builds an AdminAuthService using the test JWT_SECRET env var.
+func newAdminAuthSvc(db *gorm.DB) *services.AdminAuthService {
+	return services.NewAdminAuthService(db)
 }
 
 // adminToken mints a valid admin JWT for use in HTTP test requests.
-func adminToken(t *testing.T, authSvc *services.AuthService) string {
+func adminToken(t *testing.T, authSvc *services.AdminAuthService) string {
 	t.Helper()
-	tok, err := authSvc.MintAdminToken(uuid.New())
+	tok, err := authSvc.MintTestAdminToken(uuid.New())
 	if err != nil {
-		t.Fatalf("MintAdminToken: %v", err)
+		t.Fatalf("MintTestAdminToken: %v", err)
 	}
 	return tok
 }
@@ -137,7 +135,7 @@ func adminToken(t *testing.T, authSvc *services.AuthService) string {
 // Extra spaces cause the pattern to be treated as a plain path (no method filter)
 // which results in 404 for non-matching methods and 405 for wrong methods.
 
-func buildRouter(db *gorm.DB, authSvc *services.AuthService) http.Handler {
+func buildRouter(db *gorm.DB, authSvc *services.AdminAuthService) http.Handler {
 	mux := http.NewServeMux()
 	h := newAdminHandler(db)
 	adminAuth := middleware.AdminAuthMiddleware(authSvc)
@@ -549,7 +547,7 @@ func TestPrizeRepo_ProbabilitySummary_Postgres(t *testing.T) {
 // TestHTTP_GetPrizePool_ReturnsJSON tests GET /admin/prizes returns a JSON array.
 func TestHTTP_GetPrizePool_ReturnsJSON(t *testing.T) {
 	db := openTestDB(t)
-	authSvc := newAuthSvc(db)
+	authSvc := newAdminAuthSvc(db)
 	tok := adminToken(t, authSvc)
 	srv := httptest.NewServer(buildRouter(db, authSvc))
 	defer srv.Close()
@@ -571,7 +569,7 @@ func TestHTTP_CreatePrize_Postgres(t *testing.T) {
 		// Clear existing prizes so we're under the 10000 budget
 		tx.Exec("DELETE FROM prize_pool")
 
-		authSvc := newAuthSvc(tx)
+		authSvc := newAdminAuthSvc(tx)
 		tok := adminToken(t, authSvc)
 		srv := httptest.NewServer(buildRouter(tx, authSvc))
 		defer srv.Close()
@@ -634,7 +632,7 @@ func TestHTTP_CreatePrize_MissingName_Returns400(t *testing.T) {
 	db := openTestDB(t)
 	withTx(t, db, func(tx *gorm.DB) {
 		tx.Exec("DELETE FROM prize_pool")
-		authSvc := newAuthSvc(tx)
+		authSvc := newAdminAuthSvc(tx)
 		tok := adminToken(t, authSvc)
 		srv := httptest.NewServer(buildRouter(tx, authSvc))
 		defer srv.Close()
@@ -659,7 +657,7 @@ func TestHTTP_CreatePrize_ExceedsBudget_Returns400(t *testing.T) {
 		tx.Exec(`INSERT INTO prize_pool (name, prize_type, win_probability_weight, base_value, is_active)
 			VALUES ('Seed', 'try_again', 9900, 0, true)`)
 
-		authSvc := newAuthSvc(tx)
+		authSvc := newAdminAuthSvc(tx)
 		tok := adminToken(t, authSvc)
 		srv := httptest.NewServer(buildRouter(tx, authSvc))
 		defer srv.Close()
@@ -694,7 +692,7 @@ func TestHTTP_GetPrize_Postgres(t *testing.T) {
 			t.Fatalf("CreatePrize: %v", err)
 		}
 
-		authSvc := newAuthSvc(tx)
+		authSvc := newAdminAuthSvc(tx)
 		tok := adminToken(t, authSvc)
 		srv := httptest.NewServer(buildRouter(tx, authSvc))
 		defer srv.Close()
@@ -720,7 +718,7 @@ func TestHTTP_GetPrize_Postgres(t *testing.T) {
 // TestHTTP_GetPrize_NotFound_Returns404 tests that a non-existent prize returns 404.
 func TestHTTP_GetPrize_NotFound_Returns404(t *testing.T) {
 	db := openTestDB(t)
-	authSvc := newAuthSvc(db)
+	authSvc := newAdminAuthSvc(db)
 	tok := adminToken(t, authSvc)
 	srv := httptest.NewServer(buildRouter(db, authSvc))
 	defer srv.Close()
@@ -749,7 +747,7 @@ func TestHTTP_UpdatePrize_Postgres(t *testing.T) {
 			t.Fatalf("CreatePrize: %v", err)
 		}
 
-		authSvc := newAuthSvc(tx)
+		authSvc := newAdminAuthSvc(tx)
 		tok := adminToken(t, authSvc)
 		srv := httptest.NewServer(buildRouter(tx, authSvc))
 		defer srv.Close()
@@ -803,7 +801,7 @@ func TestHTTP_DeletePrize_Postgres(t *testing.T) {
 			t.Fatalf("CreatePrize: %v", err)
 		}
 
-		authSvc := newAuthSvc(tx)
+		authSvc := newAdminAuthSvc(tx)
 		tok := adminToken(t, authSvc)
 		srv := httptest.NewServer(buildRouter(tx, authSvc))
 		defer srv.Close()
@@ -844,7 +842,7 @@ func TestHTTP_GetPrizeSummary_Postgres(t *testing.T) {
 			}
 		}
 
-		authSvc := newAuthSvc(tx)
+		authSvc := newAdminAuthSvc(tx)
 		tok := adminToken(t, authSvc)
 		srv := httptest.NewServer(buildRouter(tx, authSvc))
 		defer srv.Close()
@@ -894,7 +892,7 @@ func TestHTTP_ReorderPrizes_Postgres(t *testing.T) {
 			ids = append(ids, p.ID.String())
 		}
 
-		authSvc := newAuthSvc(tx)
+		authSvc := newAdminAuthSvc(tx)
 		tok := adminToken(t, authSvc)
 		srv := httptest.NewServer(buildRouter(tx, authSvc))
 		defer srv.Close()
@@ -937,7 +935,7 @@ func TestHTTP_ReorderPrizes_Postgres(t *testing.T) {
 // config payload including prizes, tiers, and probability summary.
 func TestHTTP_GetSpinConfig_Postgres(t *testing.T) {
 	db := openTestDB(t)
-	authSvc := newAuthSvc(db)
+	authSvc := newAdminAuthSvc(db)
 	tok := adminToken(t, authSvc)
 	srv := httptest.NewServer(buildRouter(db, authSvc))
 	defer srv.Close()
@@ -963,7 +961,7 @@ func TestHTTP_GetSpinConfig_Postgres(t *testing.T) {
 // TestHTTP_GetSpinTiers_Postgres tests GET /admin/spin/tiers returns the seeded tiers.
 func TestHTTP_GetSpinTiers_Postgres(t *testing.T) {
 	db := openTestDB(t)
-	authSvc := newAuthSvc(db)
+	authSvc := newAdminAuthSvc(db)
 	tok := adminToken(t, authSvc)
 	srv := httptest.NewServer(buildRouter(db, authSvc))
 	defer srv.Close()
@@ -983,7 +981,7 @@ func TestHTTP_GetSpinTiers_Postgres(t *testing.T) {
 // return 401 when no Authorization header is provided.
 func TestHTTP_AdminAuth_Rejected_Without_Token(t *testing.T) {
 	db := openTestDB(t)
-	authSvc := newAuthSvc(db)
+	authSvc := newAdminAuthSvc(db)
 	srv := httptest.NewServer(buildRouter(db, authSvc))
 	defer srv.Close()
 
@@ -1006,7 +1004,7 @@ func TestHTTP_AdminAuth_Rejected_Without_Token(t *testing.T) {
 // JWT returns 401 Unauthorized on admin routes.
 func TestHTTP_AdminAuth_Rejected_With_Invalid_Token(t *testing.T) {
 	db := openTestDB(t)
-	authSvc := newAuthSvc(db)
+	authSvc := newAdminAuthSvc(db)
 	srv := httptest.NewServer(buildRouter(db, authSvc))
 	defer srv.Close()
 
@@ -1023,7 +1021,7 @@ func TestHTTP_AdminAuth_Rejected_With_Invalid_Token(t *testing.T) {
 // TestHTTP_ClaimsList_Postgres tests GET /admin/spin/claims returns a valid response.
 func TestHTTP_ClaimsList_Postgres(t *testing.T) {
 	db := openTestDB(t)
-	authSvc := newAuthSvc(db)
+	authSvc := newAdminAuthSvc(db)
 	tok := adminToken(t, authSvc)
 	srv := httptest.NewServer(buildRouter(db, authSvc))
 	defer srv.Close()
@@ -1039,7 +1037,7 @@ func TestHTTP_ClaimsList_Postgres(t *testing.T) {
 // TestHTTP_PendingClaims_Postgres tests GET /admin/spin/claims/pending.
 func TestHTTP_PendingClaims_Postgres(t *testing.T) {
 	db := openTestDB(t)
-	authSvc := newAuthSvc(db)
+	authSvc := newAdminAuthSvc(db)
 	tok := adminToken(t, authSvc)
 	srv := httptest.NewServer(buildRouter(db, authSvc))
 	defer srv.Close()
@@ -1061,7 +1059,7 @@ func TestHTTP_PendingClaims_Postgres(t *testing.T) {
 // TestHTTP_ClaimStatistics_Postgres tests GET /admin/spin/claims/statistics.
 func TestHTTP_ClaimStatistics_Postgres(t *testing.T) {
 	db := openTestDB(t)
-	authSvc := newAuthSvc(db)
+	authSvc := newAdminAuthSvc(db)
 	tok := adminToken(t, authSvc)
 	srv := httptest.NewServer(buildRouter(db, authSvc))
 	defer srv.Close()
@@ -1077,7 +1075,7 @@ func TestHTTP_ClaimStatistics_Postgres(t *testing.T) {
 // TestHTTP_ExportClaims_Postgres tests GET /admin/spin/claims/export returns CSV.
 func TestHTTP_ExportClaims_Postgres(t *testing.T) {
 	db := openTestDB(t)
-	authSvc := newAuthSvc(db)
+	authSvc := newAdminAuthSvc(db)
 	tok := adminToken(t, authSvc)
 	srv := httptest.NewServer(buildRouter(db, authSvc))
 	defer srv.Close()
@@ -1123,7 +1121,7 @@ func TestHTTP_GetPrizePool_IncludesInactive_Postgres(t *testing.T) {
 		// Soft-delete it
 		tx.Exec("UPDATE prize_pool SET is_active = false WHERE id = ?", inactive.ID)
 
-		authSvc := newAuthSvc(tx)
+		authSvc := newAdminAuthSvc(tx)
 		tok := adminToken(t, authSvc)
 		srv := httptest.NewServer(buildRouter(tx, authSvc))
 		defer srv.Close()

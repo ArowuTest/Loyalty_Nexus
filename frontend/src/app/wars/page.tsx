@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import useSWR from "swr";
 import AppShell from "@/components/layout/AppShell";
@@ -152,7 +151,6 @@ export default function RegionalWarsPage() {
           </div>
         )}
 
-<<<<<<< HEAD
         {/* No active war */}
         {!isLoading && !error && !hasActiveWar && <NoActiveWar />}
 
@@ -262,62 +260,6 @@ export default function RegionalWarsPage() {
             </div>
           </>
         )}
-=======
-        {/* My Rank Banner */}
-        {myRankData && myRankData.state && (
-          <div className="nexus-card p-4 border-nexus-500/30 bg-nexus-500/10">
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-[rgb(130_140_180)] text-xs uppercase tracking-wider">Your State</p>
-                <p className="text-white font-bold text-lg">{myRankData.state}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-[rgb(130_140_180)] text-xs uppercase tracking-wider">Current Rank</p>
-                <p className="text-nexus-400 font-bold text-lg">#{myRankData.rank}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Leaderboard */}
-        <div>
-          <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
-            <Trophy size={16} className="text-gold-400" />
-            State Leaderboard
-          </h2>
-          {loadingLeaderboard ? (
-            <div className="text-center py-8 text-[rgb(130_140_180)]">Loading leaderboard...</div>
-          ) : leaderboard.length === 0 ? (
-            <div className="text-center py-8 text-[rgb(130_140_180)]">No data available for this period.</div>
-          ) : (
-            <div className="space-y-2">
-              {leaderboard.map((row, i) => (
-                <motion.div
-                  key={row.state}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.04 }}
-                  className={cn(
-                    "nexus-card p-3 flex items-center gap-3",
-                    row.rank <= 3 && "border-gold-500/30"
-                  )}
-                >
-                  <div className="w-8 text-center text-lg">
-                    {MEDALS[row.rank] || <span className="text-[rgb(130_140_180)] text-sm font-bold">{row.rank}</span>}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-white font-semibold text-sm">{row.state}</p>
-                    <p className="text-[rgb(130_140_180)] text-xs">{row.active_members.toLocaleString()} members</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-white font-bold text-sm">{row.total_points.toLocaleString()} pts</p>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          )}
-        </div>
->>>>>>> 2a769f3 (fix: remove mock data and wire up missing endpoints from audit)
       </div>
     </AppShell>
   );
