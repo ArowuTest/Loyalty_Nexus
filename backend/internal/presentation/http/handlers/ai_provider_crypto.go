@@ -52,7 +52,7 @@ func encryptProviderKey(raw string) (string, error) {
 }
 
 // decryptProviderKey reverses encryptProviderKey.
-func decryptProviderKey(enc string) (string, error) {
+func decryptProviderKey(enc string) (string, error) { //nolint:unused
 	if strings.HasPrefix(enc, "b64:") {
 		raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(enc, "b64:"))
 		return string(raw), err

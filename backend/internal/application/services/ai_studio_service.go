@@ -1581,7 +1581,7 @@ func (o *AIStudioOrchestrator) callGoogleTranslate(ctx context.Context, apiKey, 
 // This is FREE — it uses the same HF_TOKEN already required for image generation.
 // Model: facebook/musicgen-small (best quality/speed for short clips)
 // Returns a public CDN URL to the uploaded MP3.
-func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt string, durationSecs int) (string, error) {
+func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt string, durationSecs int) (string, error) { //nolint:unused
 	// HF Inference API for audio generation.
 	// HF deprecated api-inference.huggingface.co (410 Gone) — use router instead.
 	apiURL := "https://router.huggingface.co/hf-inference/models/facebook/musicgen-small"
@@ -1759,7 +1759,7 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 //   FREE: wan-fast (Wan 2.2), ltx-2 (LTX-2)
 //   PAID: seedance, seedance-pro, veo, wan
 // Using wan-fast as the default free option.
-func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageURL, prompt string) (string, error) {
+func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageURL, prompt string) (string, error) { //nolint:unused
 	return o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, prompt, 180)
 }
 
@@ -2390,7 +2390,7 @@ func (o *AIStudioOrchestrator) callPollinationsElevenMusic(ctx context.Context, 
 // callPollinationsSeedance is kept for backward compatibility (e.g. admin DB rows that use seedance).
 // NOTE: seedance is a PAID model (1.8 pollen/M). Use callPollinationsVideo (wan-fast, FREE) for
 // cost-effective generation. Only call this when the user explicitly selected a paid seedance plan.
-func (o *AIStudioOrchestrator) callPollinationsSeedance(ctx context.Context, imageURL, prompt string) (string, error) {
+func (o *AIStudioOrchestrator) callPollinationsSeedance(ctx context.Context, imageURL, prompt string) (string, error) { //nolint:unused
 	return o.callPollinationsVideoModel(ctx, "seedance", imageURL, prompt, 180)
 }
 

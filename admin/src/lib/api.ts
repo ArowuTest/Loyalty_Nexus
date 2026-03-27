@@ -319,6 +319,8 @@ export interface AIProviderTestResult {
   status: "ok" | "failed";
   message: string;
   last_tested_at: string;
+}
+
 // ─── Bonus Pulse Point Awards types ─────────────────────────────────────────────
 export interface BonusPulseAwardResult {
   award_id: string;

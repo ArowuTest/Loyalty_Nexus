@@ -261,12 +261,10 @@ func (o *AIStudioOrchestrator) callGeminiFlashWithModel(
 	if model == "" {
 		model = "gemini-2.5-flash"
 	}
+	_ = model  // model selection deferred to callGeminiFlash env routing
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
-	// callGeminiFlash already reads GEMINI_API_KEY; we temporarily use the key
-	// from DB if different. For now delegate to the standard function and let
-	// it read the env — the DB key overrides are in the extra_config if needed.
 	_ = apiKey // future: patch Gemini call to accept explicit key param
 	return o.callGeminiFlash(ctx, systemPrompt, userPrompt)
 }
