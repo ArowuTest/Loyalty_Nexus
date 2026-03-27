@@ -6,21 +6,31 @@ import Link from "next/link";
 import { useStore } from "@/store/useStore";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Zap, Wand2, Gift, Ticket, Settings, LogOut, Shield, Bell, Globe
+  LayoutDashboard, Zap, Wand2, Gift, Settings, LogOut, Bell, Swords,
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/dashboard",  icon: LayoutDashboard, label: "Home" },
-  { href: "/spin",       icon: Zap,             label: "Spin" },
-  { href: "/prizes",     icon: Gift,            label: "Prizes" },
-  { href: "/studio",     icon: Wand2,           label: "Studio" },
-  { href: "/wars",       icon: Globe,           label: "Wars" },
+  { href: "/dashboard", icon: LayoutDashboard, label: "Home"   },
+  { href: "/spin",      icon: Zap,             label: "Spin"   },
+  { href: "/studio",    icon: Wand2,           label: "Studio" },
+  { href: "/wars",      icon: Swords,          label: "Wars"   },
+  { href: "/prizes",    icon: Gift,            label: "Prizes" },
 ];
+
+const TIER_COLORS: Record<string, string> = {
+  BRONZE: "#CD7F32", SILVER: "#C0C0C0", GOLD: "#F5A623", PLATINUM: "#E5E4E2", DIAMOND: "#B9F2FF",
+};
+const TIER_ICONS: Record<string, string> = {
+  BRONZE: "🥉", SILVER: "🥈", GOLD: "🥇", PLATINUM: "💎", DIAMOND: "💠",
+};
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { isAuthenticated, _hasHydrated, logout, user } = useStore();
+  const tier      = (user?.tier ?? "BRONZE").toUpperCase();
+  const tierColor = TIER_COLORS[tier] ?? "#CD7F32";
+  const tierIcon  = TIER_ICONS[tier]  ?? "🥉";
 
   useEffect(() => {
     // Only redirect once the Zustand persist store has finished rehydrating
@@ -36,78 +46,106 @@ export default function AppShell({ children }: { children: ReactNode }) {
   if (!isAuthenticated) return null;
 
   return (
-    <div className="min-h-screen bg-[rgb(15_17_35)] flex flex-col">
-      {/* Top bar (desktop) */}
-      <header className="hidden md:flex items-center justify-between px-6 py-4 glass border-b border-nexus-600/10 sticky top-0 z-50">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <span className="text-2xl">⚡</span>
-          <span className="font-display text-lg font-bold text-white">Loyalty Nexus</span>
+    <div className="min-h-screen flex flex-col" style={{ background: "var(--surface-0)" }}>
+
+      {/* ── Desktop top bar ── */}
+      <header
+        className="hidden md:flex items-center justify-between px-6 py-3.5 sticky top-0 z-50"
+        style={{
+          background: "rgba(13,14,20,0.88)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+        }}
+      >
+        {/* Logo */}
+        <Link href="/dashboard" className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.25)" }}>
+            <Zap size={16} style={{ color: "var(--gold)" }} />
+          </div>
+          <span className="font-black text-[15px] text-white tracking-tight">Loyalty Nexus</span>
         </Link>
-        <nav className="flex gap-1">
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all",
-                pathname === item.href
-                  ? "bg-nexus-600/20 text-nexus-400"
-                  : "text-[rgb(130_140_180)] hover:text-white hover:bg-white/5"
-              )}
-            >
-              <item.icon size={16} />
-              {item.label}
-            </Link>
-          ))}
-          {/* Prizes in desktop nav only (not in mobile bottom bar to save space) */}
-          <Link
-            href="/prizes"
-            className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all",
-              pathname === "/prizes"
-                ? "bg-nexus-600/20 text-nexus-400"
-                : "text-[rgb(130_140_180)] hover:text-white hover:bg-white/5"
-            )}
-          >
-            <Gift size={16} />
-            Prizes
-          </Link>
-        </nav>
-        <div className="flex items-center gap-3">
-          <span className={cn("tier-badge", `tier-${user?.tier || "BRONZE"}`)}>{user?.tier || "BRONZE"}</span>
-          <Link href="/notifications" className="text-[rgb(130_140_180)] hover:text-white transition-colors" title="Notifications">
-                <Bell size={18} />
+
+        {/* Nav links */}
+        <nav className="flex gap-0.5">
+          {NAV_ITEMS.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-black transition-all",
+                  active ? "" : "text-white/40 hover:text-white hover:bg-white/[0.05]"
+                )}
+                style={active ? {
+                  background: "rgba(245,166,35,0.10)",
+                  border: "1px solid rgba(245,166,35,0.18)",
+                  color: "var(--gold)",
+                } : {}}
+              >
+                <item.icon size={15} />
+                {item.label}
               </Link>
-              <Link href="/settings" className="text-[rgb(130_140_180)] hover:text-white transition-colors">
-            <Settings size={18} />
+            );
+          })}
+        </nav>
+
+        {/* Right side */}
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[11px] font-black"
+            style={{ background: `${tierColor}12`, border: `1px solid ${tierColor}25`, color: tierColor }}>
+            {tierIcon} {tier}
+          </div>
+          <Link href="/notifications"
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-white/40 hover:text-white transition-colors"
+            style={{ border: "1px solid rgba(255,255,255,0.07)" }}
+            title="Notifications">
+            <Bell size={15} />
+          </Link>
+          <Link href="/settings"
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-white/40 hover:text-white transition-colors"
+            style={{ border: "1px solid rgba(255,255,255,0.07)" }}>
+            <Settings size={15} />
           </Link>
           <button
             onClick={() => { logout(); router.push("/"); }}
-            className="text-[rgb(130_140_180)] hover:text-red-400 transition-colors"
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-white/40 hover:text-red-400 transition-colors"
+            style={{ border: "1px solid rgba(255,255,255,0.07)" }}
           >
-            <LogOut size={18} />
+            <LogOut size={15} />
           </button>
         </div>
       </header>
 
-      {/* Main content */}
+      {/* ── Main content ── */}
       <main className="flex-1 pb-24 md:pb-8">{children}</main>
 
-      {/* Bottom nav (mobile) — 5 items max for readability */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 glass border-t border-nexus-600/10 flex justify-around py-2 z-50">
-        {NAV_ITEMS.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              "flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all",
-              pathname === item.href ? "text-nexus-400" : "text-[rgb(130_140_180)]"
-            )}
-          >
-            <item.icon size={20} />
-            <span className="text-[10px] font-medium">{item.label}</span>
-          </Link>
-        ))}
+      {/* ── Mobile bottom nav ── */}
+      <nav
+        className="md:hidden fixed bottom-0 left-0 right-0 flex justify-around py-2 z-50"
+        style={{
+          background: "rgba(13,14,20,0.94)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+        }}
+      >
+        {NAV_ITEMS.map((item) => {
+          const active = pathname === item.href || pathname.startsWith(item.href + "/");
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-[52px]"
+              style={{ color: active ? "var(--gold)" : "rgba(255,255,255,0.35)" }}
+            >
+              <item.icon size={20} />
+              <span className="text-[9px] font-black uppercase tracking-wide">{item.label}</span>
+            </Link>
+          );
+        })}
       </nav>
     </div>
   );

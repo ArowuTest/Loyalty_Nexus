@@ -287,7 +287,7 @@ function PointsBadge({ pointCost, size = "sm" }: { pointCost: number; size?: "xs
         ? "bg-green-500/20 text-green-300 border-green-500/30"
         : isPremium
           ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
-          : "bg-nexus-500/20 text-nexus-300 border-nexus-500/30"
+          : "bg-gold-500/15 text-gold-400 border-gold-500/25"
     )}>
       {isFree ? "Free" : `${pointCost} pts/gen`}
     </span>
@@ -302,18 +302,18 @@ function WalletBar({ userPoints }: { userPoints: number }) {
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "nexus-card p-3 flex items-center justify-between gap-3",
+        "glass border border-white/[0.08] p-3 flex items-center justify-between gap-3",
         isLow
           ? "border-amber-500/30 bg-gradient-to-r from-amber-500/8 to-orange-500/5"
-          : "border-nexus-500/20 bg-gradient-to-r from-nexus-600/8 to-purple-600/5"
+          : "border-gold-500/15 bg-gradient-to-r from-gold-500/5 to-amber-600/3"
       )}
     >
       <div className="flex items-center gap-2.5">
         <div className={cn(
           "w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0",
-          isLow ? "bg-amber-500/20" : "bg-nexus-500/20"
+          isLow ? "bg-amber-500/20" : "bg-gold-500/15"
         )}>
-          <Zap size={15} className={isLow ? "text-amber-400" : "text-nexus-400"} />
+          <Zap size={15} className={isLow ? "text-amber-400" : "text-gold-500"} />
         </div>
         <div>
           <div className="flex items-baseline gap-1.5">
@@ -384,7 +384,7 @@ function SessionBar({ userPoints }: { userPoints: number }) {
   return (
     <motion.div
       initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
-      className="nexus-card p-2.5 border-white/5 bg-white/[0.02] space-y-2"
+      className="glass border border-white/[0.08] p-2.5 border-white/5 bg-white/[0.02] space-y-2"
     >
       {/* Generation session row */}
       {hasSession && session && (
@@ -413,17 +413,17 @@ function SessionBar({ userPoints }: { userPoints: number }) {
       {hasChat && chatInfo && (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <MessageSquare size={11} className="text-nexus-400" />
+            <MessageSquare size={11} className="text-gold-500" />
             <span className="text-white/40 text-[10px] uppercase tracking-wider">Chat today</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="h-1 w-16 rounded-full bg-white/10 overflow-hidden">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-nexus-500 to-purple-500 transition-all duration-500"
+                className="h-full rounded-full bg-gradient-to-r from-gold-500 to-amber-500 transition-all duration-500"
                 style={{ width: `${Math.min(100, (chatInfo.used / chatInfo.limit) * 100)}%` }}
               />
             </div>
-            <span className="text-nexus-300 text-[10px] font-bold tabular-nums">
+            <span className="text-gold-400 text-[10px] font-bold tabular-nums">
               {chatInfo.used}/{chatInfo.limit}
             </span>
           </div>
@@ -470,7 +470,7 @@ function HowItWorksBanner({ onDismiss }: { onDismiss: () => void }) {
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className="nexus-card p-4 border border-nexus-500/20 bg-gradient-to-r from-nexus-600/10 to-purple-600/10"
+      className="glass border border-white/[0.08] p-4 border border-gold-500/15 bg-gradient-to-r from-gold-500/8 to-amber-600/5"
     >
       <div className="flex items-start justify-between gap-2 mb-3">
         <div>
@@ -518,7 +518,7 @@ function ConfirmModal({
         className="w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="nexus-card overflow-hidden">
+        <div className="glass border border-white/[0.08] overflow-hidden">
           <div className={cn("h-1.5 w-full bg-gradient-to-r", cfg.color.replace("/20","/60").replace("/10","/40"))} />
           <div className="p-6 space-y-5">
             {/* Tool header */}
@@ -545,7 +545,7 @@ function ConfirmModal({
                 ? "border-red-500/30 bg-red-500/8"
                 : isFree
                   ? "border-green-500/25 bg-green-500/8"
-                  : "border-nexus-500/25 bg-nexus-600/8"
+                  : "border-gold-500/20 bg-gold-500/5"
             )}>
               {isFree ? (
                 <div className="flex items-center gap-2 text-green-300">
@@ -556,21 +556,21 @@ function ConfirmModal({
                 <>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-white/55 flex items-center gap-1.5">
-                      <Zap size={12} className="text-nexus-400" /> Generation cost
+                      <Zap size={12} className="text-gold-500" /> Generation cost
                     </span>
                     <span className="font-bold text-white">−{tool.point_cost} pts</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-white/55">Your balance</span>
-                    <span className="font-semibold text-nexus-300">{userPoints.toLocaleString()} pts</span>
+                    <span className="font-semibold text-gold-400">{userPoints.toLocaleString()} pts</span>
                   </div>
                   <div className={cn(
                     "h-px w-full",
-                    canAfford ? "bg-nexus-500/20" : "bg-red-500/20"
+                    canAfford ? "bg-gold-500/15" : "bg-red-500/20"
                   )} />
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-white/55">Balance after</span>
-                    <span className={cn("font-bold", canAfford ? "text-nexus-300" : "text-red-400")}>
+                    <span className={cn("font-bold", canAfford ? "text-gold-400" : "text-red-400")}>
                       {canAfford ? `${after.toLocaleString()} pts remaining` : "⚠ Insufficient"}
                     </span>
                   </div>
@@ -595,9 +595,9 @@ function ConfirmModal({
 
             {/* Refund notice */}
             {canAfford && !isFree && (
-              <div className="flex items-start gap-2.5 bg-nexus-600/10 border border-nexus-500/20 rounded-xl p-3">
-                <Info size={15} className="text-nexus-400 flex-shrink-0 mt-0.5" />
-                <p className="text-nexus-300 text-xs leading-relaxed">
+              <div className="flex items-start gap-2.5 bg-gold-500/5 border border-gold-500/15 rounded-xl p-3">
+                <Info size={15} className="text-gold-500 flex-shrink-0 mt-0.5" />
+                <p className="text-gold-400 text-xs leading-relaxed">
                   {tool.point_cost} pts deducted once when generation starts.
                   If the AI fails, your points are automatically refunded within seconds.
                 </p>
@@ -606,7 +606,7 @@ function ConfirmModal({
 
             {/* Actions */}
             <div className="flex gap-2 pt-1">
-              <button onClick={onCancel} className="nexus-btn-outline flex-1 text-sm py-3">Cancel</button>
+              <button onClick={onCancel} className="glass border border-white/[0.10] text-white/70 hover:text-white hover:border-white/20 transition-all rounded-xl font-black flex-1 text-sm py-3">Cancel</button>
               {!canAfford && !isFree ? (
                 <Link
                   href="/recharge"
@@ -621,7 +621,7 @@ function ConfirmModal({
                   disabled={busy}
                   className={cn(
                     "flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all",
-                    "bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-[0.98]",
+                    "bg-gradient-to-r from-gold-500/80 to-amber-600 text-white hover:opacity-90 active:scale-[0.98]",
                     busy && "opacity-70 cursor-not-allowed"
                   )}
                 >
@@ -725,7 +725,7 @@ function RichMessage({ content, mode }: { content: string; mode: ChatMode }) {
 
 // ─── Chat bubble ──────────────────────────────────────────────────────────────
 const MODE_META: Record<ChatMode, { label: string; color: string; icon: React.ReactNode }> = {
-  general: { label: 'Nexus AI',    color: 'text-nexus-300',  icon: <Brain size={14} className="text-nexus-300" /> },
+  general: { label: 'Nexus AI',    color: 'text-gold-400',  icon: <Brain size={14} className="text-gold-400" /> },
   search:  { label: 'Web Search',  color: 'text-sky-300',    icon: <Globe size={14} className="text-sky-300" /> },
   code:    { label: 'Code Helper', color: 'text-green-300',  icon: <Code2 size={14} className="text-green-300" /> },
 };
@@ -738,10 +738,10 @@ function ChatBubble({ msg }: { msg: Message }) {
     <div className={cn("flex gap-2.5", isUser && "flex-row-reverse")}>
       <div className={cn(
         "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5",
-        isUser ? "bg-gradient-to-br from-purple-600/40 to-nexus-600/40"
+        isUser ? "bg-gradient-to-br from-gold-500/20 to-amber-600/15"
                : mode === 'search' ? "bg-sky-600/20 border border-sky-500/20"
                : mode === 'code'   ? "bg-green-600/20 border border-green-500/20"
-               :                     "bg-gradient-to-br from-nexus-600/30 to-blue-600/30"
+               :                     "bg-gradient-to-br from-gold-500/15 to-amber-600/10"
       )}>
         {isUser ? <User size={14} className="text-purple-300" /> : meta.icon}
       </div>
@@ -749,7 +749,7 @@ function ChatBubble({ msg }: { msg: Message }) {
         <div className={cn(
           "px-4 py-2.5",
           isUser
-            ? "bg-gradient-to-br from-nexus-600 to-purple-700 text-white rounded-2xl rounded-tr-sm text-sm leading-relaxed"
+            ? "bg-gradient-to-br from-gold-500/80 to-amber-600 text-white rounded-2xl rounded-tr-sm text-sm leading-relaxed"
             : mode === 'code'
               ? "bg-gray-950/80 border border-green-500/15 rounded-2xl rounded-tl-sm"
               : mode === 'search'
@@ -788,7 +788,7 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
     <motion.button
       whileHover={{ scale: 1.012 }} whileTap={{ scale: 0.98 }}
       onClick={onClick}
-      className="w-full nexus-card p-4 text-left group hover:border-white/20 transition-all relative overflow-hidden"
+      className="w-full glass border border-white/[0.08] p-4 text-left group hover:border-white/20 transition-all relative overflow-hidden"
     >
       {/* Entry-locked overlay */}
       {entryLocked && (
@@ -861,7 +861,7 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
             "flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-xl transition-all",
             isChatTool
               ? "bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-500"
-              : "bg-nexus-600/20 text-nexus-300 border border-nexus-500/30 group-hover:bg-nexus-600 group-hover:text-white group-hover:border-nexus-500"
+              : "bg-gold-500/10 text-gold-400 border border-gold-500/25 group-hover:bg-gold-500/20 group-hover:text-white group-hover:border-gold-500"
           )}>
             {isChatTool ? "Chat" : "Use Tool"} <ChevronRight size={11} />
           </div>
@@ -935,7 +935,7 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
 
   return (
     <div className={cn(
-      "nexus-card p-4 space-y-3",
+      "glass border border-white/[0.08] p-4 space-y-3",
       gen.status === "failed" && "border-red-500/15"
     )}>
       {/* Header row */}
@@ -976,14 +976,14 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
       {gen.status === "processing" && (
         <div className="space-y-3">
           <div className="h-1 w-full rounded-full bg-white/10 overflow-hidden">
-            <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-nexus-500 to-purple-500 animate-[progress_1.6s_ease-in-out_infinite]" />
+            <div className="h-full w-1/3 rounded-full bg-gradient-to-r from-gold-500 to-amber-500 animate-[progress_1.6s_ease-in-out_infinite]" />
           </div>
           <div className="space-y-2">
             <div className="h-3 rounded-lg bg-white/10 animate-pulse w-3/4" />
             <div className="h-3 rounded-lg bg-white/8 animate-pulse w-1/2" />
           </div>
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-nexus-400 text-xs">
+            <div className="flex items-center gap-2 text-gold-500 text-xs">
               <Loader2 size={12} className="animate-spin" />
               <span>Generating your {outType.noun}…</span>
             </div>
@@ -1071,7 +1071,7 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
           )}
           {!isImage && !isAudio && !isVideo && (
             <a href={gen.output_url} target="_blank" rel="noreferrer"
-              className="flex items-center gap-2 text-nexus-400 text-sm hover:text-nexus-300">
+              className="flex items-center gap-2 text-gold-500 text-sm hover:text-gold-400">
               <ExternalLink size={14} /> View result
             </a>
           )}
@@ -1319,7 +1319,7 @@ function ToolDrawer({
         className="fixed bottom-0 left-0 right-0 z-40 max-h-[92vh] overflow-y-auto
                    md:relative md:inset-auto md:max-h-none"
       >
-        <div className="nexus-card m-2 md:m-0 overflow-hidden">
+        <div className="glass border border-white/[0.08] m-2 md:m-0 overflow-hidden">
           {/* Top colour stripe — maps to category colour */}
           <div className={cn("h-1 w-full bg-gradient-to-r", cfg.color.replace("/20","/70").replace("/10","/50"))} />
 
@@ -1358,7 +1358,7 @@ function ToolDrawer({
               </div>
               <p className="text-white/30 text-xs">Top up your PulsePoints to unlock this tool. Your points never expire.</p>
               <div className="flex gap-2">
-                <button onClick={onClose} className="flex-1 nexus-btn-outline text-sm py-3">Back</button>
+                <button onClick={onClose} className="flex-1 glass border border-white/[0.10] text-white/70 hover:text-white hover:border-white/20 transition-all rounded-xl font-black text-sm py-3">Back</button>
                 <Link href="/recharge"
                   className="flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2
                              bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90">
@@ -1418,7 +1418,7 @@ function ToolDrawer({
               <div className={cn(
                 "rounded-xl border p-3 space-y-1.5",
                 isFree     ? "border-green-500/25 bg-green-500/8"
-                : canAfford ? "border-nexus-500/20 bg-nexus-600/8"
+                : canAfford ? "border-gold-500/15 bg-gold-500/5"
                             : "border-red-500/30 bg-red-500/8",
               )}>
                 {isFree ? (
@@ -1430,18 +1430,18 @@ function ToolDrawer({
                   <>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-white/50 flex items-center gap-1.5">
-                        <Zap size={11} className="text-nexus-400" /> Generation cost
+                        <Zap size={11} className="text-gold-500" /> Generation cost
                       </span>
                       <span className="font-bold text-white">{tool.point_cost} pts per generation</span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-white/50">Your balance</span>
-                      <span className="font-semibold text-nexus-300">{userPoints.toLocaleString()} pts</span>
+                      <span className="font-semibold text-gold-400">{userPoints.toLocaleString()} pts</span>
                     </div>
-                    <div className={cn("h-px w-full", canAfford ? "bg-nexus-500/20" : "bg-red-500/20")} />
+                    <div className={cn("h-px w-full", canAfford ? "bg-gold-500/15" : "bg-red-500/20")} />
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-white/50">After generation</span>
-                      <span className={cn("font-bold", canAfford ? "text-nexus-300" : "text-red-400")}>
+                      <span className={cn("font-bold", canAfford ? "text-gold-400" : "text-red-400")}>
                         {canAfford
                           ? `${after.toLocaleString()} pts remaining`
                           : `Need ${(tool.point_cost - userPoints).toLocaleString()} more pts`}
@@ -1462,9 +1462,9 @@ function ToolDrawer({
               {generating && genStartedAt && (
                 <motion.div
                   initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center justify-between bg-nexus-600/10 border border-nexus-500/20 rounded-xl px-4 py-3"
+                  className="flex items-center justify-between bg-gold-500/5 border border-gold-500/15 rounded-xl px-4 py-3"
                 >
-                  <div className="flex items-center gap-2 text-nexus-300 text-sm">
+                  <div className="flex items-center gap-2 text-gold-400 text-sm">
                     <Loader2 size={14} className="animate-spin" />
                     <span>Generating your {outType.noun}…</span>
                   </div>
@@ -1663,7 +1663,7 @@ export default function StudioPage() {
         {/* ── Header ── */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-nexus-600 to-purple-600 flex items-center justify-center shadow-lg shadow-nexus-900/40">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-gold-500/80 to-amber-600 flex items-center justify-center shadow-lg shadow-black/40">
               <Brain size={20} className="text-white" />
             </div>
             <div>
@@ -1687,7 +1687,7 @@ export default function StudioPage() {
         </AnimatePresence>
 
         {/* ── Tab bar ── */}
-        <div className="nexus-card p-1 flex gap-1">
+        <div className="glass border border-white/[0.08] p-1 flex gap-1">
           {([
             { key: "chat",    label: "Chat",    icon: <MessageSquare size={14} />, badge: undefined as number | undefined },
             { key: "tools",   label: "Tools",   icon: <LayoutGrid size={14} />,   badge: tools.length as number | undefined },
@@ -1699,7 +1699,7 @@ export default function StudioPage() {
               className={cn(
                 "flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5",
                 activeTab === key
-                  ? "bg-gradient-to-r from-nexus-600 to-purple-600 text-white shadow"
+                  ? "bg-gradient-to-r from-gold-500/80 to-amber-600 text-white shadow"
                   : "text-white/40 hover:text-white/70"
               )}
             >
@@ -1726,7 +1726,7 @@ export default function StudioPage() {
               {/* ── Chat mode switcher ── */}
               <div className="flex gap-1.5 mb-3">
                 {([
-                  { id: 'general', label: 'General',    icon: <Brain size={12} />,  color: 'from-nexus-600 to-purple-600',    badge: 'Free' },
+                  { id: 'general', label: 'General',    icon: <Brain size={12} />,  color: 'from-gold-500/80 to-amber-600',    badge: 'Free' },
                   { id: 'search',  label: 'Web Search', icon: <Globe size={12} />,  color: 'from-sky-600 to-blue-600',        badge: 'Free' },
                   { id: 'code',    label: 'Code',       icon: <Code2 size={12} />,  color: 'from-green-600 to-emerald-600',   badge: 'Free' },
                 ] as const).map((m) => (
@@ -1765,7 +1765,7 @@ export default function StudioPage() {
 
               {/* Messages window */}
               <div className={cn(
-                'nexus-card h-[380px] overflow-y-auto p-4 space-y-4 scroll-smooth',
+                'glass border border-white/[0.08] h-[380px] overflow-y-auto p-4 space-y-4 scroll-smooth',
                 chatMode === 'code'   && 'bg-gray-950/60',
                 chatMode === 'search' && 'bg-sky-950/20',
               )}>
@@ -1776,16 +1776,16 @@ export default function StudioPage() {
                       'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0',
                       chatMode === 'code'   ? 'bg-green-600/20' :
                       chatMode === 'search' ? 'bg-sky-600/20' :
-                                             'bg-gradient-to-br from-nexus-600/30 to-blue-600/30',
+                                             'bg-gradient-to-br from-gold-500/15 to-amber-600/10',
                     )}>
                       {chatMode === 'code'   ? <Code2 size={14} className="text-green-300" /> :
                        chatMode === 'search' ? <Globe size={14} className="text-sky-300" /> :
-                                              <Brain size={14} className="text-nexus-300" />}
+                                              <Brain size={14} className="text-gold-400" />}
                     </div>
-                    <div className="nexus-card px-4 py-2.5 rounded-2xl rounded-tl-sm border border-white/5 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 bg-nexus-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                      <span className="w-1.5 h-1.5 bg-nexus-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                      <span className="w-1.5 h-1.5 bg-nexus-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                    <div className="glass border border-white/[0.08] px-4 py-2.5 rounded-2xl rounded-tl-sm border border-white/5 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 bg-gold-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                      <span className="w-1.5 h-1.5 bg-gold-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                      <span className="w-1.5 h-1.5 bg-gold-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                     </div>
                   </div>
                 )}
@@ -1805,7 +1805,7 @@ export default function StudioPage() {
                                            'Ask Nexus anything…'
                   }
                   className={cn(
-                    'nexus-input flex-1 text-sm',
+                    'glass border border-white/[0.10] rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-gold-500/40 flex-1 text-sm',
                     chatMode === 'code'   && 'font-mono',
                   )}
                   disabled={sending}
@@ -1818,7 +1818,7 @@ export default function StudioPage() {
                     input.trim() && !sending
                       ? chatMode === 'code'   ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:opacity-90 active:scale-95'
                       : chatMode === 'search' ? 'bg-gradient-to-r from-sky-600 to-blue-600 text-white hover:opacity-90 active:scale-95'
-                      :                         'bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-95'
+                      :                         'bg-gradient-to-r from-gold-500/80 to-amber-600 text-white hover:opacity-90 active:scale-95'
                       : 'bg-white/5 text-white/20 cursor-not-allowed',
                   )}
                 >
@@ -1855,7 +1855,7 @@ export default function StudioPage() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search tools…"
-                  className="nexus-input text-sm w-full"
+                  className="glass border border-white/[0.10] rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-gold-500/40 text-sm w-full"
                 />
                 <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
                   <button
@@ -1863,7 +1863,7 @@ export default function StudioPage() {
                     className={cn(
                       "flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-all font-medium",
                       !activeCategory
-                        ? "bg-nexus-600 text-white border-nexus-500"
+                        ? "bg-gold-500/15 text-gold-500 border-gold-500/30"
                         : "text-white/50 border-white/10 hover:text-white/80"
                     )}
                   >
@@ -1889,8 +1889,8 @@ export default function StudioPage() {
               </div>
 
               {/* Per-generation model clarity banner */}
-              <div className="flex items-center gap-2.5 nexus-card p-3 border-nexus-500/20">
-                <Zap size={13} className="text-nexus-400 flex-shrink-0" />
+              <div className="flex items-center gap-2.5 glass border border-white/[0.08] p-3 border-gold-500/15">
+                <Zap size={13} className="text-gold-500 flex-shrink-0" />
                 <p className="text-white/45 text-xs leading-relaxed">
                   <span className="text-white/70 font-semibold">Per-generation pricing:</span>{" "}
                   Points are deducted once each time you click Generate — you get 1 output.
@@ -1901,13 +1901,13 @@ export default function StudioPage() {
               {toolsLoading ? (
                 <div className="space-y-2">
                   {[...Array(6)].map((_, i) => (
-                    <div key={i} className="nexus-card h-20 animate-pulse opacity-50" />
+                    <div key={i} className="glass border border-white/[0.08] h-20 animate-pulse opacity-50" />
                   ))}
                 </div>
               ) : tools.length === 0 ? (
-                <div className="text-center py-16 nexus-card space-y-4">
-                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-nexus-600/20 to-purple-600/20 border border-white/10 flex items-center justify-center mx-auto">
-                    <Sparkles size={28} className="text-nexus-400" />
+                <div className="text-center py-16 glass border border-white/[0.08] space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-gold-500/10 to-amber-600/5 border border-white/10 flex items-center justify-center mx-auto">
+                    <Sparkles size={28} className="text-gold-500" />
                   </div>
                   <div>
                     <p className="text-white/60 text-base font-semibold">No tools available yet</p>
@@ -1915,18 +1915,18 @@ export default function StudioPage() {
                   </div>
                   <button
                     onClick={() => setActiveTab("chat")}
-                    className="nexus-btn-primary text-sm px-5 py-2.5 mx-auto flex items-center gap-1.5"
+                    className="btn-gold text-sm px-5 py-2.5 mx-auto flex items-center gap-1.5"
                   >
                     <MessageSquare size={14} /> Try AI Chat instead
                   </button>
                 </div>
               ) : Object.keys(groupedTools).length === 0 ? (
-                <div className="text-center py-12 text-white/30 nexus-card space-y-3">
+                <div className="text-center py-12 text-white/30 glass border border-white/[0.08] space-y-3">
                   <Wand2 size={32} className="mx-auto mb-3 opacity-40" />
                   <p className="text-sm font-medium">No tools match your search</p>
                   <button
                     onClick={() => { setSearchQuery(""); setActiveCategory(null); }}
-                    className="text-nexus-400 text-xs hover:text-nexus-300 transition-colors underline underline-offset-2"
+                    className="text-gold-500 text-xs hover:text-gold-400 transition-colors underline underline-offset-2"
                   >
                     Clear filters
                   </button>
@@ -1984,15 +1984,15 @@ export default function StudioPage() {
               </div>
 
               {recentGens.length === 0 ? (
-                <div className="text-center py-14 nexus-card space-y-3">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-nexus-600/20 to-purple-600/20 border border-white/10 flex items-center justify-center mx-auto">
+                <div className="text-center py-14 glass border border-white/[0.08] space-y-3">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-gold-500/10 to-amber-600/5 border border-white/10 flex items-center justify-center mx-auto">
                     <Play size={24} className="text-white/30" />
                   </div>
                   <p className="text-white/40 text-sm font-medium">No generations yet</p>
                   <p className="text-white/25 text-xs">Use a tool to create something amazing</p>
                   <button
                     onClick={() => setActiveTab("tools")}
-                    className="nexus-btn-primary text-sm px-5 py-2.5 mx-auto flex items-center gap-1.5"
+                    className="btn-gold text-sm px-5 py-2.5 mx-auto flex items-center gap-1.5"
                   >
                     <Wand2 size={14} /> Browse tools
                   </button>
@@ -2011,7 +2011,7 @@ export default function StudioPage() {
               )}
 
               {gallery.length > 8 && (
-                <a href="/studio/gallery" className="nexus-btn-outline w-full py-3 text-sm flex items-center justify-center gap-2">
+                <a href="/studio/gallery" className="glass border border-white/[0.10] text-white/70 hover:text-white hover:border-white/20 transition-all rounded-xl font-black w-full py-3 text-sm flex items-center justify-center gap-2">
                   View all {gallery.length} generations <ExternalLink size={13} />
                 </a>
               )}
