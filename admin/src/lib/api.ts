@@ -1,5 +1,35 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
 
+export interface PassportStats {
+  total_passports: number;
+  apple_wallet_downloads: number;
+  google_wallet_saves: number;
+  qr_scans_today: number;
+  tier_breakdown: { tier: string; count: number }[];
+  top_badge_earners: { user_id: string; phone: string; badge_count: number; tier: string }[];
+}
+
+export interface GhostNudgeLog {
+  id: string;
+  user_id: string;
+  phone_number: string;
+  nudge_type: string;
+  streak_count: number;
+  sent_at: string;
+  delivered: boolean;
+}
+
+export interface USSDSession {
+  id: string;
+  phone_number: string;
+  session_id: string;
+  current_menu: string;
+  started_at: string;
+  last_active: string;
+  is_active: boolean;
+  step_count: number;
+}
+
 class AdminAPI {
   private token: string | null = null;
   setToken(t: string) { this.token = t; typeof window !== "undefined" && localStorage.setItem("nexus_admin_token", t); }

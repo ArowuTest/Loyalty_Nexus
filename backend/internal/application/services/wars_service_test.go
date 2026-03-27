@@ -116,8 +116,8 @@ func (r *mockWarsRepo) MarkSecondaryWinnerPaid(_ context.Context, _ uuid.UUID, _
 
 func (r *mockWarsRepo) ListActiveUsersInState(_ context.Context, _ string, _, _ time.Time) ([]entities.UserRef, error) {
 	return []entities.UserRef{
-		{UserID: uuid.New(), PhoneNumber: "08012345678"},
-		{UserID: uuid.New(), PhoneNumber: "08098765432"},
+		{ID: uuid.New(), PhoneNumber: "08012345678"},
+		{ID: uuid.New(), PhoneNumber: "08098765432"},
 	}, nil
 }
 

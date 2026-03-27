@@ -2,39 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import AdminShell from "@/components/layout/AdminShell";
-import adminAPI, { ConfigEntry } from "@/lib/api";
+import adminAPI, { ConfigEntry, PassportStats, GhostNudgeLog, USSDSession } from "@/lib/api";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface PassportStats {
-  total_passports: number;
-  apple_wallet_downloads: number;
-  google_wallet_saves: number;
-  qr_scans_today: number;
-  tier_breakdown: { tier: string; count: number }[];
-  top_badge_earners: { user_id: string; phone: string; badge_count: number; tier: string }[];
-}
-
-interface GhostNudgeLog {
-  id: string;
-  user_id: string;
-  phone_number: string;
-  nudge_type: string;
-  streak_count: number;
-  sent_at: string;
-  delivered: boolean;
-}
-
-interface USSDSession {
-  id: string;
-  phone_number: string;
-  session_id: string;
-  current_menu: string;
-  started_at: string;
-  last_active: string;
-  is_active: boolean;
-  step_count: number;
-}
 
 // ─── Config keys (zero-hardcoding — all values live in network_configs) ───────
 
