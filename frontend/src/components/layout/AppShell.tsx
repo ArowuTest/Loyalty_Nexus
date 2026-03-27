@@ -20,12 +20,19 @@ const NAV_ITEMS = [
 export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, logout, user } = useStore();
+  const { isAuthenticated, _hasHydrated, logout, user } = useStore();
 
   useEffect(() => {
-    if (!isAuthenticated) router.push("/");
-  }, [isAuthenticated, router]);
+    // Only redirect once the Zustand persist store has finished rehydrating
+    // from localStorage. Without this guard, the redirect fires before the
+    // stored token is read, causing a spurious logout on every hard reload.
+    if (_hasHydrated && !isAuthenticated) {
+      router.push("/");
+    }
+  }, [_hasHydrated, isAuthenticated, router]);
 
+  // Show nothing until hydration is complete to avoid a flash of the landing page
+  if (!_hasHydrated) return null;
   if (!isAuthenticated) return null;
 
   return (
