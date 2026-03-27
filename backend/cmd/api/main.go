@@ -311,9 +311,6 @@ func main() {
 	// Notification broadcast
 	mux.Handle("POST   /api/v1/admin/notifications/broadcast", adminAuth(http.HandlerFunc(adminH.BroadcastNotification)))
 	mux.Handle("GET    /api/v1/admin/notifications/broadcasts",adminAuth(http.HandlerFunc(adminH.GetBroadcastHistory)))
-	// Subscription management
-	mux.Handle("GET    /api/v1/admin/subscriptions",          adminAuth(http.HandlerFunc(adminH.GetSubscriptions)))
-	mux.Handle("PUT    /api/v1/admin/subscriptions/{id}",     adminAuth(http.HandlerFunc(adminH.UpdateSubscription)))
 	// Fraud management
 	mux.Handle("POST   /api/v1/admin/fraud/{id}/resolve",     adminAuth(http.HandlerFunc(adminH.ResolveFraudEvent)))
 	// Regional Wars control

@@ -3,12 +3,10 @@ import { useState, useEffect, useCallback } from "react";
 import adminAPI, { Broadcast, BroadcastPayload } from "@/lib/api";
 import AdminShell from "@/components/layout/AdminShell";
 
-const NOTIF_TYPES = ["system","marketing","spin_win","draw_result","subscription_warn","wars_result","studio_ready"];
+const NOTIF_TYPES = ["system","marketing","spin_win","draw_result","wars_result","studio_ready"];
 const TARGETS = [
-  { value: "all",                label: "All Users" },
-  { value: "active_subscribers", label: "Active Subscribers" },
-  { value: "free_tier",          label: "Free Tier Only" },
-  { value: "phone_list",         label: "Phone List (CSV)" },
+  { value: "all",        label: "All Users" },
+  { value: "phone_list", label: "Phone List (CSV)" },
 ];
 
 export default function NotificationsPage() {

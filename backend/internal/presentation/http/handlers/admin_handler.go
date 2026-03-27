@@ -977,40 +977,6 @@ func (h *AdminHandler) GetBroadcastHistory(w http.ResponseWriter, r *http.Reques
 	jsonOK(w, rows)
 }
 
-// ─── Subscriptions ────────────────────────────────────────────────────────
-
-func (h *AdminHandler) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if page < 1 {
-		page = 1
-	}
-	var rows []map[string]interface{}
-	var total int64
-	h.db.WithContext(r.Context()).Table("subscription_events").Count(&total)
-	h.db.WithContext(r.Context()).Table("subscription_events se").
-		Select("se.*, u.phone_number").
-		Joins("LEFT JOIN users u ON u.id = se.user_id").
-		Order("se.created_at DESC").
-		Limit(50).Offset((page-1)*50).
-		Find(&rows)
-	jsonOK(w, map[string]interface{}{"subscriptions": rows, "total": total})
-}
-
-func (h *AdminHandler) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var body struct {
-		Status string `json:"status"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		jsonError(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	h.db.WithContext(r.Context()).Table("subscription_events").
-		Where("id = ?", id).
-		Update("event_type", body.Status)
-	jsonOK(w, map[string]string{"status": "updated"})
-}
-
 // ─── Fraud ────────────────────────────────────────────────────────────────
 
 func (h *AdminHandler) GetFraudEvents(w http.ResponseWriter, r *http.Request) {

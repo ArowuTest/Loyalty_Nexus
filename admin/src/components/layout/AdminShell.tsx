@@ -11,7 +11,6 @@ const NAV = [
   ]},
   { group: "Users & Finance", items: [
     { href: "/users",          label: "👥 Users" },
-    { href: "/subscriptions",  label: "💳 Subscriptions" },
     { href: "/fraud",          label: "🛡 Fraud Alerts" },
   ]},
   { group: "Rewards Engine", items: [

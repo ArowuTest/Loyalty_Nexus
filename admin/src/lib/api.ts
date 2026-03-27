@@ -83,10 +83,6 @@ class AdminAPI {
   }
   getBroadcasts() { return this.req<{ broadcasts: Broadcast[] }>("GET", "/admin/notifications/broadcasts"); }
   createBroadcast(payload: BroadcastPayload) { return this.req<{ id: string }>("POST", "/admin/notifications/broadcast", payload); }
-  getSubscriptions(page = 0, qs = "") {
-    return this.req<{ users: SubscriptionUser[] }>("GET", `/admin/subscriptions?offset=${page * 50}${qs}`);
-  }
-  updateSubscription(userId: string, payload: UpdateSubPayload) { return this.req("PUT", `/admin/users/${userId}/subscription`, payload); }
   // Draws management
   getDraws()               { return this.req<{ draws: Draw[] }>("GET", "/admin/draws"); }
   createDraw(d: CreateDrawPayload) { return this.req<Draw>("POST", "/admin/draws", d); }
@@ -241,16 +237,6 @@ export interface BroadcastPayload {
 export interface Broadcast {
   id: string; title: string; body: string; type: string;
   target: string; sent_count: number; created_at: string;
-}
-export interface SubscriptionUser {
-  id: string; phone_number: string; tier: string;
-  subscription_status: string; subscription_expires_at: string | null;
-  created_at: string;
-}
-export interface UpdateSubPayload {
-  status: string;   // ACTIVE | FREE | GRACE | SUSPENDED
-  expires_at?: string; // ISO
-  note?: string;
 }
 export interface Draw {
   id: string; name: string; prize_pool_kobo: number;
