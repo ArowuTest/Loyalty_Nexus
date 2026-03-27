@@ -71,11 +71,12 @@ func main() {
 	authSvc       := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
 	fulfillSvc    := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
 	rechargeSvc   := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
+	drawSvc       := services.NewDrawService(db)
+	mtnPushSvc    := services.NewMTNPushService(db, userRepo, txRepo, drawSvc, notifySvc, cfg)
 	spinSvc       := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
 	studioSvc     := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
 	hlrSvc        := services.NewHLRService(hlrRepo)
 	warssSvc      := services.NewRegionalWarsService(warsRepo, userRepo, txRepo, cfg, db)
-	drawSvc       := services.NewDrawService(db)
 	passportSvc   := services.NewPassportService(db)
 	fraudSvc      := services.NewFraudService(db)
 	claimSvc      := services.NewClaimService(prizeRepo, userRepo, momoSvc, fulfillSvc)
@@ -103,7 +104,7 @@ func main() {
 
 	// ─── HTTP Handlers ────────────────────────────────────────
 	authH    := handlers.NewAuthHandler(authSvc)
-	rechargeH := handlers.NewRechargeHandler(rechargeSvc, eq)
+	rechargeH := handlers.NewRechargeHandlerWithMTN(rechargeSvc, mtnPushSvc, eq)
 	spinH    := handlers.NewSpinHandler(spinSvc)
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
@@ -142,6 +143,7 @@ func main() {
 	// ─── Webhooks (public — signature-verified internally) ────
 	mux.HandleFunc("POST /api/v1/recharge/paystack-webhook", rechargeH.PaystackWebhook)
 	mux.HandleFunc("POST /api/v1/recharge/mno-webhook", rechargeH.MNOWebhook)
+	mux.HandleFunc("POST /api/v1/recharge/mtn-push", rechargeH.MTNPushWebhook)
 
 	// ─── USSD (public — HMAC-verified) ───────────────────────
 	mux.HandleFunc("POST /api/v1/ussd", ussdH.Handle)
