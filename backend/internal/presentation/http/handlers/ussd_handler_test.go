@@ -58,10 +58,8 @@ func newTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open sqlite: %v", err)
 	}
 
-	// AutoMigrate entities that have gorm: tags or well-formed struct fields.
+	// AutoMigrate entities that are SQLite-compatible (no Postgres-specific defaults).
 	if err := db.AutoMigrate(
-		&entities.User{},
-		&entities.Wallet{},
 		&entities.USSDSession{},
 		&entities.StudioTool{},
 		&entities.SpinResult{},
@@ -69,8 +67,57 @@ func newTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("automigrate: %v", err)
 	}
 
-	// lifetime_points lives in users via raw migration — not a User struct field.
-	db.Exec(`ALTER TABLE users ADD COLUMN lifetime_points INTEGER NOT NULL DEFAULT 0`)
+	// User and Wallet use `default:gen_random_uuid()` which is Postgres-only and
+	// breaks SQLite AutoMigrate. Use explicit SQLite-compatible DDL instead.
+	db.Exec(`CREATE TABLE IF NOT EXISTS users (
+		id TEXT PRIMARY KEY,
+		phone_number TEXT NOT NULL DEFAULT '',
+		user_code TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL DEFAULT '',
+		tier TEXT NOT NULL DEFAULT 'BRONZE',
+		streak_count INTEGER NOT NULL DEFAULT 0,
+		streak_expires_at DATETIME,
+		streak_grace_used INTEGER NOT NULL DEFAULT 0,
+		streak_grace_month INTEGER,
+		total_recharge_amount INTEGER NOT NULL DEFAULT 0,
+		last_recharge_at DATETIME,
+		momo_number TEXT NOT NULL DEFAULT '',
+		momo_verified INTEGER NOT NULL DEFAULT 0,
+		momo_verified_at DATETIME,
+		wallet_pass_id TEXT NOT NULL DEFAULT '',
+		device_type TEXT NOT NULL DEFAULT '',
+		subscription_tier TEXT NOT NULL DEFAULT '',
+		subscription_status TEXT NOT NULL DEFAULT '',
+		subscription_expires_at DATETIME,
+		referral_code TEXT NOT NULL DEFAULT '',
+		referred_by TEXT,
+		kyc_status TEXT NOT NULL DEFAULT '',
+		points_expire_at DATETIME,
+		total_points INTEGER NOT NULL DEFAULT 0,
+		stamps_count INTEGER NOT NULL DEFAULT 0,
+		lifetime_points INTEGER NOT NULL DEFAULT 0,
+		total_spins INTEGER NOT NULL DEFAULT 0,
+		studio_use_count INTEGER NOT NULL DEFAULT 0,
+		total_referrals INTEGER NOT NULL DEFAULT 0,
+		google_wallet_object_id TEXT NOT NULL DEFAULT '',
+		apple_pass_serial TEXT NOT NULL DEFAULT '',
+		spin_credits INTEGER NOT NULL DEFAULT 0,
+		is_active INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+
+	db.Exec(`CREATE TABLE IF NOT EXISTS wallets (
+		id TEXT PRIMARY KEY,
+		user_id TEXT NOT NULL UNIQUE,
+		pulse_points INTEGER NOT NULL DEFAULT 0,
+		spin_credits INTEGER NOT NULL DEFAULT 0,
+		lifetime_points INTEGER NOT NULL DEFAULT 0,
+		recharge_counter INTEGER NOT NULL DEFAULT 0,
+		spin_draw_counter INTEGER NOT NULL DEFAULT 0,
+		pulse_counter INTEGER NOT NULL DEFAULT 0,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
 
 	// user_badges is not an entity struct.
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_badges (

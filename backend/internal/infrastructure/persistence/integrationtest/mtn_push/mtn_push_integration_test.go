@@ -88,11 +88,20 @@ func uniqueRef(prefix string) string {
 
 // ─── Test DB setup ────────────────────────────────────────────────────────────
 
+// testDSN is the fallback for local development.
+// In CI the DATABASE_URL env var is set by the workflow and takes precedence.
 const testDSN = "host=localhost user=nexus_test password=nexus_test dbname=loyalty_nexus_test port=5432 sslmode=disable"
+
+func resolveTestDSN() string {
+	if v := os.Getenv("DATABASE_URL"); v != "" {
+		return v
+	}
+	return testDSN
+}
 
 func openTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(postgres.Open(testDSN), &gorm.Config{
+	db, err := gorm.Open(postgres.Open(resolveTestDSN()), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
