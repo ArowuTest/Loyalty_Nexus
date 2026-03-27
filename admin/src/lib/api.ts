@@ -70,6 +70,13 @@ class AdminAPI {
   // Regional Wars
   getRegionalWars() { return this.req<{ leaderboard: RegionalStat[] }>("GET", "/admin/regional-wars"); }
   resolveWar(period: string) { return this.req("POST", "/admin/wars/resolve", { period }); }
+  getSecondaryDraws(warId: string) { return this.req<{ draws: WarSecondaryDraw[] }>("GET", `/admin/wars/${warId}/secondary-draws`); }
+  runSecondaryDraw(warId: string, payload: { state: string; winner_count: number; prize_per_winner_kobo: number }) {
+    return this.req<WarSecondaryDraw>("POST", `/admin/wars/${warId}/secondary-draw`, payload);
+  }
+  markSecondaryWinnerPaid(winnerId: string, momoNumber: string) {
+    return this.req<{ status: string }>("POST", `/admin/wars/secondary-draw/winners/${winnerId}/pay`, { momo_number: momoNumber });
+  }
   getHealth() { return this.req<HealthReport>("GET", "/admin/health"); }
   getAIHealth() { return this.req<AIHealthReport>("GET", "/admin/ai-health"); }
 
@@ -162,6 +169,35 @@ export interface StudioTool {
 export interface User { id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean; created_at: string; }
 export interface FraudEvent { id: string; user_id: string; event_type: string; severity: string; resolved: boolean; created_at: string; }
 export interface RegionalStat { state: string; total_points: number; active_members: number; rank: number; }
+
+export interface WarSecondaryDrawWinner {
+  id: string;
+  secondary_draw_id: string;
+  war_id: string;
+  state: string;
+  user_id: string;
+  phone_number: string;
+  position: number;
+  prize_kobo: number;
+  momo_number?: string;
+  payment_status: "PENDING_PAYMENT" | "PAID" | "FAILED";
+  paid_at?: string;
+  notes?: string;
+}
+
+export interface WarSecondaryDraw {
+  id: string;
+  war_id: string;
+  state: string;
+  winner_count: number;
+  prize_per_winner_kobo: number;
+  total_pool_kobo: number;
+  participant_count: number;
+  status: "PENDING" | "COMPLETED" | "CANCELLED";
+  executed_at?: string;
+  created_at: string;
+  winners?: WarSecondaryDrawWinner[];
+}
 export const adminAPI = new AdminAPI();
 export default adminAPI;
 export interface BroadcastPayload {

@@ -66,3 +66,65 @@ type LeaderboardEntry struct {
 	PrizeKobo     int64  `json:"prize_kobo"`
 	Period        string `json:"period"`
 }
+
+// ─── WarSecondaryDraw ────────────────────────────────────────────────────────
+
+// WarSecondaryDraw is created when admin triggers the secondary draw for a
+// winning state.  At most one may exist per (war, state).
+type WarSecondaryDraw struct {
+	ID                 uuid.UUID  `gorm:"column:id;primaryKey"                       json:"id"`
+	WarID              uuid.UUID  `gorm:"column:war_id;index"                        json:"war_id"`
+	State              string     `gorm:"column:state"                               json:"state"`
+	WinnerCount        int        `gorm:"column:winner_count;default:1"              json:"winner_count"`
+	PrizePerWinnerKobo int64      `gorm:"column:prize_per_winner_kobo"               json:"prize_per_winner_kobo"`
+	TotalPoolKobo      int64      `gorm:"column:total_pool_kobo"                     json:"total_pool_kobo"`
+	ParticipantCount   int        `gorm:"column:participant_count"                   json:"participant_count"`
+	Status             string     `gorm:"column:status;default:'PENDING'"            json:"status"` // PENDING|COMPLETED|CANCELLED
+	TriggeredBy        *uuid.UUID `gorm:"column:triggered_by"                        json:"triggered_by,omitempty"`
+	ExecutedAt         *time.Time `gorm:"column:executed_at"                         json:"executed_at,omitempty"`
+	CreatedAt          time.Time  `gorm:"column:created_at;autoCreateTime"           json:"created_at"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at;autoUpdateTime"           json:"updated_at"`
+	// Preloaded
+	Winners            []WarSecondaryDrawWinner `gorm:"-" json:"winners,omitempty"`
+}
+
+func (WarSecondaryDraw) TableName() string { return "war_secondary_draws" }
+
+// ─── WarSecondaryDrawWinner ──────────────────────────────────────────────────
+
+// WarSecondaryDrawWinner is one participant selected by the secondary draw engine.
+type WarSecondaryDrawWinner struct {
+	ID              uuid.UUID  `gorm:"column:id;primaryKey"                      json:"id"`
+	SecondaryDrawID uuid.UUID  `gorm:"column:secondary_draw_id;index"            json:"secondary_draw_id"`
+	WarID           uuid.UUID  `gorm:"column:war_id"                             json:"war_id"`
+	State           string     `gorm:"column:state"                              json:"state"`
+	UserID          uuid.UUID  `gorm:"column:user_id"                            json:"user_id"`
+	PhoneNumber     string     `gorm:"column:phone_number"                       json:"phone_number"`
+	Position        int        `gorm:"column:position"                           json:"position"`
+	PrizeKobo       int64      `gorm:"column:prize_kobo"                         json:"prize_kobo"`
+	MoMoNumber      string     `gorm:"column:momo_number"                        json:"momo_number,omitempty"`
+	PaymentStatus   string     `gorm:"column:payment_status;default:'PENDING_PAYMENT'" json:"payment_status"` // PENDING_PAYMENT|PAID|FAILED
+	PaidAt          *time.Time `gorm:"column:paid_at"                            json:"paid_at,omitempty"`
+	PaidBy          *uuid.UUID `gorm:"column:paid_by"                            json:"paid_by,omitempty"`
+	Notes           string     `gorm:"column:notes"                              json:"notes,omitempty"`
+	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime"          json:"created_at"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime"          json:"updated_at"`
+}
+
+func (WarSecondaryDrawWinner) TableName() string { return "war_secondary_draw_winners" }
+
+const (
+	SecondaryDrawStatusPending   = "PENDING"
+	SecondaryDrawStatusCompleted = "COMPLETED"
+	SecondaryDrawStatusCancelled = "CANCELLED"
+
+	SecondaryWinnerPending = "PENDING_PAYMENT"
+	SecondaryWinnerPaid    = "PAID"
+	SecondaryWinnerFailed  = "FAILED"
+)
+
+// UserRef is a minimal read-model used by the secondary draw participant pool.
+type UserRef struct {
+	ID          uuid.UUID `json:"id"`
+	PhoneNumber string    `json:"phone_number"`
+}

@@ -10,6 +10,7 @@ package persistence
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -171,4 +172,105 @@ func (r *postgresWarsRepository) MarkWinnerPaid(ctx context.Context, winnerID uu
 			"status":     "PAID",
 			"updated_at": time.Now(),
 		}).Error
+}
+
+// ─── Secondary Draw ───────────────────────────────────────────────────────────
+
+func (r *postgresWarsRepository) CreateSecondaryDraw(
+	ctx context.Context,
+	draw *entities.WarSecondaryDraw,
+	winners []entities.WarSecondaryDrawWinner,
+) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(draw).Error; err != nil {
+			return fmt.Errorf("create secondary draw: %w", err)
+		}
+		if len(winners) > 0 {
+			if err := tx.Create(&winners).Error; err != nil {
+				return fmt.Errorf("create secondary draw winners: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+func (r *postgresWarsRepository) GetSecondaryDrawsForWar(
+	ctx context.Context,
+	warID uuid.UUID,
+) ([]entities.WarSecondaryDraw, error) {
+	var draws []entities.WarSecondaryDraw
+	err := r.db.WithContext(ctx).
+		Where("war_id = ?", warID).
+		Order("created_at DESC").
+		Find(&draws).Error
+	if err != nil {
+		return nil, err
+	}
+	// Load winners for each draw
+	for i := range draws {
+		var winners []entities.WarSecondaryDrawWinner
+		r.db.WithContext(ctx).
+			Where("secondary_draw_id = ?", draws[i].ID).
+			Order("position ASC").
+			Find(&winners)
+		draws[i].Winners = winners
+	}
+	return draws, nil
+}
+
+func (r *postgresWarsRepository) GetSecondaryDrawByID(
+	ctx context.Context,
+	drawID uuid.UUID,
+) (*entities.WarSecondaryDraw, error) {
+	var draw entities.WarSecondaryDraw
+	if err := r.db.WithContext(ctx).Where("id = ?", drawID).First(&draw).Error; err != nil {
+		return nil, err
+	}
+	var winners []entities.WarSecondaryDrawWinner
+	r.db.WithContext(ctx).
+		Where("secondary_draw_id = ?", draw.ID).
+		Order("position ASC").
+		Find(&winners)
+	draw.Winners = winners
+	return &draw, nil
+}
+
+func (r *postgresWarsRepository) MarkSecondaryWinnerPaid(
+	ctx context.Context,
+	winnerID uuid.UUID,
+	momoNumber string,
+	paidBy uuid.UUID,
+) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).
+		Model(&entities.WarSecondaryDrawWinner{}).
+		Where("id = ?", winnerID).
+		Updates(map[string]interface{}{
+			"payment_status": entities.SecondaryWinnerPaid,
+			"momo_number":    momoNumber,
+			"paid_at":        now,
+			"paid_by":        paidBy,
+			"updated_at":     now,
+		}).Error
+}
+
+func (r *postgresWarsRepository) ListActiveUsersInState(
+	ctx context.Context,
+	state string,
+	from, to time.Time,
+) ([]entities.UserRef, error) {
+	// Participants = users in this state who earned at least one points_award
+	// during the war window AND are currently active.
+	var refs []entities.UserRef
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT DISTINCT u.id, u.phone_number
+		FROM   users u
+		JOIN   transactions t ON t.user_id = u.id
+		WHERE  u.state      = ?
+		AND    u.is_active  = true
+		AND    t.type       = 'points_award'
+		AND    t.points_delta > 0
+		AND    t.created_at BETWEEN ? AND ?
+	`, state, from, to).Scan(&refs).Error
+	return refs, err
 }

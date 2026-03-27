@@ -173,3 +173,101 @@ func (h *WarsHandler) AdminUpdatePrizePool(w http.ResponseWriter, r *http.Reques
 func currentWarPeriod() string {
 	return services.ExportedCurrentPeriod()
 }
+
+// ─── Secondary Draw (admin) ───────────────────────────────────────────────────
+
+// RunSecondaryDraw executes the secondary draw for one winning state.
+// POST /api/v1/admin/wars/{war_id}/secondary-draw
+func (h *WarsHandler) RunSecondaryDraw(w http.ResponseWriter, r *http.Request) {
+	warIDStr := r.PathValue("war_id")
+	warID, err := uuid.Parse(warIDStr)
+	if err != nil {
+		jsonError(w, "invalid war_id", http.StatusBadRequest)
+		return
+	}
+
+	var req services.SecondaryDrawRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.WarID = warID
+
+	// Optionally attach the admin who triggered it
+	if adminID, ok := r.Context().Value(middleware.ContextUserID).(string); ok {
+		if pid, pErr := uuid.Parse(adminID); pErr == nil {
+			req.TriggeredBy = &pid
+		}
+	}
+
+	result, err := h.warsSvc.RunSecondaryDraw(r.Context(), req)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	jsonOK(w, result)
+}
+
+// GetSecondaryDraws returns all secondary draws for a war.
+// GET /api/v1/admin/wars/{war_id}/secondary-draws
+func (h *WarsHandler) GetSecondaryDraws(w http.ResponseWriter, r *http.Request) {
+	warIDStr := r.PathValue("war_id")
+	warID, err := uuid.Parse(warIDStr)
+	if err != nil {
+		jsonError(w, "invalid war_id", http.StatusBadRequest)
+		return
+	}
+	draws, err := h.warsSvc.GetSecondaryDrawsForWar(r.Context(), warID)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{"draws": draws})
+}
+
+// MarkSecondaryWinnerPaid records a MoMo payment for one secondary draw winner.
+// POST /api/v1/admin/wars/secondary-draw/winners/{winner_id}/pay
+func (h *WarsHandler) MarkSecondaryWinnerPaid(w http.ResponseWriter, r *http.Request) {
+	winnerIDStr := r.PathValue("winner_id")
+	winnerID, err := uuid.Parse(winnerIDStr)
+	if err != nil {
+		jsonError(w, "invalid winner_id", http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		MoMoNumber string `json:"momo_number"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	var paidByID uuid.UUID
+	if adminID, ok := r.Context().Value(middleware.ContextUserID).(string); ok {
+		paidByID, _ = uuid.Parse(adminID)
+	}
+
+	if err := h.warsSvc.MarkSecondaryWinnerPaid(r.Context(), winnerID, body.MoMoNumber, paidByID); err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	jsonOK(w, map[string]interface{}{"status": "paid"})
+}
+
+// GetWinnersByWarID returns the top-3 state winners for a war identified by UUID.
+// GET /api/v1/admin/wars/{war_id}/winners
+func (h *WarsHandler) GetWinnersByWarID(w http.ResponseWriter, r *http.Request) {
+	warIDStr := r.PathValue("war_id")
+	warID, err := uuid.Parse(warIDStr)
+	if err != nil {
+		jsonError(w, "invalid war_id", http.StatusBadRequest)
+		return
+	}
+	winners, err := h.warsSvc.GetWinnersForWar(r.Context(), warID)
+	if err != nil {
+		jsonError(w, "failed to load winners: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{"winners": winners})
+}

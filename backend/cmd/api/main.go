@@ -278,6 +278,10 @@ func main() {
 	mux.Handle("GET    /api/v1/admin/regional-wars",      adminAuth(http.HandlerFunc(adminH.GetRegionalWars)))
 	mux.Handle("POST /api/v1/admin/wars/resolve",          adminAuth(http.HandlerFunc(warsH.AdminResolve)))
 	mux.Handle("PUT  /api/v1/admin/wars/prize-pool",       adminAuth(http.HandlerFunc(warsH.AdminUpdatePrizePool)))
+	mux.Handle("GET  /api/v1/admin/wars/{war_id}/winners",            adminAuth(http.HandlerFunc(warsH.GetWinnersByWarID)))
+	mux.Handle("POST /api/v1/admin/wars/{war_id}/secondary-draw",      adminAuth(http.HandlerFunc(warsH.RunSecondaryDraw)))
+	mux.Handle("GET  /api/v1/admin/wars/{war_id}/secondary-draws",     adminAuth(http.HandlerFunc(warsH.GetSecondaryDraws)))
+	mux.Handle("POST /api/v1/admin/wars/secondary-draw/winners/{winner_id}/pay", adminAuth(http.HandlerFunc(warsH.MarkSecondaryWinnerPaid)))
 	mux.Handle("GET    /api/v1/admin/fraud-events",        adminAuth(http.HandlerFunc(fraudH.ListEvents)))
 	mux.Handle("PUT    /api/v1/admin/fraud-events/{id}/resolve", adminAuth(http.HandlerFunc(fraudH.ResolveEvent)))
 	// SuspendUser handled by adminH above — fraudH route removed to avoid mux panic
