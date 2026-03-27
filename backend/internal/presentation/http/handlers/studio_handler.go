@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,10 +33,11 @@ import (
 
 // StudioHandler handles all Nexus Studio HTTP endpoints.
 type StudioHandler struct {
-	studioSvc *services.StudioService
-	llmOrch   *external.LLMOrchestrator
-	worker    *AsyncStudioWorker
-	cfg       *config.ConfigManager
+	studioSvc    *services.StudioService
+	llmOrch      *external.LLMOrchestrator
+	worker       *AsyncStudioWorker
+	cfg          *config.ConfigManager
+	assetStorage external.AssetStorage // optional: nil when STORAGE_BACKEND not set
 }
 
 func NewStudioHandler(
@@ -45,6 +47,65 @@ func NewStudioHandler(
 	cfg *config.ConfigManager,
 ) *StudioHandler {
 	return &StudioHandler{studioSvc: ss, llmOrch: lo, worker: kb, cfg: cfg}
+}
+
+// SetAssetStorage injects the storage backend (called from main.go after init).
+func (h *StudioHandler) SetAssetStorage(s external.AssetStorage) { h.assetStorage = s }
+
+// ─── POST /api/v1/studio/upload ──────────────────────────────────────────────
+// Accepts a multipart form upload of an audio or image file (max 20 MB).
+// Returns { url: "https://..." } pointing to the stored object so the
+// frontend can pass it to the generate endpoint as image_url or prompt.
+func (h *StudioHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
+	if h.assetStorage == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "file upload not configured on this server",
+		})
+		return
+	}
+
+	if err := r.ParseMultipartForm(20 << 20); err != nil { // 20 MB
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file too large (max 20 MB)"})
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing file field"})
+		return
+	}
+	defer file.Close()
+
+	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	// Safety: only allow audio and image MIME types
+	if !strings.HasPrefix(contentType, "audio/") && !strings.HasPrefix(contentType, "image/") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only audio and image files are accepted"})
+		return
+	}
+
+	ext := ".bin"
+	if strings.HasPrefix(contentType, "audio/") {
+		parts := strings.SplitN(contentType, "/", 2)
+		if len(parts) == 2 {
+			ext = "." + strings.ToLower(strings.TrimPrefix(parts[1], "x-"))
+		}
+	} else if strings.HasPrefix(contentType, "image/") {
+		parts := strings.SplitN(contentType, "/", 2)
+		if len(parts) == 2 {
+			ext = "." + strings.ToLower(parts[1])
+		}
+	}
+
+	key := "uploads/" + uuid.New().String() + ext
+	pubURL, err := h.assetStorage.UploadFromReader(r.Context(), key, file, contentType)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "upload failed: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"url": pubURL, "key": key})
 }
 
 // ─── GET /api/v1/studio/tools ─────────────────────────────────────────────────

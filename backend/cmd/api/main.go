@@ -105,11 +105,18 @@ func main() {
 	// ─── Knowledge Worker (dispatches studio jobs) ─────────────
 	kbWorker := handlers.NewAsyncStudioWorker(studioSvc, aiStudioOrch)
 
+	// ─── Session Summariser Worker (compresses idle chat sessions → memory) ──
+	// Runs every 30 minutes; stores compressed summaries in session_summaries table.
+	// The LLMOrchestrator.Chat() reads these back on next message to reconstruct context.
+	summariserWorker := services.NewSummariserWorker(db, llmOrch)
+	go summariserWorker.Run(ctx)
+
 	// ─── HTTP Handlers ────────────────────────────────────────
 	authH    := handlers.NewAuthHandler(authSvc)
 	rechargeH := handlers.NewRechargeHandler(rechargeSvc, eq)
 	spinH    := handlers.NewSpinHandler(spinSvc)
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
+	studioH.SetAssetStorage(assetStorage) // enables /studio/upload endpoint
 	// kbWorker no longer needs a back-link — orch is injected directly
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
 	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc, studioSvc, rdb)
@@ -177,6 +184,7 @@ func main() {
 	mux.Handle("GET  /api/v1/studio/gallery",                auth(http.HandlerFunc(studioH.GetGallery)))
 	mux.Handle("POST /api/v1/studio/generate/{id}/dispute",  auth(http.HandlerFunc(studioH.DisputeGeneration)))
 	mux.Handle("GET  /api/v1/studio/session",                auth(http.HandlerFunc(studioH.GetSessionUsage)))
+	mux.Handle("POST /api/v1/studio/upload",                 auth(http.HandlerFunc(studioH.UploadAsset)))
 	// ── Nexus Chat ───────────────────────────────────────────────────────────
 	mux.Handle("POST /api/v1/studio/chat",                   auth(http.HandlerFunc(studioH.Chat)))
 	mux.Handle("GET  /api/v1/studio/chat/usage",             auth(http.HandlerFunc(studioH.GetChatUsage)))

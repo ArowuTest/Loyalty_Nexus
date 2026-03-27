@@ -147,6 +147,7 @@ class APIClient {
     toolId: string,
     payload: {
       prompt: string;
+      tool_slug?: string;
       aspect_ratio?: string;
       duration?: number;
       voice_id?: string;
@@ -163,10 +164,40 @@ class APIClient {
       "POST", "/studio/generate", { tool_id: toolId, ...payload }
     );
   }
+
+  /** Convenience: generate by slug (no need to look up UUID first) */
+  generateBySlug(
+    toolSlug: string,
+    payload: { prompt: string; language?: string; image_url?: string; extra_params?: Record<string, unknown> }
+  ) {
+    return this.request<{ generation_id: string; status: string }>(
+      "POST", "/studio/generate", { tool_slug: toolSlug, ...payload }
+    );
+  }
   getGenerationStatus(id: string) {
     return this.request("GET", `/studio/generate/${id}`);
   }
   getGallery() { return this.request("GET", "/studio/gallery"); }
+
+  /** Upload an audio or image file to cloud storage.
+   *  Returns { url: string } — pass the url to generateTool() as prompt (transcribe)
+   *  or image_url (image-editor / video-animator).
+   */
+  async uploadAsset(file: File): Promise<{ url: string; key: string }> {
+    const form = new FormData();
+    form.append("file", file);
+    const token = this.getToken();
+    const resp = await fetch(`${BASE_URL}/studio/upload`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? `Upload failed (${resp.status})`);
+    }
+    return resp.json() as Promise<{ url: string; key: string }>;
+  }
 
   // ── Draws (user-facing) ───────────────────────────────────────────────────
   getDraws() { return this.request("GET", "/draws"); }

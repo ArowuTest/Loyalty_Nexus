@@ -24,6 +24,7 @@ const NAV = [
     { href: "/studio-tools",   label: "🧠 Studio Tools" },
     { href: "/ai-providers",   label: "🔌 AI Providers" },
     { href: "/ai-health",      label: "⚡ AI Provider Health" },
+    { href: "/generations",    label: "🧪 Generations" },
     { href: "/notifications",  label: "📢 Notifications" },
   ]},
   { group: "Platform", items: [

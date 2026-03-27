@@ -41,7 +41,7 @@ class AdminAPI {
   disableStudioTool(id: string): Promise<void> { return this.req<void>("DELETE", `/admin/studio-tools/${id}`); }
   getStudioToolErrors(id: string): Promise<{ errors: GenerationError[]; count: number }> { return this.req<{ errors: GenerationError[]; count: number }>("GET", `/admin/studio-tools/${id}/errors`); }
   getStudioToolStats(): Promise<{ stats: ToolStat[] }> { return this.req<{ stats: ToolStat[] }>("GET", "/admin/studio-tools/stats"); }
-  getStudioGenerations(params?: { status?: string; tool_slug?: string; limit?: number; offset?: number }): Promise<{ items: Generation[]; total: number }> {
+  getStudioGenerations(params?: { status?: string; tool_slug?: string; limit?: number; offset?: number }): Promise<{ generations: Generation[]; total: number }> {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
     if (params?.tool_slug) qs.set("tool_slug", params.tool_slug);
