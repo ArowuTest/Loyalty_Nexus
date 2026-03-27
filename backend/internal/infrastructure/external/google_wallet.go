@@ -81,16 +81,19 @@ type gwLoyaltyBalance struct {
 
 // GWLoyaltyObject is the Google Wallet LoyaltyObject payload.
 type GWLoyaltyObject struct {
-	ID                    string                `json:"id"`
-	ClassID               string                `json:"classId"`
-	State                 string                `json:"state"` // ACTIVE
-	AccountID             string                `json:"accountId"`
-	AccountName           string                `json:"accountName"`
-	LoyaltyPoints         gwLoyaltyPoints       `json:"loyaltyPoints"`
-	SecondaryLoyaltyPoints gwLoyaltyPoints      `json:"secondaryLoyaltyPoints"`
-	Barcode               gwBarcode             `json:"barcode"`
-	TextModulesData       []gwTextModuleData    `json:"textModulesData"`
-	HexBackgroundColor    string                `json:"hexBackgroundColor"`
+	ID                     string                `json:"id"`
+	ClassID                string                `json:"classId"`
+	State                  string                `json:"state"` // ACTIVE
+	AccountID              string                `json:"accountId"`
+	AccountName            string                `json:"accountName"`
+	IssuerName             gwLocalizedString     `json:"issuerName"`
+	ProgramName            gwLocalizedString     `json:"programName"`
+	HeroImage              gwImage               `json:"heroImage"`
+	LoyaltyPoints          gwLoyaltyPoints       `json:"loyaltyPoints"`
+	SecondaryLoyaltyPoints gwLoyaltyPoints       `json:"secondaryLoyaltyPoints"`
+	Barcode                gwBarcode             `json:"barcode"`
+	TextModulesData        []gwTextModuleData    `json:"textModulesData"`
+	HexBackgroundColor     string                `json:"hexBackgroundColor"`
 }
 
 // GWSkinnyJWTClaims wraps the loyalty object in the Google Wallet JWT format.
@@ -176,6 +179,34 @@ func NewGoogleWalletAdapter() (*GoogleWalletAdapter, error) {
 	}, nil
 }
 
+// buildGWTextModules builds the TextModulesData for the loyalty object.
+// When IsStreakExpiring is true, a prominent warning module is prepended (REQ-4.4).
+func buildGWTextModules(input GoogleWalletPassInput) []gwTextModuleData {
+	streakLabel := fmt.Sprintf("🔥 %d-day streak", input.StreakCount)
+	if input.StreakCount == 0 {
+		streakLabel = "No active streak"
+	}
+
+	modules := []gwTextModuleData{
+		{ID: "streak",  Header: "Streak",        Body: streakLabel},
+		{ID: "spin",    Header: "Spin Credits",   Body: fmt.Sprintf("%d credits", input.SpinCredits)},
+		{ID: "tier",    Header: "Loyalty Tier",   Body: input.Tier},
+		{ID: "support", Header: "Support",        Body: "support@loyaltynexus.ng"},
+	}
+
+	if input.IsStreakExpiring {
+		alert := gwTextModuleData{
+			ID:     "expiry_alert",
+			Header: "⚠️ STREAK EXPIRING SOON!",
+			Body:   fmt.Sprintf("Your %d-day streak expires in a few hours. Recharge now to keep it!", input.StreakCount),
+		}
+		// Prepend so it appears first on the pass.
+		modules = append([]gwTextModuleData{alert}, modules...)
+	}
+
+	return modules
+}
+
 // IsConfigured returns true if the adapter was successfully initialised.
 func (a *GoogleWalletAdapter) IsConfigured() bool {
 	return a != nil && a.rsaKey != nil
@@ -183,12 +214,14 @@ func (a *GoogleWalletAdapter) IsConfigured() bool {
 
 // GoogleWalletPassInput holds the user data needed to build the pass.
 type GoogleWalletPassInput struct {
-	UserID         uuid.UUID
-	PhoneNumber    string // masked to last 4 digits on the pass
-	Tier           string
-	StreakCount    int
-	LifetimePoints int64
-	QRPayload      string // signed QR string from PassportService.GenerateQRPayload
+	UserID           uuid.UUID
+	PhoneNumber      string // masked to last 4 digits on the pass
+	Tier             string
+	StreakCount      int
+	LifetimePoints   int64
+	SpinCredits      int    // REQ-4.1 / REQ-4.2: must appear on both wallet passes
+	QRPayload        string // signed QR string from PassportService.GenerateQRPayload
+	IsStreakExpiring bool   // REQ-4.4: true during Ghost Nudge — triggers visual alert
 }
 
 // BuildSaveURL generates a "Add to Google Wallet" URL for the given user.
@@ -205,10 +238,9 @@ func (a *GoogleWalletAdapter) BuildSaveURL(input GoogleWalletPassInput) (string,
 	if bgColour == "" {
 		bgColour = "#5F72F9" // nexus-600 default
 	}
-
-	streakLabel := fmt.Sprintf("🔥 %d-day streak", input.StreakCount)
-	if input.StreakCount == 0 {
-		streakLabel = "No active streak"
+	// REQ-4.4: override background to urgent red-orange when streak is expiring.
+	if input.IsStreakExpiring {
+		bgColour = "#D94F00"
 	}
 
 	obj := GWLoyaltyObject{
@@ -217,6 +249,15 @@ func (a *GoogleWalletAdapter) BuildSaveURL(input GoogleWalletPassInput) (string,
 		State:   "ACTIVE",
 		AccountID:   input.UserID.String(),
 		AccountName: displayName,
+		IssuerName: gwLocalizedString{
+			DefaultValue: gwTranslatedValue{Language: "en-US", Value: "Loyalty Nexus"},
+		},
+		ProgramName: gwLocalizedString{
+			DefaultValue: gwTranslatedValue{Language: "en-US", Value: "Nexus Loyalty Programme"},
+		},
+		HeroImage: gwImage{
+			SourceURI: gwSourceURI{URI: a.baseURL + "/assets/wallet-hero.png"},
+		},
 		LoyaltyPoints: gwLoyaltyPoints{
 			Label: "Pulse Points",
 			Balance: gwLoyaltyBalance{
@@ -234,11 +275,7 @@ func (a *GoogleWalletAdapter) BuildSaveURL(input GoogleWalletPassInput) (string,
 			Value:         input.QRPayload,
 			AlternateText: displayName,
 		},
-		TextModulesData: []gwTextModuleData{
-			{ID: "streak",  Header: "Streak",         Body: streakLabel},
-			{ID: "tier",    Header: "Loyalty Tier",   Body: input.Tier},
-			{ID: "support", Header: "Support",        Body: "support@loyaltynexus.ng"},
-		},
+		TextModulesData: buildGWTextModules(input),
 		HexBackgroundColor: bgColour,
 	}
 

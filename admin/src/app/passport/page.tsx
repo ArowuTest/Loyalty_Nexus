@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import AdminShell from "@/components/layout/AdminShell";
-import adminAPI from "@/lib/api";
+import adminAPI, { ConfigEntry } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +36,183 @@ interface USSDSession {
   step_count: number;
 }
 
+// ─── Config keys (zero-hardcoding — all values live in network_configs) ───────
+
+const PASSPORT_CONFIG_KEYS = {
+  NUDGE_INTERVAL:       "ghost_nudge_interval_minutes",
+  NUDGE_WARNING_HOURS:  "ghost_nudge_warning_hours",
+  NUDGE_MIN_STREAK:     "ghost_nudge_min_streak",
+  NUDGE_COOLDOWN:       "ghost_nudge_cooldown_hours",
+  NUDGE_BATCH_LIMIT:    "ghost_nudge_batch_limit",
+  NUDGE_SMS_ENABLED:    "ghost_nudge_sms_enabled",
+  NUDGE_WALLET_ENABLED: "ghost_nudge_wallet_push_enabled",
+  USSD_SHORT_CODE:      "ussd_short_code",
+  USSD_TIMEOUT:         "ussd_session_timeout_seconds",
+  USSD_MAX_DEPTH:       "ussd_max_menu_depth",
+};
+
+// ─── Config hook (same pattern as points-config/page.tsx) ─────────────────────
+
+function usePassportConfig() {
+  const [configs, setConfigs]   = useState<Record<string, string>>({});
+  const [saving, setSaving]     = useState<string | null>(null);
+  const [saved, setSaved]       = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const r = await adminAPI.getConfig();
+    const m: Record<string, string> = {};
+    r.configs.forEach((c: ConfigEntry) => { m[c.key] = String(c.value); });
+    setConfigs(m);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const save = async (key: string, value: string) => {
+    setSaving(key);
+    try {
+      await adminAPI.updateConfig(key, value);
+      setConfigs(prev => ({ ...prev, [key]: value }));
+      setSaved(key);
+      setTimeout(() => setSaved(null), 2000);
+    } finally { setSaving(null); }
+  };
+
+  return { configs, saving, saved, save };
+}
+
+// ─── Reusable field components (matching points-config style) ─────────────────
+
+function NumberField({
+  label, desc, configKey, configs, saving, saved, onSave, suffix = "",
+}: {
+  label: string; desc: string; configKey: string;
+  configs: Record<string, string>; saving: string | null; saved: string | null;
+  onSave: (k: string, v: string) => void; suffix?: string;
+}) {
+  const [val, setVal] = useState(configs[configKey] ?? "");
+  useEffect(() => { setVal(configs[configKey] ?? ""); }, [configs, configKey]);
+
+  return (
+    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(95,114,249,0.12)", borderRadius: 10, padding: 16 }}>
+      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#e2e8ff", marginBottom: 4 }}>{label}</label>
+      <p style={{ fontSize: 12, color: "#828cb4", marginBottom: 12, margin: "4px 0 12px" }}>{desc}</p>
+      <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ position: "relative", flex: 1 }}>
+          <input
+            type="number"
+            value={val}
+            onChange={e => setVal(e.target.value)}
+            style={{
+              width: "100%", background: "#131629", border: "1px solid rgba(95,114,249,0.2)",
+              borderRadius: 8, padding: "8px 36px 8px 12px", fontSize: 13, color: "#e2e8ff",
+              outline: "none", boxSizing: "border-box",
+            }}
+          />
+          {suffix && (
+            <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: "#828cb4" }}>
+              {suffix}
+            </span>
+          )}
+        </div>
+        <button
+          disabled={saving === configKey}
+          onClick={() => onSave(configKey, val)}
+          style={{
+            padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer",
+            fontSize: 13, fontWeight: 500,
+            background: saved === configKey ? "#16a34a" : "#5f72f9",
+            color: "#fff", opacity: saving === configKey ? 0.5 : 1,
+            transition: "background 0.2s",
+          }}
+        >
+          {saving === configKey ? "…" : saved === configKey ? "✓ Saved" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ToggleField({
+  label, desc, configKey, configs, saving, saved, onSave,
+}: {
+  label: string; desc: string; configKey: string;
+  configs: Record<string, string>; saving: string | null; saved: string | null;
+  onSave: (k: string, v: string) => void;
+}) {
+  const isOn = configs[configKey] === "true";
+  return (
+    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(95,114,249,0.12)", borderRadius: 10, padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ flex: 1, marginRight: 16 }}>
+          <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#e2e8ff", marginBottom: 4 }}>{label}</label>
+          <p style={{ fontSize: 12, color: "#828cb4", margin: 0 }}>{desc}</p>
+        </div>
+        <button
+          disabled={saving === configKey}
+          onClick={() => onSave(configKey, isOn ? "false" : "true")}
+          style={{
+            width: 48, height: 26, borderRadius: 13, border: "none", cursor: "pointer",
+            background: isOn ? "#5f72f9" : "rgba(255,255,255,0.1)",
+            position: "relative", transition: "background 0.2s", flexShrink: 0,
+          }}
+        >
+          <span style={{
+            position: "absolute", top: 3, left: isOn ? 25 : 3,
+            width: 20, height: 20, borderRadius: "50%", background: "#fff",
+            transition: "left 0.2s", display: "block",
+          }} />
+        </button>
+      </div>
+      {saved === configKey && (
+        <p style={{ fontSize: 11, color: "#22c55e", marginTop: 6, margin: "6px 0 0" }}>✓ Saved</p>
+      )}
+    </div>
+  );
+}
+
+function TextField({
+  label, desc, configKey, configs, saving, saved, onSave,
+}: {
+  label: string; desc: string; configKey: string;
+  configs: Record<string, string>; saving: string | null; saved: string | null;
+  onSave: (k: string, v: string) => void;
+}) {
+  const [val, setVal] = useState(configs[configKey] ?? "");
+  useEffect(() => { setVal(configs[configKey] ?? ""); }, [configs, configKey]);
+
+  return (
+    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(95,114,249,0.12)", borderRadius: 10, padding: 16 }}>
+      <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#e2e8ff", marginBottom: 4 }}>{label}</label>
+      <p style={{ fontSize: 12, color: "#828cb4", marginBottom: 12, margin: "4px 0 12px" }}>{desc}</p>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          type="text"
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          style={{
+            flex: 1, background: "#131629", border: "1px solid rgba(95,114,249,0.2)",
+            borderRadius: 8, padding: "8px 12px", fontSize: 13, color: "#e2e8ff",
+            outline: "none",
+          }}
+        />
+        <button
+          disabled={saving === configKey}
+          onClick={() => onSave(configKey, val)}
+          style={{
+            padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer",
+            fontSize: 13, fontWeight: 500,
+            background: saved === configKey ? "#16a34a" : "#5f72f9",
+            color: "#fff", opacity: saving === configKey ? 0.5 : 1,
+            transition: "background 0.2s",
+          }}
+        >
+          {saving === configKey ? "…" : saved === configKey ? "✓ Saved" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function timeAgo(dateStr: string): string {
@@ -62,8 +239,10 @@ export default function PassportAdminPage() {
   const [nudgeLogs, setNudgeLogs]   = useState<GhostNudgeLog[]>([]);
   const [ussdSessions, setUSSD]     = useState<USSDSession[]>([]);
   const [loading, setLoading]       = useState(true);
-  const [activeTab, setActiveTab]   = useState<"overview" | "nudges" | "ussd">("overview");
+  const [activeTab, setActiveTab]   = useState<"overview" | "nudges" | "ussd" | "config">("overview");
   const [autoRefresh, setAutoRefresh] = useState(false);
+
+  const { configs, saving, saved, save } = usePassportConfig();
 
   const load = useCallback(async () => {
     try {
@@ -82,9 +261,7 @@ export default function PassportAdminPage() {
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -118,6 +295,16 @@ export default function PassportAdminPage() {
     transition: "all 0.15s",
   });
 
+  const sectionHeadStyle: React.CSSProperties = {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#9ca3af",
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    marginBottom: 12,
+    marginTop: 24,
+  };
+
   return (
     <AdminShell>
       {/* Header */}
@@ -127,7 +314,7 @@ export default function PassportAdminPage() {
             🪪 Digital Passport &amp; USSD
           </h1>
           <p style={{ color: "#828cb4", fontSize: 13, marginTop: 4 }}>
-            Wallet pass activity, ghost nudge logs, and USSD session monitor
+            Wallet pass activity, ghost nudge logs, USSD session monitor, and configuration
           </p>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -159,10 +346,10 @@ export default function PassportAdminPage() {
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14, marginBottom: 24 }}>
             {[
-              { label: "Total Passports",      value: stats?.total_passports ?? 0,         icon: "🪪" },
-              { label: "Apple Wallet Downloads", value: stats?.apple_wallet_downloads ?? 0, icon: "📱" },
-              { label: "Google Wallet Saves",   value: stats?.google_wallet_saves ?? 0,     icon: "💳" },
-              { label: "QR Scans Today",        value: stats?.qr_scans_today ?? 0,          icon: "📷" },
+              { label: "Total Passports",        value: stats?.total_passports ?? 0,         icon: "🪪" },
+              { label: "Apple Wallet Downloads",  value: stats?.apple_wallet_downloads ?? 0,  icon: "📱" },
+              { label: "Google Wallet Saves",     value: stats?.google_wallet_saves ?? 0,     icon: "💳" },
+              { label: "QR Scans Today",          value: stats?.qr_scans_today ?? 0,          icon: "📷" },
             ].map(s => (
               <div key={s.label} style={statCardStyle}>
                 <div style={{ fontSize: 26 }}>{s.icon}</div>
@@ -210,9 +397,12 @@ export default function PassportAdminPage() {
 
           {/* Tabs */}
           <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "rgba(255,255,255,0.03)", padding: 4, borderRadius: 10, width: "fit-content" }}>
-            {(["overview", "nudges", "ussd"] as const).map(tab => (
+            {(["overview", "nudges", "ussd", "config"] as const).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)} style={tabStyle(activeTab === tab)}>
-                {tab === "overview" ? "🏆 Top Earners" : tab === "nudges" ? "👻 Ghost Nudges" : "📱 USSD Sessions"}
+                {tab === "overview" ? "🏆 Top Earners"
+                  : tab === "nudges" ? "👻 Ghost Nudges"
+                  : tab === "ussd"   ? "📱 USSD Sessions"
+                  :                    "⚙️ Configuration"}
               </button>
             ))}
           </div>
@@ -275,7 +465,10 @@ export default function PassportAdminPage() {
                 </span>
               </div>
               {nudgeLogs.length === 0 ? (
-                <p style={{ color: "#828cb4", fontSize: 13 }}>No nudges sent yet. The Ghost Nudge worker fires every 5 minutes.</p>
+                <p style={{ color: "#828cb4", fontSize: 13 }}>
+                  No nudges sent yet. The Ghost Nudge worker fires every{" "}
+                  {configs[PASSPORT_CONFIG_KEYS.NUDGE_INTERVAL] ?? "60"} minutes.
+                </p>
               ) : (
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
@@ -387,6 +580,100 @@ export default function PassportAdminPage() {
                   </tbody>
                 </table>
               )}
+            </div>
+          )}
+
+          {/* Tab: Configuration (zero-hardcoding — all values from network_configs) */}
+          {activeTab === "config" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              <div style={{ ...cardStyle, marginBottom: 16 }}>
+                <p style={{ color: "#828cb4", fontSize: 13, margin: 0 }}>
+                  All values below are stored in the <code style={{ color: "#9cb7ff" }}>network_configs</code> table
+                  and take effect on the next Ghost Nudge worker tick — no code deploy required.
+                </p>
+              </div>
+
+              {/* Ghost Nudge Timing */}
+              <p style={sectionHeadStyle}>👻 Ghost Nudge — Timing &amp; Thresholds</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, marginBottom: 8 }}>
+                <NumberField
+                  label="Cron Interval"
+                  desc="How often the Ghost Nudge worker runs. REQ-4.4 mandates 60 min default."
+                  configKey={PASSPORT_CONFIG_KEYS.NUDGE_INTERVAL}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                  suffix="min"
+                />
+                <NumberField
+                  label="Warning Window"
+                  desc="Hours before streak expiry to trigger a nudge. REQ-4.4 mandates 4h default."
+                  configKey={PASSPORT_CONFIG_KEYS.NUDGE_WARNING_HOURS}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                  suffix="hrs"
+                />
+                <NumberField
+                  label="Minimum Streak"
+                  desc="Minimum streak length (days) to qualify for a Ghost Nudge. REQ-4.4 mandates 3 days."
+                  configKey={PASSPORT_CONFIG_KEYS.NUDGE_MIN_STREAK}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                  suffix="days"
+                />
+                <NumberField
+                  label="Nudge Cooldown"
+                  desc="Minimum hours before the same user can be nudged again. Prevents SMS spam."
+                  configKey={PASSPORT_CONFIG_KEYS.NUDGE_COOLDOWN}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                  suffix="hrs"
+                />
+                <NumberField
+                  label="Batch Limit"
+                  desc="Maximum users to nudge per cron run. Prevents runaway SMS costs."
+                  configKey={PASSPORT_CONFIG_KEYS.NUDGE_BATCH_LIMIT}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                  suffix="users"
+                />
+              </div>
+
+              {/* Ghost Nudge Channels */}
+              <p style={sectionHeadStyle}>📡 Ghost Nudge — Channels</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, marginBottom: 8 }}>
+                <ToggleField
+                  label="SMS Nudges Enabled"
+                  desc="Send Termii SMS to users during Ghost Nudge runs. Disable to pause SMS without stopping wallet pushes."
+                  configKey={PASSPORT_CONFIG_KEYS.NUDGE_SMS_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <ToggleField
+                  label="Wallet Pass Push Enabled"
+                  desc="Push updated Apple/Google Wallet passes during Ghost Nudge runs. Disable to pause wallet pushes independently."
+                  configKey={PASSPORT_CONFIG_KEYS.NUDGE_WALLET_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+              </div>
+
+              {/* USSD Settings */}
+              <p style={sectionHeadStyle}>📱 USSD Settings</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, marginBottom: 8 }}>
+                <TextField
+                  label="USSD Short Code"
+                  desc="The USSD short code displayed in SMS nudges and on wallet pass back fields."
+                  configKey={PASSPORT_CONFIG_KEYS.USSD_SHORT_CODE}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <NumberField
+                  label="Session Timeout"
+                  desc="USSD session inactivity timeout. Africa's Talking drops sessions after 20s."
+                  configKey={PASSPORT_CONFIG_KEYS.USSD_TIMEOUT}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                  suffix="sec"
+                />
+                <NumberField
+                  label="Max Menu Depth"
+                  desc="Maximum USSD menu levels a user can navigate in a single session."
+                  configKey={PASSPORT_CONFIG_KEYS.USSD_MAX_DEPTH}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                  suffix="levels"
+                />
+              </div>
             </div>
           )}
         </>

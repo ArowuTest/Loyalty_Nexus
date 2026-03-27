@@ -81,6 +81,44 @@ class AdminAPI {
   activateAIProvider(id: string)   { return this.req<{ status: string }>("POST", `/admin/ai-providers/${id}/activate`,   {}); }
   deactivateAIProvider(id: string) { return this.req<{ status: string }>("POST", `/admin/ai-providers/${id}/deactivate`, {}); }
   testAIProvider(id: string)       { return this.req<AIProviderTestResult>("POST", `/admin/ai-providers/${id}/test`,      {}); }
+
+  // ─── MTN Push CSV Upload ──────────────────────────────────────────────────
+  async uploadMTNPushCSV(file: File, note?: string): Promise<CSVUploadResult> {
+    const form = new FormData();
+    form.append("file", file);
+    if (note) form.append("note", note);
+    const resp = await fetch(`${BASE_URL}/admin/mtn-push/csv-upload`, {
+      method: "POST",
+      headers: { ...(this.getToken() ? { Authorization: `Bearer ${this.getToken()}` } : {}) },
+      body: form,
+    });
+    if (resp.status === 401) { this.clearToken(); window.location.href = "/login"; throw new Error("Unauthorized"); }
+    const data = await resp.json();
+    if (!resp.ok) throw new Error((data as { error?: string }).error || "Upload failed");
+    return data as CSVUploadResult;
+  }
+  listMTNPushCSVUploads(limit = 20, offset = 0) {
+    return this.req<{ uploads: CSVUploadSummary[]; total: number }>("GET", `/admin/mtn-push/csv-upload?limit=${limit}&offset=${offset}`);
+  }
+  getMTNPushCSVUpload(id: string) {
+    return this.req<CSVUploadSummary>("GET", `/admin/mtn-push/csv-upload/${id}`);
+  }
+  getMTNPushCSVUploadRows(id: string, limit = 100, offset = 0) {
+    return this.req<{ rows: CSVRowDetail[]; total: number }>("GET", `/admin/mtn-push/csv-upload/${id}/rows?limit=${limit}&offset=${offset}`);
+  }
+  // ─── Bonus Pulse Point Awards ─────────────────────────────────────────────
+  awardBonusPulse(payload: { phone_number: string; points: number; campaign?: string; note?: string }) {
+    return this.req<BonusPulseAwardResult>("POST", "/admin/bonus-pulse", payload);
+  }
+  listBonusPulseAwards(params?: { phone?: string; campaign?: string; limit?: number; offset?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.phone)    qs.set("phone",    params.phone);
+    if (params?.campaign) qs.set("campaign", params.campaign);
+    if (params?.limit    !== undefined) qs.set("limit",  String(params.limit));
+    if (params?.offset   !== undefined) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return this.req<{ records: BonusPulseAwardRecord[]; total: number }>("GET", `/admin/bonus-pulse${q ? `?${q}` : ""}`);
+  }
 }
 export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
@@ -281,4 +319,65 @@ export interface AIProviderTestResult {
   status: "ok" | "failed";
   message: string;
   last_tested_at: string;
+// ─── Bonus Pulse Point Awards types ─────────────────────────────────────────────
+export interface BonusPulseAwardResult {
+  award_id: string;
+  transaction_id: string;
+  user_id: string;
+  phone_number: string;
+  points_awarded: number;
+  new_balance: number;
+  campaign: string;
+  awarded_at: string;
+}
+export interface BonusPulseAwardRecord {
+  id: string;
+  user_id: string;
+  phone_number: string;
+  points: number;
+  campaign: string;
+  note: string;
+  awarded_by: string;
+  awarded_by_name: string;
+  transaction_id: string;
+  created_at: string;
+}
+
+// ─── MTN Push CSV Upload types ──────────────────────────────────────────────────
+export interface CSVUploadResult {
+  upload_id: string;
+  total_rows: number;
+  processed_rows: number;
+  skipped_rows: number;
+  failed_rows: number;
+  status: string; // DONE | PARTIAL | FAILED
+}
+export interface CSVUploadSummary {
+  id: string;
+  uploaded_by: string;
+  filename: string;
+  uploaded_at: string;
+  total_rows: number;
+  processed_rows: number;
+  skipped_rows: number;
+  failed_rows: number;
+  status: string; // DONE | PARTIAL | FAILED
+  note?: string;
+  completed_at?: string | null;
+}
+export interface CSVRowDetail {
+  row_number: number;
+  raw_msisdn: string;
+  raw_date: string;
+  raw_time: string;
+  raw_amount: string;
+  recharge_type: string;
+  status: string; // PROCESSED | SKIPPED | FAILED
+  skip_reason?: string;
+  error_msg?: string;
+  transaction_ref?: string;
+  spin_credits: number;
+  pulse_points: number;
+  draw_entries: number;
+  processed_at?: string | null;
 }

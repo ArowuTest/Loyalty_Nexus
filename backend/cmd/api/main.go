@@ -43,18 +43,19 @@ func main() {
 	cfg := config.NewConfigManager(db)
 
 	// ─── Repositories ─────────────────────────────────────────
-	userRepo   := persistence.NewPostgresUserRepository(db)
-	txRepo     := persistence.NewPostgresTransactionRepository(db)
-	studioRepo := persistence.NewPostgresStudioRepository(db)
-	hlrRepo    := persistence.NewPostgresHLRRepository(db)
-	chatRepo   := persistence.NewPostgresChatRepository(db)
-	authRepo   := persistence.NewPostgresAuthRepository(db)
-	prizeRepo  := persistence.NewPostgresPrizeRepository(db)
-	warsRepo   := persistence.NewPostgresWarsRepository(db)
+	userRepo        := persistence.NewPostgresUserRepository(db)
+	txRepo          := persistence.NewPostgresTransactionRepository(db)
+	studioRepo      := persistence.NewPostgresStudioRepository(db)
+	hlrRepo         := persistence.NewPostgresHLRRepository(db)
+	chatRepo        := persistence.NewPostgresChatRepository(db)
+	authRepo        := persistence.NewPostgresAuthRepository(db)
+	prizeRepo       := persistence.NewPostgresPrizeRepository(db)
+	warsRepo        := persistence.NewPostgresWarsRepository(db)
+	ussdSessionRepo := persistence.NewPostgresUSSDSessionRepository(db)
 
 	// ─── External Adapters ────────────────────────────────────
-	vtpass    := external.NewVTPassAdapter()
-	momoSvc   := external.NewMTNMomoAdapter()
+	vtpass       := external.NewVTPassAdapter()
+	momoSvc      := external.NewMTNMomoAdapter()
 	usageTracker := external.NewRedisUsageTracker(rdb)
 
 	// ─── AI Clients ───────────────────────────────────────────
@@ -66,19 +67,21 @@ func main() {
 	eq := queue.NewEventQueue(rdb, "recharge_stream")
 
 	// ─── Services ─────────────────────────────────────────────
-	notifySvc  := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
-	authSvc    := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
-	notifyH    := handlers.NewNotificationHandler(db)
-
-	fulfillSvc := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
-	rechargeSvc := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
-	spinSvc    := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
-	studioSvc  := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
-	hlrSvc     := services.NewHLRService(hlrRepo)
-	warssSvc   := services.NewRegionalWarsService(warsRepo, userRepo, txRepo, cfg, db)
-	drawSvc    := services.NewDrawService(db)
-	passportSvc := services.NewPassportService(db)
-	fraudSvc   := services.NewFraudService(db)
+	notifySvc     := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
+	authSvc       := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
+	fulfillSvc    := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
+	rechargeSvc   := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
+	drawSvc       := services.NewDrawService(db)
+	drawWindowSvc := services.NewDrawWindowService(db)
+	mtnPushSvc    := services.NewMTNPushService(db, userRepo, txRepo, drawSvc, drawWindowSvc, notifySvc, cfg)
+	spinSvc       := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
+	studioSvc     := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
+	hlrSvc        := services.NewHLRService(hlrRepo)
+	warssSvc      := services.NewRegionalWarsService(warsRepo, userRepo, txRepo, cfg, db)
+	passportSvc   := services.NewPassportService(db)
+	fraudSvc      := services.NewFraudService(db)
+	claimSvc      := services.NewClaimService(prizeRepo, userRepo, momoSvc, fulfillSvc)
+	adminClaimSvc := services.NewAdminClaimService(prizeRepo, momoSvc)
 
 	// Bootstrap current month's war if none exists
 	if err := warssSvc.EnsureActiveWar(context.Background(), 50_000_000); err != nil {
@@ -113,22 +116,31 @@ func main() {
 
 	// ─── HTTP Handlers ────────────────────────────────────────
 	authH    := handlers.NewAuthHandler(authSvc)
-	rechargeH := handlers.NewRechargeHandler(rechargeSvc, eq)
+	rechargeH := handlers.NewRechargeHandlerWithMTN(rechargeSvc, mtnPushSvc, eq)
 	spinH    := handlers.NewSpinHandler(spinSvc)
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
 	studioH.SetAssetStorage(assetStorage) // enables /studio/upload endpoint
-	// kbWorker no longer needs a back-link — orch is injected directly
-	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
-	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, fraudSvc, warssSvc, studioSvc, rdb)
-	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, cfg)
+	bonusPulseSvc := services.NewBonusPulseService(db, userRepo)
+	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc).
+				WithBonusPulseService(bonusPulseSvc)
+	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, drawWindowSvc, fraudSvc, warssSvc, studioSvc, adminClaimSvc, rdb).
+				WithCSVService(services.NewMTNPushCSVService(db, mtnPushSvc)).
+				WithBonusPulseService(bonusPulseSvc)
+	claimH   := handlers.NewClaimHandler(claimSvc)
+	notifyH  := handlers.NewNotificationHandler(db)
+
+	// ─── USSD Knowledge Service (REQ-6.4) ─────────────────────
+	ussdKnowledgeSvc := services.NewUSSDKnowledgeService(studioSvc, kbWorker, notifySvc, cfg)
+	ussdH    := handlers.NewUSSDHandler(spinSvc, rechargeSvc, userRepo, ussdSessionRepo, cfg)
+
 	// ─── WebSocket Hub (Regional Wars real-time leaderboard) ────
 	leaderboardHub := handlers.NewLeaderboardHub()
 	handlers.StartLeaderboardPoller(ctx, leaderboardHub, warssSvc, 30*time.Second)
 
-	warsH    := handlers.NewWarsHandler(warssSvc, leaderboardHub)
-	drawH    := handlers.NewDrawHandler(drawSvc)
+	warsH     := handlers.NewWarsHandler(warssSvc, leaderboardHub)
+	drawH     := handlers.NewDrawHandler(drawSvc)
 	passportH := handlers.NewPassportHandler(passportSvc)
-	fraudH   := handlers.NewFraudHandler(fraudSvc)
+	fraudH    := handlers.NewFraudHandler(fraudSvc)
 
 	// ─── Router ───────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -141,76 +153,99 @@ func main() {
 		}
 	})
 
-	// Auth (public)
-	mux.HandleFunc("POST /api/v1/auth/otp/send",   authH.SendOTP)
+	// ─── Auth (public) ────────────────────────────────────────
+	mux.HandleFunc("POST /api/v1/auth/otp/send", authH.SendOTP)
 	mux.HandleFunc("POST /api/v1/auth/otp/verify", authH.VerifyOTP)
 
-	// Webhooks (public — signature-verified internally)
+	// ─── Webhooks (public — signature-verified internally) ────
 	mux.HandleFunc("POST /api/v1/recharge/paystack-webhook", rechargeH.PaystackWebhook)
-	mux.HandleFunc("POST /api/v1/recharge/mno-webhook",      rechargeH.MNOWebhook)
+	mux.HandleFunc("POST /api/v1/recharge/mno-webhook", rechargeH.MNOWebhook)
+	mux.HandleFunc("POST /api/v1/recharge/mtn-push", rechargeH.MTNPushWebhook)
 
-	// USSD (public — HMAC-verified)
+	// ─── USSD (public — HMAC-verified) ───────────────────────
 	mux.HandleFunc("POST /api/v1/ussd", ussdH.Handle)
 
-	// Protected routes
+	// ─── Protected routes ─────────────────────────────────────
 	auth := middleware.AuthMiddleware(authSvc)
 
-	mux.Handle("GET  /api/v1/user/profile",       auth(http.HandlerFunc(userH.GetProfile)))
-	mux.Handle("GET  /api/v1/user/wallet",        auth(http.HandlerFunc(userH.GetWallet)))
-	mux.Handle("POST /api/v1/user/momo/request",  auth(http.HandlerFunc(userH.RequestMoMoLink)))
-	mux.Handle("POST /api/v1/user/profile/state",  auth(http.HandlerFunc(userH.UpdateProfileState)))
-	mux.Handle("POST /api/v1/user/momo/verify",   auth(http.HandlerFunc(userH.VerifyMoMo)))
-	mux.Handle("GET  /api/v1/user/transactions",  auth(http.HandlerFunc(userH.GetTransactions)))
-	mux.Handle("GET  /api/v1/user/passport",      auth(http.HandlerFunc(userH.GetPassportURLs)))
+	// User profile & wallet
+	mux.Handle("GET /api/v1/user/profile", auth(http.HandlerFunc(userH.GetProfile)))
+	mux.Handle("GET /api/v1/user/wallet", auth(http.HandlerFunc(userH.GetWallet)))
+	mux.Handle("POST /api/v1/user/momo/request", auth(http.HandlerFunc(userH.RequestMoMoLink)))
+	mux.Handle("POST /api/v1/user/profile/state", auth(http.HandlerFunc(userH.UpdateProfileState)))
+	mux.Handle("POST /api/v1/user/momo/verify", auth(http.HandlerFunc(userH.VerifyMoMo)))
+	mux.Handle("GET /api/v1/user/transactions", auth(http.HandlerFunc(userH.GetTransactions)))
+	mux.Handle("GET /api/v1/user/passport",    auth(http.HandlerFunc(userH.GetPassportURLs)))
+	mux.Handle("GET /api/v1/user/bonus-pulse", auth(http.HandlerFunc(userH.GetBonusPulseAwards)))
 
-	mux.Handle("GET  /api/v1/spin/wheel",         auth(http.HandlerFunc(spinH.GetWheelConfig)))
-	mux.Handle("POST /api/v1/spin/play",          auth(http.HandlerFunc(spinH.Play)))
-	mux.Handle("GET  /api/v1/spin/history",       auth(http.HandlerFunc(spinH.GetHistory)))
+	// ─── Spin Wheel ───────────────────────────────────────────
+	// NOTE: /spin/eligibility must be before /spin/wins/{id}/claim to avoid
+	// "eligibility" being matched as a {id} value if patterns overlap.
+	mux.Handle("GET /api/v1/spin/eligibility", auth(http.HandlerFunc(spinH.CheckEligibility)))
+	mux.Handle("GET /api/v1/spin/wheel", auth(http.HandlerFunc(spinH.GetWheelConfig)))
+	mux.Handle("POST /api/v1/spin/play", auth(http.HandlerFunc(spinH.Play)))
+	mux.Handle("GET /api/v1/spin/history", auth(http.HandlerFunc(spinH.GetHistory)))
+	mux.Handle("GET /api/v1/spin/wins", auth(http.HandlerFunc(claimH.GetMyWins)))
+	mux.Handle("POST /api/v1/spin/wins/{id}/claim", auth(http.HandlerFunc(claimH.ClaimPrize)))
+	mux.Handle("GET /api/v1/spin/momo-check", auth(http.HandlerFunc(claimH.CheckMoMoAccount)))
 
-	// ─── Notifications ────────────────────────────────────────────────────────
-	mux.Handle("GET /api/v1/notifications",                auth(http.HandlerFunc(notifyH.ListNotifications)))
-	mux.Handle("PATCH /api/v1/notifications/{id}/read",    auth(http.HandlerFunc(notifyH.MarkRead)))
-	mux.Handle("POST /api/v1/notifications/read-all",      auth(http.HandlerFunc(notifyH.MarkAllRead)))
-	mux.Handle("POST /api/v1/notifications/push-token",    auth(http.HandlerFunc(notifyH.RegisterPushToken)))
-	mux.Handle("GET /api/v1/notifications/preferences",    auth(http.HandlerFunc(notifyH.GetPreferences)))
-	mux.Handle("PATCH /api/v1/notifications/preferences",  auth(http.HandlerFunc(notifyH.UpdatePreferences)))
+	// ─── Notifications ────────────────────────────────────────
+	mux.Handle("GET /api/v1/notifications", auth(http.HandlerFunc(notifyH.ListNotifications)))
+	mux.Handle("PATCH /api/v1/notifications/{id}/read", auth(http.HandlerFunc(notifyH.MarkRead)))
+	mux.Handle("POST /api/v1/notifications/read-all", auth(http.HandlerFunc(notifyH.MarkAllRead)))
+	mux.Handle("POST /api/v1/notifications/push-token", auth(http.HandlerFunc(notifyH.RegisterPushToken)))
+	mux.Handle("GET /api/v1/notifications/preferences", auth(http.HandlerFunc(notifyH.GetPreferences)))
+	mux.Handle("PATCH /api/v1/notifications/preferences", auth(http.HandlerFunc(notifyH.UpdatePreferences)))
 
+	// ─── Nexus Studio ─────────────────────────────────────────
+	mux.Handle("GET /api/v1/studio/tools", auth(http.HandlerFunc(studioH.ListTools)))
+	mux.Handle("GET /api/v1/studio/tools/{slug}", auth(http.HandlerFunc(studioH.GetTool)))
+	mux.Handle("POST /api/v1/studio/generate", auth(http.HandlerFunc(studioH.Generate)))
+	mux.Handle("GET /api/v1/studio/generate/{id}", auth(http.HandlerFunc(studioH.GetGenerationStatus)))
+	mux.Handle("GET /api/v1/studio/gallery", auth(http.HandlerFunc(studioH.GetGallery)))
+	mux.Handle("POST /api/v1/studio/generate/{id}/dispute", auth(http.HandlerFunc(studioH.DisputeGeneration)))
+	mux.Handle("GET /api/v1/studio/session", auth(http.HandlerFunc(studioH.GetSessionUsage)))
 
-	// ── Nexus Studio ────────────────────────────────────────────────────────
-	mux.Handle("GET  /api/v1/studio/tools",                  auth(http.HandlerFunc(studioH.ListTools)))
-	mux.Handle("GET  /api/v1/studio/tools/{slug}",           auth(http.HandlerFunc(studioH.GetTool)))
-	mux.Handle("POST /api/v1/studio/generate",               auth(http.HandlerFunc(studioH.Generate)))
-	mux.Handle("GET  /api/v1/studio/generate/{id}",          auth(http.HandlerFunc(studioH.GetGenerationStatus)))
-	mux.Handle("GET  /api/v1/studio/gallery",                auth(http.HandlerFunc(studioH.GetGallery)))
-	mux.Handle("POST /api/v1/studio/generate/{id}/dispute",  auth(http.HandlerFunc(studioH.DisputeGeneration)))
-	mux.Handle("GET  /api/v1/studio/session",                auth(http.HandlerFunc(studioH.GetSessionUsage)))
-	mux.Handle("POST /api/v1/studio/upload",                 auth(http.HandlerFunc(studioH.UploadAsset)))
-	// ── Nexus Chat ───────────────────────────────────────────────────────────
-	mux.Handle("POST /api/v1/studio/chat",                   auth(http.HandlerFunc(studioH.Chat)))
-	mux.Handle("GET  /api/v1/studio/chat/usage",             auth(http.HandlerFunc(studioH.GetChatUsage)))
+	mux.Handle("POST /api/v1/studio/upload", auth(http.HandlerFunc(studioH.UploadAsset)))
+	// ─── Nexus Chat ───────────────────────────────────────────
+	mux.Handle("POST /api/v1/studio/chat", auth(http.HandlerFunc(studioH.Chat)))
+	mux.Handle("GET /api/v1/studio/chat/usage", auth(http.HandlerFunc(studioH.GetChatUsage)))
 
-	// Wars routes
-	mux.Handle("GET  /api/v1/wars/leaderboard",         auth(http.HandlerFunc(warsH.GetLeaderboard)))
-	mux.Handle("GET  /api/v1/wars/my-rank",             auth(http.HandlerFunc(warsH.GetMyRank)))
-	mux.Handle("GET  /api/v1/wars/history",             auth(http.HandlerFunc(warsH.GetHistory)))
-	mux.Handle("GET  /api/v1/wars/{period}/winners",    auth(http.HandlerFunc(warsH.GetWinners)))
-	// WebSocket: real-time leaderboard (spec §3.5 Phase 3)
-	mux.Handle("GET  /api/v1/wars/live",                auth(http.HandlerFunc(warsH.LiveLeaderboard)))
+	// ─── Regional Wars ────────────────────────────────────────
+	mux.Handle("GET /api/v1/wars/leaderboard", auth(http.HandlerFunc(warsH.GetLeaderboard)))
+	mux.Handle("GET /api/v1/wars/my-rank", auth(http.HandlerFunc(warsH.GetMyRank)))
+	mux.Handle("GET /api/v1/wars/history", auth(http.HandlerFunc(warsH.GetHistory)))
+	mux.Handle("GET /api/v1/wars/{period}/winners", auth(http.HandlerFunc(warsH.GetWinners)))
+	mux.Handle("GET /api/v1/wars/live", auth(http.HandlerFunc(warsH.LiveLeaderboard)))
 
-	// Passport routes (spec §6)
-	mux.Handle("GET  /api/v1/passport",              auth(http.HandlerFunc(passportH.GetPassport)))
-	mux.Handle("GET  /api/v1/passport/badges",       auth(http.HandlerFunc(passportH.GetBadges)))
-	mux.Handle("GET  /api/v1/passport/qr",           auth(http.HandlerFunc(passportH.GetQR)))
-	mux.Handle("POST /api/v1/passport/qr/verify",    auth(http.HandlerFunc(passportH.VerifyQR)))
-	mux.Handle("GET  /api/v1/passport/pkpass",       auth(http.HandlerFunc(passportH.DownloadPKPass)))
-	mux.Handle("GET  /api/v1/passport/events",       auth(http.HandlerFunc(passportH.GetEvents)))
-	mux.Handle("GET  /api/v1/passport/share",        auth(http.HandlerFunc(passportH.GetShareCard)))
+	// ─── Passport ─────────────────────────────────────────────
+	mux.Handle("GET /api/v1/passport", auth(http.HandlerFunc(passportH.GetPassport)))
+	mux.Handle("GET /api/v1/passport/profile", auth(http.HandlerFunc(passportH.GetPassport))) // alias
+	mux.Handle("GET /api/v1/passport/badges", auth(http.HandlerFunc(passportH.GetBadges)))
+	mux.Handle("GET /api/v1/passport/qr", auth(http.HandlerFunc(passportH.GetQR)))
+	mux.Handle("POST /api/v1/passport/qr/verify", auth(http.HandlerFunc(passportH.VerifyQR)))
+	mux.Handle("GET /api/v1/passport/pkpass", auth(http.HandlerFunc(passportH.DownloadPKPass)))
+	mux.Handle("GET /api/v1/passport/wallet-urls", auth(http.HandlerFunc(passportH.GetWalletPassURLs)))
+	mux.Handle("GET /api/v1/passport/events", auth(http.HandlerFunc(passportH.GetEvents)))
+	mux.Handle("GET /api/v1/passport/share", auth(http.HandlerFunc(passportH.GetShareCard)))
+	// Apple Wallet web service callbacks (called by iOS Wallet app)
+	mux.Handle("POST /api/v1/passport/apple/v1/devices/{deviceID}/registrations/{passTypeID}/{serialNumber}",
+		http.HandlerFunc(passportH.RegisterAppleDevice))
+	mux.Handle("DELETE /api/v1/passport/apple/v1/devices/{deviceID}/registrations/{passTypeID}/{serialNumber}",
+		http.HandlerFunc(passportH.UnregisterAppleDevice))
+	mux.Handle("GET /api/v1/passport/apple/v1/devices/{deviceID}/registrations/{passTypeID}",
+		http.HandlerFunc(passportH.GetUpdatedSerials))
 
-	// Draws (public results)
-	mux.Handle("GET  /api/v1/draws",             auth(http.HandlerFunc(drawH.ListUpcoming)))
-	mux.Handle("GET  /api/v1/draws/{id}/winners", auth(http.HandlerFunc(drawH.GetWinners)))
+	// Wire services into USSD handler
+	ussdH.SetPassportService(passportSvc)
+	ussdH.SetDrawService(drawSvc)
+	ussdH.SetKnowledgeService(ussdKnowledgeSvc)
 
-	// Admin routes (admin JWT required)
+	// ─── Draws (public results) ───────────────────────────────
+	mux.Handle("GET /api/v1/draws", auth(http.HandlerFunc(drawH.ListUpcoming)))
+	mux.Handle("GET /api/v1/draws/{id}/winners", auth(http.HandlerFunc(drawH.GetWinners)))
+
+	// ─── Admin routes (admin JWT required) ───────────────────
 	adminAuth := middleware.AdminAuthMiddleware(authSvc)
 	mux.Handle("GET    /api/v1/admin/dashboard",          adminAuth(http.HandlerFunc(adminH.GetDashboard)))
 	mux.Handle("GET    /api/v1/admin/config",             adminAuth(http.HandlerFunc(adminH.GetConfig)))
@@ -294,7 +329,7 @@ func main() {
 
 	log.Printf("[API] Loyalty Nexus API starting on :%s (mode: %s)", port, cfg.GetString("operation_mode", "independent"))
 
-	// ─── Recharge-event → leaderboard broadcast ─────────────────────────
+	// ─── Recharge-event → leaderboard broadcast ───────────────
 	// Subscribe to the recharge stream; on every successful recharge re-fetch
 	// the leaderboard and push to all connected WebSocket clients (≤1s latency).
 	go eq.Subscribe(ctx, "wars-ws-group", "api-server", func(event map[string]interface{}) error {

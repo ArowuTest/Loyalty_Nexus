@@ -137,6 +137,8 @@ func (s *AuthService) VerifyOTP(ctx context.Context, phone, code, purpose string
 }
 
 // ValidateJWT parses and validates a JWT, returning claims.
+// The is_admin claim is read directly from the token so that MintAdminToken
+// tokens are correctly recognised by AdminAuthMiddleware.
 func (s *AuthService) ValidateJWT(tokenStr string) (*entities.JWTClaims, error) {
 	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -153,11 +155,26 @@ func (s *AuthService) ValidateJWT(tokenStr string) (*entities.JWTClaims, error) 
 		return nil, errors.New("invalid claims")
 	}
 
+	isAdmin, _ := claims["is_admin"].(bool)
 	return &entities.JWTClaims{
 		UserID:      fmt.Sprintf("%v", claims["uid"]),
 		PhoneNumber: fmt.Sprintf("%v", claims["phone"]),
-		IsAdmin:     false,
+		IsAdmin:     isAdmin,
 	}, nil
+}
+
+// MintAdminToken issues a short-lived admin JWT for use in integration tests
+// and admin tooling. The token carries is_admin=true so AdminAuthMiddleware
+// accepts it without requiring a real user row.
+func (s *AuthService) MintAdminToken(adminID uuid.UUID) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"uid":      adminID.String(),
+		"phone":    "admin",
+		"is_admin": true,
+		"exp":      time.Now().Add(1 * time.Hour).Unix(),
+		"iat":      time.Now().Unix(),
+	})
+	return token.SignedString(s.jwtSecret)
 }
 
 func (s *AuthService) registerNewUser(ctx context.Context, phone string) (*entities.User, error) {

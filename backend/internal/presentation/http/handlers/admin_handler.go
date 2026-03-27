@@ -17,20 +17,26 @@ import (
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
+	"loyalty-nexus/internal/pkg/safe"
+	"loyalty-nexus/internal/presentation/http/middleware"
 )
 
 // AdminHandler handles all /api/v1/admin/* endpoints.
 // Zero-hardcoding: every business parameter is read from network_configs,
 // editable live via PUT /api/v1/admin/config/:key.
 type AdminHandler struct {
-	db        *gorm.DB
-	cfg       *config.ConfigManager
-	spinSvc   *services.SpinService
-	drawSvc   *services.DrawService
-	fraudSvc  *services.FraudService
-	warsSvc   *services.RegionalWarsService
-	studioSvc *services.StudioService
-	rdb       *redis.Client
+	db            *gorm.DB
+	cfg           *config.ConfigManager
+	spinSvc       *services.SpinService
+	drawSvc       *services.DrawService
+	drawWindowSvc *services.DrawWindowService
+	fraudSvc      *services.FraudService
+	warsSvc       *services.RegionalWarsService
+	studioSvc     *services.StudioService
+	claimSvc      *services.AdminClaimService
+	csvSvc        *services.MTNPushCSVService  // nil-safe; set via WithCSVService
+	bonusPulseSvc *services.BonusPulseService  // nil-safe; set via WithBonusPulseService
+	rdb           *redis.Client
 }
 
 func NewAdminHandler(
@@ -38,21 +44,38 @@ func NewAdminHandler(
 	cfg *config.ConfigManager,
 	spinSvc *services.SpinService,
 	drawSvc *services.DrawService,
+	drawWindowSvc *services.DrawWindowService,
 	fraudSvc *services.FraudService,
 	warsSvc *services.RegionalWarsService,
 	studioSvc *services.StudioService,
+	claimSvc  *services.AdminClaimService,
 	rdb *redis.Client,
 ) *AdminHandler {
 	return &AdminHandler{
-		db:        db,
-		cfg:       cfg,
-		spinSvc:   spinSvc,
-		drawSvc:   drawSvc,
-		fraudSvc:  fraudSvc,
-		warsSvc:   warsSvc,
-		studioSvc: studioSvc,
-		rdb:       rdb,
+		db:            db,
+		cfg:           cfg,
+		spinSvc:       spinSvc,
+		drawSvc:       drawSvc,
+		drawWindowSvc: drawWindowSvc,
+		fraudSvc:      fraudSvc,
+		warsSvc:       warsSvc,
+		studioSvc:     studioSvc,
+		claimSvc:      claimSvc,
+		rdb:           rdb,
 	}
+}
+
+// WithCSVService attaches the MTN push CSV upload service to the handler.
+// Called after construction in main.go to avoid changing the constructor signature.
+func (h *AdminHandler) WithCSVService(svc *services.MTNPushCSVService) *AdminHandler {
+	h.csvSvc = svc
+	return h
+}
+
+// WithBonusPulseService attaches the bonus pulse point award service.
+func (h *AdminHandler) WithBonusPulseService(svc *services.BonusPulseService) *AdminHandler {
+	h.bonusPulseSvc = svc
+	return h
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────
@@ -249,12 +272,62 @@ func (h *AdminHandler) AdjustPoints(w http.ResponseWriter, r *http.Request) {
 // ─── Prize Pool (Spin Wheel) ──────────────────────────────────────────────
 
 func (h *AdminHandler) GetPrizePool(w http.ResponseWriter, r *http.Request) {
-	prizes, err := h.spinSvc.GetAllPrizes(r.Context())
+	// Admin always sees all prizes (active + inactive) unless ?active_only=true
+	includeInactive := r.URL.Query().Get("active_only") != "true"
+	prizes, err := h.spinSvc.GetAllPrizes(r.Context(), includeInactive)
 	if err != nil {
 		jsonError(w, "failed to get prizes: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	jsonOK(w, prizes)
+}
+
+func (h *AdminHandler) GetPrize(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	prizeID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid prize id", http.StatusBadRequest)
+		return
+	}
+	prize, err := h.spinSvc.GetPrize(r.Context(), prizeID)
+	if err != nil {
+		jsonError(w, "prize not found", http.StatusNotFound)
+		return
+	}
+	jsonOK(w, prize)
+}
+
+func (h *AdminHandler) GetPrizeSummary(w http.ResponseWriter, r *http.Request) {
+	summary, err := h.spinSvc.GetPrizeProbabilitySummary(r.Context())
+	if err != nil {
+		jsonError(w, "failed to get prize summary: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, summary)
+}
+
+func (h *AdminHandler) ReorderPrizes(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		OrderedIDs []string `json:"ordered_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.OrderedIDs) == 0 {
+		jsonError(w, "ordered_ids array is required", http.StatusBadRequest)
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(body.OrderedIDs))
+	for _, s := range body.OrderedIDs {
+		id, err := uuid.Parse(s)
+		if err != nil {
+			jsonError(w, "invalid prize id: "+s, http.StatusBadRequest)
+			return
+		}
+		ids = append(ids, id)
+	}
+	if err := h.spinSvc.ReorderPrizes(r.Context(), ids); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]string{"status": "reordered"})
 }
 
 func (h *AdminHandler) CreatePrize(w http.ResponseWriter, r *http.Request) {
@@ -314,41 +387,35 @@ func (h *AdminHandler) DeletePrize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) GetSpinConfig(w http.ResponseWriter, r *http.Request) {
-	// Returns the full spin configuration (prize table + global limits from network_configs)
-	prizes, _ := h.spinSvc.GetAllPrizes(r.Context())
+	// Returns the full spin configuration (all prizes + tiers + stats)
+	prizes, _ := h.spinSvc.GetAllPrizes(r.Context(), true) // include inactive
+	tiers, _ := h.spinSvc.GetAllSpinTiers(r.Context())
+	summary, _ := h.spinSvc.GetPrizeProbabilitySummary(r.Context())
 	spinStats, _ := h.spinSvc.GetStats(r.Context())
 	jsonOK(w, map[string]interface{}{
-		"prizes":               prizes,
-		"max_spins_per_day":    h.cfg.GetInt("spin_max_per_user_per_day", 3),
-		"spin_trigger_naira":   h.cfg.GetInt64("spin_trigger_naira", 1000),
-		"liability_cap_naira":  h.cfg.GetInt64("daily_prize_liability_cap_naira", 500000),
-		"stats":                spinStats,
+		"prizes":              prizes,
+		"tiers":               tiers,
+		"probability_summary": summary,
+		"liability_cap_naira": h.cfg.GetInt64("daily_prize_liability_cap_naira", 500000),
+		"stats":               spinStats,
 	})
 }
 
+// UpdateSpinConfig updates global spin configuration keys.
+// Note: daily spin caps are now controlled per-tier via /admin/spin/tiers.
+// This endpoint only manages the daily prize liability cap.
 func (h *AdminHandler) UpdateSpinConfig(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		MaxSpinsPerDay    *int   `json:"max_spins_per_day"`
-		SpinTriggerNaira  *int64 `json:"spin_trigger_naira"`
 		LiabilityCapNaira *int64 `json:"liability_cap_naira"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	updates := map[string]string{}
-	if body.MaxSpinsPerDay != nil {
-		updates["spin_max_per_user_per_day"] = strconv.Itoa(*body.MaxSpinsPerDay)
-	}
-	if body.SpinTriggerNaira != nil {
-		updates["spin_trigger_naira"] = strconv.FormatInt(*body.SpinTriggerNaira, 10)
-	}
 	if body.LiabilityCapNaira != nil {
-		updates["daily_prize_liability_cap_naira"] = strconv.FormatInt(*body.LiabilityCapNaira, 10)
-	}
-	for k, v := range updates {
 		h.db.WithContext(r.Context()).Exec(
-			"UPDATE network_configs SET value = ?, updated_at = NOW() WHERE key = ?", v, k)
+			"UPDATE network_configs SET value = ?, updated_at = NOW() WHERE key = ?",
+			strconv.FormatInt(*body.LiabilityCapNaira, 10), "daily_prize_liability_cap_naira")
 	}
 	jsonOK(w, map[string]string{"status": "ok"})
 }
@@ -826,7 +893,7 @@ func (h *AdminHandler) BroadcastNotification(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Background: push to all users (simplified — production would use a queue)
-	go func() {
+	safe.Go(func() {
 		var phoneNumbers []string
 		if len(body.Targets) > 0 {
 			phoneNumbers = body.Targets
@@ -835,7 +902,7 @@ func (h *AdminHandler) BroadcastNotification(w http.ResponseWriter, r *http.Requ
 		}
 		h.db.Exec("UPDATE notification_broadcasts SET target_count = ?, status = 'sent', sent_at = NOW() WHERE id = ?",
 			len(phoneNumbers), broadcastID)
-	}()
+	})
 
 	w.WriteHeader(http.StatusAccepted)
 	if encErr := json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1149,5 +1216,659 @@ func (h *AdminHandler) GetAIHealth(w http.ResponseWriter, r *http.Request) {
 		"recent_switches":      recentSwitches,
 		"studio_tools":         studioTools,
 		"checked_at":           time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// ─── Spin Tiers ───────────────────────────────────────────────────────────
+
+func (h *AdminHandler) GetSpinTiers(w http.ResponseWriter, r *http.Request) {
+	tiers, err := h.spinSvc.GetAllSpinTiers(r.Context())
+	if err != nil {
+		jsonError(w, "failed to get spin tiers: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, tiers)
+}
+
+func (h *AdminHandler) CreateSpinTier(w http.ResponseWriter, r *http.Request) {
+	var data map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		jsonError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	tier, err := h.spinSvc.CreateSpinTier(r.Context(), data)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(tier)
+}
+
+func (h *AdminHandler) UpdateSpinTier(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	tierID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid tier id", http.StatusBadRequest)
+		return
+	}
+	var data map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		jsonError(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	tier, err := h.spinSvc.UpdateSpinTier(r.Context(), tierID, data)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	jsonOK(w, tier)
+}
+
+func (h *AdminHandler) DeleteSpinTier(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	tierID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid tier id", http.StatusBadRequest)
+		return
+	}
+	if err := h.spinSvc.DeleteSpinTier(r.Context(), tierID); err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]string{"status": "deleted"})
+}
+
+// ─── Claims ───────────────────────────────────────────────────────────────
+
+func (h *AdminHandler) ListClaims(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	limit := 50
+	offset := 0
+
+	claims, total, err := h.claimSvc.ListClaims(r.Context(), status, limit, offset)
+	if err != nil {
+		jsonError(w, "failed to list claims: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	jsonOK(w, map[string]interface{}{
+		"data":  claims,
+		"total": total,
+	})
+}
+
+func (h *AdminHandler) GetClaimDetails(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	claimID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid claim id", http.StatusBadRequest)
+		return
+	}
+
+	claim, err := h.claimSvc.GetClaimDetails(r.Context(), claimID)
+	if err != nil {
+		jsonError(w, "claim not found", http.StatusNotFound)
+		return
+	}
+
+	jsonOK(w, claim)
+}
+
+func (h *AdminHandler) ApproveClaim(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	claimID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid claim id", http.StatusBadRequest)
+		return
+	}
+
+	uidStr, ok := r.Context().Value(middleware.ContextUserID).(string)
+	if !ok {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	adminID, err := uuid.Parse(uidStr)
+	if err != nil {
+		jsonError(w, "invalid admin id", http.StatusUnauthorized)
+		return
+	}
+
+	var req services.ApproveClaimRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	claim, err := h.claimSvc.ApproveClaim(r.Context(), claimID, adminID, req)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	jsonOK(w, claim)
+}
+
+func (h *AdminHandler) RejectClaim(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	claimID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid claim id", http.StatusBadRequest)
+		return
+	}
+
+	uidStr, ok := r.Context().Value(middleware.ContextUserID).(string)
+	if !ok {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	adminID, err := uuid.Parse(uidStr)
+	if err != nil {
+		jsonError(w, "invalid admin id", http.StatusUnauthorized)
+		return
+	}
+
+	var req services.RejectClaimRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	claim, err := h.claimSvc.RejectClaim(r.Context(), claimID, adminID, req)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	jsonOK(w, claim)
+}
+
+// GetPendingClaims returns all claims in PENDING_ADMIN_REVIEW status.
+func (h *AdminHandler) GetPendingClaims(w http.ResponseWriter, r *http.Request) {
+	claims, err := h.claimSvc.GetPendingClaims(r.Context())
+	if err != nil {
+		jsonError(w, "failed to get pending claims: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"data":  claims,
+		"total": len(claims),
+	})
+}
+
+// GetClaimStatistics returns aggregate claim stats for the admin dashboard.
+func (h *AdminHandler) GetClaimStatistics(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.claimSvc.GetStatistics(r.Context())
+	if err != nil {
+		jsonError(w, "failed to get claim statistics: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, stats)
+}
+
+// ExportClaims returns a CSV export of claims, optionally filtered by status.
+func (h *AdminHandler) ExportClaims(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	csv, err := h.claimSvc.ExportCSV(r.Context(), status)
+	if err != nil {
+		jsonError(w, "export failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"claims_export.csv\"")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(csv))
+}
+
+// ─── Recharge Points Config ───────────────────────────────────────────────────
+
+// rechargeConfigResponse is the shape returned by GET /api/v1/admin/recharge/config.
+type rechargeConfigResponse struct {
+	SpinDrawNairaPerCredit int64 `json:"spin_draw_naira_per_credit"` // ₦ per spin credit + draw entry
+	PulseNairaPerPoint     int64 `json:"pulse_naira_per_point"`      // ₦ per Pulse Point (AI Studio)
+	MinAmountNaira         int64 `json:"min_amount_naira"`           // minimum qualifying recharge
+}
+
+// GetRechargeConfig returns the three admin-configurable recharge reward thresholds.
+//
+// GET /api/v1/admin/recharge/config
+func (h *AdminHandler) GetRechargeConfig(w http.ResponseWriter, r *http.Request) {
+	resp := rechargeConfigResponse{
+		SpinDrawNairaPerCredit: h.cfg.GetInt64("spin_draw_naira_per_credit", 200),
+		PulseNairaPerPoint:     h.cfg.GetInt64("pulse_naira_per_point", 250),
+		MinAmountNaira:         h.cfg.GetInt64("mtn_push_min_amount_naira", 50),
+	}
+	jsonOK(w, resp)
+}
+
+// UpdateRechargeConfig updates one or more recharge reward thresholds.
+//
+// PUT /api/v1/admin/recharge/config
+// Body (all fields optional — only provided fields are updated):
+//
+//	{
+//	  "spin_draw_naira_per_credit": 200,
+//	  "pulse_naira_per_point":      250,
+//	  "min_amount_naira":           50
+//	}
+func (h *AdminHandler) UpdateRechargeConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SpinDrawNairaPerCredit *int64 `json:"spin_draw_naira_per_credit"`
+		PulseNairaPerPoint     *int64 `json:"pulse_naira_per_point"`
+		MinAmountNaira         *int64 `json:"min_amount_naira"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	type kv struct {
+		key string
+		val int64
+	}
+	var updates []kv
+
+	if req.SpinDrawNairaPerCredit != nil {
+		if *req.SpinDrawNairaPerCredit < 1 {
+			jsonError(w, "spin_draw_naira_per_credit must be at least 1", http.StatusBadRequest)
+			return
+		}
+		updates = append(updates, kv{"spin_draw_naira_per_credit", *req.SpinDrawNairaPerCredit})
+	}
+	if req.PulseNairaPerPoint != nil {
+		if *req.PulseNairaPerPoint < 1 {
+			jsonError(w, "pulse_naira_per_point must be at least 1", http.StatusBadRequest)
+			return
+		}
+		updates = append(updates, kv{"pulse_naira_per_point", *req.PulseNairaPerPoint})
+	}
+	if req.MinAmountNaira != nil {
+		if *req.MinAmountNaira < 0 {
+			jsonError(w, "min_amount_naira must be non-negative", http.StatusBadRequest)
+			return
+		}
+		updates = append(updates, kv{"mtn_push_min_amount_naira", *req.MinAmountNaira})
+	}
+
+	if len(updates) == 0 {
+		jsonError(w, "no fields provided to update", http.StatusBadRequest)
+		return
+	}
+
+	for _, u := range updates {
+		if err := h.cfg.Set(r.Context(), u.key, fmt.Sprintf("%d", u.val)); err != nil {
+			jsonError(w, fmt.Sprintf("failed to update %s: %s", u.key, err.Error()), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Return the new effective config.
+	resp := rechargeConfigResponse{
+		SpinDrawNairaPerCredit: h.cfg.GetInt64("spin_draw_naira_per_credit", 200),
+		PulseNairaPerPoint:     h.cfg.GetInt64("pulse_naira_per_point", 250),
+		MinAmountNaira:         h.cfg.GetInt64("mtn_push_min_amount_naira", 50),
+	}
+	jsonOK(w, resp)
+}
+
+// ─── Draw Schedule Config ─────────────────────────────────────────────────
+//
+// These endpoints let admin view and update the draw eligibility window rules
+// stored in the draw_schedules table. All fields are admin-configurable at
+// runtime with no deployment needed.
+
+// GetDrawSchedule returns all draw window rules.
+//
+// GET /api/v1/admin/draw/schedule
+func (h *AdminHandler) GetDrawSchedule(w http.ResponseWriter, r *http.Request) {
+	schedules, err := h.drawWindowSvc.GetAllSchedules(r.Context())
+	if err != nil {
+		jsonError(w, "failed to load draw schedules: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, schedules)
+}
+
+// UpdateDrawSchedule updates a single draw window rule by ID.
+//
+// PUT /api/v1/admin/draw/schedule/{id}
+// Body (all fields optional — only provided fields are updated):
+//
+//	{
+//	  "draw_type":            "DAILY",
+//	  "draw_day_of_week":     2,
+//	  "window_open_time":     "17:00:01",
+//	  "window_close_time":    "17:00:00",
+//	  "is_active":            true,
+//	  "draw_name":            "Tuesday Daily Draw"
+//	}
+func (h *AdminHandler) UpdateDrawSchedule(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid schedule id — must be a UUID", http.StatusBadRequest)
+		return
+	}
+	var req services.UpdateDrawScheduleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	updated, err := h.drawWindowSvc.UpdateSchedule(r.Context(), id, req)
+	if err != nil {
+		jsonError(w, "update failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, updated)
+}
+
+// CreateDrawSchedule adds a new draw window rule.
+//
+// POST /api/v1/admin/draw/schedule
+func (h *AdminHandler) CreateDrawSchedule(w http.ResponseWriter, r *http.Request) {
+	var req services.CreateDrawScheduleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	created, err := h.drawWindowSvc.CreateSchedule(r.Context(), req)
+	if err != nil {
+		jsonError(w, "create failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	jsonOK(w, created)
+}
+
+// DeleteDrawSchedule soft-deletes a draw window rule.
+//
+// DELETE /api/v1/admin/draw/schedule/{id}
+func (h *AdminHandler) DeleteDrawSchedule(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid schedule id — must be a UUID", http.StatusBadRequest)
+		return
+	}
+	if err := h.drawWindowSvc.DeleteSchedule(r.Context(), id); err != nil {
+		jsonError(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]string{"status": "deleted"})
+}
+
+// PreviewDrawWindow shows which draws a recharge at a given time would qualify for.
+// Useful for admin to test window rules before going live.
+//
+// GET /api/v1/admin/draw/schedule/preview?at=2025-05-14T16:30:00+01:00
+func (h *AdminHandler) PreviewDrawWindow(w http.ResponseWriter, r *http.Request) {
+	atStr := r.URL.Query().Get("at")
+	var at time.Time
+	if atStr == "" {
+		at = time.Now()
+	} else {
+		var err error
+		at, err = time.Parse(time.RFC3339, atStr)
+		if err != nil {
+			jsonError(w, "invalid 'at' timestamp — use RFC3339 format e.g. 2025-05-14T16:30:00+01:00", http.StatusBadRequest)
+			return
+		}
+	}
+	qualifying, err := h.drawWindowSvc.ResolveQualifyingDraws(r.Context(), at)
+	if err != nil {
+		jsonError(w, "preview failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"recharge_time":    at,
+		"qualifying_draws": qualifying,
+		"count":            len(qualifying),
+	})
+}
+
+// ─── MTN Push CSV Bulk Upload ─────────────────────────────────────────────────
+//
+// When the MTN push webhook API is unavailable, admins can upload a CSV file
+// to manually trigger the full recharge pipeline (spin credits, pulse points,
+// draw entries) for each subscriber row.
+//
+// CSV format (header row required):
+//
+//	msisdn,date,time,amount[,recharge_type]
+//
+// date:          YYYY-MM-DD
+// time:          HH:MM or HH:MM:SS  (WAT assumed)
+// amount:        naira value (e.g. 1000 or 1000.00)
+// recharge_type: optional; defaults to AIRTIME
+//
+// Routes:
+//   POST   /api/v1/admin/mtn-push/csv-upload          — upload & process
+//   GET    /api/v1/admin/mtn-push/csv-upload           — list batches
+//   GET    /api/v1/admin/mtn-push/csv-upload/{id}      — batch summary
+//   GET    /api/v1/admin/mtn-push/csv-upload/{id}/rows — per-row results
+
+// UploadMTNPushCSV handles multipart/form-data CSV uploads.
+// POST /api/v1/admin/mtn-push/csv-upload
+func (h *AdminHandler) UploadMTNPushCSV(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.csvSvc == nil {
+		jsonError(w, "CSV upload service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Extract admin identity from JWT context.
+	uploadedBy, _ := r.Context().Value(middleware.ContextUserID).(string)
+	if uploadedBy == "" {
+		uploadedBy = "unknown"
+	}
+
+	// Parse multipart form — limit to 10 MB.
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		jsonError(w, "failed to parse multipart form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, fileHeader, err := r.FormFile("file")
+	if err != nil {
+		jsonError(w, "field 'file' is required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	note := r.FormValue("note")
+
+	result, err := h.csvSvc.ProcessCSVUpload(ctx, services.CSVUploadRequest{
+		UploadedBy: uploadedBy,
+		Filename:   fileHeader.Filename,
+		Reader:     file,
+		Note:       note,
+	})
+	if err != nil {
+		jsonError(w, "upload processing failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return 207 Multi-Status when some rows failed, 200 when all succeeded.
+	code := http.StatusOK
+	if result.Status == "PARTIAL" || result.Status == "FAILED" {
+		code = http.StatusMultiStatus
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if encErr := json.NewEncoder(w).Encode(result); encErr != nil {
+		log.Printf("[Admin] UploadMTNPushCSV encode error: %v", encErr)
+	}
+}
+
+// ListMTNPushCSVUploads returns recent upload batches.
+// GET /api/v1/admin/mtn-push/csv-upload
+func (h *AdminHandler) ListMTNPushCSVUploads(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.csvSvc == nil {
+		jsonError(w, "CSV upload service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	uploads, total, err := h.csvSvc.ListUploads(ctx, limit, offset)
+	if err != nil {
+		jsonError(w, "failed to list uploads: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"total":   total,
+		"uploads": uploads,
+	})
+}
+
+// GetMTNPushCSVUpload returns the summary for a single upload batch.
+// GET /api/v1/admin/mtn-push/csv-upload/{id}
+func (h *AdminHandler) GetMTNPushCSVUpload(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.csvSvc == nil {
+		jsonError(w, "CSV upload service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	uploadID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid upload id", http.StatusBadRequest)
+		return
+	}
+
+	summary, err := h.csvSvc.GetUpload(ctx, uploadID)
+	if err != nil {
+		jsonError(w, "upload not found", http.StatusNotFound)
+		return
+	}
+	jsonOK(w, summary)
+}
+
+// GetMTNPushCSVUploadRows returns per-row results for a batch.
+// GET /api/v1/admin/mtn-push/csv-upload/{id}/rows
+func (h *AdminHandler) GetMTNPushCSVUploadRows(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	if h.csvSvc == nil {
+		jsonError(w, "CSV upload service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	uploadID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid upload id", http.StatusBadRequest)
+		return
+	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	rows, total, err := h.csvSvc.GetUploadRows(ctx, uploadID, limit, offset)
+	if err != nil {
+		jsonError(w, "failed to get rows: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"total": total,
+		"rows":  rows,
+	})
+}
+
+// ─── Bonus Pulse Point Awards ────────────────────────────────────────────────
+
+// AwardBonusPulse awards bonus Pulse Points to a user by phone number.
+// POST /api/v1/admin/bonus-pulse
+//
+// Request body:
+//
+//	{
+//	  "phone_number": "08012345678",
+//	  "points":       500,
+//	  "campaign":     "Ramadan 2025",   // optional
+//	  "note":         "Top-up for VIP"  // optional
+//	}
+func (h *AdminHandler) AwardBonusPulse(w http.ResponseWriter, r *http.Request) {
+	if h.bonusPulseSvc == nil {
+		jsonError(w, "bonus pulse service not configured", http.StatusServiceUnavailable)
+		return
+	}
+	ctx := r.Context()
+
+	// Extract admin identity from JWT claims.
+	uidStr, ok := ctx.Value(middleware.ContextUserID).(string)
+	if !ok {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	adminID, err := uuid.Parse(uidStr)
+	if err != nil {
+		jsonError(w, "invalid admin id", http.StatusUnauthorized)
+		return
+	}
+
+	// Resolve admin display name for the audit trail.
+	var adminName string
+	if dbErr := h.db.WithContext(ctx).
+		Table("users").
+		Where("id = ?", adminID).
+		Select("COALESCE(full_name, phone_number, id::text)").
+		Scan(&adminName).Error; dbErr != nil || adminName == "" {
+		adminName = adminID.String()
+	}
+
+	var req services.AwardBonusPulseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.PhoneNumber == "" {
+		jsonError(w, "phone_number is required", http.StatusBadRequest)
+		return
+	}
+	if req.Points <= 0 {
+		jsonError(w, "points must be greater than zero", http.StatusBadRequest)
+		return
+	}
+
+	req.AwardedByID = adminID
+	req.AwardedByName = adminName
+
+	result, err := h.bonusPulseSvc.AwardBonusPulse(ctx, req)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	jsonOK(w, result)
+}
+
+// ListBonusPulseAwards returns a paginated audit log of all bonus pulse point
+// awards, optionally filtered by phone number and/or campaign name.
+// GET /api/v1/admin/bonus-pulse?phone=&campaign=&limit=&offset=
+func (h *AdminHandler) ListBonusPulseAwards(w http.ResponseWriter, r *http.Request) {
+	if h.bonusPulseSvc == nil {
+		jsonError(w, "bonus pulse service not configured", http.StatusServiceUnavailable)
+		return
+	}
+	ctx := r.Context()
+	phone := r.URL.Query().Get("phone")
+	campaign := r.URL.Query().Get("campaign")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	records, total, err := h.bonusPulseSvc.ListAwards(ctx, phone, campaign, limit, offset)
+	if err != nil {
+		jsonError(w, "failed to list awards: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"total":   total,
+		"records": records,
 	})
 }

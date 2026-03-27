@@ -20,6 +20,7 @@ const QUICK_ACTIONS = [
 const fetcher = (key: string) => {
   if (key === "/user/profile") return api.getProfile();
   if (key === "/user/wallet") return api.getWallet();
+  if (key === "/user/bonus-pulse") return api.getBonusPulseAwards();
   return Promise.resolve(null);
 };
 
@@ -27,6 +28,8 @@ export default function DashboardPage() {
   const { setUser, setWallet, user } = useStore();
   const { data: profile } = useSWR("/user/profile", fetcher, { onSuccess: (d: unknown) => setUser(d as Parameters<typeof setUser>[0]) });
   const { data: wallet } = useSWR("/user/wallet", fetcher, { onSuccess: (d: unknown) => setWallet(d as Parameters<typeof setWallet>[0]) });
+  const { data: bonusData } = useSWR("/user/bonus-pulse", fetcher);
+  const totalBonus = (bonusData as { total_bonus?: number } | undefined)?.total_bonus || 0;
 
   const tierData = TIER_THRESHOLDS.find(t => t.tier === (profile as { tier?: string } | undefined)?.tier) || TIER_THRESHOLDS[0];
   const nextTier = TIER_THRESHOLDS[TIER_THRESHOLDS.indexOf(tierData) + 1];
@@ -95,6 +98,21 @@ export default function DashboardPage() {
                 <p className="text-white font-bold text-lg">{formatPoints((wallet as { lifetime_points?: number } | undefined)?.lifetime_points || 0)}</p>
               </div>
             </div>
+            {/* Bonus awards row — only shown when the user has received bonus points */}
+            {totalBonus > 0 && (
+              <div className="bg-white/10 rounded-xl px-3 py-2 mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-white/70 text-xs">🎁 Bonus Awards</p>
+                  <p className="text-white font-bold text-lg">{formatPoints(totalBonus)}</p>
+                </div>
+                <Link
+                  href="/pulse-awards"
+                  className="text-white/60 text-xs underline underline-offset-2 hover:text-white transition-colors"
+                >
+                  View history
+                </Link>
+              </div>
+            )}
             {/* Tier progress */}
             {nextTier && (
               <div>

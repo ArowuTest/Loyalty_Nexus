@@ -2,6 +2,8 @@ package persistence
 
 import (
 	"context"
+	"time"
+
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"github.com/google/uuid"
@@ -44,8 +46,9 @@ func (r *postgresTransactionRepository) ListByUser(ctx context.Context, userID u
 
 func (r *postgresTransactionRepository) CountByUserAndType(ctx context.Context, userID uuid.UUID, txType entities.TransactionType, sinceEpoch int64) (int64, error) {
 	var count int64
+	sinceTime := time.Unix(sinceEpoch, 0)
 	r.db.WithContext(ctx).Table("transactions").
-		Where("user_id = ? AND type = ? AND EXTRACT(EPOCH FROM created_at) >= ?", userID, txType, sinceEpoch).
+		Where("user_id = ? AND type = ? AND created_at >= ?", userID, txType, sinceTime).
 		Count(&count)
 	return count, nil
 }
@@ -54,7 +57,8 @@ func (r *postgresTransactionRepository) CountByPhoneAndTypeSince(ctx context.Con
 	var count int64
 	q := r.db.WithContext(ctx).Table("transactions").Where("phone_number = ? AND type = ?", phone, txType)
 	if sinceEpoch > 0 {
-		q = q.Where("EXTRACT(EPOCH FROM created_at) >= ?", sinceEpoch)
+		sinceTime := time.Unix(sinceEpoch, 0)
+		q = q.Where("created_at >= ?", sinceTime)
 	}
 	q.Count(&count)
 	return count, nil
@@ -62,16 +66,19 @@ func (r *postgresTransactionRepository) CountByPhoneAndTypeSince(ctx context.Con
 
 func (r *postgresTransactionRepository) SumAmountByUserSince(ctx context.Context, userID uuid.UUID, sinceEpoch int64) (int64, error) {
 	var total int64
+	// Use date() so the comparison works on both Postgres (timestamptz) and SQLite (text datetime).
+	sinceDate := time.Unix(sinceEpoch, 0).UTC().Format("2006-01-02")
 	r.db.WithContext(ctx).Table("transactions").
-		Where("user_id = ? AND EXTRACT(EPOCH FROM created_at) >= ?", userID, sinceEpoch).
+		Where("user_id = ? AND type = ? AND date(created_at) >= ?", userID, entities.TxTypeRecharge, sinceDate).
 		Select("COALESCE(SUM(amount), 0)").Scan(&total)
 	return total, nil
 }
 
 func (r *postgresTransactionRepository) DailyLiabilityTotal(ctx context.Context) (int64, error) {
 	var total int64
+	today := time.Now().UTC().Truncate(24 * time.Hour)
 	r.db.WithContext(ctx).Raw(
-		"SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'prize_award' AND created_at >= CURRENT_DATE",
+		"SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'prize_award' AND created_at >= ?", today,
 	).Scan(&total)
 	return total, nil
 }

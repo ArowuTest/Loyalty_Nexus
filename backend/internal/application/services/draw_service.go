@@ -57,10 +57,15 @@ type DrawEntry struct {
 	ID          uuid.UUID  `gorm:"column:id;primaryKey"`
 	DrawID      uuid.UUID  `gorm:"column:draw_id;index"`
 	UserID      uuid.UUID  `gorm:"column:user_id;index"`
-	PhoneNumber string     `gorm:"column:phone_number"`
+	// MSISDN is the real writable column. PhoneNumber is a Postgres GENERATED
+	// ALWAYS AS (msisdn) STORED alias — GORM must never SELECT or INSERT it.
+	MSISDN      string     `gorm:"column:msisdn"`
+	PhoneNumber string     `gorm:"-"` // generated always as (msisdn) stored — excluded from all GORM ops
 	EntrySource string     `gorm:"column:entry_source"` // recharge | subscription | bonus
 	Amount      int64      `gorm:"column:amount"`        // kobo
-	TicketCount int        `gorm:"column:ticket_count"`
+	// EntriesCount is the real writable column. TicketCount is a GENERATED alias.
+	EntriesCount int       `gorm:"column:entries_count"`
+	TicketCount  int       `gorm:"-"` // generated always as (entries_count) stored — excluded from all GORM ops
 	CreatedAt   *time.Time `gorm:"column:created_at;autoCreateTime"`
 }
 
@@ -442,14 +447,14 @@ func (svc *DrawService) AddEntry(ctx context.Context, drawID, userID uuid.UUID, 
 	}
 	now := time.Now()
 	entry := DrawEntry{
-		ID:          uuid.New(),
-		DrawID:      drawID,
-		UserID:      userID,
-		PhoneNumber: phone,
-		EntrySource: source,
-		Amount:      amount,
-		TicketCount: tickets,
-		CreatedAt:   &now,
+		ID:           uuid.New(),
+		DrawID:       drawID,
+		UserID:       userID,
+		MSISDN:       phone,
+		EntrySource:  source,
+		Amount:       amount,
+		EntriesCount: tickets,
+		CreatedAt:    &now,
 	}
 	if err := svc.db.Create(&entry).Error; err != nil {
 		return fmt.Errorf("add entry: %w", err)

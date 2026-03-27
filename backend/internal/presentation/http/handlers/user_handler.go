@@ -5,22 +5,33 @@ import (
 	"net/http"
 
 	"loyalty-nexus/internal/application/services"
+	"context"
+
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/external"
+	"loyalty-nexus/internal/pkg/safe"
 	"loyalty-nexus/internal/presentation/http/middleware"
 
 	"github.com/google/uuid"
 )
 
 type UserHandler struct {
-	userRepo    repositories.UserRepository
-	hlrSvc      *services.HLRService
-	momoAdapter external.MoMoPayer
-	fulfillSvc  *services.PrizeFulfillmentService
+	userRepo      repositories.UserRepository
+	hlrSvc        *services.HLRService
+	momoAdapter   external.MoMoPayer
+	fulfillSvc    *services.PrizeFulfillmentService
+	bonusPulseSvc *services.BonusPulseService
 }
 
 func NewUserHandler(ur repositories.UserRepository, hs *services.HLRService, ma external.MoMoPayer, fs *services.PrizeFulfillmentService) *UserHandler {
 	return &UserHandler{userRepo: ur, hlrSvc: hs, momoAdapter: ma, fulfillSvc: fs}
+}
+
+// WithBonusPulseService attaches the BonusPulseService so the user-facing
+// bonus awards endpoint can query the audit table.
+func (h *UserHandler) WithBonusPulseService(svc *services.BonusPulseService) *UserHandler {
+	h.bonusPulseSvc = svc
+	return h
 }
 
 func (h *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +101,9 @@ func (h *UserHandler) VerifyMoMo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Release any held MoMo prizes
-	go h.fulfillSvc.ReleaseMoMoHeldPrizes(r.Context(), userID)
+	safe.Go(func() {
+		h.fulfillSvc.ReleaseMoMoHeldPrizes(context.Background(), userID)
+	})
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "MoMo number linked successfully"})
 }
@@ -100,6 +113,32 @@ func (h *UserHandler) GetPassportURLs(w http.ResponseWriter, r *http.Request) {
 		"apple":  "#",
 		"google": "#",
 		"message": "Wallet integration coming soon",
+	})
+}
+
+// GetBonusPulseAwards handles GET /api/v1/user/bonus-pulse
+// Returns the user's bonus Pulse Point award history (most recent first).
+func (h *UserHandler) GetBonusPulseAwards(w http.ResponseWriter, r *http.Request) {
+	if h.bonusPulseSvc == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"total_bonus": 0, "awards": []interface{}{}})
+		return
+	}
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uid)
+
+	total, err := h.bonusPulseSvc.GetUserBonusTotal(r.Context(), userID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not fetch bonus total"})
+		return
+	}
+	awards, err := h.bonusPulseSvc.GetUserAwards(r.Context(), userID, 20)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not fetch awards"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total_bonus": total,
+		"awards":      awards,
 	})
 }
 

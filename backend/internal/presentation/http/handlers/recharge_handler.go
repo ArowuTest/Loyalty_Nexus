@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,16 +15,24 @@ import (
 
 	"loyalty-nexus/internal/application/services"
 	"loyalty-nexus/internal/infrastructure/queue"
+	"loyalty-nexus/internal/pkg/safe"
 )
 
 // RechargeHandler processes incoming payment / recharge webhooks.
 type RechargeHandler struct {
 	rechargeSvc *services.RechargeService
+	mtnPushSvc  *services.MTNPushService
 	eventQueue  *queue.EventQueue
 }
 
 func NewRechargeHandler(rs *services.RechargeService, eq *queue.EventQueue) *RechargeHandler {
 	return &RechargeHandler{rechargeSvc: rs, eventQueue: eq}
+}
+
+// NewRechargeHandlerWithMTN creates a RechargeHandler with the MTN push service wired in.
+// Use this constructor in main.go once MTNPushService is instantiated.
+func NewRechargeHandlerWithMTN(rs *services.RechargeService, mtn *services.MTNPushService, eq *queue.EventQueue) *RechargeHandler {
+	return &RechargeHandler{rechargeSvc: rs, mtnPushSvc: mtn, eventQueue: eq}
 }
 
 // ── Paystack Webhook ─────────────────────────────────────────────────────────
@@ -65,12 +74,12 @@ func (h *RechargeHandler) PaystackWebhook(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	go func() {
-		ctx := r.Context()
+	safe.Go(func() {
+		ctx := context.Background() // Use background context for async processing
 		if err := h.rechargeSvc.ProcessRechargeWebhook(ctx, event); err != nil {
 			log.Printf("[paystack] ProcessRechargeWebhook: %v", err)
 		}
-	}()
+	})
 }
 
 // ── MNO BSS Webhook (Integrated Mode) ────────────────────────────────────────
@@ -120,12 +129,95 @@ func (h *RechargeHandler) MNOWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if qErr := h.eventQueue.Publish(r.Context(), eventMap); qErr != nil {
 		log.Printf("[mno_webhook] queue failed (%v) — processing inline", qErr)
-		go func() {
-			if err := h.rechargeSvc.ProcessRechargeWebhook(r.Context(), event); err != nil {
+		safe.Go(func() {
+			if err := h.rechargeSvc.ProcessRechargeWebhook(context.Background(), event); err != nil {
 				log.Printf("[mno_webhook] inline process: %v", err)
 			}
-		}()
+		})
 	}
+}
+
+// ── MTN Push Webhook ──────────────────────────────────────────────────────────
+// POST /api/v1/recharge/mtn-push
+//
+// MTN pushes recharge notifications directly to this endpoint.
+// Payload: { "transaction_ref": "...", "msisdn": "...", "recharge_type": "AIRTIME|DATA|BUNDLE",
+//            "amount": 500.00, "timestamp": "2026-03-27T10:00:00Z" }
+//
+// Authentication: HMAC-SHA256 of the raw request body, sent in X-MTN-Signature header.
+// Secret is read from MTN_PUSH_SECRET env var (falls back to mtn_push_hmac_secret in network_configs).
+//
+// Response: 200 OK with JSON body on success; 400/401/503 on error.
+// The response is synchronous — MTN expects a 200 before it stops retrying.
+func (h *RechargeHandler) MTNPushWebhook(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16)) // 64 KB max
+	if err != nil {
+		jsonError(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+
+	// ── HMAC-SHA256 signature verification ───────────────────────────────────
+	// MTN sends: X-MTN-Signature: sha256=<hex>
+	secret := os.Getenv("MTN_PUSH_SECRET")
+	if secret != "" {
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write(body) //nolint:errcheck
+		expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+		got := r.Header.Get("X-MTN-Signature")
+		if !hmac.Equal([]byte(expected), []byte(got)) {
+			log.Printf("[mtn-push] signature mismatch — rejecting (got=%q)", got)
+			jsonError(w, "invalid signature", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// ── Parse payload ─────────────────────────────────────────────────────────
+	var payload services.MTNPushPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		jsonError(w, "invalid JSON payload", http.StatusBadRequest)
+		return
+	}
+	if payload.TransactionRef == "" {
+		jsonError(w, "transaction_ref is required", http.StatusBadRequest)
+		return
+	}
+	if payload.MSISDN == "" {
+		jsonError(w, "msisdn is required", http.StatusBadRequest)
+		return
+	}
+	if payload.Amount <= 0 {
+		jsonError(w, "amount must be positive", http.StatusBadRequest)
+		return
+	}
+
+	// ── Guard: service must be wired ──────────────────────────────────────────
+	if h.mtnPushSvc == nil {
+		log.Printf("[mtn-push] MTNPushService not wired — check main.go")
+		jsonError(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	// ── Process synchronously ─────────────────────────────────────────────────
+	// MTN retries until it gets a 200, so we process synchronously and return
+	// the result. The service is fast (single DB transaction + async side effects).
+	result, err := h.mtnPushSvc.ProcessMTNPush(r.Context(), payload)
+	if err != nil {
+		log.Printf("[mtn-push] ProcessMTNPush error: %v", err)
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+		"status":               "ok",
+		"event_id":             result.EventID,
+		"msisdn":               result.MSISDN,
+		"pulse_points_awarded":  result.PulsePoints,
+		"draw_entries_created": result.DrawEntries,
+		"spin_credits_awarded": result.SpinCredits,
+		"is_duplicate":         result.IsDuplicate,
+	})
 }
 
 // ── Builders ──────────────────────────────────────────────────────────────────

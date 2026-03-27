@@ -33,6 +33,20 @@ func NewConfigManager(db *gorm.DB) *ConfigManager {
 	return cm
 }
 
+// NewConfigManagerNoRefresh creates a ConfigManager without starting the background
+// auto-refresh goroutine. Use this in integration tests to avoid lock contention
+// between the test transaction and the background SELECT on network_configs.
+func NewConfigManagerNoRefresh(db *gorm.DB) *ConfigManager {
+	cm := &ConfigManager{
+		db:    db,
+		cache: make(map[string]json.RawMessage),
+	}
+	if err := cm.Refresh(context.Background()); err != nil {
+		log.Printf("[CONFIG] Initial refresh failed: %v", err)
+	}
+	return cm
+}
+
 func (c *ConfigManager) autoRefresh() {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
@@ -130,6 +144,26 @@ func (c *ConfigManager) GetBool(key string, defaultVal bool) bool {
 		}
 	}
 	return defaultVal
+}
+
+// Set writes a key-value pair to network_configs and refreshes the in-memory cache.
+// This is used by admin endpoints to update business rules at runtime.
+func (c *ConfigManager) Set(ctx context.Context, key, value string) error {
+	err := c.db.WithContext(ctx).Exec(
+		`INSERT INTO network_configs (key, value, updated_at)
+		 VALUES (?, ?, NOW())
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+		key, value,
+	).Error
+	if err != nil {
+		return err
+	}
+	// Immediately update the in-memory cache so the new value is visible
+	// to the current process without waiting for the 60s auto-refresh.
+	c.mu.Lock()
+	c.cache[key] = json.RawMessage(value)
+	c.mu.Unlock()
+	return nil
 }
 
 // IsIndependentMode reads OPERATION_MODE — never hardcoded.

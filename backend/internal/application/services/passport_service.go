@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"loyalty-nexus/internal/domain/entities"
+
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -59,27 +61,59 @@ var badgeCatalogue = []BadgeDefinition{
 
 // UserPassport is the full profile returned to the client.
 type UserPassport struct {
-	UserID        uuid.UUID         `json:"user_id"`
-	Tier          string            `json:"tier"`
-	StreakCount   int               `json:"streak_count"`
-	LifetimePoints int64            `json:"lifetime_points"`
-	Badges        []BadgeDefinition `json:"badges"`
-	NextTier      string            `json:"next_tier"`
-	PointsToNext  int64             `json:"points_to_next_tier"`
+	UserID           uuid.UUID         `json:"user_id"`
+	Tier             string            `json:"tier"`
+	StreakCount      int               `json:"streak_count"`
+	LifetimePoints   int64             `json:"lifetime_points"`
+	PulsePoints      int64             `json:"pulse_points"`
+	SpinCredits      int               `json:"spin_credits"`
+	Badges           []BadgeDefinition `json:"badges"`
+	NextTier         string            `json:"next_tier"`
+	PointsToNext     int64             `json:"points_to_next_tier"`
+	MemberSince      time.Time         `json:"member_since"`
+	// AmountToNextSpin is the naira amount still needed to earn the next spin credit.
+	// Computed as: spin_trigger_naira - (recharge_counter % spin_trigger_naira).
+	AmountToNextSpin int64             `json:"amount_to_next_spin_naira"`
 }
 
 // GetPassport returns the full passport for a user.
 func (svc *PassportService) GetPassport(ctx context.Context, userID uuid.UUID) (*UserPassport, error) {
 	type userRow struct {
-		Tier           string `gorm:"column:tier"`
-		StreakCount    int    `gorm:"column:streak_count"`
-		LifetimePoints int64  `gorm:"column:lifetime_points"`
+		Tier           string    `gorm:"column:tier"`
+		StreakCount    int       `gorm:"column:streak_count"`
+		LifetimePoints int64     `gorm:"column:lifetime_points"`
+		CreatedAt      time.Time `gorm:"column:created_at"`
 	}
 	var u userRow
 	if err := svc.db.WithContext(ctx).Table("users").
-		Select("tier, streak_count, lifetime_points").
+		Select("tier, streak_count, lifetime_points, created_at").
 		Where("id = ?", userID).First(&u).Error; err != nil {
 		return nil, fmt.Errorf("user not found: %w", err)
+	}
+
+	// Load wallet for pulse_points and spin_credits (REQ-4.1, REQ-4.2)
+	var wallet entities.Wallet
+	_ = svc.db.WithContext(ctx).Where("user_id = ?", userID).First(&wallet).Error
+
+	// Compute amount to next spin credit.
+	// spin_trigger_naira is stored in network_configs; default 1000.
+	var spinTriggerNaira int64 = 1000
+	var cfgRow struct{ Value string `gorm:"column:value"` }
+	if err := svc.db.WithContext(ctx).Table("network_configs").
+		Select("value").Where("key = ?", "spin_trigger_naira").First(&cfgRow).Error; err == nil {
+		if v, parseErr := fmt.Sscan(cfgRow.Value, &spinTriggerNaira); v == 0 || parseErr != nil {
+			spinTriggerNaira = 1000
+		}
+	}
+	var amountToNextSpin int64
+	if spinTriggerNaira > 0 {
+		recharged := wallet.RechargeCounter // cumulative naira recharged
+		mod := recharged % spinTriggerNaira
+		if mod == 0 && recharged > 0 {
+			amountToNextSpin = 0
+		} else {
+			amountToNextSpin = spinTriggerNaira - mod
+		}
 	}
 
 	// Load earned badge keys
@@ -108,13 +142,17 @@ func (svc *PassportService) GetPassport(ctx context.Context, userID uuid.UUID) (
 	}
 
 	return &UserPassport{
-		UserID:         userID,
-		Tier:           u.Tier,
-		StreakCount:    u.StreakCount,
-		LifetimePoints: u.LifetimePoints,
-		Badges:         badges,
-		NextTier:       nextTier,
-		PointsToNext:   pointsToNext,
+		UserID:           userID,
+		Tier:             u.Tier,
+		StreakCount:      u.StreakCount,
+		LifetimePoints:   u.LifetimePoints,
+		PulsePoints:      wallet.PulsePoints,
+		SpinCredits:      wallet.SpinCredits,
+		Badges:           badges,
+		NextTier:         nextTier,
+		PointsToNext:     pointsToNext,
+		MemberSince:      u.CreatedAt,
+		AmountToNextSpin: amountToNextSpin,
 	}, nil
 }
 

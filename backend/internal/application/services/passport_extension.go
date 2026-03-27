@@ -260,22 +260,32 @@ type GhostNudgeCandidate struct {
 	StreakCount int       `gorm:"column:streak_count"`
 }
 
-// GetGhostNudgeCandidates returns users whose last recharge was 23-24h ago
-// and who haven't been nudged in the last 24h.
-func (svc *PassportService) GetGhostNudgeCandidates(ctx context.Context) ([]GhostNudgeCandidate, error) {
+// GetGhostNudgeCandidates returns users whose Recharge Streak will expire within
+// the next warningHours AND who have a streak of at least minStreak days (REQ-4.4).
+// Both parameters are read from ConfigManager by the caller (GhostNudgeWorker) so
+// this method remains pure — no config reads here.
+//
+// The expiry window is calculated as:
+//   last_recharge_at + streak_expiry_hours (from network_configs) < NOW() + warningHours
+//   i.e. the streak will expire within the next warningHours hours.
+func (svc *PassportService) GetGhostNudgeCandidates(ctx context.Context, warningHours, minStreak int) ([]GhostNudgeCandidate, error) {
 	var candidates []GhostNudgeCandidate
 	err := svc.db.WithContext(ctx).Raw(`
 		SELECT u.id, u.phone_number, u.streak_count
 		FROM users u
+		JOIN network_configs nc ON nc.key = 'streak_expiry_hours'
 		WHERE u.is_active = true
-		  AND u.streak_count > 0
-		  AND u.last_recharge_at BETWEEN NOW() - INTERVAL '24 hours' AND NOW() - INTERVAL '23 hours'
+		  AND u.streak_count >= ?
+		  AND u.last_recharge_at IS NOT NULL
+		  AND (
+			  u.last_recharge_at + (CAST(nc.value AS INTEGER) * INTERVAL '1 hour')
+		  ) BETWEEN NOW() AND NOW() + (? * INTERVAL '1 hour')
 		  AND u.id NOT IN (
 			  SELECT user_id FROM ghost_nudge_log
 			  WHERE nudged_at > NOW() - INTERVAL '24 hours'
 		  )
 		LIMIT 500
-	`).Scan(&candidates).Error
+	`, minStreak, warningHours).Scan(&candidates).Error
 	return candidates, err
 }
 
