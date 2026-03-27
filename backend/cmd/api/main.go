@@ -293,6 +293,13 @@ func main() {
 	mux.Handle("GET /api/v1/admin/spin/config", adminAuth(http.HandlerFunc(adminH.GetSpinConfig)))
 	mux.Handle("PUT /api/v1/admin/spin/config", adminAuth(http.HandlerFunc(adminH.UpdateSpinConfig)))
 
+	// ─── Recharge Reward Thresholds ──────────────────────────
+	// spin_draw_naira_per_credit (default ₦200) — ₦ per spin credit + draw entry
+	// pulse_naira_per_point      (default ₦250) — ₦ per Pulse Point (AI Studio)
+	// mtn_push_min_amount_naira  (default ₦50)  — minimum qualifying recharge
+	mux.Handle("GET /api/v1/admin/recharge/config", adminAuth(http.HandlerFunc(adminH.GetRechargeConfig)))
+	mux.Handle("PUT /api/v1/admin/recharge/config", adminAuth(http.HandlerFunc(adminH.UpdateRechargeConfig)))
+
 	// ─── Spin Claims ──────────────────────────────────────────
 	// IMPORTANT: static sub-paths (/pending, /statistics, /export) MUST be
 	// registered BEFORE the wildcard /{id} path.

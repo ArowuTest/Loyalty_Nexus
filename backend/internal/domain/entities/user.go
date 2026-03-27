@@ -50,17 +50,26 @@ type User struct {
 	UpdatedAt             time.Time  `db:"updated_at"              gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
-// Wallet holds the two-pool ledger for a user.
-// PulsePoints  → AI Studio currency  (earned by recharging)
-// SpinCredits  → Spin Wheel currency (1 per ₦1,000 cumulative recharge)
+// Wallet holds the multi-pool ledger for a user.
+//
+// Currency pools:
+//   PulsePoints     — AI Studio currency. Earned at ₦250 per point (configurable).
+//   SpinCredits     — Spin Wheel currency. Earned at ₦200 per credit (configurable).
+//
+// Accumulators (kobo remainder between awards):
+//   SpinDrawCounter — tracks kobo remainder for spin credit + draw entry awards.
+//   PulseCounter    — tracks kobo remainder for Pulse Point awards.
+//   RechargeCounter — legacy field, kept for backwards compatibility.
 type Wallet struct {
-	ID              uuid.UUID `db:"id"               gorm:"column:id;primaryKey"     json:"id"`
-	UserID          uuid.UUID `db:"user_id"           gorm:"column:user_id;uniqueIndex" json:"user_id"`
-	PulsePoints     int64     `db:"pulse_points"      gorm:"column:pulse_points"      json:"pulse_points"`
-	SpinCredits     int       `db:"spin_credits"      gorm:"column:spin_credits"      json:"spin_credits"`
-	LifetimePoints  int64     `db:"lifetime_points"   gorm:"column:lifetime_points"   json:"lifetime_points"`
-	RechargeCounter int64     `db:"recharge_counter"  gorm:"column:recharge_counter"  json:"recharge_counter"`
-	UpdatedAt       time.Time `db:"updated_at"        gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID               uuid.UUID `db:"id"                gorm:"column:id;primaryKey"      json:"id"`
+	UserID           uuid.UUID `db:"user_id"            gorm:"column:user_id;uniqueIndex" json:"user_id"`
+	PulsePoints      int64     `db:"pulse_points"       gorm:"column:pulse_points"       json:"pulse_points"`
+	SpinCredits      int       `db:"spin_credits"       gorm:"column:spin_credits"       json:"spin_credits"`
+	LifetimePoints   int64     `db:"lifetime_points"    gorm:"column:lifetime_points"    json:"lifetime_points"`
+	RechargeCounter  int64     `db:"recharge_counter"   gorm:"column:recharge_counter"   json:"recharge_counter"`
+	SpinDrawCounter  int64     `db:"spin_draw_counter"  gorm:"column:spin_draw_counter"  json:"spin_draw_counter"`
+	PulseCounter     int64     `db:"pulse_counter"      gorm:"column:pulse_counter"      json:"pulse_counter"`
+	UpdatedAt        time.Time `db:"updated_at"         gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (Wallet) TableName() string { return "wallets" }

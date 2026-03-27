@@ -1401,3 +1401,94 @@ func (h *AdminHandler) ExportClaims(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(csv))
 }
+
+// ─── Recharge Points Config ───────────────────────────────────────────────────
+
+// rechargeConfigResponse is the shape returned by GET /api/v1/admin/recharge/config.
+type rechargeConfigResponse struct {
+	SpinDrawNairaPerCredit int64 `json:"spin_draw_naira_per_credit"` // ₦ per spin credit + draw entry
+	PulseNairaPerPoint     int64 `json:"pulse_naira_per_point"`      // ₦ per Pulse Point (AI Studio)
+	MinAmountNaira         int64 `json:"min_amount_naira"`           // minimum qualifying recharge
+}
+
+// GetRechargeConfig returns the three admin-configurable recharge reward thresholds.
+//
+// GET /api/v1/admin/recharge/config
+func (h *AdminHandler) GetRechargeConfig(w http.ResponseWriter, r *http.Request) {
+	resp := rechargeConfigResponse{
+		SpinDrawNairaPerCredit: h.cfg.GetInt64("spin_draw_naira_per_credit", 200),
+		PulseNairaPerPoint:     h.cfg.GetInt64("pulse_naira_per_point", 250),
+		MinAmountNaira:         h.cfg.GetInt64("mtn_push_min_amount_naira", 50),
+	}
+	jsonOK(w, resp)
+}
+
+// UpdateRechargeConfig updates one or more recharge reward thresholds.
+//
+// PUT /api/v1/admin/recharge/config
+// Body (all fields optional — only provided fields are updated):
+//
+//	{
+//	  "spin_draw_naira_per_credit": 200,
+//	  "pulse_naira_per_point":      250,
+//	  "min_amount_naira":           50
+//	}
+func (h *AdminHandler) UpdateRechargeConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SpinDrawNairaPerCredit *int64 `json:"spin_draw_naira_per_credit"`
+		PulseNairaPerPoint     *int64 `json:"pulse_naira_per_point"`
+		MinAmountNaira         *int64 `json:"min_amount_naira"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	type kv struct {
+		key string
+		val int64
+	}
+	var updates []kv
+
+	if req.SpinDrawNairaPerCredit != nil {
+		if *req.SpinDrawNairaPerCredit < 1 {
+			jsonError(w, "spin_draw_naira_per_credit must be at least 1", http.StatusBadRequest)
+			return
+		}
+		updates = append(updates, kv{"spin_draw_naira_per_credit", *req.SpinDrawNairaPerCredit})
+	}
+	if req.PulseNairaPerPoint != nil {
+		if *req.PulseNairaPerPoint < 1 {
+			jsonError(w, "pulse_naira_per_point must be at least 1", http.StatusBadRequest)
+			return
+		}
+		updates = append(updates, kv{"pulse_naira_per_point", *req.PulseNairaPerPoint})
+	}
+	if req.MinAmountNaira != nil {
+		if *req.MinAmountNaira < 0 {
+			jsonError(w, "min_amount_naira must be non-negative", http.StatusBadRequest)
+			return
+		}
+		updates = append(updates, kv{"mtn_push_min_amount_naira", *req.MinAmountNaira})
+	}
+
+	if len(updates) == 0 {
+		jsonError(w, "no fields provided to update", http.StatusBadRequest)
+		return
+	}
+
+	for _, u := range updates {
+		if err := h.cfg.Set(r.Context(), u.key, fmt.Sprintf("%d", u.val)); err != nil {
+			jsonError(w, fmt.Sprintf("failed to update %s: %s", u.key, err.Error()), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Return the new effective config.
+	resp := rechargeConfigResponse{
+		SpinDrawNairaPerCredit: h.cfg.GetInt64("spin_draw_naira_per_credit", 200),
+		PulseNairaPerPoint:     h.cfg.GetInt64("pulse_naira_per_point", 250),
+		MinAmountNaira:         h.cfg.GetInt64("mtn_push_min_amount_naira", 50),
+	}
+	jsonOK(w, resp)
+}

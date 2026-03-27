@@ -213,7 +213,7 @@ func (h *RechargeHandler) MTNPushWebhook(w http.ResponseWriter, r *http.Request)
 		"status":               "ok",
 		"event_id":             result.EventID,
 		"msisdn":               result.MSISDN,
-		"points_awarded":       result.PointsAwarded,
+		"pulse_points_awarded":  result.PulsePoints,
 		"draw_entries_created": result.DrawEntries,
 		"spin_credits_awarded": result.SpinCredits,
 		"is_duplicate":         result.IsDuplicate,

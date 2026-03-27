@@ -9,7 +9,21 @@ package services
 // confirmed via Paystack/VTPass), here MTN is the authoritative source —
 // the recharge has already happened on the MTN network.
 //
-// Pipeline (mirrors RechargeMax ussd_recharge_service.go):
+// ─── Reward Rules ────────────────────────────────────────────────────────────
+//
+//  Every ₦200 recharge  → 1 Spin Credit  + 1 Draw Entry
+//  Every ₦250 recharge  → 1 Pulse Point  (AI Studio currency)
+//
+//  Both thresholds are admin-configurable via network_configs:
+//    spin_draw_naira_per_credit  (default 200)
+//    pulse_naira_per_point       (default 250)
+//
+//  Accumulator model (same as RechargeMax ÷200 pattern):
+//    SpinDrawCounter accumulates kobo until it crosses spin_draw_naira_per_credit×100.
+//    PulseCounter    accumulates kobo until it crosses pulse_naira_per_point×100.
+//    This ensures two ₦100 recharges correctly award 1 spin at ₦200 threshold.
+//
+// ─── Pipeline ─────────────────────────────────────────────────────────────────
 //
 //  1. Idempotency check — reject duplicates via transaction_ref
 //  2. Minimum amount guard — configurable via network_configs
@@ -17,13 +31,14 @@ package services
 //  4. Resolve or auto-create user account
 //  5. ATOMIC DB TRANSACTION:
 //     a. Row-lock wallet (SELECT FOR UPDATE)
-//     b. Calculate Pulse Points (same rate as Paystack recharge)
-//     c. Calculate Spin Credits via RechargeCounter accumulator
-//     d. Update wallet (pulse_points, spin_credits, recharge_counter)
-//     e. Write immutable ledger entries (recharge, points_award, spin_credit_award)
+//     b. Calculate Spin Credits + Draw Entries  (₦200 accumulator)
+//     c. Calculate Pulse Points                 (₦250 accumulator)
+//     d. Update wallet (spin_credits, pulse_points, lifetime_points,
+//                       spin_draw_counter, pulse_counter)
+//     e. Write immutable ledger entries (recharge, spin_credit_award, pulse_points_award)
 //     f. Update user streak + stats
 //  6. POST-COMMIT (non-fatal, never rolls back the payment):
-//     a. Create draw_entries rows for the active draw (1 entry per point)
+//     a. Create draw_entries rows for the active draw (1 per spin credit earned)
 //     b. Send SMS notification
 //     c. Update mtn_push_events row to status=PROCESSED
 
@@ -66,32 +81,32 @@ type MTNPushPayload struct {
 
 // MTNPushResult is returned to the caller after processing.
 type MTNPushResult struct {
-	EventID         uuid.UUID `json:"event_id"`
-	MSISDN          string    `json:"msisdn"`
-	PointsAwarded   int64     `json:"points_awarded"`
-	DrawEntries     int       `json:"draw_entries_created"`
-	SpinCredits     int       `json:"spin_credits_awarded"`
-	IsDuplicate     bool      `json:"is_duplicate"`
+	EventID       uuid.UUID `json:"event_id"`
+	MSISDN        string    `json:"msisdn"`
+	PulsePoints   int64     `json:"pulse_points_awarded"`
+	DrawEntries   int       `json:"draw_entries_created"`
+	SpinCredits   int       `json:"spin_credits_awarded"`
+	IsDuplicate   bool      `json:"is_duplicate"`
 }
 
 // ─── mtn_push_events DB model ─────────────────────────────────────────────────
 
 // mtnPushEvent mirrors the mtn_push_events table added in migration 045.
 type mtnPushEvent struct {
-	ID                  uuid.UUID  `gorm:"column:id;primaryKey"`
-	TransactionRef      string     `gorm:"column:transaction_ref"`
-	MSISDN              string     `gorm:"column:msisdn"`
-	RechargeType        string     `gorm:"column:recharge_type"`
-	AmountKobo          int64      `gorm:"column:amount_kobo"`
-	EventTimestamp      time.Time  `gorm:"column:event_timestamp"`
-	RawPayload          []byte     `gorm:"column:raw_payload"`
-	Status              string     `gorm:"column:status"`
-	ProcessingError     string     `gorm:"column:processing_error"`
-	PointsAwarded       int64      `gorm:"column:points_awarded"`
-	DrawEntriesCreated  int        `gorm:"column:draw_entries_created"`
-	SpinCreditsAwarded  int        `gorm:"column:spin_credits_awarded"`
-	ProcessedAt         *time.Time `gorm:"column:processed_at"`
-	CreatedAt           time.Time  `gorm:"column:created_at;autoCreateTime"`
+	ID                 uuid.UUID  `gorm:"column:id;primaryKey"`
+	TransactionRef     string     `gorm:"column:transaction_ref"`
+	MSISDN             string     `gorm:"column:msisdn"`
+	RechargeType       string     `gorm:"column:recharge_type"`
+	AmountKobo         int64      `gorm:"column:amount_kobo"`
+	EventTimestamp     time.Time  `gorm:"column:event_timestamp"`
+	RawPayload         []byte     `gorm:"column:raw_payload"`
+	Status             string     `gorm:"column:status"`
+	ProcessingError    string     `gorm:"column:processing_error"`
+	PointsAwarded      int64      `gorm:"column:points_awarded"`
+	DrawEntriesCreated int        `gorm:"column:draw_entries_created"`
+	SpinCreditsAwarded int        `gorm:"column:spin_credits_awarded"`
+	ProcessedAt        *time.Time `gorm:"column:processed_at"`
+	CreatedAt          time.Time  `gorm:"column:created_at;autoCreateTime"`
 }
 
 func (mtnPushEvent) TableName() string { return "mtn_push_events" }
@@ -151,12 +166,12 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 		First(&existing).Error; err == nil {
 		// Already processed — return the cached result.
 		return &MTNPushResult{
-			EventID:       existing.ID,
-			MSISDN:        existing.MSISDN,
-			PointsAwarded: existing.PointsAwarded,
-			DrawEntries:   existing.DrawEntriesCreated,
-			SpinCredits:   existing.SpinCreditsAwarded,
-			IsDuplicate:   true,
+			EventID:     existing.ID,
+			MSISDN:      existing.MSISDN,
+			PulsePoints: existing.PointsAwarded,
+			DrawEntries: existing.DrawEntriesCreated,
+			SpinCredits: existing.SpinCreditsAwarded,
+			IsDuplicate: true,
 		}, nil
 	}
 
@@ -200,8 +215,8 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 	}
 
 	// ── 6. Atomic DB transaction ──────────────────────────────────────────────
-	var ptsEarned int64
 	var spinCreditsEarned int
+	var pulsePointsEarned int64
 
 	txErr := s.db.WithContext(ctx).Transaction(func(dbTx *gorm.DB) error {
 		// Row-level lock on wallet — prevents concurrent double-award.
@@ -210,44 +225,49 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 			return fmt.Errorf("wallet lock failed: %w", err)
 		}
 
-		amountNaira := payload.Amount
+		// ── Spin Credit + Draw Entry calculation (₦200 accumulator) ──────────
+		// Every ₦200 recharge = 1 spin credit + 1 draw entry.
+		// spinDrawNairaPerCredit is admin-configurable (default 200).
+		spinDrawKoboPerCredit := s.cfg.GetInt64("spin_draw_naira_per_credit", 200) * 100
+		newSpinDrawCounter := wallet.SpinDrawCounter + amountKobo
+		spinCreditsEarned = int(newSpinDrawCounter / spinDrawKoboPerCredit)
+		newSpinDrawCounter = newSpinDrawCounter % spinDrawKoboPerCredit
 
-		// ── Points calculation (same formula as processAwardTransaction) ──────
-		baseRate := s.cfg.GetFloat("points_per_250_naira", 1.0) / 250.0
-		tieredRate := s.getTieredRate(wallet.LifetimePoints)
-		globalMult := s.cfg.GetFloat("global_points_multiplier", 1.0)
-		effectiveRate := baseRate * tieredRate * globalMult
-		ptsEarned = int64(math.Floor(amountNaira * effectiveRate))
-
-		// ── Spin credit calculation via RechargeCounter accumulator ──────────
-		// RechargeCounter accumulates kobo until it crosses spin_trigger_naira*100.
-		// This ensures that e.g. two ₦500 recharges correctly award 1 spin
-		// (not 0 spins each).
-		spinTriggerKobo := s.cfg.GetInt64("spin_trigger_naira", 1000) * 100
-		newCounter := wallet.RechargeCounter + amountKobo
-		spinCreditsEarned = int(newCounter / spinTriggerKobo)
-		newCounter = newCounter % spinTriggerKobo
+		// ── Pulse Point calculation (₦250 accumulator) ───────────────────────
+		// Every ₦250 recharge = 1 Pulse Point (AI Studio currency).
+		// pulseNairaPerPoint is admin-configurable (default 250).
+		pulseKoboPerPoint := s.cfg.GetInt64("pulse_naira_per_point", 250) * 100
+		newPulseCounter := wallet.PulseCounter + amountKobo
+		pulsePointsEarned = newPulseCounter / pulseKoboPerPoint
+		newPulseCounter = newPulseCounter % pulseKoboPerPoint
 
 		// ── Update wallet atomically ──────────────────────────────────────────
+		updates := map[string]interface{}{
+			"spin_draw_counter": newSpinDrawCounter,
+			"pulse_counter":     newPulseCounter,
+		}
+		if spinCreditsEarned > 0 {
+			updates["spin_credits"] = gorm.Expr("spin_credits + ?", spinCreditsEarned)
+		}
+		if pulsePointsEarned > 0 {
+			updates["pulse_points"]    = gorm.Expr("pulse_points + ?", pulsePointsEarned)
+			updates["lifetime_points"] = gorm.Expr("lifetime_points + ?", pulsePointsEarned)
+		}
 		if err := dbTx.Table("wallets").
 			Where("user_id = ?", wallet.UserID).
-			Updates(map[string]interface{}{
-				"pulse_points":     gorm.Expr("pulse_points + ?", ptsEarned),
-				"lifetime_points":  gorm.Expr("lifetime_points + ?", ptsEarned),
-				"spin_credits":     gorm.Expr("spin_credits + ?", spinCreditsEarned),
-				"recharge_counter": newCounter,
-			}).Error; err != nil {
+			Updates(updates).Error; err != nil {
 			return fmt.Errorf("wallet update failed: %w", err)
 		}
-		wallet.PulsePoints += ptsEarned
-		wallet.LifetimePoints += ptsEarned
 		wallet.SpinCredits += spinCreditsEarned
-		wallet.RechargeCounter = newCounter
+		wallet.PulsePoints += pulsePointsEarned
+		wallet.LifetimePoints += pulsePointsEarned
+		wallet.SpinDrawCounter = newSpinDrawCounter
+		wallet.PulseCounter = newPulseCounter
 
 		// ── Immutable ledger entries ──────────────────────────────────────────
 		ref := "MTN-" + payload.TransactionRef
 
-		// 1. Recharge record
+		// 1. Recharge record — always written, even if no rewards earned.
 		rechargeTx := &entities.Transaction{
 			ID:           uuid.New(),
 			UserID:       user.ID,
@@ -262,32 +282,14 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 			return err
 		}
 
-		// 2. Points award record
-		if ptsEarned > 0 {
-			meta, _ := json.Marshal(map[string]interface{}{
-				"amount_kobo":    amountKobo,
-				"recharge_type":  rechargeType,
-				"effective_rate": effectiveRate,
-				"source":         "mtn_push",
-			})
-			ptsTx := &entities.Transaction{
-				ID:           uuid.New(),
-				UserID:       user.ID,
-				PhoneNumber:  phone,
-				Type:         entities.TxTypePointsAward,
-				PointsDelta:  ptsEarned,
-				BalanceAfter: wallet.PulsePoints,
-				Reference:    ref + "_pts",
-				Metadata:     meta,
-				CreatedAt:    time.Now(),
-			}
-			if err := s.txRepo.SaveTx(ctx, dbTx, ptsTx); err != nil {
-				return err
-			}
-		}
-
-		// 3. Spin credit award record
+		// 2. Spin credit award record.
 		if spinCreditsEarned > 0 {
+			meta, _ := json.Marshal(map[string]interface{}{
+				"amount_kobo":   amountKobo,
+				"recharge_type": rechargeType,
+				"threshold":     s.cfg.GetInt64("spin_draw_naira_per_credit", 200),
+				"source":        "mtn_push",
+			})
 			spinTx := &entities.Transaction{
 				ID:          uuid.New(),
 				UserID:      user.ID,
@@ -295,9 +297,34 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 				Type:        entities.TxTypeSpinCreditAward,
 				SpinDelta:   spinCreditsEarned,
 				Reference:   ref + "_spin",
+				Metadata:    meta,
 				CreatedAt:   time.Now(),
 			}
 			if err := s.txRepo.SaveTx(ctx, dbTx, spinTx); err != nil {
+				return err
+			}
+		}
+
+		// 3. Pulse Point award record.
+		if pulsePointsEarned > 0 {
+			meta, _ := json.Marshal(map[string]interface{}{
+				"amount_kobo":   amountKobo,
+				"recharge_type": rechargeType,
+				"threshold":     s.cfg.GetInt64("pulse_naira_per_point", 250),
+				"source":        "mtn_push",
+			})
+			pulseTx := &entities.Transaction{
+				ID:           uuid.New(),
+				UserID:       user.ID,
+				PhoneNumber:  phone,
+				Type:         entities.TxTypePointsAward,
+				PointsDelta:  pulsePointsEarned,
+				BalanceAfter: wallet.PulsePoints,
+				Reference:    ref + "_pulse",
+				Metadata:     meta,
+				CreatedAt:    time.Now(),
+			}
+			if err := s.txRepo.SaveTx(ctx, dbTx, pulseTx); err != nil {
 				return err
 			}
 		}
@@ -319,10 +346,8 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 		if newTier != user.Tier {
 			_ = s.userRepo.UpdateTier(ctx, user.ID, newTier)
 		}
-
 		return nil // commit
 	})
-
 	if txErr != nil {
 		s.markEventFailed(ctx, event, txErr)
 		return nil, fmt.Errorf("MTN push processing failed: %w", txErr)
@@ -331,50 +356,48 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 	// ── 7. Post-commit side effects (non-fatal) ───────────────────────────────
 	// These MUST NOT be inside the DB transaction — a failure here must never
 	// roll back the wallet update (same pattern as RechargeMax).
-
 	drawEntriesCreated := 0
 	safe.Go(func() {
 		bgCtx := context.Background()
 
-		// 7a. Draw entries — 1 entry per Pulse Point earned (configurable).
-		if ptsEarned > 0 {
-			entriesPerPoint := s.cfg.GetInt("draw_entries_per_point", 1)
-			totalEntries := int(ptsEarned) * entriesPerPoint
-			if totalEntries > 0 {
-				drawID, err := s.drawSvc.GetActiveDrawID(bgCtx)
-				if err == nil {
-					// AddEntry creates a single row with ticket_count = totalEntries.
-					// This matches the RechargeMax pattern (one row, entries_count field).
-					addErr := s.drawSvc.AddEntry(
-						bgCtx,
-						drawID,
-						user.ID,
-						phone,
-						"recharge",   // entry_source
-						amountKobo,
-						totalEntries,
-					)
-					if addErr != nil {
-						log.Printf("[MTN-PUSH] draw entry creation failed (non-fatal): %v", addErr)
-					} else {
-						drawEntriesCreated = totalEntries
-					}
+		// 7a. Draw entries — 1 entry per spin credit earned.
+		// (Spin credit and draw entry are always awarded together at the ₦200 threshold.)
+		if spinCreditsEarned > 0 {
+			drawID, err := s.drawSvc.GetActiveDrawID(bgCtx)
+			if err == nil {
+				addErr := s.drawSvc.AddEntry(
+					bgCtx,
+					drawID,
+					user.ID,
+					phone,
+					"recharge",
+					amountKobo,
+					spinCreditsEarned, // 1 draw entry per spin credit
+				)
+				if addErr != nil {
+					log.Printf("[MTN-PUSH] draw entry creation failed (non-fatal): %v", addErr)
+				} else {
+					drawEntriesCreated = spinCreditsEarned
 				}
-				// No active draw is expected — entries will be imported at draw time.
 			}
+			// No active draw is fine — entries will be imported at draw time.
 		}
 
 		// 7b. SMS notification.
 		if s.notifySvc != nil {
 			amountNaira := int64(payload.Amount)
-			msg := fmt.Sprintf(
-				"Your MTN recharge of ₦%d has been processed. You earned %d Pulse Points",
-				amountNaira, ptsEarned,
-			)
+			var parts []string
 			if spinCreditsEarned > 0 {
-				msg += fmt.Sprintf(" and %d Spin Credit(s)", spinCreditsEarned)
+				parts = append(parts, fmt.Sprintf("%d Spin Credit(s)", spinCreditsEarned))
 			}
-			msg += ". Keep recharging to win big!"
+			if pulsePointsEarned > 0 {
+				parts = append(parts, fmt.Sprintf("%d Pulse Point(s)", pulsePointsEarned))
+			}
+			msg := fmt.Sprintf("Your MTN recharge of ₦%d has been processed.", amountNaira)
+			if len(parts) > 0 {
+				msg += " You earned " + strings.Join(parts, " and ") + "."
+			}
+			msg += " Keep recharging to win big!"
 			s.notifySvc.SendSMS(bgCtx, phone, msg)
 		}
 
@@ -382,22 +405,22 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 		now := time.Now()
 		s.db.WithContext(bgCtx).Model(event).Updates(map[string]interface{}{
 			"status":               "PROCESSED",
-			"points_awarded":       ptsEarned,
+			"points_awarded":       pulsePointsEarned,
 			"draw_entries_created": drawEntriesCreated,
 			"spin_credits_awarded": spinCreditsEarned,
 			"processed_at":         &now,
 		})
 	})
 
-	log.Printf("[MTN-PUSH] Processed %s: ₦%.2f %s -> +%d pts, +%d spins, +%d draw entries",
-		phone, payload.Amount, rechargeType, ptsEarned, spinCreditsEarned, drawEntriesCreated)
+	log.Printf("[MTN-PUSH] Processed %s: ₦%.2f %s -> +%d spin credits, +%d pulse pts, +%d draw entries",
+		phone, payload.Amount, rechargeType, spinCreditsEarned, pulsePointsEarned, drawEntriesCreated)
 
 	return &MTNPushResult{
-		EventID:       event.ID,
-		MSISDN:        phone,
-		PointsAwarded: ptsEarned,
-		DrawEntries:   drawEntriesCreated,
-		SpinCredits:   spinCreditsEarned,
+		EventID:     event.ID,
+		MSISDN:      phone,
+		PulsePoints: pulsePointsEarned,
+		DrawEntries: drawEntriesCreated,
+		SpinCredits: spinCreditsEarned,
 	}, nil
 }
 
@@ -414,11 +437,12 @@ func (s *MTNPushService) resolveOrCreateUser(ctx context.Context, phone string) 
 	// Auto-create a minimal account.
 	referralCode := "MTN" + strings.ToUpper(uuid.New().String()[:6])
 	newUser := &entities.User{
-		ID:          uuid.New(),
-		PhoneNumber: phone,
+		ID:           uuid.New(),
+		PhoneNumber:  phone,
 		ReferralCode: referralCode,
-		Tier:        "bronze",
-		CreatedAt:   time.Now(),
+		Tier:         "BRONZE",
+		IsActive:     true,
+		CreatedAt:    time.Now(),
 	}
 	if err := s.userRepo.Create(ctx, newUser); err != nil {
 		return nil, fmt.Errorf("auto-create user failed: %w", err)
@@ -434,22 +458,7 @@ func (s *MTNPushService) resolveOrCreateUser(ctx context.Context, phone string) 
 	return newUser, nil
 }
 
-// getTieredRate returns the points multiplier based on lifetime points.
-// Mirrors recharge_service.go getTieredRate.
-func (s *MTNPushService) getTieredRate(lifetimePoints int64) float64 {
-	switch {
-	case lifetimePoints >= 5000:
-		return 1.5
-	case lifetimePoints >= 1500:
-		return 1.25
-	case lifetimePoints >= 500:
-		return 1.1
-	default:
-		return 1.0
-	}
-}
-
-// markEventFailed updates the audit row with the error message.
+// markEventFailed updates the mtn_push_events row to status=FAILED.
 func (s *MTNPushService) markEventFailed(ctx context.Context, event *mtnPushEvent, err error) {
 	s.db.WithContext(ctx).Model(event).Updates(map[string]interface{}{
 		"status":           "FAILED",
@@ -457,10 +466,11 @@ func (s *MTNPushService) markEventFailed(ctx context.Context, event *mtnPushEven
 	})
 }
 
-// normalisePhone converts any MTN phone format to 0XXXXXXXXXX.
-// Handles: 2348012345678, +2348012345678, 08012345678, 8012345678.
+// normalisePhone converts any Nigerian phone format to 0XXXXXXXXXX.
+// Supported inputs: 2348012345678, +2348012345678, 08012345678,
+//                   8012345678, 234-801-234-5678.
 func normalisePhone(raw string) string {
-	// Strip all non-digit characters.
+	// Strip non-digit characters.
 	var digits strings.Builder
 	for _, r := range raw {
 		if unicode.IsDigit(r) {
@@ -476,24 +486,18 @@ func normalisePhone(raw string) string {
 	case len(d) == 10:
 		return "0" + d
 	default:
-		return d // return as-is if unrecognised
+		return d
 	}
 }
 
-// calcStreak mirrors recharge_service.go calculateNewStreak.
-func calcStreak(user *entities.User, expiryHours int) int {
+// calcStreak returns the new streak count for a user based on their last recharge.
+func calcStreak(user *entities.User, windowHours int) int {
 	if user.LastRechargeAt == nil {
 		return 1
 	}
-	deadline := user.LastRechargeAt.Add(time.Duration(expiryHours) * time.Hour)
-	if time.Now().Before(deadline) {
+	window := time.Duration(windowHours) * time.Hour
+	if time.Since(*user.LastRechargeAt) <= window {
 		return user.StreakCount + 1
 	}
 	return 1
 }
-
-// ─── GetActiveDrawID helper on DrawService ────────────────────────────────────
-// DrawService doesn't expose GetActiveDrawID yet — add it here as a thin
-// wrapper so MTNPushService doesn't need to import gorm directly for this query.
-// This is added to draw_service.go via an extension file to keep concerns separate.
-// See: draw_service_active_draw.go

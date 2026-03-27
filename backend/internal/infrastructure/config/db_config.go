@@ -132,6 +132,26 @@ func (c *ConfigManager) GetBool(key string, defaultVal bool) bool {
 	return defaultVal
 }
 
+// Set writes a key-value pair to network_configs and refreshes the in-memory cache.
+// This is used by admin endpoints to update business rules at runtime.
+func (c *ConfigManager) Set(ctx context.Context, key, value string) error {
+	err := c.db.WithContext(ctx).Exec(
+		`INSERT INTO network_configs (key, value, updated_at)
+		 VALUES (?, ?, NOW())
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+		key, value,
+	).Error
+	if err != nil {
+		return err
+	}
+	// Immediately update the in-memory cache so the new value is visible
+	// to the current process without waiting for the 60s auto-refresh.
+	c.mu.Lock()
+	c.cache[key] = json.RawMessage(value)
+	c.mu.Unlock()
+	return nil
+}
+
 // IsIndependentMode reads OPERATION_MODE — never hardcoded.
 func (c *ConfigManager) IsIndependentMode() bool {
 	return c.GetString("operation_mode", "independent") == "independent"

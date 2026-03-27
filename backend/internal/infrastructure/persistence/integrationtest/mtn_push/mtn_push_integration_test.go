@@ -220,10 +220,10 @@ func TestMTNPush_FullPipeline_PointsAndWallet(t *testing.T) {
 		t.Fatal("expected non-duplicate")
 	}
 
-	// Points: 500 naira × (1/250) = 2 pts (bronze tier, rate=1.0)
-	expectedPts := int64(math.Floor(500.0 * (1.0 / 250.0)))
-	if result.PointsAwarded != expectedPts {
-		t.Errorf("points: got %d, want %d", result.PointsAwarded, expectedPts)
+	// Pulse Points: floor(500 / 250) = 2 pts (flat ₦250-per-point accumulator, no tier multiplier)
+	expectedPts := int64(math.Floor(500.0 / 250.0))
+	if result.PulsePoints != expectedPts {
+		t.Errorf("PulsePoints: got %d, want %d", result.PulsePoints, expectedPts)
 	}
 
 	// Verify wallet updated in DB
@@ -238,15 +238,18 @@ func TestMTNPush_FullPipeline_PointsAndWallet(t *testing.T) {
 }
 
 func TestMTNPush_SpinCreditAccumulator(t *testing.T) {
-	// Two ₦500 recharges should award 1 spin on the second push
-	// (spin_trigger_naira defaults to 1000, so 500+500=1000 kobo → 1 spin)
+	// Rule: every ₦200 recharge = 1 spin credit (flat accumulator, no tier multiplier).
+	// ₦500 = floor(500/200) = 2 spins on the first push.
+	// A second ₦500 push adds floor((500 + leftover_100) / 200) more.
+	// Leftover from first push: 500 - 2*200 = 100 kobo carried forward.
+	// Second push: 500 + 100 = 600; floor(600/200) = 3 spins; leftover = 0.
 	db := openTestDB(t)
 	txdb := txDB(t, db)
 	phone := "08011110002"
 	seedUser(t, txdb, phone)
 	svc := buildMTNPushService(t, txdb)
 
-	// First push: ₦500 → no spin yet
+	// First push: ₦500 → floor(500/200) = 2 spins, leftover = 100
 	r1, err := svc.ProcessMTNPush(context.Background(), services.MTNPushPayload{
 		TransactionRef: "MTN-SPIN-001",
 		MSISDN:         phone,
@@ -256,11 +259,11 @@ func TestMTNPush_SpinCreditAccumulator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first push: %v", err)
 	}
-	if r1.SpinCredits != 0 {
-		t.Errorf("first push: expected 0 spins, got %d", r1.SpinCredits)
+	if r1.SpinCredits != 2 {
+		t.Errorf("first push: expected 2 spins (floor(500/200)), got %d", r1.SpinCredits)
 	}
 
-	// Second push: ₦500 → 1 spin awarded
+	// Second push: ₦500 + 100 leftover = 600; floor(600/200) = 3 spins, leftover = 0
 	r2, err := svc.ProcessMTNPush(context.Background(), services.MTNPushPayload{
 		TransactionRef: "MTN-SPIN-002",
 		MSISDN:         phone,
@@ -270,24 +273,24 @@ func TestMTNPush_SpinCreditAccumulator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second push: %v", err)
 	}
-	if r2.SpinCredits != 1 {
-		t.Errorf("second push: expected 1 spin, got %d", r2.SpinCredits)
+	if r2.SpinCredits != 3 {
+		t.Errorf("second push: expected 3 spins (floor(600/200)), got %d", r2.SpinCredits)
 	}
 
-	// Verify wallet spin_credits = 1
+	// Verify wallet spin_credits = 5 total (2 + 3)
 	var wallet entities.Wallet
 	txdb.Where("user_id = (SELECT id FROM users WHERE phone_number = ?)", phone).First(&wallet)
-	if wallet.SpinCredits != 1 {
-		t.Errorf("wallet.SpinCredits: got %d, want 1", wallet.SpinCredits)
+	if wallet.SpinCredits != 5 {
+		t.Errorf("wallet.SpinCredits: got %d, want 5", wallet.SpinCredits)
 	}
-	// RechargeCounter should be 0 (1000 kobo used exactly)
-	if wallet.RechargeCounter != 0 {
-		t.Errorf("wallet.RechargeCounter: got %d, want 0", wallet.RechargeCounter)
+	// SpinDrawCounter should be 0 (1000 naira used exactly: 2×200 + 3×200 = 1000)
+	if wallet.SpinDrawCounter != 0 {
+		t.Errorf("wallet.SpinDrawCounter: got %d, want 0", wallet.SpinDrawCounter)
 	}
 }
 
 func TestMTNPush_SingleLargeRecharge_MultipleSpins(t *testing.T) {
-	// ₦3,000 recharge should award 3 spins
+	// Rule: ₦200 per spin credit. ₦3,000 → floor(3000/200) = 15 spins.
 	db := openTestDB(t)
 	txdb := txDB(t, db)
 	phone := "08011110003"
@@ -303,8 +306,8 @@ func TestMTNPush_SingleLargeRecharge_MultipleSpins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProcessMTNPush: %v", err)
 	}
-	if result.SpinCredits != 3 {
-		t.Errorf("expected 3 spins for ₦3000, got %d", result.SpinCredits)
+	if result.SpinCredits != 15 {
+		t.Errorf("expected 15 spins for ₦3000 (floor(3000/200)), got %d", result.SpinCredits)
 	}
 }
 
@@ -342,10 +345,10 @@ func TestMTNPush_Idempotency(t *testing.T) {
 		t.Errorf("duplicate should return same event_id: got %v, want %v", r2.EventID, r1.EventID)
 	}
 
-	// Wallet should only have points from the first call
+	// Wallet should only have Pulse Points from the first call — no double-award
 	var wallet entities.Wallet
 	txdb.Where("user_id = (SELECT id FROM users WHERE phone_number = ?)", phone).First(&wallet)
-	expectedPts := int64(math.Floor(1000.0 * (1.0 / 250.0)))
+	expectedPts := int64(math.Floor(1000.0 / 250.0)) // floor(1000/250) = 4
 	if wallet.PulsePoints != expectedPts {
 		t.Errorf("wallet.PulsePoints after duplicate: got %d, want %d (double-award detected)", wallet.PulsePoints, expectedPts)
 	}
@@ -385,8 +388,8 @@ func TestMTNPush_AutoCreateUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProcessMTNPush for new user: %v", err)
 	}
-	if result.PointsAwarded == 0 {
-		t.Error("expected points to be awarded to auto-created user")
+	if result.PulsePoints == 0 {
+		t.Error("expected Pulse Points to be awarded to auto-created user")
 	}
 
 	// Verify user was created
@@ -403,7 +406,10 @@ func TestMTNPush_AutoCreateUser(t *testing.T) {
 	}
 }
 
-func TestMTNPush_TieredPointsRate_Platinum(t *testing.T) {
+func TestMTNPush_PulsePoints_FlatAccumulator_NoPlatinumMultiplier(t *testing.T) {
+	// Pulse Points use a flat ₦250-per-point accumulator with NO tier multiplier.
+	// A Platinum user recharging ₦500 gets the same 2 Pulse Points as a Bronze user.
+	// (Tier only affects spin credits via the spin_tiers table, not Pulse Points.)
 	db := openTestDB(t)
 	txdb := txDB(t, db)
 	phone := "08011110006"
@@ -420,13 +426,10 @@ func TestMTNPush_TieredPointsRate_Platinum(t *testing.T) {
 		t.Fatalf("ProcessMTNPush: %v", err)
 	}
 
-	// Platinum rate = 1.5× base rate
-	// base = 500 × (1/250) = 2; platinum = 2 × 1.5 = 3
-	baseRate := 1.0 / 250.0
-	platinumRate := baseRate * 1.5
-	expectedPts := int64(math.Floor(500.0 * platinumRate))
-	if result.PointsAwarded != expectedPts {
-		t.Errorf("platinum points: got %d, want %d", result.PointsAwarded, expectedPts)
+	// Pulse Points: floor(500 / 250) = 2 — same for all tiers, no multiplier
+	expectedPts := int64(math.Floor(500.0 / 250.0))
+	if result.PulsePoints != expectedPts {
+		t.Errorf("PulsePoints (platinum): got %d, want %d (no tier multiplier on Pulse Points)", result.PulsePoints, expectedPts)
 	}
 }
 
@@ -465,12 +468,12 @@ func TestMTNPush_LedgerEntriesWritten(t *testing.T) {
 		t.Errorf("recharge tx amount: got %d, want 100000", rechargeTx.Amount)
 	}
 
-	// Verify spin credit entry
+	// Verify spin credit entry: ₦1000 → floor(1000/200) = 5 spins
 	var spinTx entities.Transaction
 	txdb.Where("phone_number = ? AND type = ?", phone, entities.TxTypeSpinCreditAward).
 		First(&spinTx)
-	if spinTx.SpinDelta != 1 {
-		t.Errorf("spin_credit_award SpinDelta: got %d, want 1", spinTx.SpinDelta)
+	if spinTx.SpinDelta != 5 {
+		t.Errorf("spin_credit_award SpinDelta: got %d, want 5 (floor(1000/200))", spinTx.SpinDelta)
 	}
 }
 
@@ -734,24 +737,24 @@ func TestHTTP_MTNPush_ResponseContainsAllFields(t *testing.T) {
 	var resp map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	requiredFields := []string{"status", "event_id", "msisdn", "points_awarded", "draw_entries_created", "spin_credits_awarded", "is_duplicate"}
+	requiredFields := []string{"status", "event_id", "msisdn", "pulse_points_awarded", "draw_entries_created", "spin_credits_awarded", "is_duplicate"}
 	for _, field := range requiredFields {
 		if _, ok := resp[field]; !ok {
 			t.Errorf("response missing field: %s", field)
 		}
 	}
 
-	// ₦1000 → 1 spin
+	// Spin credits: floor(1000 / 200) = 5 (₦200 per spin credit, default threshold)
 	spinCredits, _ := resp["spin_credits_awarded"].(float64)
-	if int(spinCredits) != 1 {
-		t.Errorf("spin_credits_awarded: got %v, want 1", spinCredits)
+	if int(spinCredits) != 5 {
+		t.Errorf("spin_credits_awarded: got %v, want 5 (floor(1000/200))", spinCredits)
 	}
 
-	// ₦1000 × (1/250) = 4 pts
-	pts, _ := resp["points_awarded"].(float64)
-	expectedPts := math.Floor(1000.0 * (1.0 / 250.0))
+	// Pulse Points: floor(1000 / 250) = 4
+	pts, _ := resp["pulse_points_awarded"].(float64)
+	expectedPts := math.Floor(1000.0 / 250.0)
 	if pts != expectedPts {
-		t.Errorf("points_awarded: got %v, want %v", pts, expectedPts)
+		t.Errorf("pulse_points_awarded: got %v, want %v", pts, expectedPts)
 	}
 }
 
