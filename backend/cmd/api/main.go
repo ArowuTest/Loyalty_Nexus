@@ -325,6 +325,22 @@ func main() {
 	mux.Handle("POST   /api/v1/admin/ai-providers/{id}/deactivate",    adminAuth(http.HandlerFunc(aiProviderH.DeactivateProvider)))
 	mux.Handle("POST   /api/v1/admin/ai-providers/{id}/test",          adminAuth(http.HandlerFunc(aiProviderH.TestProvider)))
 
+
+	// ─── Admin: MTN Push CSV Upload ──────────────────────────────────────────────
+	mux.Handle("POST   /api/v1/admin/mtn-push/csv-upload",              adminAuth(http.HandlerFunc(adminH.UploadMTNPushCSV)))
+	mux.Handle("GET    /api/v1/admin/mtn-push/csv-upload",              adminAuth(http.HandlerFunc(adminH.ListMTNPushCSVUploads)))
+	mux.Handle("GET    /api/v1/admin/mtn-push/csv-upload/{id}",         adminAuth(http.HandlerFunc(adminH.GetMTNPushCSVUpload)))
+	mux.Handle("GET    /api/v1/admin/mtn-push/csv-upload/{id}/rows",    adminAuth(http.HandlerFunc(adminH.GetMTNPushCSVUploadRows)))
+
+	// ─── Admin: Bonus Pulse Point Awards ─────────────────────────────────────────
+	mux.Handle("POST   /api/v1/admin/bonus-pulse",   adminAuth(http.HandlerFunc(adminH.AwardBonusPulse)))
+	mux.Handle("GET    /api/v1/admin/bonus-pulse",   adminAuth(http.HandlerFunc(adminH.ListBonusPulseAwards)))
+
+	// ─── Admin: Passport & USSD monitoring ───────────────────────────────────────
+	mux.Handle("GET    /api/v1/admin/passport/stats",    adminAuth(http.HandlerFunc(adminH.GetPassportStats)))
+	mux.Handle("GET    /api/v1/admin/passport/nudge-log",adminAuth(http.HandlerFunc(adminH.GetGhostNudgeLog)))
+	mux.Handle("GET    /api/v1/admin/ussd/sessions",     adminAuth(http.HandlerFunc(adminH.GetUSSDSessions)))
+
 	// System health (REQ-5.8.3)
 	mux.Handle("GET    /api/v1/admin/health",                 adminAuth(http.HandlerFunc(adminH.GetHealth)))
 	mux.Handle("GET    /api/v1/admin/ai-health",              adminAuth(http.HandlerFunc(adminH.GetAIHealth)))
