@@ -9,11 +9,6 @@ import (
 	"loyalty-nexus/internal/domain/entities"
 )
 
-// adminClaimsKey is the context key used by AdminAuthMiddleware to store JWTClaims.
-// Must match ContextAdminClaims in middleware/auth.go.
-type adminClaimsContextKey string
-const adminClaimsKey adminClaimsContextKey = "admin_claims"
-
 // AdminAuthHandler handles admin login, admin user management, and password changes.
 type AdminAuthHandler struct {
 	adminAuthSvc *services.AdminAuthService
