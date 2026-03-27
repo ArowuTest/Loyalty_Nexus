@@ -20,6 +20,7 @@ const NAV = [
     { href: "/prizes",          label: "🏆 Prize Pool" },
     { href: "/draws",           label: "🎟 Draws" },
     { href: "/mtn-push-upload", label: "📤 MTN CSV Upload" },
+    { href: "/bonus-pulse",     label: "🎁 Bonus Pulse Points" },
   ]},
   { group: "Content & AI", items: [
     { href: "/studio-tools",   label: "🧠 Studio Tools" },

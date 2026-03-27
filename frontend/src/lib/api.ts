@@ -31,6 +31,15 @@ export interface QRData {
   qr_payload: string;
 }
 
+// ─── Bonus Pulse Award Types ─────────────────────────────────────────────────
+export interface BonusPulseAward {
+  id: string;
+  points: number;
+  campaign: string;
+  note: string;
+  created_at: string;
+}
+
 // ─── API Client ───────────────────────────────────────────────────────────────
 
 class APIClient {
@@ -109,6 +118,10 @@ class APIClient {
   }
   /** @deprecated Use getPassport() instead */
   getPassportURLs() { return this.request("GET", "/user/passport"); }
+  /** Returns the user's bonus Pulse Point awards (total + recent history) */
+  getBonusPulseAwards() {
+    return this.request<{ total_bonus: number; awards: BonusPulseAward[] }>("GET", "/user/bonus-pulse");
+  }
 
   // ── Passport ──────────────────────────────────────────────────────────────
   /** Returns the full passport profile: tier, streak, badges, lifetime points */

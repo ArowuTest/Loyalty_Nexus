@@ -34,7 +34,8 @@ type AdminHandler struct {
 	warsSvc       *services.RegionalWarsService
 	studioSvc     *services.StudioService
 	claimSvc      *services.AdminClaimService
-	csvSvc        *services.MTNPushCSVService // nil-safe; set via WithCSVService
+	csvSvc        *services.MTNPushCSVService  // nil-safe; set via WithCSVService
+	bonusPulseSvc *services.BonusPulseService  // nil-safe; set via WithBonusPulseService
 	rdb           *redis.Client
 }
 
@@ -68,6 +69,12 @@ func NewAdminHandler(
 // Called after construction in main.go to avoid changing the constructor signature.
 func (h *AdminHandler) WithCSVService(svc *services.MTNPushCSVService) *AdminHandler {
 	h.csvSvc = svc
+	return h
+}
+
+// WithBonusPulseService attaches the bonus pulse point award service.
+func (h *AdminHandler) WithBonusPulseService(svc *services.BonusPulseService) *AdminHandler {
+	h.bonusPulseSvc = svc
 	return h
 }
 
@@ -1771,5 +1778,97 @@ func (h *AdminHandler) GetMTNPushCSVUploadRows(w http.ResponseWriter, r *http.Re
 	jsonOK(w, map[string]interface{}{
 		"total": total,
 		"rows":  rows,
+	})
+}
+
+// ─── Bonus Pulse Point Awards ────────────────────────────────────────────────
+
+// AwardBonusPulse awards bonus Pulse Points to a user by phone number.
+// POST /api/v1/admin/bonus-pulse
+//
+// Request body:
+//
+//	{
+//	  "phone_number": "08012345678",
+//	  "points":       500,
+//	  "campaign":     "Ramadan 2025",   // optional
+//	  "note":         "Top-up for VIP"  // optional
+//	}
+func (h *AdminHandler) AwardBonusPulse(w http.ResponseWriter, r *http.Request) {
+	if h.bonusPulseSvc == nil {
+		jsonError(w, "bonus pulse service not configured", http.StatusServiceUnavailable)
+		return
+	}
+	ctx := r.Context()
+
+	// Extract admin identity from JWT claims.
+	uidStr, ok := ctx.Value(middleware.ContextUserID).(string)
+	if !ok {
+		jsonError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	adminID, err := uuid.Parse(uidStr)
+	if err != nil {
+		jsonError(w, "invalid admin id", http.StatusUnauthorized)
+		return
+	}
+
+	// Resolve admin display name for the audit trail.
+	var adminName string
+	if dbErr := h.db.WithContext(ctx).
+		Table("users").
+		Where("id = ?", adminID).
+		Select("COALESCE(full_name, phone_number, id::text)").
+		Scan(&adminName).Error; dbErr != nil || adminName == "" {
+		adminName = adminID.String()
+	}
+
+	var req services.AwardBonusPulseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.PhoneNumber == "" {
+		jsonError(w, "phone_number is required", http.StatusBadRequest)
+		return
+	}
+	if req.Points <= 0 {
+		jsonError(w, "points must be greater than zero", http.StatusBadRequest)
+		return
+	}
+
+	req.AwardedByID = adminID
+	req.AwardedByName = adminName
+
+	result, err := h.bonusPulseSvc.AwardBonusPulse(ctx, req)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	jsonOK(w, result)
+}
+
+// ListBonusPulseAwards returns a paginated audit log of all bonus pulse point
+// awards, optionally filtered by phone number and/or campaign name.
+// GET /api/v1/admin/bonus-pulse?phone=&campaign=&limit=&offset=
+func (h *AdminHandler) ListBonusPulseAwards(w http.ResponseWriter, r *http.Request) {
+	if h.bonusPulseSvc == nil {
+		jsonError(w, "bonus pulse service not configured", http.StatusServiceUnavailable)
+		return
+	}
+	ctx := r.Context()
+	phone := r.URL.Query().Get("phone")
+	campaign := r.URL.Query().Get("campaign")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+
+	records, total, err := h.bonusPulseSvc.ListAwards(ctx, phone, campaign, limit, offset)
+	if err != nil {
+		jsonError(w, "failed to list awards: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"total":   total,
+		"records": records,
 	})
 }

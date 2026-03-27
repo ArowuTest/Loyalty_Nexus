@@ -108,9 +108,12 @@ func main() {
 	rechargeH := handlers.NewRechargeHandlerWithMTN(rechargeSvc, mtnPushSvc, eq)
 	spinH    := handlers.NewSpinHandler(spinSvc)
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
-	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc)
+	bonusPulseSvc := services.NewBonusPulseService(db, userRepo)
+	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc).
+				WithBonusPulseService(bonusPulseSvc)
 	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, drawWindowSvc, fraudSvc, warssSvc, studioSvc, adminClaimSvc, rdb).
-				WithCSVService(services.NewMTNPushCSVService(db, mtnPushSvc))
+				WithCSVService(services.NewMTNPushCSVService(db, mtnPushSvc)).
+				WithBonusPulseService(bonusPulseSvc)
 	claimH   := handlers.NewClaimHandler(claimSvc)
 	notifyH  := handlers.NewNotificationHandler(db)
 
@@ -160,7 +163,8 @@ func main() {
 	mux.Handle("POST /api/v1/user/profile/state", auth(http.HandlerFunc(userH.UpdateProfileState)))
 	mux.Handle("POST /api/v1/user/momo/verify", auth(http.HandlerFunc(userH.VerifyMoMo)))
 	mux.Handle("GET /api/v1/user/transactions", auth(http.HandlerFunc(userH.GetTransactions)))
-	mux.Handle("GET /api/v1/user/passport", auth(http.HandlerFunc(userH.GetPassportURLs)))
+	mux.Handle("GET /api/v1/user/passport",    auth(http.HandlerFunc(userH.GetPassportURLs)))
+	mux.Handle("GET /api/v1/user/bonus-pulse", auth(http.HandlerFunc(userH.GetBonusPulseAwards)))
 
 	// ─── Spin Wheel ───────────────────────────────────────────
 	// NOTE: /spin/eligibility must be before /spin/wins/{id}/claim to avoid
@@ -280,6 +284,10 @@ func main() {
 	mux.Handle("GET /api/v1/admin/mtn-push/csv-upload", adminAuth(http.HandlerFunc(adminH.ListMTNPushCSVUploads)))
 	mux.Handle("GET /api/v1/admin/mtn-push/csv-upload/{id}/rows", adminAuth(http.HandlerFunc(adminH.GetMTNPushCSVUploadRows)))
 	mux.Handle("GET /api/v1/admin/mtn-push/csv-upload/{id}", adminAuth(http.HandlerFunc(adminH.GetMTNPushCSVUpload)))
+
+	// ─── Bonus Pulse Point Awards (super-admin campaign incentives) ──────────────
+	mux.Handle("POST /api/v1/admin/bonus-pulse", adminAuth(http.HandlerFunc(adminH.AwardBonusPulse)))
+	mux.Handle("GET /api/v1/admin/bonus-pulse", adminAuth(http.HandlerFunc(adminH.ListBonusPulseAwards)))
 
 	// ─── Draws admin — full CRUD + execute + CSV export
 	mux.Handle("GET /api/v1/admin/draws", adminAuth(http.HandlerFunc(adminH.GetDraws)))

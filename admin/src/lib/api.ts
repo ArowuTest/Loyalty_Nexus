@@ -96,6 +96,19 @@ class AdminAPI {
   getMTNPushCSVUploadRows(id: string, limit = 100, offset = 0) {
     return this.req<{ rows: CSVRowDetail[]; total: number }>("GET", `/admin/mtn-push/csv-upload/${id}/rows?limit=${limit}&offset=${offset}`);
   }
+  // ─── Bonus Pulse Point Awards ─────────────────────────────────────────────
+  awardBonusPulse(payload: { phone_number: string; points: number; campaign?: string; note?: string }) {
+    return this.req<BonusPulseAwardResult>("POST", "/admin/bonus-pulse", payload);
+  }
+  listBonusPulseAwards(params?: { phone?: string; campaign?: string; limit?: number; offset?: number }) {
+    const qs = new URLSearchParams();
+    if (params?.phone)    qs.set("phone",    params.phone);
+    if (params?.campaign) qs.set("campaign", params.campaign);
+    if (params?.limit    !== undefined) qs.set("limit",  String(params.limit));
+    if (params?.offset   !== undefined) qs.set("offset", String(params.offset));
+    const q = qs.toString();
+    return this.req<{ records: BonusPulseAwardRecord[]; total: number }>("GET", `/admin/bonus-pulse${q ? `?${q}` : ""}`);
+  }
 }
 export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
@@ -236,6 +249,30 @@ export interface Generation {
   provider: string;
   prompt: string;
   points_deducted: number;
+  created_at: string;
+}
+
+// ─── Bonus Pulse Point Awards types ─────────────────────────────────────────────
+export interface BonusPulseAwardResult {
+  award_id: string;
+  transaction_id: string;
+  user_id: string;
+  phone_number: string;
+  points_awarded: number;
+  new_balance: number;
+  campaign: string;
+  awarded_at: string;
+}
+export interface BonusPulseAwardRecord {
+  id: string;
+  user_id: string;
+  phone_number: string;
+  points: number;
+  campaign: string;
+  note: string;
+  awarded_by: string;
+  awarded_by_name: string;
+  transaction_id: string;
   created_at: string;
 }
 
