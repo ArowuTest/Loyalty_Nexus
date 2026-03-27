@@ -31,13 +31,21 @@ export interface QRData {
   qr_payload: string;
 }
 
-// ─── Bonus Pulse Award Types ─────────────────────────────────────────────────
+// ─── Bonus Pulse Award Types ──────────────────────────────────────
 export interface BonusPulseAward {
   id: string;
   points: number;
   campaign: string;
   note: string;
+  awarded_by_name: string;
   created_at: string;
+}
+
+export interface RegionalStat {
+  state: string;
+  total_points: number;
+  active_members: number;
+  rank: number;
 }
 
 // ─── API Client ───────────────────────────────────────────────────────────────
@@ -243,6 +251,9 @@ class APIClient {
       count: number;
     }>("GET", `/wars/history?limit=${limit}`);
   }
+  getWarWinners(period: string) {
+    return this.request("GET", `/wars/${period}/winners`);
+  }
 
   // ── Notifications ────────────────────────────────────────────────────────
   getNotifications() {
@@ -250,7 +261,6 @@ class APIClient {
   }
   markNotificationRead(id: string) { return this.request("PATCH", `/notifications/${id}/read`); }
   markAllNotificationsRead() { return this.request("POST", "/notifications/read-all"); }
-
   // ── Chat usage quota ──────────────────────────────────────────────────────
   getChatUsage() { return this.request("GET", "/studio/chat/usage"); }
 

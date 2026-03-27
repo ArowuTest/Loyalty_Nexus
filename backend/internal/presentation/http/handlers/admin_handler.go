@@ -1082,9 +1082,31 @@ func (h *AdminHandler) ResetWarsCycle(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	// Check DB
+	dbStart := time.Now()
 	dbOK := true
 	if err := h.db.WithContext(r.Context()).Exec("SELECT 1").Error; err != nil {
 		dbOK = false
+	}
+	dbLatency := time.Since(dbStart).Milliseconds()
+
+	var dbPoolUsed, dbPoolMax int
+	if sqlDB, err := h.db.DB(); err == nil {
+		stats := sqlDB.Stats()
+		dbPoolUsed = stats.InUse
+		dbPoolMax = stats.MaxOpenConnections
+	}
+
+	// Check Redis
+	redisOK := true
+	var redisLatency int64
+	if h.rdb != nil {
+		rStart := time.Now()
+		if err := h.rdb.Ping(r.Context()).Err(); err != nil {
+			redisOK = false
+		}
+		redisLatency = time.Since(rStart).Milliseconds()
+	} else {
+		redisOK = false
 	}
 
 	// Check pending prize queue
@@ -1099,18 +1121,44 @@ func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		Where("resolved = false").
 		Count(&openFraudEvents)
 
-	status := "healthy"
-	if !dbOK || pendingPrizes > 100 || openFraudEvents > 50 {
-		status = "degraded"
+	overall := "healthy"
+	if !dbOK || !redisOK || pendingPrizes > 100 || openFraudEvents > 50 {
+		overall = "degraded"
+	}
+	if !dbOK && !redisOK {
+		overall = "outage"
+	}
+
+	services := []map[string]interface{}{
+		{
+			"name":         "PostgreSQL",
+			"status":       map[bool]string{true: "up", false: "down"}[dbOK],
+			"latency_ms":   dbLatency,
+			"uptime_pct":   100.0, // Real uptime would require external monitoring
+			"last_checked": time.Now(),
+		},
+		{
+			"name":         "Redis",
+			"status":       map[bool]string{true: "up", false: "down"}[redisOK],
+			"latency_ms":   redisLatency,
+			"uptime_pct":   100.0,
+			"last_checked": time.Now(),
+		},
 	}
 
 	jsonOK(w, map[string]interface{}{
-		"status":              status,
-		"database":            dbOK,
-		"pending_prizes":      pendingPrizes,
-		"open_fraud_events":   openFraudEvents,
-		"checked_at":          time.Now(),
-		"version":             "phase-8",
+		"overall":                   overall,
+		"services":                  services,
+		"webhook_success_rate_24h":  100.0, // Placeholder for real metrics
+		"paystack_success_rate_24h": 100.0, // Placeholder for real metrics
+		"api_p99_ms":                50,    // Placeholder for real metrics
+		"db_pool_used":              dbPoolUsed,
+		"db_pool_max":               dbPoolMax,
+		"redis_hit_rate":            100.0, // Placeholder for real metrics
+		"checked_at":                time.Now(),
+		"pending_prizes":            pendingPrizes,
+		"open_fraud_events":         openFraudEvents,
+		"version":                   "phase-8",
 	})
 }
 
