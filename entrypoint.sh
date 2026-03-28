@@ -1,6 +1,6 @@
 #!/bin/sh
-# Migrations are handled by Render's preDeployCommand (/migrate up)
-# which runs before this container starts, using MIGRATE_DATABASE_URL.
-# The entrypoint simply starts the API server immediately so Render's
-# port health-check passes within the startup window.
+set -e
+echo "[entrypoint] Running database migrations..."
+/migrate up
+echo "[entrypoint] Migrations complete. Starting API on port ${PORT:-8080}..."
 exec /api
