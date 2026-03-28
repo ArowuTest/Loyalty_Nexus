@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -118,7 +119,7 @@ class _PassportScreenState extends ConsumerState<PassportScreen>
         ],
       ),
       body: passportAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(color: NexusColors.primary)),
+        loading: () => _PassportShimmer(),
         error: (e, _) => _ErrorView(message: e.toString(), onRetry: () => ref.invalidate(_passportDetailProvider)),
         data: (passport) => RefreshIndicator(
           color: NexusColors.primary,
@@ -541,6 +542,13 @@ class _OverviewTab extends StatelessWidget {
       _SectionTitle('Tier Progression'),
       const SizedBox(height: 10),
       _TierProgressionCard(lifetimePoints: life),
+
+      const SizedBox(height: 20),
+
+      // Points sparkline
+      _SectionTitle('Points Journey'),
+      const SizedBox(height: 10),
+      _PointsSparkline(lifetimePoints: life),
     ]);
   }
 }
@@ -780,4 +788,143 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) => Text(text,
     style: const TextStyle(color: NexusColors.textSecondary, fontSize: 12,
       fontWeight: FontWeight.w700, letterSpacing: 0.8));
+}
+
+
+// ── Passport shimmer skeleton ─────────────────────────────────────────────────
+class _PassportShimmer extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(20),
+    child: Column(children: const [
+      NexusShimmer(width: double.infinity, height: 200, radius: NexusRadius.lg),
+      SizedBox(height: 16),
+      NexusShimmer(width: double.infinity, height: 100, radius: NexusRadius.md),
+      SizedBox(height: 12),
+      NexusShimmer(width: double.infinity, height: 80,  radius: NexusRadius.md),
+      SizedBox(height: 12),
+      NexusShimmer(width: double.infinity, height: 200, radius: NexusRadius.md),
+    ]),
+  );
+}
+
+// ── Points Journey sparkline ───────────────────────────────────────────────────
+/// Shows tier milestones (0, Silver@2000, Gold@10000, Platinum@50000) as
+/// waypoints and plots the user's current lifetime points on the curve.
+class _PointsSparkline extends StatelessWidget {
+  final int lifetimePoints;
+  const _PointsSparkline({required this.lifetimePoints});
+
+  static const _milestones = [
+    (label: 'Start',    pts: 0),
+    (label: 'Silver',   pts: 2000),
+    (label: 'Gold',     pts: 10000),
+    (label: 'Platinum', pts: 50000),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    // Build a curve through milestone y-values; add user point
+    final sorted = [
+      ..._milestones.map((m) => FlSpot(m.pts.toDouble(), m.pts.toDouble())),
+    ];
+
+    // User's current progress spot — clamp to 50000 max for display
+    final clampedPts = lifetimePoints.clamp(0, 50000).toDouble();
+    final userSpot   = FlSpot(clampedPts, clampedPts);
+
+    return Container(
+      height: 160,
+      padding: const EdgeInsets.fromLTRB(0, 8, 16, 8),
+      decoration: BoxDecoration(
+        color: NexusColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: NexusColors.border),
+      ),
+      child: LineChart(LineChartData(
+        minX: 0, maxX: 50000,
+        minY: 0, maxY: 50000,
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          getDrawingHorizontalLine: (_) => const FlLine(
+              color: NexusColors.border, strokeWidth: 0.5),
+        ),
+        borderData: FlBorderData(show: false),
+        titlesData: FlTitlesData(
+          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(sideTitles: SideTitles(
+            showTitles: true,
+            getTitlesWidget: (v, meta) {
+              final m = _milestones.firstWhere(
+                  (m) => (m.pts.toDouble() - v).abs() < 1,
+                  orElse: () => (label: '', pts: -1));
+              if (m.pts == -1 || m.label.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(m.label,
+                    style: const TextStyle(color: NexusColors.textMuted,
+                        fontSize: 10, fontWeight: FontWeight.w600)),
+              );
+            },
+            reservedSize: 24,
+          )),
+        ),
+        lineBarsData: [
+          // Milestone baseline
+          LineChartBarData(
+            spots: sorted,
+            isCurved: true,
+            color: NexusColors.border,
+            barWidth: 1.5,
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (s, _, __, ___) => FlDotCirclePainter(
+                  radius: 3, color: NexusColors.surface,
+                  strokeWidth: 1.5, strokeColor: NexusColors.textMuted),
+            ),
+            belowBarData: BarAreaData(show: false),
+          ),
+          // User progress line
+          LineChartBarData(
+            spots: [FlSpot(0, 0), userSpot],
+            isCurved: true,
+            gradient: LinearGradient(colors: [NexusColors.primary, NexusColors.gold]),
+            barWidth: 3,
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (s, _, __, ___) {
+                if ((s.x - clampedPts).abs() < 1) {
+                  return FlDotCirclePainter(
+                    radius: 6, color: NexusColors.primary,
+                    strokeWidth: 2, strokeColor: Colors.white);
+                }
+                return FlDotCirclePainter(radius: 0, color: Colors.transparent);
+              },
+            ),
+            belowBarData: BarAreaData(
+              show: true,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                colors: [
+                  NexusColors.primary.withOpacity(0.25),
+                  NexusColors.primary.withOpacity(0.0),
+                ],
+              ),
+            ),
+          ),
+        ],
+        lineTouchData: LineTouchData(
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipItems: (spots) => spots.map((s) => LineTooltipItem(
+              '${s.y.toInt()} pts',
+              const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11),
+            )).toList(),
+          ),
+        ),
+      )),
+    );
+  }
 }

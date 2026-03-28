@@ -262,13 +262,9 @@ class _LoadingList extends StatelessWidget {
   Widget build(BuildContext context) => ListView.builder(
     padding: const EdgeInsets.all(16),
     itemCount: 6,
-    itemBuilder: (_, __) => Container(
-      height: 72, margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: NexusColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: NexusColors.border),
-      ),
+    itemBuilder: (_, __) => Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: NexusShimmer(width: double.infinity, height: 72, radius: NexusRadius.md),
     ),
   );
 }

@@ -352,13 +352,8 @@ class _ShimmerCard extends StatelessWidget {
   final double height;
   const _ShimmerCard({required this.height});
   @override
-  Widget build(BuildContext context) => Container(
-    height: height,
-    margin: const EdgeInsets.only(bottom: 8),
-    decoration: BoxDecoration(
-      color: NexusColors.surface,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: NexusColors.border),
-    ),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: NexusShimmer(width: double.infinity, height: height, radius: NexusRadius.md),
   );
 }

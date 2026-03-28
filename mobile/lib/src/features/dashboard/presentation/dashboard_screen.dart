@@ -919,10 +919,9 @@ class _LoadingRow extends StatelessWidget {
   final String label;
   const _LoadingRow({required this.label});
   @override
-  Widget build(BuildContext context) => Row(children: [
-    const SizedBox(width: 16, height: 16,
-      child: CircularProgressIndicator(strokeWidth: 2, color: NexusColors.primary)),
-    const SizedBox(width: 10),
-    Text(label, style: const TextStyle(color: NexusColors.textSecondary, fontSize: 13)),
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    const NexusShimmer(width: double.infinity, height: 80, radius: NexusRadius.md),
+    const SizedBox(height: 10),
+    NexusShimmer(width: 200, height: 14, radius: NexusRadius.sm),
   ]);
 }
