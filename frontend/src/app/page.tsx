@@ -7,6 +7,7 @@ import {
   Zap, Sparkles, ArrowRight, RotateCcw, Lock, ChevronRight,
   Trophy, MapPin, Users, Gift, Star, Clock, Swords,
   Brain, Camera, Video, Mic, BookOpen, BarChart2,
+  Music, Wand2, FileText, ImageIcon, Cpu, Globe,
 } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import NavBar from "@/components/landing/NavBar";
@@ -359,53 +360,95 @@ export default function HomePage() {
             </motion.p>
           </div>
 
-          {/* Feature pills */}
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.28 }}
-            className="flex flex-wrap items-center justify-center gap-2 mb-10">
+          {/* Floating AI tool cards */}
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.26 }}
+            className="flex flex-wrap items-center justify-center gap-2.5 mb-10">
             {[
-              { icon: "⚡", text: "Instant spin on recharge" },
-              { icon: "🤖", text: "30+ AI tools" },
-              { icon: "⚔️", text: "Regional Wars" },
-              { icon: "🇳🇬", text: "MTN Nigeria only" },
-            ].map(({ icon, text }) => (
-              <div key={text} className="glass border border-white/[0.10] rounded-full px-4 py-1.5 text-[13px] font-semibold text-white/60 flex items-center gap-1.5">
-                <span>{icon}</span>{text}
-              </div>
+              { icon: <Camera className="w-3.5 h-3.5" />,    label: "AI Photo",      pts: "10 pts",  color: "#F5A623",  bg: "rgba(245,166,35,0.10)",   border: "rgba(245,166,35,0.25)" },
+              { icon: <Video className="w-3.5 h-3.5" />,     label: "Video Cinematic", pts: "65 pts", color: "#00D4FF",  bg: "rgba(0,212,255,0.10)",    border: "rgba(0,212,255,0.25)" },
+              { icon: <Brain className="w-3.5 h-3.5" />,     label: "Ask Nexus",    pts: "FREE",    color: "#10B981",  bg: "rgba(16,185,129,0.10)",   border: "rgba(16,185,129,0.25)" },
+              { icon: <BarChart2 className="w-3.5 h-3.5" />, label: "Business Plan", pts: "30 pts", color: "#8B5CF6",  bg: "rgba(139,92,246,0.10)",   border: "rgba(139,92,246,0.25)" },
+              { icon: <Music className="w-3.5 h-3.5" />,     label: "Jingle AI",    pts: "45 pts",  color: "#EC4899",  bg: "rgba(236,72,153,0.10)",   border: "rgba(236,72,153,0.25)" },
+              { icon: <ImageIcon className="w-3.5 h-3.5" />, label: "BG Remover",   pts: "3 pts",   color: "#F59E0B",  bg: "rgba(245,158,11,0.10)",   border: "rgba(245,158,11,0.25)" },
+              { icon: <Wand2 className="w-3.5 h-3.5" />,     label: "AI Avatar",    pts: "15 pts",  color: "#A78BFA",  bg: "rgba(167,139,250,0.10)",  border: "rgba(167,139,250,0.25)" },
+              { icon: <FileText className="w-3.5 h-3.5" />,  label: "Voice to Plan", pts: "35 pts", color: "#34D399",  bg: "rgba(52,211,153,0.10)",   border: "rgba(52,211,153,0.25)" },
+            ].map(({ icon, label, pts, color, bg, border }) => (
+              <motion.div
+                key={label}
+                whileHover={{ scale: 1.06, y: -2 }}
+                transition={{ type: "spring", stiffness: 400, damping: 20 }}
+                className="flex items-center gap-2 rounded-2xl px-3.5 py-2 border cursor-default select-none"
+                style={{ background: bg, borderColor: border }}
+              >
+                <span style={{ color }}>{icon}</span>
+                <span className="text-[12px] font-bold text-white/80">{label}</span>
+                <span className="text-[11px] font-black rounded-full px-2 py-0.5" style={{ background: `${color}22`, color }}>{pts}</span>
+              </motion.div>
             ))}
           </motion.div>
 
           {/* CTA buttons */}
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
-            className="flex flex-col sm:flex-row items-center gap-3 mb-16">
+            className="flex flex-col sm:flex-row items-center gap-3 mb-6">
             <button onClick={openAuth}
-              className="btn-gold rounded-2xl h-14 px-8 text-[15px] font-black inline-flex items-center gap-2 w-full sm:w-auto justify-center"
-              style={{ boxShadow: "0 0 24px rgba(245,166,35,0.4)" }}>
+              className="btn-gold rounded-2xl h-14 px-9 text-[15px] font-black inline-flex items-center gap-2 w-full sm:w-auto justify-center"
+              style={{ boxShadow: "0 0 28px rgba(245,166,35,0.45)" }}>
               <Zap className="w-5 h-5" />
-              Start Earning Free
+              Start Earning — It&apos;s Free
               <ArrowRight className="w-4 h-4" />
             </button>
-            <Link href="/studio">
-              <button className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
-                <Sparkles className="w-4 h-4 text-gold-500" />
-                Explore AI Studio
-              </button>
-            </Link>
+            <button onClick={openAuth}
+              className="glass border border-white/[0.14] rounded-2xl h-14 px-9 text-[15px] font-semibold text-white hover:border-gold-500/40 hover:bg-white/[0.05] transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
+              <Sparkles className="w-4 h-4 text-gold-500" />
+              Try AI Studio Free
+            </button>
           </motion.div>
 
-          {/* Stats row */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}
+          {/* Social proof */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.42 }}
+            className="flex items-center gap-2.5 mb-14">
+            <div className="flex">
+              {[...Array(5)].map((_, i) => (
+                <Star key={i} className="w-4 h-4 fill-gold-500 text-gold-500" />
+              ))}
+            </div>
+            <span className="text-[13px] font-bold text-white">4.9/5</span>
+            <span className="text-[13px] text-white/35">from 12,000+ reviews</span>
+          </motion.div>
+
+          {/* 4 trust signal icons */}
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.48 }}
+            className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-3xl mb-10">
+            {[
+              { icon: <Zap className="w-5 h-5" />,       color: "#F5A623", title: "Free Spin",        sub: "on ₦1,000+ recharge" },
+              { icon: <Trophy className="w-5 h-5" />,     color: "#10B981", title: "Win ₦5,000",       sub: "instant cash prizes" },
+              { icon: <Sparkles className="w-5 h-5" />,   color: "#00D4FF", title: "30+ AI Tools",     sub: "earn from recharges" },
+              { icon: <Swords className="w-5 h-5" />,     color: "#8B5CF6", title: "Regional Wars",    sub: "₦500K prize pool" },
+            ].map(({ icon, color, title, sub }) => (
+              <div key={title} className="glass rounded-2xl border border-white/[0.08] p-4 flex flex-col items-center text-center gap-2">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: `${color}18`, border: `1px solid ${color}30`, color }}>
+                  {icon}
+                </div>
+                <div className="text-[13px] font-black text-white">{title}</div>
+                <div className="text-[11px] text-white/40 leading-snug">{sub}</div>
+              </div>
+            ))}
+          </motion.div>
+
+          {/* Stats row — coloured numbers */}
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}
             className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full max-w-3xl">
             {[
-              { to: 84231,   suffix: "+",  label: "Active Users",       prefix: "" },
-              { to: 18,      suffix: "M+", label: "Naira in Prizes",    prefix: "₦" },
-              { to: 1200000, suffix: "+",  label: "AI Creations",       prefix: "" },
-              { to: 37,      suffix: "",   label: "States Competing",   prefix: "" },
-            ].map(({ to, suffix, label, prefix }) => (
-              <div key={label} className="glass rounded-2xl border border-white/[0.08] p-4 text-center">
-                <div className="text-2xl sm:text-3xl font-black text-white mb-1">
+              { to: 84231,   suffix: "+",  label: "Active Users",     prefix: "",  color: "#F5A623" },
+              { to: 18,      suffix: "M+", label: "Naira in Prizes",  prefix: "₦", color: "#10B981" },
+              { to: 1200000, suffix: "+",  label: "AI Creations",     prefix: "",  color: "#00D4FF" },
+              { to: 37,      suffix: "",   label: "States Competing", prefix: "",  color: "#8B5CF6" },
+            ].map(({ to, suffix, label, prefix, color }) => (
+              <div key={label} className="glass rounded-2xl border border-white/[0.08] p-4 text-center" style={{ borderColor: `${color}20` }}>
+                <div className="text-2xl sm:text-3xl font-black mb-1" style={{ color }}>
                   <Counter to={to} suffix={suffix} prefix={prefix} />
                 </div>
-                <div className="text-[12px] text-white/40 font-medium">{label}</div>
+                <div className="text-[12px] text-white/45 font-medium">{label}</div>
               </div>
             ))}
           </motion.div>
