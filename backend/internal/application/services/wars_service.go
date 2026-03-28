@@ -14,9 +14,12 @@ package services
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"log"
 	"time"
+
+	crand "crypto/rand"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -264,3 +267,153 @@ func periodStr(t time.Time) string {
 
 // ExportedCurrentPeriod exposes the current period string to the handler layer.
 func ExportedCurrentPeriod() string { return periodStr(time.Now().UTC()) }
+
+// ─── Secondary Draw ───────────────────────────────────────────────────────────
+
+// SecondaryDrawRequest carries admin-configurable parameters.
+type SecondaryDrawRequest struct {
+	WarID              uuid.UUID  `json:"war_id"`
+	State              string     `json:"state"`
+	WinnerCount        int        `json:"winner_count"`        // 1-10
+	PrizePerWinnerKobo int64      `json:"prize_per_winner_kobo"` // e.g. 100000 = ₦1,000
+	TriggeredBy        *uuid.UUID `json:"triggered_by,omitempty"`
+}
+
+// RunSecondaryDraw executes the secondary draw for a single winning state:
+//  1. Validates parameters (state must be a top-3 winner in the war).
+//  2. Builds the participant pool: active users in that state who earned
+//     points during the war window.
+//  3. Applies CSPRNG Fisher-Yates shuffle (same engine as main draw, SEC-009).
+//  4. Selects up to WinnerCount distinct users.
+//  5. Persists WarSecondaryDraw + winner rows atomically.
+func (svc *RegionalWarsService) RunSecondaryDraw(
+	ctx context.Context,
+	req SecondaryDrawRequest,
+) (*entities.WarSecondaryDraw, error) {
+
+	// ── 1. Validate winner count ──────────────────────────────────────────────
+	if req.WinnerCount < 1 || req.WinnerCount > 10 {
+		return nil, fmt.Errorf("winner_count must be between 1 and 10")
+	}
+	if req.PrizePerWinnerKobo < 0 {
+		return nil, fmt.Errorf("prize_per_winner_kobo must be ≥ 0")
+	}
+	if req.State == "" {
+		return nil, fmt.Errorf("state is required")
+	}
+
+	// ── 2. Fetch the war and verify it is COMPLETED ───────────────────────────
+	var war entities.RegionalWar
+	if err := svc.db.WithContext(ctx).Where("id = ?", req.WarID).First(&war).Error; err != nil {
+		return nil, fmt.Errorf("war not found: %w", err)
+	}
+	if war.Status != entities.WarStatusCompleted {
+		return nil, fmt.Errorf("war %s is not completed (status: %s) — resolve the war first", req.WarID, war.Status)
+	}
+
+	// ── 3. Verify the requested state was a winner ───────────────────────────
+	winners, err := svc.warsRepo.GetWinnersForWar(ctx, req.WarID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch war winners: %w", err)
+	}
+	isWinner := false
+	for _, w := range winners {
+		if w.State == req.State {
+			isWinner = true
+			break
+		}
+	}
+	if !isWinner {
+		return nil, fmt.Errorf("state %q was not a top-3 winner in war %s", req.State, req.WarID)
+	}
+
+	// ── 4. Build participant pool ─────────────────────────────────────────────
+	participants, err := svc.warsRepo.ListActiveUsersInState(ctx, req.State, war.StartsAt, war.EndsAt)
+	if err != nil {
+		return nil, fmt.Errorf("fetch participants: %w", err)
+	}
+	if len(participants) == 0 {
+		return nil, fmt.Errorf("no eligible participants found in state %q for the war window", req.State)
+	}
+
+	// ── 5. CSPRNG Fisher-Yates shuffle ───────────────────────────────────────
+	secondaryDrawShuffleCrypto(participants)
+
+	// ── 6. Deduplicate and pick up to WinnerCount ────────────────────────────
+	seen := map[uuid.UUID]bool{}
+	selected := make([]entities.UserRef, 0, req.WinnerCount)
+	for _, p := range participants {
+		if seen[p.ID] {
+			continue
+		}
+		seen[p.ID] = true
+		selected = append(selected, p)
+		if len(selected) >= req.WinnerCount {
+			break
+		}
+	}
+
+	// ── 7. Build records ──────────────────────────────────────────────────────
+	now := time.Now()
+	draw := &entities.WarSecondaryDraw{
+		ID:                 uuid.New(),
+		WarID:              req.WarID,
+		State:              req.State,
+		WinnerCount:        len(selected),
+		PrizePerWinnerKobo: req.PrizePerWinnerKobo,
+		TotalPoolKobo:      int64(len(selected)) * req.PrizePerWinnerKobo,
+		ParticipantCount:   len(participants),
+		Status:             entities.SecondaryDrawStatusCompleted,
+		TriggeredBy:        req.TriggeredBy,
+		ExecutedAt:         &now,
+	}
+
+	winnerRows := make([]entities.WarSecondaryDrawWinner, len(selected))
+	for i, u := range selected {
+		winnerRows[i] = entities.WarSecondaryDrawWinner{
+			ID:              uuid.New(),
+			SecondaryDrawID: draw.ID,
+			WarID:           req.WarID,
+			State:           req.State,
+			UserID:          u.ID,
+			PhoneNumber:     u.PhoneNumber,
+			Position:        i + 1,
+			PrizeKobo:       req.PrizePerWinnerKobo,
+			PaymentStatus:   entities.SecondaryWinnerPending,
+		}
+	}
+	draw.Winners = winnerRows
+
+	// ── 8. Persist atomically ─────────────────────────────────────────────────
+	if err := svc.warsRepo.CreateSecondaryDraw(ctx, draw, winnerRows); err != nil {
+		return nil, fmt.Errorf("persist secondary draw: %w", err)
+	}
+
+	log.Printf("[WarsService] Secondary draw complete: war=%s state=%s participants=%d winners=%d prizeEach=₦%.2f",
+		req.WarID, req.State, len(participants), len(selected), float64(req.PrizePerWinnerKobo)/100)
+
+	return draw, nil
+}
+
+// GetSecondaryDrawsForWar returns all secondary draws and their winners for a war.
+func (svc *RegionalWarsService) GetSecondaryDrawsForWar(ctx context.Context, warID uuid.UUID) ([]entities.WarSecondaryDraw, error) {
+	return svc.warsRepo.GetSecondaryDrawsForWar(ctx, warID)
+}
+
+// MarkSecondaryWinnerPaid records MoMo payment for one secondary draw winner.
+func (svc *RegionalWarsService) MarkSecondaryWinnerPaid(ctx context.Context, winnerID uuid.UUID, momoNumber string, paidBy uuid.UUID) error {
+	return svc.warsRepo.MarkSecondaryWinnerPaid(ctx, winnerID, momoNumber, paidBy)
+}
+
+// ─── CSPRNG helpers ───────────────────────────────────────────────────────────
+
+// secondaryDrawShuffleCrypto performs a Fisher-Yates shuffle on a []UserRef
+// slice using CSPRNG (crypto/rand), satisfying SEC-009.
+func secondaryDrawShuffleCrypto(s []entities.UserRef) {
+	for i := len(s) - 1; i > 0; i-- {
+		var b [8]byte
+		crand.Read(b[:]) //nolint:errcheck
+		j := int(binary.BigEndian.Uint64(b[:]) % uint64(i+1))
+		s[i], s[j] = s[j], s[i]
+	}
+}

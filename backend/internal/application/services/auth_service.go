@@ -185,7 +185,6 @@ func (s *AuthService) registerNewUser(ctx context.Context, phone string) (*entit
 		Tier:             entities.TierBronze,
 		IsActive:         true,
 		DeviceType:       "smartphone",
-		SubscriptionTier: "free",
 		KYCStatus:        "unverified",
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),

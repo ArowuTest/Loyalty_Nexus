@@ -51,4 +51,22 @@ type WarsRepository interface {
 
 	// MarkWinnerPaid updates a winner row status to PAID.
 	MarkWinnerPaid(ctx context.Context, winnerID uuid.UUID) error
+
+	// ─── Secondary Draw ──────────────────────────────────────────────────────
+
+	// CreateSecondaryDraw inserts the draw record and its winner rows atomically.
+	CreateSecondaryDraw(ctx context.Context, draw *entities.WarSecondaryDraw, winners []entities.WarSecondaryDrawWinner) error
+
+	// GetSecondaryDrawsForWar returns all secondary draws (with winners) for a war.
+	GetSecondaryDrawsForWar(ctx context.Context, warID uuid.UUID) ([]entities.WarSecondaryDraw, error)
+
+	// GetSecondaryDrawByID returns a single secondary draw with its winners.
+	GetSecondaryDrawByID(ctx context.Context, drawID uuid.UUID) (*entities.WarSecondaryDraw, error)
+
+	// MarkSecondaryWinnerPaid updates one winner's payment status to PAID.
+	MarkSecondaryWinnerPaid(ctx context.Context, winnerID uuid.UUID, momoNumber string, paidBy uuid.UUID) error
+
+	// ListActiveUsersInState returns (userID, phoneNumber) for all active users
+	// in the state who had at least one points_award transaction during the war window.
+	ListActiveUsersInState(ctx context.Context, state string, from, to time.Time) ([]entities.UserRef, error)
 }

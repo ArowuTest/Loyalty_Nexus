@@ -21,6 +21,7 @@ type UserHandler struct {
 	momoAdapter   external.MoMoPayer
 	fulfillSvc    *services.PrizeFulfillmentService
 	bonusPulseSvc *services.BonusPulseService
+	passportSvc   *services.PassportService
 }
 
 func NewUserHandler(ur repositories.UserRepository, hs *services.HLRService, ma external.MoMoPayer, fs *services.PrizeFulfillmentService) *UserHandler {
@@ -31,6 +32,12 @@ func NewUserHandler(ur repositories.UserRepository, hs *services.HLRService, ma 
 // bonus awards endpoint can query the audit table.
 func (h *UserHandler) WithBonusPulseService(svc *services.BonusPulseService) *UserHandler {
 	h.bonusPulseSvc = svc
+	return h
+}
+
+// WithPassportService attaches the PassportService to generate wallet URLs.
+func (h *UserHandler) WithPassportService(svc *services.PassportService) *UserHandler {
+	h.passportSvc = svc
 	return h
 }
 
@@ -109,10 +116,29 @@ func (h *UserHandler) VerifyMoMo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) GetPassportURLs(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
-		"apple":  "#",
-		"google": "#",
-		"message": "Wallet integration coming soon",
+	if h.passportSvc == nil {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"apple":  "#",
+			"google": "#",
+			"message": "Wallet integration coming soon",
+		})
+		return
+	}
+
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uid)
+
+	urls, err := h.passportSvc.GetWalletPassURLs(r.Context(), userID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate wallet URLs"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"apple":  urls.ApplePKPassURL,
+		"google": urls.GoogleWalletURL,
+		"apple_signed": urls.IsAppleSigned,
+		"google_configured": urls.IsGoogleConfigured,
 	})
 }
 

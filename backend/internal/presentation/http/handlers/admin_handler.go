@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -36,6 +37,7 @@ type AdminHandler struct {
 	claimSvc      *services.AdminClaimService
 	csvSvc        *services.MTNPushCSVService  // nil-safe; set via WithCSVService
 	bonusPulseSvc *services.BonusPulseService  // nil-safe; set via WithBonusPulseService
+	notifySvc     *services.NotificationService // for winner SMS notifications
 	rdb           *redis.Client
 }
 
@@ -67,6 +69,12 @@ func NewAdminHandler(
 
 // WithCSVService attaches the MTN push CSV upload service to the handler.
 // Called after construction in main.go to avoid changing the constructor signature.
+// WithNotificationService injects the notification service for winner SMS.
+func (h *AdminHandler) WithNotificationService(n *services.NotificationService) *AdminHandler {
+	h.notifySvc = n
+	return h
+}
+
 func (h *AdminHandler) WithCSVService(svc *services.MTNPushCSVService) *AdminHandler {
 	h.csvSvc = svc
 	return h
@@ -508,7 +516,56 @@ func (h *AdminHandler) ExecuteDraw(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "execution failed: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Notify winners asynchronously (non-blocking — draw execution already committed)
+	if h.notifySvc != nil {
+		go h.notifyDrawWinners(drawID)
+	}
+
 	jsonOK(w, map[string]string{"status": "completed"})
+}
+
+// notifyDrawWinners fetches the draw's winners from DB and sends an SMS to each.
+func (h *AdminHandler) notifyDrawWinners(drawID uuid.UUID) {
+	ctx := context.Background()
+	winners, err := h.drawSvc.GetDrawWinners(ctx, drawID)
+	if err != nil {
+		log.Printf("[Draw] notifyDrawWinners: failed to fetch winners for %s: %v", drawID, err)
+		return
+	}
+	for _, w := range winners {
+		if w.IsRunnerUp || w.PhoneNumber == "" {
+			continue
+		}
+		msg := fmt.Sprintf(
+			"🎉 Congratulations! You won the Loyalty Nexus draw! "+
+				"Prize: ₦%s. Your winnings will be disbursed within 24 hours. "+
+				"Ref: %s",
+			formatNaira(int64(w.PrizeValue * 100)),
+			drawID.String()[:8],
+		)
+		if err := h.notifySvc.SendSMS(ctx, w.PhoneNumber, msg); err != nil {
+			log.Printf("[Draw] SMS notification failed for %s: %v", w.PhoneNumber, err)
+		}
+	}
+	log.Printf("[Draw] ✅ Notified %d winners for draw %s", len(winners), drawID)
+}
+
+func formatNaira(kobo int64) string {
+	naira := kobo / 100
+	if naira == 0 {
+		return "0"
+	}
+	s := fmt.Sprintf("%d", naira)
+	// Insert commas every 3 digits from right
+	var result []byte
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, c)
+	}
+	return string(result)
 }
 
 func (h *AdminHandler) GetDrawWinners(w http.ResponseWriter, r *http.Request) {
@@ -920,40 +977,6 @@ func (h *AdminHandler) GetBroadcastHistory(w http.ResponseWriter, r *http.Reques
 	jsonOK(w, rows)
 }
 
-// ─── Subscriptions ────────────────────────────────────────────────────────
-
-func (h *AdminHandler) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if page < 1 {
-		page = 1
-	}
-	var rows []map[string]interface{}
-	var total int64
-	h.db.WithContext(r.Context()).Table("subscription_events").Count(&total)
-	h.db.WithContext(r.Context()).Table("subscription_events se").
-		Select("se.*, u.phone_number").
-		Joins("LEFT JOIN users u ON u.id = se.user_id").
-		Order("se.created_at DESC").
-		Limit(50).Offset((page-1)*50).
-		Find(&rows)
-	jsonOK(w, map[string]interface{}{"subscriptions": rows, "total": total})
-}
-
-func (h *AdminHandler) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var body struct {
-		Status string `json:"status"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		jsonError(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	h.db.WithContext(r.Context()).Table("subscription_events").
-		Where("id = ?", id).
-		Update("event_type", body.Status)
-	jsonOK(w, map[string]string{"status": "updated"})
-}
-
 // ─── Fraud ────────────────────────────────────────────────────────────────
 
 func (h *AdminHandler) GetFraudEvents(w http.ResponseWriter, r *http.Request) {
@@ -1025,9 +1048,31 @@ func (h *AdminHandler) ResetWarsCycle(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	// Check DB
+	dbStart := time.Now()
 	dbOK := true
 	if err := h.db.WithContext(r.Context()).Exec("SELECT 1").Error; err != nil {
 		dbOK = false
+	}
+	dbLatency := time.Since(dbStart).Milliseconds()
+
+	var dbPoolUsed, dbPoolMax int
+	if sqlDB, err := h.db.DB(); err == nil {
+		stats := sqlDB.Stats()
+		dbPoolUsed = stats.InUse
+		dbPoolMax = stats.MaxOpenConnections
+	}
+
+	// Check Redis
+	redisOK := true
+	var redisLatency int64
+	if h.rdb != nil {
+		rStart := time.Now()
+		if err := h.rdb.Ping(r.Context()).Err(); err != nil {
+			redisOK = false
+		}
+		redisLatency = time.Since(rStart).Milliseconds()
+	} else {
+		redisOK = false
 	}
 
 	// Check pending prize queue
@@ -1042,18 +1087,44 @@ func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		Where("resolved = false").
 		Count(&openFraudEvents)
 
-	status := "healthy"
-	if !dbOK || pendingPrizes > 100 || openFraudEvents > 50 {
-		status = "degraded"
+	overall := "healthy"
+	if !dbOK || !redisOK || pendingPrizes > 100 || openFraudEvents > 50 {
+		overall = "degraded"
+	}
+	if !dbOK && !redisOK {
+		overall = "outage"
+	}
+
+	services := []map[string]interface{}{
+		{
+			"name":         "PostgreSQL",
+			"status":       map[bool]string{true: "up", false: "down"}[dbOK],
+			"latency_ms":   dbLatency,
+			"uptime_pct":   100.0, // Real uptime would require external monitoring
+			"last_checked": time.Now(),
+		},
+		{
+			"name":         "Redis",
+			"status":       map[bool]string{true: "up", false: "down"}[redisOK],
+			"latency_ms":   redisLatency,
+			"uptime_pct":   100.0,
+			"last_checked": time.Now(),
+		},
 	}
 
 	jsonOK(w, map[string]interface{}{
-		"status":              status,
-		"database":            dbOK,
-		"pending_prizes":      pendingPrizes,
-		"open_fraud_events":   openFraudEvents,
-		"checked_at":          time.Now(),
-		"version":             "phase-8",
+		"overall":                   overall,
+		"services":                  services,
+		"webhook_success_rate_24h":  100.0, // Placeholder for real metrics
+		"paystack_success_rate_24h": 100.0, // Placeholder for real metrics
+		"api_p99_ms":                50,    // Placeholder for real metrics
+		"db_pool_used":              dbPoolUsed,
+		"db_pool_max":               dbPoolMax,
+		"redis_hit_rate":            100.0, // Placeholder for real metrics
+		"checked_at":                time.Now(),
+		"pending_prizes":            pendingPrizes,
+		"open_fraud_events":         openFraudEvents,
+		"version":                   "phase-8",
 	})
 }
 

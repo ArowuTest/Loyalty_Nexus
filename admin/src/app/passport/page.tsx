@@ -2,39 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import AdminShell from "@/components/layout/AdminShell";
-import adminAPI, { ConfigEntry } from "@/lib/api";
+import adminAPI, { ConfigEntry, PassportStats, GhostNudgeLog, USSDSession } from "@/lib/api";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface PassportStats {
-  total_passports: number;
-  apple_wallet_downloads: number;
-  google_wallet_saves: number;
-  qr_scans_today: number;
-  tier_breakdown: { tier: string; count: number }[];
-  top_badge_earners: { user_id: string; phone: string; badge_count: number; tier: string }[];
-}
-
-interface GhostNudgeLog {
-  id: string;
-  user_id: string;
-  phone_number: string;
-  nudge_type: string;
-  streak_count: number;
-  sent_at: string;
-  delivered: boolean;
-}
-
-interface USSDSession {
-  id: string;
-  phone_number: string;
-  session_id: string;
-  current_menu: string;
-  started_at: string;
-  last_active: string;
-  is_active: boolean;
-  step_count: number;
-}
 
 // ─── Config keys (zero-hardcoding — all values live in network_configs) ───────
 
@@ -49,6 +18,25 @@ const PASSPORT_CONFIG_KEYS = {
   USSD_SHORT_CODE:      "ussd_short_code",
   USSD_TIMEOUT:         "ussd_session_timeout_seconds",
   USSD_MAX_DEPTH:       "ussd_max_menu_depth",
+  // Dashboard banner
+  BANNER_ENABLED:       "passport_banner_enabled",
+  BANNER_TITLE:         "passport_banner_title",
+  BANNER_SUBTITLE:      "passport_banner_subtitle",
+  BANNER_CTA_IOS:       "passport_banner_cta_ios",
+  BANNER_CTA_ANDROID:   "passport_banner_cta_android",
+  // Wallet card messages
+  WALLET_STREAK_EXPIRY_ENABLED:  "wallet_streak_expiry_enabled",
+  WALLET_STREAK_EXPIRY_MSG:      "wallet_streak_expiry_message",
+  WALLET_SPIN_READY_ENABLED:     "wallet_spin_ready_enabled",
+  WALLET_SPIN_READY_MSG:         "wallet_spin_ready_message",
+  WALLET_TIER_UPGRADE_ENABLED:   "wallet_tier_upgrade_enabled",
+  WALLET_TIER_UPGRADE_MSG:       "wallet_tier_upgrade_message",
+  WALLET_PRIZE_WON_ENABLED:      "wallet_prize_won_enabled",
+  WALLET_PRIZE_WON_MSG:          "wallet_prize_won_message",
+  // Broadcast
+  WALLET_BROADCAST_ENABLED:      "wallet_broadcast_enabled",
+  WALLET_BROADCAST_LABEL:        "wallet_broadcast_label",
+  WALLET_BROADCAST_MSG:          "wallet_broadcast_message",
 };
 
 // ─── Config hook (same pattern as points-config/page.tsx) ─────────────────────
@@ -247,9 +235,9 @@ export default function PassportAdminPage() {
   const load = useCallback(async () => {
     try {
       const [s, n, u] = await Promise.all([
-        adminAPI.req<PassportStats>("GET", "/admin/passport/stats"),
-        adminAPI.req<{ logs: GhostNudgeLog[] }>("GET", "/admin/passport/nudge-log?limit=50"),
-        adminAPI.req<{ sessions: USSDSession[] }>("GET", "/admin/ussd/sessions?limit=50"),
+        adminAPI.getPassportStats(),
+        adminAPI.getPassportNudgeLog(50),
+        adminAPI.getUSSDSessions(50),
       ]);
       setStats(s);
       setNudgeLogs(n.logs ?? []);
@@ -344,7 +332,8 @@ export default function PassportAdminPage() {
         <div style={{ color: "#828cb4" }}>Loading passport data…</div>
       ) : (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14, marginBottom: 24 }}>
+          {/* Row 1: Historical download counts */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14, marginBottom: 14 }}>
             {[
               { label: "Total Passports",        value: stats?.total_passports ?? 0,         icon: "🪪" },
               { label: "Apple Wallet Downloads",  value: stats?.apple_wallet_downloads ?? 0,  icon: "📱" },
@@ -360,6 +349,64 @@ export default function PassportAdminPage() {
               </div>
             ))}
           </div>
+
+          {/* Row 2: Active installs (currently installed on devices right now) */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14, marginBottom: 24 }}>
+            {[
+              { label: "Active Installs (Total)",  value: stats?.total_active_installs ?? 0,  icon: "✅", color: "#48bb78" },
+              { label: "Active on Apple Wallet",   value: stats?.active_apple_installs ?? 0,  icon: "🍎", color: "#a0aec0" },
+              { label: "Active on Google Wallet",  value: stats?.active_google_installs ?? 0, icon: "🤖", color: "#68d391" },
+              { label: "Removal Rate (Apple)",
+                value: `${(stats?.removal_rate_pct ?? 0).toFixed(1)}%`,
+                icon: "🗑️",
+                color: (stats?.removal_rate_pct ?? 0) > 20 ? "#fc8181" : "#68d391",
+                isString: true },
+            ].map(s => (
+              <div key={s.label} style={{ ...statCardStyle, borderColor: `${s.color}33` }}>
+                <div style={{ fontSize: 26 }}>{s.icon}</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>
+                  {s.isString ? s.value : (s.value as number).toLocaleString()}
+                </div>
+                <div style={{ color: "#828cb4", fontSize: 12 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Device type breakdown */}
+          {stats?.device_breakdown && stats.device_breakdown.length > 0 && (
+            <div style={{ ...cardStyle, marginBottom: 24 }}>
+              <h3 style={{ color: "#e2e8ff", fontSize: 14, fontWeight: 600, marginBottom: 14 }}>
+                📱 Device Type Breakdown
+              </h3>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                {stats.device_breakdown.map((d: { device_type: string; count: number }) => {
+                  const total = stats.device_breakdown.reduce((a: number, b: { count: number }) => a + b.count, 0);
+                  const pct = total > 0 ? Math.round((d.count / total) * 100) : 0;
+                  const deviceIcon = d.device_type === "ios" ? "🍎" : d.device_type === "android" ? "🤖" : d.device_type === "web" ? "🌐" : "❓";
+                  const deviceColor = d.device_type === "ios" ? "#a0aec0" : d.device_type === "android" ? "#68d391" : d.device_type === "web" ? "#63b3ed" : "#828cb4";
+                  return (
+                    <div key={d.device_type} style={{ flex: "1 1 140px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                        <span style={{ color: deviceColor, fontSize: 13, fontWeight: 600 }}>
+                          {deviceIcon} {d.device_type.toUpperCase()}
+                        </span>
+                        <span style={{ color: "#828cb4", fontSize: 12 }}>{d.count.toLocaleString()} ({pct}%)</span>
+                      </div>
+                      <div style={{ height: 6, background: "rgba(255,255,255,0.05)", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{
+                          height: "100%",
+                          width: `${pct}%`,
+                          background: deviceColor,
+                          borderRadius: 3,
+                          transition: "width 0.8s ease",
+                        }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Tier breakdown */}
           {stats?.tier_breakdown && stats.tier_breakdown.length > 0 && (
@@ -646,6 +693,130 @@ export default function PassportAdminPage() {
                   label="Wallet Pass Push Enabled"
                   desc="Push updated Apple/Google Wallet passes during Ghost Nudge runs. Disable to pause wallet pushes independently."
                   configKey={PASSPORT_CONFIG_KEYS.NUDGE_WALLET_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+              </div>
+
+              {/* Dashboard Banner */}
+              <p style={sectionHeadStyle}>🎫 Dashboard Passport Banner</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, marginBottom: 8 }}>
+                <ToggleField
+                  label="Banner Enabled"
+                  desc="Show the 'Download Your Passport' banner on the user dashboard. Disable to hide it globally."
+                  configKey={PASSPORT_CONFIG_KEYS.BANNER_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Banner Title"
+                  desc="Main heading shown on the dashboard passport banner."
+                  configKey={PASSPORT_CONFIG_KEYS.BANNER_TITLE}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Banner Subtitle"
+                  desc="Supporting text below the banner title."
+                  configKey={PASSPORT_CONFIG_KEYS.BANNER_SUBTITLE}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="iOS CTA Text"
+                  desc="Button text shown to iPhone users on the banner."
+                  configKey={PASSPORT_CONFIG_KEYS.BANNER_CTA_IOS}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Android CTA Text"
+                  desc="Button text shown to Android users on the banner."
+                  configKey={PASSPORT_CONFIG_KEYS.BANNER_CTA_ANDROID}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+              </div>
+
+              {/* Wallet Card Messages */}
+              <p style={sectionHeadStyle}>💳 Wallet Card Lock-Screen Messages</p>
+              <div style={{ ...cardStyle, marginBottom: 12, padding: "10px 14px" }}>
+                <p style={{ color: "#828cb4", fontSize: 12, margin: 0 }}>
+                  These messages appear on the user&apos;s lock screen via Apple Wallet / Google Wallet.
+                  Changes take effect on the next Ghost Nudge tick — no deploy needed.
+                  <strong style={{ color: "#9cb7ff" }}> Broadcast overrides all other messages when enabled.</strong>
+                </p>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, marginBottom: 8 }}>
+                <ToggleField
+                  label="Streak Expiry Push Enabled"
+                  desc="Push a wallet card update when a user's streak is about to expire."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_STREAK_EXPIRY_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Streak Expiry Message"
+                  desc="Text shown on the wallet card when streak is expiring."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_STREAK_EXPIRY_MSG}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <ToggleField
+                  label="Spin Ready Push Enabled"
+                  desc="Push a wallet card update when the user has spin credits available."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_SPIN_READY_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Spin Ready Message"
+                  desc="Text shown on the wallet card when a free spin is available."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_SPIN_READY_MSG}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <ToggleField
+                  label="Tier Upgrade Push Enabled"
+                  desc="Push a wallet card update when the user is promoted to a new tier."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_TIER_UPGRADE_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Tier Upgrade Message"
+                  desc="Text shown on the wallet card after a tier upgrade."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_TIER_UPGRADE_MSG}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <ToggleField
+                  label="Prize Won Push Enabled"
+                  desc="Push a wallet card update when the user has an unclaimed prize."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_PRIZE_WON_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Prize Won Message"
+                  desc="Text shown on the wallet card when an unclaimed prize is waiting."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_PRIZE_WON_MSG}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+              </div>
+
+              {/* Broadcast Message */}
+              <p style={sectionHeadStyle}>📢 Broadcast Message (overrides all card messages)</p>
+              <div style={{ ...cardStyle, marginBottom: 12, padding: "10px 14px", border: "1px solid rgba(234,179,8,0.3)" }}>
+                <p style={{ color: "#fbbf24", fontSize: 12, margin: 0 }}>
+                  ⚠️ When broadcast is enabled, ALL wallet cards will show this message regardless of user state.
+                  Use for promotions, double-points events, or announcements. Disable when done.
+                </p>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, marginBottom: 8 }}>
+                <ToggleField
+                  label="Broadcast Enabled"
+                  desc="When ON, the broadcast message overrides all other wallet card messages for every user."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_BROADCAST_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Broadcast Label"
+                  desc="Short label shown above the broadcast message on the wallet card (e.g. '📢 ANNOUNCEMENT')."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_BROADCAST_LABEL}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Broadcast Message"
+                  desc="The message shown on every user's wallet card lock screen. Keep it under 40 characters."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_BROADCAST_MSG}
                   configs={configs} saving={saving} saved={saved} onSave={save}
                 />
               </div>

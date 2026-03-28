@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"loyalty-nexus/internal/application/services"
+	"loyalty-nexus/internal/infrastructure/config"
 )
 
 func setupPassportDB(t *testing.T) *gorm.DB {
@@ -84,9 +85,9 @@ func setupPassportDB(t *testing.T) *gorm.DB {
 
 func TestPassportService_GetPassport(t *testing.T) {
 	db := setupPassportDB(t)
-	svc := services.NewPassportService(db)
+	cfg := config.NewConfigManagerNoRefresh(db)
+	svc := services.NewPassportService(db, cfg)
 	ctx := context.Background()
-
 	userID := uuid.New()
 	db.Exec(`INSERT INTO users (id, phone_number, tier, streak_count, lifetime_points) VALUES (?, '2348012345678', 'SILVER', 5, 2500)`, userID)
 	db.Exec(`INSERT INTO wallets (id, user_id, pulse_points, spin_credits, recharge_counter) VALUES (?, ?, 150, 2, 1650)`, uuid.New(), userID)
@@ -130,7 +131,8 @@ func TestPassportService_GetPassport(t *testing.T) {
 
 func TestPassportService_EvaluateBadges(t *testing.T) {
 	db := setupPassportDB(t)
-	svc := services.NewPassportService(db)
+	cfg := config.NewConfigManagerNoRefresh(db)
+	svc := services.NewPassportService(db, cfg)
 	ctx := context.Background()
 
 	userID := uuid.New()
@@ -151,7 +153,8 @@ func TestPassportService_EvaluateBadges(t *testing.T) {
 
 func TestPassportService_QR(t *testing.T) {
 	db := setupPassportDB(t)
-	svc := services.NewPassportService(db)
+	cfg := config.NewConfigManagerNoRefresh(db)
+	svc := services.NewPassportService(db, cfg)
 
 	os.Setenv("PASSPORT_QR_SECRET", "test-secret")
 	defer os.Unsetenv("PASSPORT_QR_SECRET")
@@ -174,11 +177,12 @@ func TestPassportService_QR(t *testing.T) {
 
 func TestPassportService_BuildPKPass(t *testing.T) {
 	db := setupPassportDB(t)
-	svc := services.NewPassportService(db)
+	cfg := config.NewConfigManagerNoRefresh(db)
+	svc := services.NewPassportService(db, cfg)
 	ctx := context.Background()
-
 	userID := uuid.New()
-	db.Exec(`INSERT INTO users (id, phone_number, tier, streak_count, lifetime_points) VALUES (?, '2348012345678', 'GOLD', 12, 15000)`, userID)
+	// Insert a GOLD-tier user (lifetime_points >= 10000 threshold)
+	db.Exec(`INSERT INTO users (id, phone_number, tier, streak_count, lifetime_points, total_spins) VALUES (?, '2348012345678', 'GOLD', 3, 12000, 5)`, userID)
 	db.Exec(`INSERT INTO wallets (id, user_id, pulse_points, spin_credits, recharge_counter) VALUES (?, ?, 500, 1, 0)`, uuid.New(), userID)
 
 	pass, err := svc.BuildPKPass(ctx, userID)

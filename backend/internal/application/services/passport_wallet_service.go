@@ -153,7 +153,7 @@ func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uu
 	}
 
 	passTypeID := "pass.ng.loyaltynexus.passport"
-	teamID     := "XXXXXXXXXX"
+	teamID     := "" // Populated from APPLE_TEAM_ID env var via appleWalletSigner.TeamID()
 	if appleWalletSigner != nil {
 		passTypeID = appleWalletSigner.PassTypeID()
 		teamID     = appleWalletSigner.TeamID()
@@ -208,6 +208,40 @@ func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uu
 		UPDATE users SET apple_pass_serial = ? WHERE id = ? AND apple_pass_serial IS NULL
 	`, serialNumber, userID)
 
+	// Resolve contextual header message (spin ready, tier upgrade, prize won, streak expiry)
+	var spinReady, tierUpgraded, prizeWon bool
+	{
+		var spinCredits int
+		svc.db.WithContext(ctx).Table("wallets").Where("user_id = ?", userID).Pluck("spin_credits", &spinCredits)
+		spinReady = spinCredits > 0
+
+		// Tier upgrade: check if tier changed in the last 24h
+		var tierChangedAt *time.Time
+		svc.db.WithContext(ctx).Raw(`
+			SELECT MAX(created_at) FROM passport_events
+			WHERE user_id = ? AND event_type = 'tier_upgrade'
+			  AND created_at > NOW() - INTERVAL '24 hours'
+		`, userID).Scan(&tierChangedAt)
+		tierUpgraded = tierChangedAt != nil
+
+		// Prize won: check for unclaimed prizes in the last 7 days
+		var unclaimedCount int64
+		svc.db.WithContext(ctx).Table("spin_results").
+			Where("user_id = ? AND prize_type NOT IN ('try_again','pulse_points') AND status = 'pending' AND created_at > NOW() - INTERVAL '7 days'", userID).
+			Count(&unclaimedCount)
+		prizeWon = unclaimedCount > 0
+	}
+
+	headerMsg := ResolvePassHeaderMessage(isStreakExpiring, spinReady, tierUpgraded, prizeWon, passport.Tier, svc.cfg)
+	headerField := map[string]interface{}{
+		"key":   "tier",
+		"label": headerMsg.Label,
+		"value": headerMsg.Value,
+	}
+	if headerMsg.Message != "" {
+		headerField["changeMessage"] = headerMsg.Message
+	}
+
 	passObj := map[string]interface{}{
 		"formatVersion":       1,
 		"passTypeIdentifier":  passTypeID,
@@ -223,7 +257,7 @@ func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uu
 		"authenticationToken": generatePassAuthToken(userID),
 		"storeCard": map[string]interface{}{
 			"headerFields": []map[string]interface{}{
-				{"key": "tier", "label": "TIER", "value": passport.Tier},
+				headerField,
 			},
 			"primaryFields": []map[string]interface{}{
 				{"key": "points", "label": "PULSE POINTS", "value": passport.PulsePoints,
@@ -307,6 +341,84 @@ func buildUnsignedPKPass(passJSON []byte) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// PassHeaderMessage defines the contextual message shown in the wallet card header.
+// Priority order (highest first): streak_expiry > spin_ready > tier_upgrade > prize_won > default.
+type PassHeaderMessage struct {
+	Label   string
+	Value   string
+	Message string // changeMessage shown in APNs notification
+}
+
+// ResolvePassHeaderMessage returns the highest-priority contextual header message
+// for the wallet card based on the user's current state.
+// All message strings and enable/disable toggles are read from ConfigManager
+// (network_configs table) so they can be changed from the admin panel without
+// a code deploy. cfg may be nil (falls back to hardcoded defaults).
+func ResolvePassHeaderMessage(isStreakExpiring, spinReady, tierUpgraded, prizeWon bool, tier string, cfg interface {
+	GetString(string, string) string
+	GetBool(string, bool) bool
+}) PassHeaderMessage {
+	// Helper to read config with fallback
+	getStr := func(key, def string) string {
+		if cfg == nil {
+			return def
+		}
+		return cfg.GetString(key, def)
+	}
+	getBool := func(key string, def bool) bool {
+		if cfg == nil {
+			return def
+		}
+		return cfg.GetBool(key, def)
+	}
+
+	// Broadcast message takes highest priority when enabled
+	if getBool("wallet_broadcast_enabled", false) {
+		broadcastLabel := getStr("wallet_broadcast_label", "📢 ANNOUNCEMENT")
+		broadcastMsg   := getStr("wallet_broadcast_message", "")
+		if broadcastMsg != "" {
+			return PassHeaderMessage{
+				Label:   broadcastLabel,
+				Value:   broadcastMsg,
+				Message: broadcastMsg + " %@",
+			}
+		}
+	}
+
+	switch {
+	case isStreakExpiring && getBool("wallet_streak_expiry_enabled", true):
+		return PassHeaderMessage{
+			Label:   "⚠️ ALERT",
+			Value:   getStr("wallet_streak_expiry_message", "Streak expiring soon!"),
+			Message: getStr("wallet_streak_expiry_message", "Streak expiring soon!") + " Recharge now! %@",
+		}
+	case spinReady && getBool("wallet_spin_ready_enabled", true):
+		return PassHeaderMessage{
+			Label:   "🎰 SPIN READY",
+			Value:   getStr("wallet_spin_ready_message", "You have a free spin!"),
+			Message: getStr("wallet_spin_ready_message", "You have a free spin!") + " Open app to win up to ₦5,000! %@",
+		}
+	case tierUpgraded && getBool("wallet_tier_upgrade_enabled", true):
+		return PassHeaderMessage{
+			Label:   "🎉 TIER UP!",
+			Value:   getStr("wallet_tier_upgrade_message", "You've been promoted!") + " " + tier,
+			Message: getStr("wallet_tier_upgrade_message", "You've been promoted!") + " You're now " + tier + "! %@",
+		}
+	case prizeWon && getBool("wallet_prize_won_enabled", true):
+		return PassHeaderMessage{
+			Label:   "🏆 YOU WON!",
+			Value:   getStr("wallet_prize_won_message", "Prize waiting — open app"),
+			Message: getStr("wallet_prize_won_message", "Prize waiting — open app") + " %@",
+		}
+	default:
+		return PassHeaderMessage{
+			Label:   "TIER",
+			Value:   tier,
+			Message: "",
+		}
+	}
 }
 
 // buildAppleAuxFields returns the auxiliaryFields for the Apple PKPass storeCard.

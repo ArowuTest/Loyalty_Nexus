@@ -69,6 +69,7 @@ func main() {
 	// ─── Services ─────────────────────────────────────────────
 	notifySvc     := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
 	authSvc       := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
+	adminAuthSvc  := services.NewAdminAuthService(db)           // RBAC email+password auth for admins
 	fulfillSvc    := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
 	rechargeSvc   := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
 	drawSvc       := services.NewDrawService(db)
@@ -78,7 +79,7 @@ func main() {
 	studioSvc     := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
 	hlrSvc        := services.NewHLRService(hlrRepo)
 	warssSvc      := services.NewRegionalWarsService(warsRepo, userRepo, txRepo, cfg, db)
-	passportSvc   := services.NewPassportService(db)
+	passportSvc   := services.NewPassportService(db, cfg)
 	fraudSvc      := services.NewFraudService(db)
 	claimSvc      := services.NewClaimService(prizeRepo, userRepo, momoSvc, fulfillSvc)
 	adminClaimSvc := services.NewAdminClaimService(prizeRepo, momoSvc)
@@ -100,18 +101,33 @@ func main() {
 	aiStudioOrch := services.NewAIStudioOrchestrator(cfg, studioRepo, studioSvc, userRepo, assetStorage)
 	aiStudioOrch.SetLLMOrch(llmOrch) // wire health tracking
 
+	// ─── AI Provider Registry (DB-backed dynamic dispatch) ────────────
+	aiProviderRepo := persistence.NewAIProviderRepository(db)
+	aiStudioOrch.SetProviderDB(aiProviderRepo) // enables DB-driven fallback chains
+	aiProviderH := handlers.NewAIProviderAdminHandler(aiProviderRepo)
+
 	// ─── Knowledge Worker (dispatches studio jobs) ─────────────
 	kbWorker := handlers.NewAsyncStudioWorker(studioSvc, aiStudioOrch)
 
+	// ─── Session Summariser Worker (compresses idle chat sessions → memory) ──
+	// Runs every 30 minutes; stores compressed summaries in session_summaries table.
+	// The LLMOrchestrator.Chat() reads these back on next message to reconstruct context.
+	summariserWorker := services.NewSummariserWorker(db, llmOrch)
+	go summariserWorker.Run(ctx)
+
 	// ─── HTTP Handlers ────────────────────────────────────────
 	authH    := handlers.NewAuthHandler(authSvc)
+	adminAuthH := handlers.NewAdminAuthHandler(adminAuthSvc)    // Admin RBAC
 	rechargeH := handlers.NewRechargeHandlerWithMTN(rechargeSvc, mtnPushSvc, eq)
 	spinH    := handlers.NewSpinHandler(spinSvc)
 	studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
+	studioH.SetAssetStorage(assetStorage) // enables /studio/upload endpoint
 	bonusPulseSvc := services.NewBonusPulseService(db, userRepo)
 	userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc).
-				WithBonusPulseService(bonusPulseSvc)
+				WithBonusPulseService(bonusPulseSvc).
+				WithPassportService(passportSvc)
 	adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, drawWindowSvc, fraudSvc, warssSvc, studioSvc, adminClaimSvc, rdb).
+			WithNotificationService(notifySvc).
 				WithCSVService(services.NewMTNPushCSVService(db, mtnPushSvc)).
 				WithBonusPulseService(bonusPulseSvc)
 	claimH   := handlers.NewClaimHandler(claimSvc)
@@ -127,7 +143,7 @@ func main() {
 
 	warsH     := handlers.NewWarsHandler(warssSvc, leaderboardHub)
 	drawH     := handlers.NewDrawHandler(drawSvc)
-	passportH := handlers.NewPassportHandler(passportSvc)
+	passportH := handlers.NewPassportHandler(passportSvc).WithConfig(cfg)
 	fraudH    := handlers.NewFraudHandler(fraudSvc)
 
 	// ─── Router ───────────────────────────────────────────────
@@ -144,6 +160,11 @@ func main() {
 	// ─── Auth (public) ────────────────────────────────────────
 	mux.HandleFunc("POST /api/v1/auth/otp/send", authH.SendOTP)
 	mux.HandleFunc("POST /api/v1/auth/otp/verify", authH.VerifyOTP)
+
+	// ─── Passport banner config (public — no auth required) ──
+	mux.HandleFunc("GET /api/v1/passport/banner-config", passportH.GetBannerConfig)
+
+
 
 	// ─── Webhooks (public — signature-verified internally) ────
 	mux.HandleFunc("POST /api/v1/recharge/paystack-webhook", rechargeH.PaystackWebhook)
@@ -193,6 +214,7 @@ func main() {
 	mux.Handle("GET /api/v1/studio/gallery", auth(http.HandlerFunc(studioH.GetGallery)))
 	mux.Handle("POST /api/v1/studio/generate/{id}/dispute", auth(http.HandlerFunc(studioH.DisputeGeneration)))
 	mux.Handle("GET /api/v1/studio/session", auth(http.HandlerFunc(studioH.GetSessionUsage)))
+	mux.Handle("POST /api/v1/studio/upload", auth(http.HandlerFunc(studioH.UploadAsset)))			// REQ: VoiceToPlan + image-editor pre-upload
 
 	// ─── Nexus Chat ───────────────────────────────────────────
 	mux.Handle("POST /api/v1/studio/chat", auth(http.HandlerFunc(studioH.Chat)))
@@ -233,130 +255,119 @@ func main() {
 	mux.Handle("GET /api/v1/draws/{id}/winners", auth(http.HandlerFunc(drawH.GetWinners)))
 
 	// ─── Admin routes (admin JWT required) ───────────────────
-	adminAuth := middleware.AdminAuthMiddleware(authSvc)
+	adminAuth := middleware.AdminAuthMiddleware(adminAuthSvc)  // Uses AdminAuthService (email+pw+RBAC)
 
-	// Dashboard & config
-	mux.Handle("GET /api/v1/admin/dashboard", adminAuth(http.HandlerFunc(adminH.GetDashboard)))
-	mux.Handle("GET /api/v1/admin/config", adminAuth(http.HandlerFunc(adminH.GetConfig)))
-	mux.Handle("PUT /api/v1/admin/config/{key}", adminAuth(http.HandlerFunc(adminH.UpdateConfig)))
+	// ─── Admin Auth (email + password + RBAC) ────────────────────────────────
+	mux.HandleFunc("POST /api/v1/admin/auth/login",           adminAuthH.Login)
+	mux.Handle("GET    /api/v1/admin/auth/me",                adminAuth(http.HandlerFunc(adminAuthH.Me)))
+	mux.Handle("POST   /api/v1/admin/auth/change-password",   adminAuth(http.HandlerFunc(adminAuthH.ChangePassword)))
+	mux.Handle("GET    /api/v1/admin/auth/admins",            adminAuth(http.HandlerFunc(adminAuthH.ListAdmins)))
+	mux.Handle("POST   /api/v1/admin/auth/admins",            adminAuth(http.HandlerFunc(adminAuthH.CreateAdmin)))
+	mux.Handle("DELETE /api/v1/admin/auth/admins/{id}",       adminAuth(http.HandlerFunc(adminAuthH.DeactivateAdmin)))
 
-	// Legacy prize-pool routes (kept for backward compat with older admin UI)
-	mux.Handle("GET /api/v1/admin/prize-pool", adminAuth(http.HandlerFunc(adminH.GetPrizePool)))
-	mux.Handle("PUT /api/v1/admin/prize-pool/{id}", adminAuth(http.HandlerFunc(adminH.UpdatePrize)))
+	mux.Handle("GET    /api/v1/admin/dashboard",          adminAuth(http.HandlerFunc(adminH.GetDashboard)))
+	mux.Handle("GET    /api/v1/admin/config",             adminAuth(http.HandlerFunc(adminH.GetConfig)))
+	mux.Handle("PUT    /api/v1/admin/config/{key}",       adminAuth(http.HandlerFunc(adminH.UpdateConfig)))
+	mux.Handle("GET    /api/v1/admin/prize-pool",         adminAuth(http.HandlerFunc(adminH.GetPrizePool)))
+	mux.Handle("PUT    /api/v1/admin/prize-pool/{id}",    adminAuth(http.HandlerFunc(adminH.UpdatePrize)))
+	mux.Handle("GET    /api/v1/admin/studio-tools",       adminAuth(http.HandlerFunc(adminH.GetStudioTools)))
+	mux.Handle("PUT    /api/v1/admin/studio-tools/{id}",  adminAuth(http.HandlerFunc(adminH.UpdateStudioTool)))
+	mux.Handle("POST   /api/v1/admin/studio-tools",              adminAuth(http.HandlerFunc(adminH.CreateStudioTool)))
+	mux.Handle("DELETE /api/v1/admin/studio-tools/{id}",         adminAuth(http.HandlerFunc(adminH.DisableStudioTool)))
+	mux.Handle("GET    /api/v1/admin/studio-tools/stats",        adminAuth(http.HandlerFunc(adminH.GetStudioToolStats)))
+	mux.Handle("GET    /api/v1/admin/studio-tools/{id}/errors",  adminAuth(http.HandlerFunc(adminH.GetStudioToolErrors)))
+	mux.Handle("GET    /api/v1/admin/studio-generations",        adminAuth(http.HandlerFunc(adminH.GetStudioGenerations)))
+	mux.Handle("GET    /api/v1/admin/users",              adminAuth(http.HandlerFunc(adminH.ListUsers)))
+	mux.Handle("GET    /api/v1/admin/regional-wars",      adminAuth(http.HandlerFunc(adminH.GetRegionalWars)))
+	mux.Handle("POST /api/v1/admin/wars/resolve",          adminAuth(http.HandlerFunc(warsH.AdminResolve)))
+	mux.Handle("PUT  /api/v1/admin/wars/prize-pool",       adminAuth(http.HandlerFunc(warsH.AdminUpdatePrizePool)))
+	mux.Handle("GET  /api/v1/admin/wars/{war_id}/winners",            adminAuth(http.HandlerFunc(warsH.GetWinnersByWarID)))
+	mux.Handle("POST /api/v1/admin/wars/{war_id}/secondary-draw",      adminAuth(http.HandlerFunc(warsH.RunSecondaryDraw)))
+	mux.Handle("GET  /api/v1/admin/wars/{war_id}/secondary-draws",     adminAuth(http.HandlerFunc(warsH.GetSecondaryDraws)))
+	mux.Handle("POST /api/v1/admin/wars/secondary-draw/winners/{winner_id}/pay", adminAuth(http.HandlerFunc(warsH.MarkSecondaryWinnerPaid)))
+	mux.Handle("GET    /api/v1/admin/fraud-events",        adminAuth(http.HandlerFunc(fraudH.ListEvents)))
+	mux.Handle("PUT    /api/v1/admin/fraud-events/{id}/resolve", adminAuth(http.HandlerFunc(fraudH.ResolveEvent)))
+	// SuspendUser handled by adminH above — fraudH route removed to avoid mux panic
+	// Draws admin — full CRUD + execute + CSV export + schedules
+	mux.Handle("GET    /api/v1/admin/draws",                       adminAuth(http.HandlerFunc(adminH.GetDraws)))
+	mux.Handle("POST   /api/v1/admin/draws",                       adminAuth(http.HandlerFunc(adminH.CreateDraw)))
+	mux.Handle("PUT    /api/v1/admin/draws/{id}",                  adminAuth(http.HandlerFunc(adminH.UpdateDraw)))
+	mux.Handle("POST   /api/v1/admin/draws/{id}/execute",          adminAuth(http.HandlerFunc(adminH.ExecuteDraw)))
+	mux.Handle("GET    /api/v1/admin/draws/{id}/winners",          adminAuth(http.HandlerFunc(adminH.GetDrawWinners)))
+	mux.Handle("GET    /api/v1/admin/draws/{id}/export",           adminAuth(http.HandlerFunc(adminH.ExportDrawEntries)))
+	// Draw schedules (automated recurring draws)
+	mux.Handle("GET    /api/v1/admin/draw/schedule",               adminAuth(http.HandlerFunc(adminH.GetDrawSchedule)))
+	mux.Handle("POST   /api/v1/admin/draw/schedule",               adminAuth(http.HandlerFunc(adminH.CreateDrawSchedule)))
+	mux.Handle("PUT    /api/v1/admin/draw/schedule/{id}",          adminAuth(http.HandlerFunc(adminH.UpdateDrawSchedule)))
+	mux.Handle("DELETE /api/v1/admin/draw/schedule/{id}",          adminAuth(http.HandlerFunc(adminH.DeleteDrawSchedule)))
+	mux.Handle("GET    /api/v1/admin/draw/schedule/preview",       adminAuth(http.HandlerFunc(adminH.PreviewDrawWindow)))
+	// Prize pool — extended management
+	mux.Handle("GET    /api/v1/admin/prizes",                      adminAuth(http.HandlerFunc(adminH.GetPrizePool)))
+	mux.Handle("GET    /api/v1/admin/prizes/summary",              adminAuth(http.HandlerFunc(adminH.GetPrizeSummary)))
+	mux.Handle("GET    /api/v1/admin/prizes/{id}",                 adminAuth(http.HandlerFunc(adminH.GetPrize)))
+	mux.Handle("POST   /api/v1/admin/prizes",                      adminAuth(http.HandlerFunc(adminH.CreatePrize)))
+	mux.Handle("PUT    /api/v1/admin/prizes/{id}",                 adminAuth(http.HandlerFunc(adminH.UpdatePrize)))
+	mux.Handle("DELETE /api/v1/admin/prizes/{id}",                 adminAuth(http.HandlerFunc(adminH.DeletePrize)))
+	mux.Handle("POST   /api/v1/admin/prizes/reorder",              adminAuth(http.HandlerFunc(adminH.ReorderPrizes)))
+	// Spin configuration + tiers
+	mux.Handle("GET    /api/v1/admin/spin/config",                 adminAuth(http.HandlerFunc(adminH.GetSpinConfig)))
+	mux.Handle("PUT    /api/v1/admin/spin/config",                 adminAuth(http.HandlerFunc(adminH.UpdateSpinConfig)))
+	mux.Handle("GET    /api/v1/admin/spin/tiers",                  adminAuth(http.HandlerFunc(adminH.GetSpinTiers)))
+	mux.Handle("POST   /api/v1/admin/spin/tiers",                  adminAuth(http.HandlerFunc(adminH.CreateSpinTier)))
+	mux.Handle("PUT    /api/v1/admin/spin/tiers/{id}",             adminAuth(http.HandlerFunc(adminH.UpdateSpinTier)))
+	mux.Handle("DELETE /api/v1/admin/spin/tiers/{id}",             adminAuth(http.HandlerFunc(adminH.DeleteSpinTier)))
+	// Spin claims management
+	mux.Handle("GET    /api/v1/admin/spin/claims",                 adminAuth(http.HandlerFunc(adminH.ListClaims)))
+	mux.Handle("GET    /api/v1/admin/spin/claims/pending",         adminAuth(http.HandlerFunc(adminH.GetPendingClaims)))
+	mux.Handle("GET    /api/v1/admin/spin/claims/statistics",      adminAuth(http.HandlerFunc(adminH.GetClaimStatistics)))
+	mux.Handle("GET    /api/v1/admin/spin/claims/export",          adminAuth(http.HandlerFunc(adminH.ExportClaims)))
+	mux.Handle("GET    /api/v1/admin/spin/claims/{id}",            adminAuth(http.HandlerFunc(adminH.GetClaimDetails)))
+	mux.Handle("POST   /api/v1/admin/spin/claims/{id}/approve",    adminAuth(http.HandlerFunc(adminH.ApproveClaim)))
+	mux.Handle("POST   /api/v1/admin/spin/claims/{id}/reject",     adminAuth(http.HandlerFunc(adminH.RejectClaim)))
+	// Points ledger audit
+	mux.Handle("GET    /api/v1/admin/points/stats",           adminAuth(http.HandlerFunc(adminH.GetPointsStats)))
+	mux.Handle("GET    /api/v1/admin/points/history",         adminAuth(http.HandlerFunc(adminH.GetPointsHistory)))
+	mux.Handle("POST   /api/v1/admin/points/adjust",          adminAuth(http.HandlerFunc(adminH.AdjustPoints)))
+	// Recharge reward config (spin credit threshold, pulse point rate, MTN push minimum)
+	mux.Handle("GET    /api/v1/admin/recharge/config",        adminAuth(http.HandlerFunc(adminH.GetRechargeConfig)))
+	mux.Handle("PUT    /api/v1/admin/recharge/config",        adminAuth(http.HandlerFunc(adminH.UpdateRechargeConfig)))
+	// User management
+	mux.Handle("GET    /api/v1/admin/users/{id}",             adminAuth(http.HandlerFunc(adminH.GetUser)))
+	mux.Handle("PUT    /api/v1/admin/users/{id}/suspend",     adminAuth(http.HandlerFunc(adminH.SuspendUser)))
+	// Studio tool enable/reprice — handled by PUT /api/v1/admin/studio-tools/{id} above
+	// Notification broadcast
+	mux.Handle("POST   /api/v1/admin/notifications/broadcast", adminAuth(http.HandlerFunc(adminH.BroadcastNotification)))
+	mux.Handle("GET    /api/v1/admin/notifications/broadcasts",adminAuth(http.HandlerFunc(adminH.GetBroadcastHistory)))
+	// Fraud management
+	mux.Handle("POST   /api/v1/admin/fraud/{id}/resolve",     adminAuth(http.HandlerFunc(adminH.ResolveFraudEvent)))
+	// Regional Wars control
+	mux.Handle("POST   /api/v1/admin/wars/cycle/reset",       adminAuth(http.HandlerFunc(adminH.ResetWarsCycle)))
+	// MTN Push CSV bulk upload (fallback when webhook API is unavailable)
+	mux.Handle("POST   /api/v1/admin/mtn-push/csv-upload",               adminAuth(http.HandlerFunc(adminH.UploadMTNPushCSV)))
+	mux.Handle("GET    /api/v1/admin/mtn-push/csv-upload",               adminAuth(http.HandlerFunc(adminH.ListMTNPushCSVUploads)))
+	mux.Handle("GET    /api/v1/admin/mtn-push/csv-upload/{id}",          adminAuth(http.HandlerFunc(adminH.GetMTNPushCSVUpload)))
+	mux.Handle("GET    /api/v1/admin/mtn-push/csv-upload/{id}/rows",     adminAuth(http.HandlerFunc(adminH.GetMTNPushCSVUploadRows)))
+	// Bonus Pulse manual awards
+	mux.Handle("POST   /api/v1/admin/bonus-pulse",            adminAuth(http.HandlerFunc(adminH.AwardBonusPulse)))
+	mux.Handle("GET    /api/v1/admin/bonus-pulse",            adminAuth(http.HandlerFunc(adminH.ListBonusPulseAwards)))
+	// Passport & USSD monitoring
+	mux.Handle("GET    /api/v1/admin/passport/stats",         adminAuth(http.HandlerFunc(adminH.GetPassportStats)))
+	mux.Handle("GET    /api/v1/admin/passport/nudge-log",     adminAuth(http.HandlerFunc(adminH.GetGhostNudgeLog)))
+	mux.Handle("GET    /api/v1/admin/ussd/sessions",          adminAuth(http.HandlerFunc(adminH.GetUSSDSessions)))
+	// AI Provider management (dynamic provider registry)
+	mux.Handle("GET    /api/v1/admin/ai-providers",                    adminAuth(http.HandlerFunc(aiProviderH.ListProviders)))
+	mux.Handle("GET    /api/v1/admin/ai-providers/meta",               adminAuth(http.HandlerFunc(aiProviderH.GetProviderMeta)))
+	mux.Handle("POST   /api/v1/admin/ai-providers",                    adminAuth(http.HandlerFunc(aiProviderH.CreateProvider)))
+	mux.Handle("PUT    /api/v1/admin/ai-providers/{id}",               adminAuth(http.HandlerFunc(aiProviderH.UpdateProvider)))
+	mux.Handle("DELETE /api/v1/admin/ai-providers/{id}",               adminAuth(http.HandlerFunc(aiProviderH.DeleteProvider)))
+	mux.Handle("POST   /api/v1/admin/ai-providers/{id}/activate",      adminAuth(http.HandlerFunc(aiProviderH.ActivateProvider)))
+	mux.Handle("POST   /api/v1/admin/ai-providers/{id}/deactivate",    adminAuth(http.HandlerFunc(aiProviderH.DeactivateProvider)))
+	mux.Handle("POST   /api/v1/admin/ai-providers/{id}/test",          adminAuth(http.HandlerFunc(aiProviderH.TestProvider)))
 
-	// Studio tools
-	mux.Handle("GET /api/v1/admin/studio-tools", adminAuth(http.HandlerFunc(adminH.GetStudioTools)))
-	mux.Handle("POST /api/v1/admin/studio-tools", adminAuth(http.HandlerFunc(adminH.CreateStudioTool)))
-	mux.Handle("GET /api/v1/admin/studio-tools/stats", adminAuth(http.HandlerFunc(adminH.GetStudioToolStats)))
-	mux.Handle("GET /api/v1/admin/studio-tools/{id}/errors", adminAuth(http.HandlerFunc(adminH.GetStudioToolErrors)))
-	mux.Handle("PUT /api/v1/admin/studio-tools/{id}", adminAuth(http.HandlerFunc(adminH.UpdateStudioTool)))
-	mux.Handle("DELETE /api/v1/admin/studio-tools/{id}", adminAuth(http.HandlerFunc(adminH.DisableStudioTool)))
-	mux.Handle("GET /api/v1/admin/studio-generations", adminAuth(http.HandlerFunc(adminH.GetStudioGenerations)))
 
-	// Users
-	mux.Handle("GET /api/v1/admin/users", adminAuth(http.HandlerFunc(adminH.ListUsers)))
-	mux.Handle("GET /api/v1/admin/users/{id}", adminAuth(http.HandlerFunc(adminH.GetUser)))
-	mux.Handle("PUT /api/v1/admin/users/{id}/suspend", adminAuth(http.HandlerFunc(adminH.SuspendUser)))
-
-	// Regional Wars
-	mux.Handle("GET /api/v1/admin/regional-wars", adminAuth(http.HandlerFunc(adminH.GetRegionalWars)))
-	mux.Handle("POST /api/v1/admin/wars/resolve", adminAuth(http.HandlerFunc(warsH.AdminResolve)))
-	mux.Handle("PUT /api/v1/admin/wars/prize-pool", adminAuth(http.HandlerFunc(warsH.AdminUpdatePrizePool)))
-	mux.Handle("POST /api/v1/admin/wars/cycle/reset", adminAuth(http.HandlerFunc(adminH.ResetWarsCycle)))
-
-	// Fraud
-	mux.Handle("GET /api/v1/admin/fraud-events", adminAuth(http.HandlerFunc(fraudH.ListEvents)))
-	mux.Handle("PUT /api/v1/admin/fraud-events/{id}/resolve", adminAuth(http.HandlerFunc(fraudH.ResolveEvent)))
-	mux.Handle("PUT /api/v1/admin/users/{id}/suspend", adminAuth(http.HandlerFunc(fraudH.SuspendUser)))
-	mux.Handle("POST /api/v1/admin/fraud/{id}/resolve", adminAuth(http.HandlerFunc(adminH.ResolveFraudEvent)))
-
-	// ─── Draw Schedule Config (admin-configurable window rules) ─────────────
-	// IMPORTANT: /preview must be before /{id} to avoid being matched as a UUID.
-	mux.Handle("GET /api/v1/admin/draw/schedule", adminAuth(http.HandlerFunc(adminH.GetDrawSchedule)))
-	mux.Handle("POST /api/v1/admin/draw/schedule", adminAuth(http.HandlerFunc(adminH.CreateDrawSchedule)))
-	mux.Handle("GET /api/v1/admin/draw/schedule/preview", adminAuth(http.HandlerFunc(adminH.PreviewDrawWindow)))
-	mux.Handle("PUT /api/v1/admin/draw/schedule/{id}", adminAuth(http.HandlerFunc(adminH.UpdateDrawSchedule)))
-	mux.Handle("DELETE /api/v1/admin/draw/schedule/{id}", adminAuth(http.HandlerFunc(adminH.DeleteDrawSchedule)))
-
-	// ─── MTN Push CSV Bulk Upload (fallback when MTN webhook API is down) ────────
-	// IMPORTANT: static sub-paths (/rows) MUST be before /{id} to avoid UUID match.
-	mux.Handle("POST /api/v1/admin/mtn-push/csv-upload", adminAuth(http.HandlerFunc(adminH.UploadMTNPushCSV)))
-	mux.Handle("GET /api/v1/admin/mtn-push/csv-upload", adminAuth(http.HandlerFunc(adminH.ListMTNPushCSVUploads)))
-	mux.Handle("GET /api/v1/admin/mtn-push/csv-upload/{id}/rows", adminAuth(http.HandlerFunc(adminH.GetMTNPushCSVUploadRows)))
-	mux.Handle("GET /api/v1/admin/mtn-push/csv-upload/{id}", adminAuth(http.HandlerFunc(adminH.GetMTNPushCSVUpload)))
-
-	// ─── Bonus Pulse Point Awards (super-admin campaign incentives) ──────────────
-	mux.Handle("POST /api/v1/admin/bonus-pulse", adminAuth(http.HandlerFunc(adminH.AwardBonusPulse)))
-	mux.Handle("GET /api/v1/admin/bonus-pulse", adminAuth(http.HandlerFunc(adminH.ListBonusPulseAwards)))
-
-	// ─── Draws admin — full CRUD + execute + CSV export
-	mux.Handle("GET /api/v1/admin/draws", adminAuth(http.HandlerFunc(adminH.GetDraws)))
-	mux.Handle("POST /api/v1/admin/draws", adminAuth(http.HandlerFunc(adminH.CreateDraw)))
-	mux.Handle("PUT /api/v1/admin/draws/{id}", adminAuth(http.HandlerFunc(adminH.UpdateDraw)))
-	mux.Handle("POST /api/v1/admin/draws/{id}/execute", adminAuth(http.HandlerFunc(adminH.ExecuteDraw)))
-	mux.Handle("GET /api/v1/admin/draws/{id}/winners", adminAuth(http.HandlerFunc(adminH.GetDrawWinners)))
-	mux.Handle("GET /api/v1/admin/draws/{id}/export", adminAuth(http.HandlerFunc(adminH.ExportDrawEntries)))
-
-	// ─── Prize / Spin Wheel CRUD ──────────────────────────────
-	// IMPORTANT: static sub-paths (/summary, /reorder) MUST be registered
-	// BEFORE the wildcard /{id} path so Go 1.22 mux resolves them correctly.
-	mux.Handle("GET /api/v1/admin/prizes", adminAuth(http.HandlerFunc(adminH.GetPrizePool)))
-	mux.Handle("POST /api/v1/admin/prizes", adminAuth(http.HandlerFunc(adminH.CreatePrize)))
-	mux.Handle("GET /api/v1/admin/prizes/summary", adminAuth(http.HandlerFunc(adminH.GetPrizeSummary)))
-	mux.Handle("POST /api/v1/admin/prizes/reorder", adminAuth(http.HandlerFunc(adminH.ReorderPrizes)))
-	mux.Handle("GET /api/v1/admin/prizes/{id}", adminAuth(http.HandlerFunc(adminH.GetPrize)))
-	mux.Handle("PUT /api/v1/admin/prizes/{id}", adminAuth(http.HandlerFunc(adminH.UpdatePrize)))
-	mux.Handle("DELETE /api/v1/admin/prizes/{id}", adminAuth(http.HandlerFunc(adminH.DeletePrize)))
-
-	// ─── Spin Tiers ───────────────────────────────────────────
-	mux.Handle("GET /api/v1/admin/spin/tiers", adminAuth(http.HandlerFunc(adminH.GetSpinTiers)))
-	mux.Handle("POST /api/v1/admin/spin/tiers", adminAuth(http.HandlerFunc(adminH.CreateSpinTier)))
-	mux.Handle("PUT /api/v1/admin/spin/tiers/{id}", adminAuth(http.HandlerFunc(adminH.UpdateSpinTier)))
-	mux.Handle("DELETE /api/v1/admin/spin/tiers/{id}", adminAuth(http.HandlerFunc(adminH.DeleteSpinTier)))
-
-	// ─── Spin Configuration ───────────────────────────────────
-	mux.Handle("GET /api/v1/admin/spin/config", adminAuth(http.HandlerFunc(adminH.GetSpinConfig)))
-	mux.Handle("PUT /api/v1/admin/spin/config", adminAuth(http.HandlerFunc(adminH.UpdateSpinConfig)))
-
-	// ─── Recharge Reward Thresholds ──────────────────────────
-	// spin_draw_naira_per_credit (default ₦200) — ₦ per spin credit + draw entry
-	// pulse_naira_per_point      (default ₦250) — ₦ per Pulse Point (AI Studio)
-	// mtn_push_min_amount_naira  (default ₦50)  — minimum qualifying recharge
-	mux.Handle("GET /api/v1/admin/recharge/config", adminAuth(http.HandlerFunc(adminH.GetRechargeConfig)))
-	mux.Handle("PUT /api/v1/admin/recharge/config", adminAuth(http.HandlerFunc(adminH.UpdateRechargeConfig)))
-
-	// ─── Spin Claims ──────────────────────────────────────────
-	// IMPORTANT: static sub-paths (/pending, /statistics, /export) MUST be
-	// registered BEFORE the wildcard /{id} path.
-	mux.Handle("GET /api/v1/admin/spin/claims", adminAuth(http.HandlerFunc(adminH.ListClaims)))
-	mux.Handle("GET /api/v1/admin/spin/claims/pending", adminAuth(http.HandlerFunc(adminH.GetPendingClaims)))
-	mux.Handle("GET /api/v1/admin/spin/claims/statistics", adminAuth(http.HandlerFunc(adminH.GetClaimStatistics)))
-	mux.Handle("GET /api/v1/admin/spin/claims/export", adminAuth(http.HandlerFunc(adminH.ExportClaims)))
-	mux.Handle("GET /api/v1/admin/spin/claims/{id}", adminAuth(http.HandlerFunc(adminH.GetClaimDetails)))
-	mux.Handle("POST /api/v1/admin/spin/claims/{id}/approve", adminAuth(http.HandlerFunc(adminH.ApproveClaim)))
-	mux.Handle("POST /api/v1/admin/spin/claims/{id}/reject", adminAuth(http.HandlerFunc(adminH.RejectClaim)))
-
-	// ─── Points ledger audit ──────────────────────────────────
-	mux.Handle("GET /api/v1/admin/points/stats", adminAuth(http.HandlerFunc(adminH.GetPointsStats)))
-	mux.Handle("GET /api/v1/admin/points/history", adminAuth(http.HandlerFunc(adminH.GetPointsHistory)))
-	mux.Handle("POST /api/v1/admin/points/adjust", adminAuth(http.HandlerFunc(adminH.AdjustPoints)))
-
-	// ─── Notification broadcast ───────────────────────────────
-	mux.Handle("POST /api/v1/admin/notifications/broadcast", adminAuth(http.HandlerFunc(adminH.BroadcastNotification)))
-	mux.Handle("GET /api/v1/admin/notifications/broadcasts", adminAuth(http.HandlerFunc(adminH.GetBroadcastHistory)))
-
-	// ─── Subscriptions ────────────────────────────────────────
-	mux.Handle("GET /api/v1/admin/subscriptions", adminAuth(http.HandlerFunc(adminH.GetSubscriptions)))
-	mux.Handle("PUT /api/v1/admin/subscriptions/{id}", adminAuth(http.HandlerFunc(adminH.UpdateSubscription)))
-
-	// ─── System health ────────────────────────────────────────
-	mux.Handle("GET /api/v1/admin/health", adminAuth(http.HandlerFunc(adminH.GetHealth)))
-	mux.Handle("GET /api/v1/admin/ai-health", adminAuth(http.HandlerFunc(adminH.GetAIHealth)))
-
-	// ─── Passport & USSD admin monitoring ────────────────────
-	mux.Handle("GET /api/v1/admin/passport/stats", adminAuth(http.HandlerFunc(adminH.GetPassportStats)))
-	mux.Handle("GET /api/v1/admin/passport/nudge-log", adminAuth(http.HandlerFunc(adminH.GetGhostNudgeLog)))
-	mux.Handle("GET /api/v1/admin/ussd/sessions", adminAuth(http.HandlerFunc(adminH.GetUSSDSessions)))
+	// System health (REQ-5.8.3)
+	mux.Handle("GET    /api/v1/admin/health",                 adminAuth(http.HandlerFunc(adminH.GetHealth)))
+	mux.Handle("GET    /api/v1/admin/ai-health",              adminAuth(http.HandlerFunc(adminH.GetAIHealth)))
 
 	// ─── HTTP Server ──────────────────────────────────────────
 	port := cfg.GetString("port", "8080")

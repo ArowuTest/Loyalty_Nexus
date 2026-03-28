@@ -14,41 +14,62 @@ const TYPE_ICONS: Record<PrizeType, string> = {
   momo_cash:    "💵",
 };
 
-const TYPE_COLORS: Record<PrizeType, string> = {
-  try_again:    "bg-gray-100 border-gray-300",
-  pulse_points: "bg-indigo-50 border-indigo-300",
-  airtime:      "bg-blue-50 border-blue-300",
-  data_bundle:  "bg-cyan-50 border-cyan-300",
-  momo_cash:    "bg-green-50 border-green-300",
+const TYPE_LABELS: Record<PrizeType, string> = {
+  try_again:    "Try Again (no prize)",
+  pulse_points: "Pulse Points",
+  airtime:      "Airtime",
+  data_bundle:  "Data Bundle",
+  momo_cash:    "MoMo Cash",
 };
 
-type LocalPrize = Omit<Prize, "id"> & { id?: string; _dirty?: boolean };
+const DEFAULT_COLORS: Record<PrizeType, string> = {
+  try_again:    "#6b7280",
+  pulse_points: "#5f72f9",
+  airtime:      "#2196F3",
+  data_bundle:  "#9C27B0",
+  momo_cash:    "#10b981",
+};
+
+type LocalPrize = Prize & { _dirty?: boolean; _isNew?: boolean };
 
 function totalWeight(prizes: LocalPrize[]): number {
-  return prizes.filter(p => p.is_active).reduce((s, p) => s + p.probability, 0);
+  return prizes.filter(p => p.is_active).reduce((s, p) => s + (p.win_probability_weight || 0), 0);
+}
+
+function fmt(val: number, type: PrizeType): string {
+  if (type === "try_again") return "—";
+  if (type === "pulse_points") return `${val} pts`;
+  if (type === "airtime" || type === "momo_cash") return `₦${(val / 100).toLocaleString()}`;
+  if (type === "data_bundle") return val >= 100000 ? `${val / 100000}GB` : `${val / 100}MB`;
+  return String(val);
 }
 
 export default function SpinConfigPage() {
-  const [prizes, setPrizes]   = useState<LocalPrize[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving]   = useState(false);
-  const [saved, setSaved]     = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [prizes, setPrizes]     = useState<LocalPrize[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState(false);
+  const [saved, setSaved]       = useState(false);
+  const [error, setError]       = useState<string | null>(null);
 
-  // Config keys for spin settings
-  const [spinMax, setSpinMax]         = useState("3");
-  const [liabilityCap, setLiabCap]    = useState("500000");
-  const [savingCfg, setSavingCfg]     = useState(false);
-  const [savedCfg, setSavedCfg]       = useState(false);
+  // Spin limit config
+  const [spinMax, setSpinMax]     = useState("3");
+  const [liabCap, setLiabCap]     = useState("500000");
+  const [savingCfg, setSavingCfg] = useState(false);
+  const [savedCfg, setSavedCfg]   = useState(false);
 
   const load = useCallback(async () => {
-    const [r, cfg] = await Promise.all([adminAPI.getPrizePool(), adminAPI.getConfig()]);
-    setPrizes(r.prizes);
-    const m: Record<string,string> = {};
-    cfg.configs.forEach(c => { m[c.key] = String(c.value); });
-    setSpinMax(m["spin_max_per_user_per_day"] ?? "3");
-    setLiabCap(String(Number(m["daily_prize_liability_cap_kobo"] ?? "50000000") / 100));
-    setLoading(false);
+    try {
+      const [r, cfg] = await Promise.all([adminAPI.getPrizePool(), adminAPI.getConfig()]);
+      setPrizes(r.prizes as LocalPrize[]);
+      const m: Record<string, string> = {};
+      cfg.configs.forEach(c => { m[c.key] = String(c.value); });
+      setSpinMax(m["spin_max_per_user_per_day"] ?? "3");
+      setLiabCap(String(Number(m["daily_prize_liability_cap_kobo"] ?? "50000000") / 100));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -57,205 +78,276 @@ export default function SpinConfigPage() {
     setPrizes(prev => prev.map((p, j) => j === i ? { ...p, [field]: val, _dirty: true } : p));
 
   const addSlot = () => {
-    if (prizes.length >= 16) { setError("Maximum 16 slots allowed"); return; }
-    setPrizes(prev => [...prev, {
-      name: "New Prize", prize_type: "try_again", base_value: 0,
-      probability: 0, daily_inventory: -1, is_active: true, _dirty: true,
-    }]);
+    if (prizes.length >= 16) { setError("Maximum 16 slots"); return; }
+    const newPrize: LocalPrize = {
+      id: "", name: "New Prize",
+      prize_type: "try_again",
+      base_value: 0, win_probability_weight: 0,
+      is_active: true, is_no_win: true,
+      color_scheme: DEFAULT_COLORS["try_again"],
+      _dirty: true, _isNew: true,
+    };
+    setPrizes(p => [...p, newPrize]);
   };
 
   const removeSlot = (i: number) => {
-    if (prizes.length <= 8) { setError("Minimum 8 slots required"); return; }
-    setPrizes(prev => prev.filter((_, j) => j !== i));
+    const p = prizes[i];
+    if (p._isNew) { setPrizes(prev => prev.filter((_, j) => j !== i)); return; }
+    if (!confirm(`Delete "${p.name}"?`)) return;
+    adminAPI.deletePrize(p.id).then(load).catch(e => setError(String(e)));
   };
 
   const validateAndSave = async () => {
-    const active = prizes.filter(p => p.is_active);
-    const total = active.reduce((s, p) => s + p.probability, 0);
-    if (Math.abs(total - 100) > 0.01) {
-      setError(`Probability weights must sum to 100% (currently ${total.toFixed(2)}%)`);
-      return;
-    }
-    if (prizes.length < 8 || prizes.length > 16) {
-      setError("Wheel must have 8–16 slots");
-      return;
-    }
     setError(null);
+    const active = prizes.filter(p => p.is_active);
+    const total = active.reduce((s, p) => s + (p.win_probability_weight || 0), 0);
+    if (total > 10000) {
+      setError(`Total probability weight is ${total}/10000 (${(total/100).toFixed(2)}%). Must be ≤ 10000 (100.00%).`);
+      return;
+    }
     setSaving(true);
     try {
-      // Save each dirty prize via PUT /admin/prizes/:id
-      const savePs = prizes.map((p) => {
-        if (!p.id || !p._dirty) return Promise.resolve();
-        return adminAPI.updatePrize(p.id, {
-          name: p.name, prize_type: p.prize_type, base_value: p.base_value,
-          probability: p.probability, daily_inventory: p.daily_inventory,
+      for (const p of prizes) {
+        if (!p._dirty) continue;
+        const payload = {
+          name: p.name,
+          prize_type: p.prize_type,
+          base_value: p.base_value,
+          win_probability_weight: p.win_probability_weight,
+          daily_inventory_cap: p.daily_inventory_cap ?? -1,
           is_active: p.is_active,
-        }).catch((e) => { throw new Error(`Failed to save "${p.name}": ${e.message}`); });
-      });
-      await Promise.all(savePs);
-      // Also sync probability weights via spin config endpoint
-      setSaved(true); setTimeout(() => setSaved(false), 2000);
-    } catch (e: unknown) { setError((e as Error).message); }
-    finally { setSaving(false); }
+          is_no_win: p.is_no_win ?? false,
+          no_win_message: p.no_win_message ?? "",
+          color_scheme: p.color_scheme ?? DEFAULT_COLORS[p.prize_type as PrizeType] ?? "#888",
+          sort_order: p.sort_order ?? 0,
+          minimum_recharge: p.minimum_recharge ?? 0,
+        };
+        if (p._isNew) {
+          await adminAPI.createPrize(payload as Omit<Prize, "id">);
+        } else {
+          await adminAPI.updatePrize(p.id, payload);
+        }
+      }
+      await load();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const saveSpinConfig = async () => {
     setSavingCfg(true);
-    await Promise.all([
-      adminAPI.updateConfig("spin_max_per_user_per_day", spinMax),
-      adminAPI.updateConfig("daily_prize_liability_cap_kobo", String(Math.round(Number(liabilityCap) * 100))),
-    ]);
-    setSavingCfg(false); setSavedCfg(true); setTimeout(() => setSavedCfg(false), 2000);
+    try {
+      await Promise.all([
+        adminAPI.updateConfig("spin_max_per_user_per_day", spinMax),
+        adminAPI.updateConfig("daily_prize_liability_cap_kobo", String(Number(liabCap) * 100)),
+      ]);
+      setSavedCfg(true);
+      setTimeout(() => setSavedCfg(false), 2500);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Config save failed");
+    } finally {
+      setSavingCfg(false);
+    }
   };
 
-  const tw = totalWeight(prizes);
-  const twColor = Math.abs(tw - 100) < 0.01 ? "text-green-600" : "text-red-600";
+  const total = totalWeight(prizes);
+  const pct = (total / 100).toFixed(2);
+  const barColor = total > 10000 ? "#ef4444" : total === 10000 ? "#10b981" : "#5f72f9";
 
   return (
-    <div className="space-y-8 max-w-5xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Spin Wheel Configurator</h1>
-          <p className="text-sm text-gray-500 mt-1">Configure prize slots, probabilities, and liability limits. (REQ-5.3.x)</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className={`text-sm font-semibold ${twColor}`}>
-            Weight total: {tw.toFixed(2)}% {Math.abs(tw - 100) < 0.01 ? "✓" : "(must be 100%)"}
-          </span>
-          <button onClick={validateAndSave} disabled={saving}
-            className={`px-4 py-2 rounded-lg text-sm font-medium ${
-              saved ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"
-            } disabled:opacity-50`}>
-            {saving ? "Saving…" : saved ? "✓ Saved" : "Save Prize Table"}
-          </button>
-        </div>
-      </div>
+    <AdminShell>
+      <div className="max-w-4xl mx-auto space-y-6 pb-12">
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm flex items-center gap-2">
-          ⚠️ {error}
-          <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600">✕</button>
-        </div>
-      )}
-
-      {/* ── Spin Controls ── */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h2 className="text-base font-semibold text-gray-800 mb-4">Spin Limits & Liability (REQ-5.3.5/5.3.6)</h2>
-        <div className="grid grid-cols-2 gap-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Max Spins Per User Per Day</label>
-            <div className="flex gap-2">
-              <input type="number" value={spinMax} onChange={e => setSpinMax(e.target.value)}
-                className="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
-              <span className="self-center text-xs text-gray-400">spins/day</span>
-            </div>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: "#e2e8ff" }}>🎰 Spin Wheel Config</h1>
+            <p style={{ color: "#828cb4", fontSize: 13, marginTop: 4 }}>
+              Manage prize slots, probabilities, and payout limits. Weights must sum to ≤ 10,000 (= 100%).
+            </p>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Daily Prize Liability Cap</label>
-            <div className="flex gap-2">
-              <span className="self-center text-sm text-gray-500">₦</span>
-              <input type="number" value={liabilityCap} onChange={e => setLiabCap(e.target.value)}
-                className="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
-            </div>
-          </div>
-        </div>
-        <button onClick={saveSpinConfig} disabled={savingCfg}
-          className={`mt-4 px-4 py-2 rounded-lg text-sm font-medium ${
-            savedCfg ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"
-          } disabled:opacity-50`}>
-          {savingCfg ? "Saving…" : savedCfg ? "✓ Saved" : "Save Limits"}
-        </button>
-      </div>
-
-      {/* ── Prize Slots ── */}
-      {loading ? (
-        <div className="flex justify-center py-20"><div className="animate-spin h-8 w-8 border-4 border-indigo-600 border-t-transparent rounded-full"/></div>
-      ) : (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-gray-800">
-              Prize Slots ({prizes.length}/16)
-            </h2>
-            <button onClick={addSlot}
-              className="px-3 py-1.5 border border-indigo-300 text-indigo-600 rounded-lg text-sm hover:bg-indigo-50">
-              + Add Slot
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={load}
+              style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid rgba(95,114,249,0.3)", color: "#828cb4", fontSize: 13, background: "transparent", cursor: "pointer" }}>
+              ↺ Refresh
+            </button>
+            <button onClick={validateAndSave} disabled={saving}
+              style={{ padding: "8px 18px", borderRadius: 8, background: saved ? "#10b981" : "#5f72f9", color: "#fff", fontWeight: 600, fontSize: 13, border: "none", cursor: "pointer", opacity: saving ? 0.6 : 1 }}>
+              {saving ? "Saving…" : saved ? "✓ Saved" : "Save Prize Table"}
             </button>
           </div>
-
-          {prizes.map((p, i) => (
-            <div key={i} className={`rounded-xl border-2 p-4 ${TYPE_COLORS[p.prize_type as PrizeType] ?? "bg-gray-50 border-gray-200"}`}>
-              <div className="flex gap-4 items-start flex-wrap">
-                {/* Active toggle */}
-                <div className="flex items-center gap-1 pt-1">
-                  <button onClick={() => update(i, "is_active", !p.is_active)}
-                    className={`w-10 h-5 rounded-full transition-colors ${p.is_active ? "bg-indigo-600" : "bg-gray-300"}`}>
-                    <span className={`block w-4 h-4 rounded-full bg-white shadow transition-transform mx-0.5 ${p.is_active ? "translate-x-5" : ""}`}/>
-                  </button>
-                  <span className="text-lg">{TYPE_ICONS[p.prize_type as PrizeType] ?? "🎁"}</span>
-                </div>
-
-                {/* Name */}
-                <div className="flex-1 min-w-32">
-                  <label className="text-xs text-gray-500 mb-1 block">Prize Name</label>
-                  <input value={p.name} onChange={e => update(i, "name", e.target.value)}
-                    className="w-full border border-white rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"/>
-                </div>
-
-                {/* Type */}
-                <div className="w-36">
-                  <label className="text-xs text-gray-500 mb-1 block">Type</label>
-                  <select value={p.prize_type} onChange={e => update(i, "prize_type", e.target.value)}
-                    className="w-full border border-white rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
-                    {PRIZE_TYPES.map(t => <option key={t} value={t}>{TYPE_ICONS[t]} {t.replace("_"," ")}</option>)}
-                  </select>
-                </div>
-
-                {/* Value */}
-                <div className="w-28">
-                  <label className="text-xs text-gray-500 mb-1 block">
-                    {p.prize_type === "momo_cash" || p.prize_type === "airtime" ? "Value (₦)" :
-                     p.prize_type === "pulse_points" ? "Points" :
-                     p.prize_type === "data_bundle" ? "MB" : "—"}
-                  </label>
-                  <input type="number" value={p.base_value}
-                    onChange={e => update(i, "base_value", Number(e.target.value))}
-                    disabled={p.prize_type === "try_again"}
-                    className="w-full border border-white rounded-lg px-2 py-1.5 text-sm bg-white disabled:bg-gray-50 focus:ring-2 focus:ring-indigo-500 outline-none"/>
-                </div>
-
-                {/* Probability */}
-                <div className="w-28">
-                  <label className="text-xs text-gray-500 mb-1 block">Weight (%)</label>
-                  <input type="number" step="0.1" min="0" max="100" value={p.probability}
-                    onChange={e => update(i, "probability", parseFloat(e.target.value) || 0)}
-                    className="w-full border border-white rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"/>
-                </div>
-
-                {/* Daily Inventory */}
-                <div className="w-28">
-                  <label className="text-xs text-gray-500 mb-1 block">Daily Cap</label>
-                  <input type="number" value={p.daily_inventory === -1 ? "" : p.daily_inventory}
-                    placeholder="∞"
-                    onChange={e => update(i, "daily_inventory", e.target.value ? Number(e.target.value) : -1)}
-                    className="w-full border border-white rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"/>
-                </div>
-
-                {/* Delete */}
-                <button onClick={() => removeSlot(i)}
-                  className="text-red-400 hover:text-red-600 text-xl pt-5">×</button>
-              </div>
-
-              {/* Probability bar */}
-              <div className="mt-3">
-                <div className="w-full bg-white/60 rounded-full h-1.5">
-                  <div className="bg-indigo-500 h-1.5 rounded-full transition-all"
-                    style={{ width: `${Math.min(p.probability, 100)}%` }}/>
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
-      )}
-    </div>
+
+        {error && (
+          <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "12px 16px", color: "#fca5a5", fontSize: 13, display: "flex", alignItems: "center", gap: 10 }}>
+            ⚠️ {error}
+            <button onClick={() => setError(null)} style={{ marginLeft: "auto", background: "none", border: "none", color: "#fca5a5", cursor: "pointer" }}>✕</button>
+          </div>
+        )}
+
+        {/* Spin Limits */}
+        <div className="card" style={{ padding: 20 }}>
+          <h2 style={{ fontSize: 15, fontWeight: 600, color: "#e2e8ff", marginBottom: 16 }}>⚙️ Spin Limits</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#828cb4", marginBottom: 6 }}>Max Spins / User / Day</label>
+              <input type="number" min={1} max={20} value={spinMax}
+                onChange={e => setSpinMax(e.target.value)}
+                style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 14 }} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#828cb4", marginBottom: 6 }}>Daily Prize Liability Cap (₦)</label>
+              <input type="number" value={liabCap}
+                onChange={e => setLiabCap(e.target.value)}
+                style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 14 }} />
+            </div>
+          </div>
+          <button onClick={saveSpinConfig} disabled={savingCfg}
+            style={{ marginTop: 14, padding: "8px 18px", borderRadius: 8, background: savedCfg ? "#10b981" : "#5f72f9", color: "#fff", fontWeight: 600, fontSize: 13, border: "none", cursor: "pointer", opacity: savingCfg ? 0.6 : 1 }}>
+            {savingCfg ? "Saving…" : savedCfg ? "✓ Saved" : "Save Limits"}
+          </button>
+        </div>
+
+        {/* Probability Meter */}
+        <div className="card" style={{ padding: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <span style={{ fontSize: 13, color: "#828cb4" }}>Total Probability Weight</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: barColor }}>{total} / 10,000 ({pct}%)</span>
+          </div>
+          <div style={{ height: 8, borderRadius: 4, background: "rgba(255,255,255,0.05)", overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${Math.min(100, total / 100)}%`, background: barColor, borderRadius: 4, transition: "width 0.3s" }} />
+          </div>
+          {total < 10000 && (
+            <p style={{ marginTop: 8, fontSize: 11, color: "#828cb4" }}>⚠️ {10000 - total} weight remaining unallocated — add to "Try Again" or another slot.</p>
+          )}
+          {total > 10000 && (
+            <p style={{ marginTop: 8, fontSize: 11, color: "#fca5a5" }}>❌ Over budget by {total - 10000} — reduce some weights before saving.</p>
+          )}
+        </div>
+
+        {/* Prize Slots */}
+        {loading ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}>
+            <div style={{ width: 32, height: 32, border: "3px solid #5f72f9", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <h2 style={{ fontSize: 15, fontWeight: 600, color: "#e2e8ff" }}>Prize Slots ({prizes.length}/16)</h2>
+              <button onClick={addSlot}
+                style={{ padding: "7px 16px", border: "1px solid rgba(95,114,249,0.4)", borderRadius: 8, color: "#5f72f9", background: "transparent", fontSize: 13, cursor: "pointer" }}>
+                + Add Slot
+              </button>
+            </div>
+
+            {prizes.map((p, i) => (
+              <div key={p.id || i} className="card" style={{ padding: 16, opacity: p.is_active ? 1 : 0.55 }}>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+
+                  {/* Active toggle + icon */}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, paddingTop: 4 }}>
+                    <button onClick={() => update(i, "is_active", !p.is_active)}
+                      style={{ width: 42, height: 22, borderRadius: 11, background: p.is_active ? "#5f72f9" : "#374151", border: "none", cursor: "pointer", position: "relative", transition: "background 0.2s" }}>
+                      <span style={{ position: "absolute", top: 2, left: p.is_active ? 22 : 2, width: 18, height: 18, background: "#fff", borderRadius: "50%", transition: "left 0.2s" }} />
+                    </button>
+                    <span style={{ fontSize: 20 }}>{TYPE_ICONS[p.prize_type as PrizeType] ?? "🎁"}</span>
+                  </div>
+
+                  {/* Name */}
+                  <div style={{ flex: "1 1 140px" }}>
+                    <label style={{ fontSize: 11, color: "#828cb4", display: "block", marginBottom: 4 }}>Prize Name</label>
+                    <input value={p.name} onChange={e => update(i, "name", e.target.value)}
+                      style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 7, padding: "7px 10px", color: "#e2e8ff", fontSize: 13 }} />
+                  </div>
+
+                  {/* Type */}
+                  <div style={{ flex: "1 1 130px" }}>
+                    <label style={{ fontSize: 11, color: "#828cb4", display: "block", marginBottom: 4 }}>Type</label>
+                    <select value={p.prize_type}
+                      onChange={e => {
+                        const t = e.target.value as PrizeType;
+                        update(i, "prize_type", t);
+                        update(i, "is_no_win", t === "try_again");
+                        update(i, "color_scheme", DEFAULT_COLORS[t] ?? "#888");
+                      }}
+                      style={{ width: "100%", background: "#1c2038", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 7, padding: "7px 10px", color: "#e2e8ff", fontSize: 13 }}>
+                      {PRIZE_TYPES.map(t => (
+                        <option key={t} value={t}>{TYPE_LABELS[t]}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Value */}
+                  {p.prize_type !== "try_again" && (
+                    <div style={{ flex: "1 1 100px" }}>
+                      <label style={{ fontSize: 11, color: "#828cb4", display: "block", marginBottom: 4 }}>
+                        Value {p.prize_type === "pulse_points" ? "(pts)" : p.prize_type === "data_bundle" ? "(kobo-MB)" : "(kobo)"}
+                      </label>
+                      <input type="number" min={0} value={p.base_value}
+                        onChange={e => update(i, "base_value", Number(e.target.value))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 7, padding: "7px 10px", color: "#e2e8ff", fontSize: 13 }} />
+                      <p style={{ fontSize: 10, color: "#5f72f9", marginTop: 3 }}>{fmt(p.base_value, p.prize_type as PrizeType)}</p>
+                    </div>
+                  )}
+
+                  {/* Probability weight */}
+                  <div style={{ flex: "1 1 100px" }}>
+                    <label style={{ fontSize: 11, color: "#828cb4", display: "block", marginBottom: 4 }}>
+                      Weight (of 10,000)
+                    </label>
+                    <input type="number" min={0} max={10000} value={p.win_probability_weight}
+                      onChange={e => update(i, "win_probability_weight", Number(e.target.value))}
+                      style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 7, padding: "7px 10px", color: "#e2e8ff", fontSize: 13 }} />
+                    <p style={{ fontSize: 10, color: "#5f72f9", marginTop: 3 }}>
+                      {((p.win_probability_weight / 100)).toFixed(2)}% chance
+                    </p>
+                  </div>
+
+                  {/* Daily cap */}
+                  <div style={{ flex: "1 1 80px" }}>
+                    <label style={{ fontSize: 11, color: "#828cb4", display: "block", marginBottom: 4 }}>Daily Cap (-1 = ∞)</label>
+                    <input type="number" min={-1} value={p.daily_inventory_cap ?? -1}
+                      onChange={e => update(i, "daily_inventory_cap", Number(e.target.value))}
+                      style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 7, padding: "7px 10px", color: "#e2e8ff", fontSize: 13 }} />
+                  </div>
+
+                  {/* Color */}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, paddingTop: 2 }}>
+                    <label style={{ fontSize: 11, color: "#828cb4" }}>Color</label>
+                    <input type="color" value={p.color_scheme || DEFAULT_COLORS[p.prize_type as PrizeType] || "#888"}
+                      onChange={e => update(i, "color_scheme", e.target.value)}
+                      style={{ width: 36, height: 32, borderRadius: 6, border: "none", background: "none", cursor: "pointer", padding: 0 }} />
+                  </div>
+
+                  {/* Delete */}
+                  <button onClick={() => removeSlot(i)}
+                    style={{ alignSelf: "flex-start", marginTop: 20, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 7, color: "#fca5a5", padding: "6px 12px", fontSize: 12, cursor: "pointer" }}>
+                    🗑
+                  </button>
+                </div>
+
+                {/* No-win message */}
+                {p.is_no_win && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(95,114,249,0.1)" }}>
+                    <label style={{ fontSize: 11, color: "#828cb4", display: "block", marginBottom: 4 }}>No-win message shown to user</label>
+                    <input value={p.no_win_message ?? ""}
+                      onChange={e => update(i, "no_win_message", e.target.value)}
+                      style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.1)", borderRadius: 7, padding: "7px 10px", color: "#e2e8ff", fontSize: 12 }} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
+    </AdminShell>
   );
 }

@@ -31,13 +31,21 @@ export interface QRData {
   qr_payload: string;
 }
 
-// ─── Bonus Pulse Award Types ─────────────────────────────────────────────────
+// ─── Bonus Pulse Award Types ──────────────────────────────────────
 export interface BonusPulseAward {
   id: string;
   points: number;
   campaign: string;
   note: string;
+  awarded_by_name: string;
   created_at: string;
+}
+
+export interface RegionalStat {
+  state: string;
+  total_points: number;
+  active_members: number;
+  rank: number;
 }
 
 // ─── API Client ───────────────────────────────────────────────────────────────
@@ -160,6 +168,7 @@ class APIClient {
     toolId: string,
     payload: {
       prompt: string;
+      tool_slug?: string;
       aspect_ratio?: string;
       duration?: number;
       voice_id?: string;
@@ -176,15 +185,100 @@ class APIClient {
       "POST", "/studio/generate", { tool_id: toolId, ...payload }
     );
   }
+
+  /** Convenience: generate by slug (no need to look up UUID first) */
+  generateBySlug(
+    toolSlug: string,
+    payload: { prompt: string; language?: string; image_url?: string; extra_params?: Record<string, unknown> }
+  ) {
+    return this.request<{ generation_id: string; status: string }>(
+      "POST", "/studio/generate", { tool_slug: toolSlug, ...payload }
+    );
+  }
   getGenerationStatus(id: string) {
     return this.request("GET", `/studio/generate/${id}`);
   }
   getGallery() { return this.request("GET", "/studio/gallery"); }
 
+  /** Upload an audio or image file to cloud storage.
+   *  Returns { url: string } — pass the url to generateTool() as prompt (transcribe)
+   *  or image_url (image-editor / video-animator).
+   */
+  async uploadAsset(file: File): Promise<{ url: string; key: string }> {
+    const form = new FormData();
+    form.append("file", file);
+    const token = this.getToken();
+    const resp = await fetch(`${BASE_URL}/studio/upload`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? `Upload failed (${resp.status})`);
+    }
+    return resp.json() as Promise<{ url: string; key: string }>;
+  }
+
   // ── Draws (user-facing) ───────────────────────────────────────────────────
   getDraws() { return this.request("GET", "/draws"); }
   getDrawWinners(id: string) { return this.request("GET", `/draws/${id}/winners`); }
 
+  // ── Regional Wars ─────────────────────────────────────────────────────────
+  getWarsLeaderboard(limit = 37) {
+    return this.request<{
+      leaderboard: Array<{
+        state: string; total_points: number; active_members: number;
+        rank: number; prize_kobo: number; period: string;
+      }>;
+      count: number;
+      period: string;
+    }>("GET", `/wars/leaderboard?limit=${limit}`);
+  }
+  getMyWarRank() {
+    return this.request<{
+      ranked: boolean;
+      entry?: { state: string; total_points: number; rank: number; prize_kobo: number };
+      message?: string;
+    }>("GET", "/wars/my-rank");
+  }
+  getWarsHistory(limit = 12) {
+    return this.request<{
+      wars: Array<{
+        id: string; period: string; status: string;
+        total_prize_kobo: number; starts_at: string; ends_at: string;
+      }>;
+      count: number;
+    }>("GET", `/wars/history?limit=${limit}`);
+  }
+  getWarWinners(period: string) {
+    return this.request("GET", `/wars/${period}/winners`);
+  }
+
+  // ── Prizes / Claims ──────────────────────────────────────────────────────
+  getMyWins() {
+    return this.request<Array<{
+      id: string;
+      prize_type: string;
+      prize_value: number;
+      prize_label: string;
+      fulfillment_status: string;
+      claim_status: string;
+      created_at: string;
+      expires_at: string;
+      needs_momo_setup?: boolean;
+    }>>("GET", "/spin/wins");
+  }
+  claimPrize(id: string, payload: { momo_number?: string; bank_account_number?: string; bank_account_name?: string; bank_name?: string } = {}) {
+    return this.request<{ id: string; claim_status: string; fulfillment_status: string }>("POST", `/spin/wins/${id}/claim`, payload);
+  }
+
+  // ── Notifications ────────────────────────────────────────────────────────
+  getNotifications() {
+    return this.request<{ notifications: Array<{ id: string; type: string; title: string; body: string; is_read: boolean; created_at: string }>; unread_count: number }>("GET", "/notifications");
+  }
+  markNotificationRead(id: string) { return this.request("PATCH", `/notifications/${id}/read`); }
+  markAllNotificationsRead() { return this.request("POST", "/notifications/read-all"); }
   // ── Chat usage quota ──────────────────────────────────────────────────────
   getChatUsage() { return this.request("GET", "/studio/chat/usage"); }
 

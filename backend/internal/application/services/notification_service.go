@@ -257,24 +257,6 @@ func (n *NotificationService) NotifyDrawResult(ctx context.Context, phone, fcmTo
 	}
 }
 
-// NotifySubscriptionExpiring warns user that their subscription is about to expire.
-func (n *NotificationService) NotifySubscriptionExpiring(ctx context.Context, phone, fcmToken string, hoursLeft int) {
-	msg := fmt.Sprintf("⏰ Your Loyalty Nexus subscription expires in %d hours. Recharge to stay Premium!", hoursLeft)
-	_ = n.SendSMS(ctx, phone, msg)
-	_ = n.SendPush(ctx, fcmToken, "Subscription Expiring ⏰", msg, map[string]string{
-		"type": "subscription_warn",
-	})
-}
-
-// NotifySubscriptionExpired tells user their subscription has been downgraded.
-func (n *NotificationService) NotifySubscriptionExpired(ctx context.Context, phone, fcmToken string) {
-	msg := "Your Loyalty Nexus Premium subscription has expired. Recharge to unlock premium spins & AI Studio!"
-	_ = n.SendSMS(ctx, phone, msg)
-	_ = n.SendPush(ctx, fcmToken, "Subscription Expired", msg, map[string]string{
-		"type": "subscription_expired",
-	})
-}
-
 // NotifyRegionalWarsResult announces war results to all state participants.
 func (n *NotificationService) NotifyRegionalWarsResult(ctx context.Context, phone, fcmToken, state string, rank int) {
 	var msg string

@@ -29,18 +29,69 @@ type AuthOTP struct {
 	CreatedAt   time.Time  `db:"created_at" json:"created_at"`
 }
 
+// AdminRole defines the RBAC roles for admin users.
+type AdminRole string
+const (
+	RoleSuperAdmin  AdminRole = "super_admin"  // Full platform access
+	RoleFinance     AdminRole = "finance"       // Approve claims, view financials, adjust points
+	RoleOperations  AdminRole = "operations"    // Manage draws, notifications, users, wars
+	RoleContent     AdminRole = "content"       // Manage studio tools, prizes, config
+)
+
+// AdminUser represents a platform admin with email/password credentials and RBAC role.
 type AdminUser struct {
 	ID           uuid.UUID `db:"id" json:"id"`
-	Username     string    `db:"username" json:"username"`
+	Email        string    `db:"email" json:"email"`
 	PasswordHash string    `db:"password_hash" json:"-"`
-	Role         string    `db:"role" json:"role"` // platform_admin | mno_executive
+	FullName     string    `db:"full_name" json:"full_name"`
+	Role         AdminRole `db:"role" json:"role"`
+	IsActive     bool      `db:"is_active" json:"is_active"`
+	LastLoginAt  *time.Time `db:"last_login_at" json:"last_login_at,omitempty"`
 	CreatedAt    time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
 }
 
 // JWTClaims used for both user and admin tokens.
 type JWTClaims struct {
-	UserID      string `json:"uid"`
-	PhoneNumber string `json:"phone,omitempty"`
-	Role        string `json:"role,omitempty"` // empty = subscriber
-	IsAdmin     bool   `json:"is_admin"`
+	UserID      string    `json:"uid"`
+	PhoneNumber string    `json:"phone,omitempty"`
+	Email       string    `json:"email,omitempty"`   // populated for admin tokens
+	Role        AdminRole `json:"role,omitempty"`    // populated for admin tokens
+	IsAdmin     bool      `json:"is_admin"`
+}
+
+// HasPermission returns true if the admin role is allowed to perform the action.
+// super_admin can do everything. Other roles have specific domains.
+func (c *JWTClaims) HasPermission(action string) bool {
+	if !c.IsAdmin {
+		return false
+	}
+	if c.Role == RoleSuperAdmin {
+		return true
+	}
+	permissions := map[AdminRole][]string{
+		RoleFinance: {
+			"claims:approve", "claims:reject", "claims:view",
+			"points:adjust", "points:view",
+			"dashboard:view", "users:view",
+		},
+		RoleOperations: {
+			"users:view", "users:suspend",
+			"draws:manage", "draws:execute",
+			"notifications:send",
+			"wars:manage",
+			"dashboard:view", "fraud:view", "fraud:resolve",
+		},
+		RoleContent: {
+			"prizes:manage", "studio:manage",
+			"config:manage", "passport:view",
+			"dashboard:view",
+		},
+	}
+	for _, perm := range permissions[c.Role] {
+		if perm == action {
+			return true
+		}
+	}
+	return false
 }

@@ -83,11 +83,63 @@ func (h *AdminHandler) GetPassportStats(w http.ResponseWriter, r *http.Request) 
 		topEarners = []BadgeEarner{}
 	}
 
+	// ── Active installs: Apple (wallet_registrations, is_active=true) ──────────
+	var activeAppleInstalls int64
+	h.db.WithContext(ctx).
+		Raw(`SELECT COUNT(*) FROM wallet_registrations WHERE platform = 'apple' AND is_active = true`).
+		Scan(&activeAppleInstalls)
+
+	// ── Active installs: Google (google_wallet_objects, state != 'inactive') ───
+	var activeGoogleInstalls int64
+	h.db.WithContext(ctx).
+		Raw(`SELECT COUNT(*) FROM google_wallet_objects WHERE state != 'inactive'`).
+		Scan(&activeGoogleInstalls)
+
+	// ── Device type breakdown from users table ───────────────────────────────
+	type DeviceTypeCount struct {
+		DeviceType string `json:"device_type"`
+		Count      int64  `json:"count"`
+	}
+	var deviceBreakdown []DeviceTypeCount
+	h.db.WithContext(ctx).
+		Raw(`SELECT
+		       CASE
+		         WHEN device_type IS NULL OR device_type = '' THEN 'unknown'
+		         ELSE LOWER(device_type)
+		       END AS device_type,
+		       COUNT(*) AS count
+		     FROM users
+		     GROUP BY 1
+		     ORDER BY count DESC`).
+		Scan(&deviceBreakdown)
+	if deviceBreakdown == nil {
+		deviceBreakdown = []DeviceTypeCount{}
+	}
+
+	// ── Pass removal rate (unregistered / total ever registered, Apple only) ──
+	var totalEverApple int64
+	h.db.WithContext(ctx).
+		Raw(`SELECT COUNT(*) FROM wallet_registrations WHERE platform = 'apple'`).
+		Scan(&totalEverApple)
+	var removedApple int64
+	h.db.WithContext(ctx).
+		Raw(`SELECT COUNT(*) FROM wallet_registrations WHERE platform = 'apple' AND is_active = false`).
+		Scan(&removedApple)
+	removalRatePct := 0.0
+	if totalEverApple > 0 {
+		removalRatePct = float64(removedApple) / float64(totalEverApple) * 100
+	}
+
 	jsonOK(w, map[string]interface{}{
 		"total_passports":        totalPassports,
 		"apple_wallet_downloads": appleDownloads,
 		"google_wallet_saves":    googleSaves,
 		"qr_scans_today":         qrScansToday,
+		"active_apple_installs":  activeAppleInstalls,
+		"active_google_installs": activeGoogleInstalls,
+		"total_active_installs":  activeAppleInstalls + activeGoogleInstalls,
+		"removal_rate_pct":       removalRatePct,
+		"device_breakdown":       deviceBreakdown,
 		"tier_breakdown":         tierBreakdown,
 		"top_badge_earners":      topEarners,
 	})

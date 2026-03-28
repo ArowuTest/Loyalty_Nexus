@@ -60,41 +60,19 @@ export default function HealthPage() {
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAuto] = useState(true);
 
+  const [error, setError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     try {
-      // GET /admin/health — we'll add this endpoint
+      setError(null);
       const r = await (adminAPI as AdminAPIWithHealth).getHealth();
       setData(r);
-    } catch {
-      // Fallback mock when endpoint isn't ready
-      setData({
-        overall: "healthy",
-        services: [
-          { name: "API Gateway",      status: "up",       latency_ms: 12,  uptime_pct: 99.98, last_checked: new Date().toISOString() },
-          { name: "PostgreSQL",       status: "up",       latency_ms: 5,   uptime_pct: 99.99, last_checked: new Date().toISOString() },
-          { name: "Redis",            status: "up",       latency_ms: 1,   uptime_pct: 100,   last_checked: new Date().toISOString() },
-          { name: "NATS",             status: "up",       latency_ms: 3,   uptime_pct: 99.95, last_checked: new Date().toISOString() },
-          { name: "Termii SMS",       status: "up",       latency_ms: 210, uptime_pct: 99.8,  last_checked: new Date().toISOString() },
-          { name: "Paystack",         status: "up",       latency_ms: 450, uptime_pct: 99.9,  last_checked: new Date().toISOString() },
-          { name: "VTPass",           status: "up",       latency_ms: 320, uptime_pct: 99.7,  last_checked: new Date().toISOString() },
-          { name: "MTN MoMo API",     status: "up",       latency_ms: 380, uptime_pct: 99.5,  last_checked: new Date().toISOString() },
-          { name: "FAL.AI",           status: "up",       latency_ms: 3200,uptime_pct: 99.6,  last_checked: new Date().toISOString() },
-          { name: "ElevenLabs",       status: "up",       latency_ms: 1800,uptime_pct: 99.4,  last_checked: new Date().toISOString() },
-          { name: "Hugging Face",     status: "up",       latency_ms: 4100,uptime_pct: 98.9,  last_checked: new Date().toISOString() },
-          { name: "Groq (Nexus Chat)","status": "up",     latency_ms: 180, uptime_pct: 99.85, last_checked: new Date().toISOString() },
-          { name: "Lifecycle Worker", status: "up",       latency_ms: 0,   uptime_pct: 100,   last_checked: new Date().toISOString() },
-          { name: "FCM Push",         status: "up",       latency_ms: 95,  uptime_pct: 99.99, last_checked: new Date().toISOString() },
-        ],
-        webhook_success_rate_24h: 99.4,
-        paystack_success_rate_24h: 99.7,
-        api_p99_ms: 210,
-        db_pool_used: 14,
-        db_pool_max: 50,
-        redis_hit_rate: 92.3,
-        checked_at: new Date().toISOString(),
-      });
+    } catch (err: any) {
+      console.error("Failed to load health data:", err);
+      setError(err.message || "Failed to load health data");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -106,6 +84,13 @@ export default function HealthPage() {
 
   if (loading) return (
     <div className="flex justify-center py-20"><div className="animate-spin h-8 w-8 border-4 border-indigo-600 border-t-transparent rounded-full"/></div>
+  );
+  if (error) return (
+    <div className="p-8 text-red-500 bg-red-50 rounded-xl border border-red-200">
+      <h2 className="font-bold text-lg mb-2">Error Loading Health Data</h2>
+      <p>{error}</p>
+      <button onClick={load} className="mt-4 px-4 py-2 bg-red-100 hover:bg-red-200 text-red-800 rounded-lg text-sm font-medium transition-colors">Try Again</button>
+    </div>
   );
   if (!data) return null;
 

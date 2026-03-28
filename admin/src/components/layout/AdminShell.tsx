@@ -11,7 +11,6 @@ const NAV = [
   ]},
   { group: "Users & Finance", items: [
     { href: "/users",          label: "👥 Users" },
-    { href: "/subscriptions",  label: "💳 Subscriptions" },
     { href: "/fraud",          label: "🛡 Fraud Alerts" },
   ]},
   { group: "Rewards Engine", items: [
@@ -19,12 +18,17 @@ const NAV = [
     { href: "/spin-config",     label: "🎡 Spin Wheel" },
     { href: "/prizes",          label: "🏆 Prize Pool" },
     { href: "/draws",           label: "🎟 Draws" },
-    { href: "/mtn-push-upload", label: "📤 MTN CSV Upload" },
-    { href: "/bonus-pulse",     label: "🎁 Bonus Pulse Points" },
+    { href: "/mtn-push-upload",   label: "📤 MTN CSV Upload" },
+    { href: "/bonus-pulse",       label: "🎁 Bonus Pulse Points" },
+    { href: "/recharge-config",   label: "⚡ Recharge Rewards" },
+    { href: "/team",            label: "👥 Admin Team (RBAC)" },
+    { href: "/generations",     label: "🎨 AI Generations" },
   ]},
   { group: "Content & AI", items: [
     { href: "/studio-tools",   label: "🧠 Studio Tools" },
+    { href: "/ai-providers",   label: "🔌 AI Providers" },
     { href: "/ai-health",      label: "⚡ AI Provider Health" },
+    { href: "/generations",    label: "🧪 Generations" },
     { href: "/notifications",  label: "📢 Notifications" },
   ]},
   { group: "Platform", items: [

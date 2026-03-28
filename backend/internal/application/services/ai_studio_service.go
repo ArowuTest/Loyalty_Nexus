@@ -16,7 +16,7 @@ package services
 //  mindmap          Learn       2 pts  Gemini Flash → Groq
 //  research-brief   Learn       5 pts  Gemini Flash → Groq → DeepSeek
 //  ai-photo         Create     10 pts  HF FLUX.1-Schnell (free) → FAL.AI FLUX-dev
-//  bg-music         Create      5 pts  HF MusicGen-small (free, uses HF_TOKEN) → Mubert → ElevenLabs sound
+//  bg-music         Create      5 pts  Pollinations ElevenMusic (instrumental) → Mubert → ElevenLabs sound
 //  podcast          Learn       4 pts  Gemini script + Google TTS narration
 //  slide-deck       Build       4 pts  Gemini Flash → Groq
 //  infographic      Build       5 pts  Gemini Flash → Groq
@@ -125,6 +125,14 @@ type AIStudioOrchestrator struct {
 	storage    external.AssetStorage
 	httpClient *http.Client
 	llmOrch    *external.LLMOrchestrator // for provider health tracking
+	providerDB ProviderConfigStore       // optional DB-backed provider registry
+}
+
+// ProviderConfigStore is the minimal interface the orchestrator needs
+// to load dynamic provider chains from the database.
+// Implemented by persistence.AIProviderRepository.
+type ProviderConfigStore interface {
+	ListByCategory(ctx context.Context, category string) ([]entities.AIProviderConfig, error)
 }
 
 func NewAIStudioOrchestrator(
@@ -145,6 +153,28 @@ func NewAIStudioOrchestrator(
 		storage:    storage,
 		httpClient: &http.Client{Timeout: 120 * time.Second},
 	}
+}
+
+// SetProviderDB wires the DB-backed provider registry.
+// When set, the dispatch functions check DB for active providers before
+// falling back to the hardcoded chains (backward-compatible).
+func (o *AIStudioOrchestrator) SetProviderDB(store ProviderConfigStore) {
+	o.providerDB = store
+}
+
+// dbProviders returns active providers for a category from DB, sorted by priority.
+// Returns nil (not an error) if DB is not wired or returns nothing — callers
+// treat nil as "use hardcoded chain".
+func (o *AIStudioOrchestrator) dbProviders(ctx context.Context, category string) []entities.AIProviderConfig {
+	if o.providerDB == nil {
+		return nil
+	}
+	providers, err := o.providerDB.ListByCategory(ctx, category)
+	if err != nil {
+		log.Printf("[AIStudio] dbProviders(%s): %v — using hardcoded chain", category, err)
+		return nil
+	}
+	return providers
 }
 
 // SetLLMOrch wires the LLM orchestrator for provider health tracking.
@@ -287,6 +317,13 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 
 	systemPrompt, userPrompt := buildTextPrompts(slug, prompt)
 
+	// ── DB-first: admin can override/reorder providers per category ──────────
+	in := providerInput{SystemPrompt: systemPrompt, UserPrompt: userPrompt}
+	if url, text, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryText, in); err == nil {
+		return &studioProviderResult{OutputText: text, OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain (active when DB has no text providers) ──────
 	providers := []struct {
 		name string
 		fn   func(ctx context.Context, sys, user string) (string, error)
@@ -397,19 +434,40 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 
 	case "photo-editor":
 		// Kontext image-to-image editing — CostMicros: $0.015
+		// NOTE: kontext is currently OFF on Pollinations monitor (40% success, 2520 5xx errors).
+		// Fallback chain: kontext → p-image-edit (Pruna, 98.1% success) → gptimage-large (generate from prompt)
 		// Frontend sends: { prompt: instruction, image_url: imgURL } via buildEnrichedPrompt
 		imgURL := env.ImageURL
 		instruction := env.Prompt
 		if imgURL == "" {
 			return nil, fmt.Errorf("photo-editor: image_url is required")
 		}
+		// Tier 1: kontext (FLUX.1 Kontext) — best quality image editing, currently OFF
 		url, err := o.callPollinationsKontext(ctx, imgURL, instruction)
-		if err != nil {
-			return nil, fmt.Errorf("photo-editor requires Pollinations key: %w", err)
+		if err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/kontext", CostMicros: 15000}, nil
 		}
-		return &studioProviderResult{OutputURL: url, Provider: "pollinations/kontext", CostMicros: 15000}, nil
+		log.Printf("[AIStudio] Kontext failed for photo-editor: %v — trying p-image-edit", err)
+		// Tier 2: p-image-edit (Pruna) — image-to-image editing, 98.1% success
+		url, err = o.callPollinationsKontextAlt(ctx, imgURL, instruction)
+		if err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/p-image-edit", CostMicros: 10000}, nil
+		}
+		log.Printf("[AIStudio] p-image-edit failed for photo-editor: %v — falling back to gptimage-large", err)
+		// Tier 3: gptimage-large — generate from instruction prompt (no source image, 100% success)
+		url, err = o.callPollinationsGPTImage(ctx, instruction, "gptimage-large")
+		if err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "pollinations/gptimage-large", CostMicros: 30000}, nil
+		}
+		return nil, fmt.Errorf("photo-editor: all providers failed: %w", err)
 
 	default: // ai-photo
+		// ── DB-first ────────────────────────────────────────────────────────
+		in := providerInput{Prompt: prompt}
+		if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryImage, in); err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+		}
+		// ── Hardcoded fallback ───────────────────────────────────────────────
 		// tier 1: HuggingFace FLUX.1-Schnell (free, uses HF_TOKEN)
 		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
 			url, err := o.callHFFluxSchnell(ctx, hfKey, prompt)
@@ -435,6 +493,13 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 }
 
 func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL string) (*studioProviderResult, error) {
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	in := providerInput{ImageURL: imageURL}
+	if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryBGRemove, in); err == nil {
+		return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	// Primary: self-hosted rembg microservice
 	if rembgURL := os.Getenv("REMBG_SERVICE_URL"); rembgURL != "" {
 		result, err := o.callRembgService(ctx, rembgURL, imageURL)
@@ -467,40 +532,63 @@ func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL s
 
 // ─── Video dispatch ────────────────────────────────────────────────────────────
 // Handles: animate-photo, video-premium, video-jingle, video-cinematic, video-veo
+//
+// Pollinations video model pricing (confirmed 2026-03-28):
+//   FREE:  wan-fast (Wan 2.2, 91.4% success), p-video (Pruna p-video, 100% success)
+//   PAID:  seedance (1.8/M pollen), seedance-pro (1.0/M), veo (0.150/sec), wan (0.050/sec)
+//   OFF:   ltx-2 (5.3% success — REMOVED from all chains)
+//
+// Strategy:
+//   video-cinematic  → wan-fast FREE primary, p-video FREE fallback  (ltx-2 was OFF — replaced)
+//   video-veo        → veo PAID primary, wan-fast FREE fallback, p-video FREE 2nd fallback
+//   animate-photo    → FAL LTX-Video → wan-fast FREE → p-video FREE (ltx-2 was OFF — replaced)
 
 func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
-	// video-cinematic: Seedance (image + motion prompt, paid)
-	// Frontend sends: { prompt: motionPrompt, image_url: imgURL } via buildEnrichedPrompt
+	// video-cinematic: high-quality cinematic image-to-video
+	// Primary: wan-fast (Wan 2.2) — FREE, 15 pollen input, ~50s, image-to-video
+	// Fallback: ltx-2 (LTX-2)   — FREE, 15 pollen input, NEW model
 	if slug == "video-cinematic" {
 		imgURL := env.ImageURL
 		motionPrompt := env.Prompt
 		if imgURL == "" {
 			return nil, fmt.Errorf("video-cinematic: image_url is required")
 		}
-		vidURL, err := o.callPollinationsSeedance(ctx, imgURL, motionPrompt)
-		if err == nil {
-			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/seedance", CostMicros: 200000}, nil
-		}
-		log.Printf("[AIStudio] Seedance failed for video-cinematic: %v — falling back to wan-fast", err)
-		vidURL, err = o.callPollinationsVideo(ctx, imgURL, motionPrompt)
+		// Tier 1: wan-fast (Wan 2.2) — FREE, 91.4% success
+		vidURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imgURL, motionPrompt, 180)
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 		}
+		log.Printf("[AIStudio] wan-fast failed for video-cinematic: %v — trying p-video", err)
+		// Tier 2: p-video (Pruna p-video) — FREE, 100% success (ltx-2 was OFF, replaced)
+		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", imgURL, motionPrompt, 180)
+		if err == nil {
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] p-video failed for video-cinematic: %v", err)
 		return nil, fmt.Errorf("video-cinematic: all providers failed")
 	}
 
-	// video-veo: Google Veo text-to-video (paid, highest quality)
+	// video-veo: Google Veo 3.1 text-to-video (PAID, highest quality, 0.150/sec)
+	// Fallback: wan-fast FREE (not seedance — also paid)
 	if slug == "video-veo" {
 		prompt := env.Prompt
 		vidURL, err := o.callPollinationsVeo(ctx, prompt)
 		if err == nil {
-			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo2", CostMicros: 400000}, nil
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo", CostMicros: 400000}, nil
 		}
-		log.Printf("[AIStudio] Veo failed for video-veo: %v — falling back to wan-fast", err)
-		vidURL, err = o.callPollinationsVideo(ctx, "", prompt)
+		log.Printf("[AIStudio] Veo failed for video-veo: %v — falling back to wan-fast (FREE)", err)
+		// Fallback 1: wan-fast text-to-video (FREE) — NOT seedance (also paid)
+		vidURL, err = o.callPollinationsVideoModel(ctx, "wan-fast", "", prompt, 180)
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 		}
+		log.Printf("[AIStudio] wan-fast fallback failed for video-veo: %v — trying p-video", err)
+		// Fallback 2: p-video (Pruna p-video) — FREE, 100% success
+		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", "", prompt, 180)
+		if err == nil {
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] p-video fallback failed for video-veo: %v", err)
 		return nil, fmt.Errorf("video-veo: all providers failed")
 	}
 
@@ -511,6 +599,13 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		imageURL = env.Prompt // legacy fallback: older rows stored imageURL in prompt
 	}
 
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	vidIn := providerInput{Prompt: env.Prompt, ImageURL: imageURL}
+	if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryVideo, vidIn); err == nil {
+		return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	// Tier 1: FAL.AI (Kling v1.5 for premium, LTX for standard)
 	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
 		var model string
@@ -541,12 +636,22 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		log.Printf("[AIStudio] FAL video failed: %v", err)
 	}
 
-	// Tier 2: Pollinations.ai wan-fast (FREE — 5-second video, no key needed)
-	if videoURL, err := o.callPollinationsVideo(ctx, imageURL, "animate this image with subtle cinematic motion"); err == nil {
+	// Tier 2: Pollinations wan-fast / Wan 2.2 — FREE, 91.4% success
+	// NOTE: seedance is PAID (1.8 pollen/M) — never use as a free fallback
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, "animate this image with subtle cinematic motion", 180); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
+	} else {
+		log.Printf("[AIStudio] Pollinations wan-fast failed: %v — trying p-video", err)
 	}
 
-	return nil, fmt.Errorf("video generation unavailable: configure FAL_API_KEY for premium video")
+	// Tier 3: Pollinations p-video (Pruna) — FREE, 100% success (ltx-2 was OFF, replaced)
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "p-video", imageURL, "animate this image with subtle cinematic motion", 180); err == nil {
+		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
+	} else {
+		log.Printf("[AIStudio] Pollinations p-video failed: %v", err)
+	}
+
+	return nil, fmt.Errorf("video generation unavailable: all providers failed")
 }
 
 // ─── Voice / Translate dispatch ───────────────────────────────────────────────
@@ -584,6 +689,13 @@ func (o *AIStudioOrchestrator) dispatchTranslate(ctx context.Context, env prompt
 		targetLang = "yo"
 	}
 
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	dbIn := providerInput{UserPrompt: text, TargetLang: targetLang}
+	if _, translated, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryTranslate, dbIn); err == nil {
+		return &studioProviderResult{OutputText: translated, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	if apiKey := os.Getenv("GOOGLE_TRANSLATE_API_KEY"); apiKey != "" {
 		translated, err := o.callGoogleTranslate(ctx, apiKey, text, targetLang)
 		if err == nil {
@@ -607,6 +719,13 @@ func (o *AIStudioOrchestrator) dispatchTranslate(ctx context.Context, env prompt
 }
 
 func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*studioProviderResult, error) {
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	in := providerInput{Text: text}
+	if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryTTS, in); err == nil {
+		return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	// Primary: Google Cloud TTS (free tier: 1M chars/month standard)
 	if gcpKey := os.Getenv("GOOGLE_CLOUD_TTS_KEY"); gcpKey != "" {
 		audioURL, err := o.callGoogleCloudTTS(ctx, gcpKey, text)
@@ -620,7 +739,7 @@ func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*s
 	if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 		voiceID := os.Getenv("ELEVENLABS_VOICE_ID")
 		if voiceID == "" {
-			voiceID = "21m00Tcm4TlvDq8ikWAM" // Rachel
+			voiceID = "EXAVITQu4vr4xnSDxMaL" // Sarah - premade voice, accessible on free tier
 		}
 		audioURL, err := o.callElevenLabsTTS(ctx, el11Key, voiceID, text)
 		if err == nil {
@@ -646,6 +765,13 @@ func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*s
 }
 
 func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, audioURL string) (*studioProviderResult, error) {
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	in := providerInput{AudioURL: audioURL}
+	if _, text, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryTranscribe, in); err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	// Primary: AssemblyAI (free $50 credit on signup)
 	if aaiKey := os.Getenv("ASSEMBLY_AI_KEY"); aaiKey != "" {
 		text, err := o.callAssemblyAI(ctx, aaiKey, audioURL)
@@ -673,34 +799,36 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 	prompt := env.Prompt
 	switch slug {
 	case "song-creator":
-		// Full song with vocals via Pollinations ElevenMusic
-		audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, false)
-		if err == nil {
-			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic", CostMicros: 100000}, nil
-		}
-		log.Printf("[AIStudio] Pollinations ElevenMusic failed for song-creator: %v — falling back", err)
-		// Fallback: ElevenLabs Music
+		// Full song with vocals.
+		// NOTE: Pollinations elevenmusic is currently OFF (45.9% success). ElevenLabs direct is primary.
+		// Tier 1: ElevenLabs Music direct API (professional quality, ~$0.045/song)
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
-			audioURL, err = o.callElevenLabsMusic(ctx, el11Key, prompt)
+			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
 			if err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-music", CostMicros: 45000}, nil
 			}
+			log.Printf("[AIStudio] ElevenLabs Music failed for song-creator: %v — trying Pollinations", err)
+		}
+		// Tier 2: Pollinations ElevenMusic (currently OFF, kept as secondary in case it recovers)
+		if audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, false); err == nil {
+			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic", CostMicros: 100000}, nil
 		}
 		return nil, fmt.Errorf("song-creator: all providers failed")
 
 	case "instrumental":
-		// Instrumental track (no vocals) via Pollinations ElevenMusic
-		audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, true)
-		if err == nil {
-			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic-instrumental", CostMicros: 100000}, nil
-		}
-		log.Printf("[AIStudio] Pollinations ElevenMusic failed for instrumental: %v — falling back", err)
-		// Fallback: ElevenLabs Music
+		// Instrumental track (no vocals).
+		// NOTE: Pollinations elevenmusic is currently OFF (45.9% success). ElevenLabs direct is primary.
+		// Tier 1: ElevenLabs Music direct API
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
-			audioURL, err = o.callElevenLabsMusic(ctx, el11Key, prompt)
+			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
 			if err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-music", CostMicros: 45000}, nil
 			}
+			log.Printf("[AIStudio] ElevenLabs Music failed for instrumental: %v — trying Pollinations", err)
+		}
+		// Tier 2: Pollinations ElevenMusic (currently OFF, kept as secondary in case it recovers)
+		if audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, true); err == nil {
+			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic-instrumental", CostMicros: 100000}, nil
 		}
 		return nil, fmt.Errorf("instrumental: all providers failed")
 
@@ -716,31 +844,39 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 		return nil, fmt.Errorf("marketing jingle requires ELEVENLABS_API_KEY")
 
 	default: // bg-music
-		// Primary: HuggingFace MusicGen-small (FREE — uses existing HF_TOKEN, no extra signup)
-		// Model: facebook/musicgen-small — 5-30 second ambient/background music clips
-		if hfToken := os.Getenv("HF_TOKEN"); hfToken != "" {
-			audioURL, err := o.callHFMusicGen(ctx, hfToken, prompt, 15)
-			if err == nil {
-				return &studioProviderResult{OutputURL: audioURL, Provider: "hf-musicgen", CostMicros: 0}, nil
-			}
-			log.Printf("[AIStudio] HF MusicGen failed: %v — trying Mubert", err)
+		// ── DB-first ────────────────────────────────────────────────────────────────────────
+		dbIn := providerInput{Prompt: prompt, Instrumental: true, DurationSecs: 30}
+		if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryMusic, dbIn); err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
 		}
-		// Secondary: Mubert (if user has configured a paid plan key)
-		if mubertKey := os.Getenv("MUBERT_API_KEY"); mubertKey != "" {
-			audioURL, err := o.callMubert(ctx, mubertKey, prompt, 30)
-			if err == nil {
-				return &studioProviderResult{OutputURL: audioURL, Provider: "mubert", CostMicros: 0}, nil
-			}
-			log.Printf("[AIStudio] Mubert failed: %v — trying ElevenLabs sound", err)
-		}
-		// Final fallback: ElevenLabs sound-generation (uses existing ELEVENLABS_API_KEY)
+		// ── Hardcoded fallback chain ─────────────────────────────────────────────────────
+		// NOTE: Pollinations elevenmusic is currently OFF (45.9% success).
+		// Reordered: ElevenLabs direct → Mubert → Pollinations ElevenMusic (as last resort)
+		// Primary: ElevenLabs direct (reliable, uses existing ELEVENLABS_API_KEY)
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
 			if err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-sound", CostMicros: 500}, nil
 			}
+			log.Printf("[AIStudio] ElevenLabs Music failed for bg-music: %v — trying Mubert", err)
 		}
-		return nil, fmt.Errorf("background music unavailable: configure HF_TOKEN (free) to enable this feature")
+		// Secondary: Mubert (royalty-free, text-to-music, paid plan)
+		if mubertKey := os.Getenv("MUBERT_API_KEY"); mubertKey != "" {
+			audioURL, err := o.callMubert(ctx, mubertKey, prompt, 30)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "mubert", CostMicros: 0}, nil
+			}
+			log.Printf("[AIStudio] Mubert failed: %v — trying Pollinations ElevenMusic", err)
+		}
+		// Tertiary: Pollinations ElevenMusic (currently OFF — kept as last resort in case it recovers)
+		if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
+			audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, true)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic", CostMicros: 500}, nil
+			}
+			log.Printf("[AIStudio] Pollinations ElevenMusic also failed for bg-music: %v", err)
+		}
+		return nil, fmt.Errorf("background music unavailable: configure ELEVENLABS_API_KEY (primary) or MUBERT_API_KEY")
 	}
 }
 
@@ -814,7 +950,7 @@ func (o *AIStudioOrchestrator) callGeminiFlash(ctx context.Context, systemPrompt
 		return "", fmt.Errorf("GEMINI_API_KEY not configured")
 	}
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", apiKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
 	payload := map[string]interface{}{
 		"system_instruction": map[string]interface{}{
 			"parts": []map[string]string{{"text": systemPrompt}},
@@ -878,7 +1014,7 @@ func (o *AIStudioOrchestrator) callGroqLlama4(ctx context.Context, systemPrompt,
 	}
 
 	payload := map[string]interface{}{
-		"model": "llama-4-scout-17b-16e-instruct",
+		"model": "meta-llama/llama-4-scout-17b-16e-instruct",
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
@@ -1266,8 +1402,10 @@ func (o *AIStudioOrchestrator) callElevenLabsTTS(ctx context.Context, apiKey, vo
 func (o *AIStudioOrchestrator) callHuggingFaceTTS(ctx context.Context, hfKey, text string) (string, error) {
 	body, _ := json.Marshal(map[string]string{"inputs": text})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		// HF deprecated api-inference.huggingface.co (410 Gone) — use router instead.
-	"https://router.huggingface.co/hf-inference/models/suno/bark",
+		// suno/bark is NOT available on HF serverless inference (no providers).
+	// Fallback to Google Cloud TTS via callGoogleCloudTTS if key is set, otherwise fail fast.
+	// This function is kept as a stub — it always returns an error so dispatchTTS skips it.
+	"https://router.huggingface.co/hf-inference/models/suno/bark", // intentionally unsupported — will 404
 		bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -1294,6 +1432,7 @@ func (o *AIStudioOrchestrator) callAssemblyAI(ctx context.Context, apiKey, audio
 	submitPayload := map[string]interface{}{
 		"audio_url":     audioURL,
 		"language_code": "en",
+		"speech_models": []string{"universal-2"}, // required since AssemblyAI deprecated speech_model (singular)
 	}
 	body, _ := json.Marshal(submitPayload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -1357,21 +1496,48 @@ func (o *AIStudioOrchestrator) callAssemblyAI(ctx context.Context, apiKey, audio
 
 // callGroqWhisper uses Groq's Whisper for transcription (fast fallback).
 func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audioURL string) (string, error) {
-	// Groq Whisper accepts a URL for audio files
-	payload := map[string]interface{}{
-		"model":     "whisper-large-v3",
-		"url":       audioURL,
-		"language":  "en",
-		"response_format": "json",
+	// Groq Whisper requires multipart/form-data with a binary file upload.
+	// It does NOT accept a JSON body with a "url" field.
+	// Step 1: Download the audio file from the URL.
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, audioURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("Groq Whisper download request: %w", err)
 	}
-	body, _ := json.Marshal(payload)
+	dlResp, err := o.httpClient.Do(dlReq)
+	if err != nil {
+		return "", fmt.Errorf("Groq Whisper download: %w", err)
+	}
+	defer dlResp.Body.Close()
+	if dlResp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Groq Whisper: audio download failed with status %d", dlResp.StatusCode)
+	}
+	audioBytes, err := io.ReadAll(dlResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("Groq Whisper: read audio bytes: %w", err)
+	}
+
+	// Step 2: POST as multipart/form-data with the file bytes.
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("model", "whisper-large-v3")
+	_ = w.WriteField("language", "en")
+	_ = w.WriteField("response_format", "json")
+	fw, err := w.CreateFormFile("file", "audio.mp3")
+	if err != nil {
+		return "", fmt.Errorf("Groq Whisper form: %w", err)
+	}
+	if _, err = fw.Write(audioBytes); err != nil {
+		return "", fmt.Errorf("Groq Whisper write form: %w", err)
+	}
+	w.Close()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.groq.com/openai/v1/audio/transcriptions", bytes.NewReader(body))
+		"https://api.groq.com/openai/v1/audio/transcriptions", &buf)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", w.FormDataContentType())
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -1379,10 +1545,14 @@ func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audi
 	}
 	defer resp.Body.Close()
 
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Groq Whisper %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
 	var result struct {
 		Text string `json:"text"`
 	}
-	if decErr := json.NewDecoder(resp.Body).Decode(&result); decErr != nil {
+	if decErr := json.Unmarshal(raw, &result); decErr != nil {
 		return "", fmt.Errorf("Groq Whisper decode: %w", decErr)
 	}
 	if result.Text == "" {
@@ -1437,7 +1607,7 @@ func (o *AIStudioOrchestrator) callGoogleTranslate(ctx context.Context, apiKey, 
 // This is FREE — it uses the same HF_TOKEN already required for image generation.
 // Model: facebook/musicgen-small (best quality/speed for short clips)
 // Returns a public CDN URL to the uploaded MP3.
-func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt string, durationSecs int) (string, error) {
+func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt string, durationSecs int) (string, error) { //nolint:unused
 	// HF Inference API for audio generation.
 	// HF deprecated api-inference.huggingface.co (410 Gone) — use router instead.
 	apiURL := "https://router.huggingface.co/hf-inference/models/facebook/musicgen-small"
@@ -1495,7 +1665,7 @@ func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt
 
 // ─── Pollinations.ai callers (100% free, no API key required) ────────────────
 // Pollinations is an open-source Berlin-based AI platform. Their gen.pollinations.ai
-// unified endpoint provides free image, TTS, and video — powered by FLUX, wan-fast,
+// unified endpoint provides image, TTS, and video — powered by FLUX, seedance,
 // and ElevenLabs voices. No signup, no rate limit per IP (publishable tier).
 // Docs: https://github.com/pollinations/pollinations
 // Used as: zero-cost tier between HuggingFace (free with key) and FAL.AI (paid).
@@ -1503,7 +1673,8 @@ func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt
 // callPollinationsImage generates an image using Pollinations FLUX (free model).
 // Official documented endpoint: GET https://gen.pollinations.ai/image/{prompt}
 // Docs: https://gen.pollinations.ai  — Returns JPEG/PNG directly (not JSON).
-// Bearer sk_ key required for rate-limit-free access; key passed as Authorization header.
+// NOTE (2026-03-26): Pollinations removed anonymous access — sk_ key is now REQUIRED
+// for ALL models including free ones. Requests without a key return HTTP 401.
 func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt string) (string, error) {
 	encoded := url.PathEscape(prompt)
 	seed := time.Now().UnixNano() % 999983
@@ -1518,9 +1689,10 @@ func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt
 	}
 	req.Header.Set("User-Agent", "NexusAI/1.0")
 	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
-	if sk != "" {
-		req.Header.Set("Authorization", "Bearer "+sk)
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured (required since 2026-03-26)")
 	}
+	req.Header.Set("Authorization", "Bearer "+sk)
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -1558,7 +1730,7 @@ func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt
 }
 
 // callPollinationsTTS generates speech using Pollinations TTS (OpenAI-compatible).
-// Uses secret key (sk_...) when available — unlocks 13+ voices and no rate limits.
+// sk_ key is now REQUIRED (anonymous access removed 2026-03-26).
 // Endpoint: POST https://gen.pollinations.ai/v1/audio/speech
 func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, voice string) (string, error) {
 	if voice == "" {
@@ -1577,9 +1749,11 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "NexusAI/1.0")
-	if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
-		req.Header.Set("Authorization", "Bearer "+sk)
+	sk2 := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk2 == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured (required since 2026-03-26)")
 	}
+	req.Header.Set("Authorization", "Bearer "+sk2)
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -1606,13 +1780,13 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 	return publicURL, nil
 }
 
-// callPollinationsVideo generates a short video using Pollinations wan-fast (free tier).
-// Official documented endpoint: GET https://gen.pollinations.ai/image/{prompt}?model=wan-fast
-// Docs: https://gen.pollinations.ai — video models use the /image/{prompt} route.
-// The response is a raw MP4 binary (not JSON). sk_ key required via Bearer header.
-// imageURL is passed as the `image` query param for image-to-video; empty = text-to-video.
-func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageURL, prompt string) (string, error) {
-	return o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, prompt, 120)
+// callPollinationsVideo generates a short video using wan-fast (FREE).
+// Pollinations video pricing (2026-03-26):
+//   FREE: wan-fast (Wan 2.2), ltx-2 (LTX-2)
+//   PAID: seedance, seedance-pro, veo, wan
+// Using wan-fast as the default free option.
+func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageURL, prompt string) (string, error) { //nolint:unused
+	return o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, prompt, 180)
 }
 
 // callPollinationsVideoModel is the shared GET-based video caller for any video model.
@@ -1695,14 +1869,29 @@ func (o *AIStudioOrchestrator) callMubert(ctx context.Context, apiKey, prompt st
 	}
 
 	var result struct {
+		Status int    `json:"status"` // 1 = success, 0 = error
+		Error  *struct {
+			Code int    `json:"code"`
+			Text string `json:"text"`
+		} `json:"error"`
 		Data struct {
 			Tasks []struct {
 				MusicURL string `json:"music_url"`
 			} `json:"tasks"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(raw, &result); err != nil || len(result.Data.Tasks) == 0 || result.Data.Tasks[0].MusicURL == "" {
-		return "", fmt.Errorf("Mubert: no track URL returned — check API key and plan")
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("Mubert parse: %w", err)
+	}
+	if result.Status != 1 {
+		errText := "unknown error"
+		if result.Error != nil {
+			errText = fmt.Sprintf("code %d: %s", result.Error.Code, result.Error.Text)
+		}
+		return "", fmt.Errorf("Mubert API error — %s", errText)
+	}
+	if len(result.Data.Tasks) == 0 || result.Data.Tasks[0].MusicURL == "" {
+		return "", fmt.Errorf("Mubert: no track URL in response")
 	}
 	return result.Data.Tasks[0].MusicURL, nil
 }
@@ -1759,6 +1948,13 @@ func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug string, 
 		question = ""
 	}
 
+	// ── DB-first ─────────────────────────────────────────────────────────────
+	vIn := providerInput{ImageURL: imageURL, UserPrompt: question}
+	if _, text, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryVision, vIn); err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback chain ──────────────────────────────────────────────
 	// Primary: Pollinations Vision (OpenAI-compatible multimodal)
 	text, err := o.callPollinationsVision(ctx, imageURL, question)
 	if err == nil {
@@ -2096,6 +2292,88 @@ func (o *AIStudioOrchestrator) callPollinationsKontext(ctx context.Context, imag
 	return "", fmt.Errorf("Pollinations Kontext: no url or b64_json in response")
 }
 
+// callPollinationsKontextAlt performs image-to-image editing via Pollinations p-image-edit (Pruna).
+// This is the fallback for when kontext is OFF/degraded. Uses the same edits endpoint but model=p-image-edit.
+func (o *AIStudioOrchestrator) callPollinationsKontextAlt(ctx context.Context, imageURL, instruction string) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+
+	// Step 1: Download source image
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("p-image-edit: build download request: %w", err)
+	}
+	dlResp, err := o.httpClient.Do(dlReq)
+	if err != nil {
+		return "", fmt.Errorf("p-image-edit: download image: %w", err)
+	}
+	defer dlResp.Body.Close()
+	imgBytes, err := io.ReadAll(dlResp.Body)
+	if err != nil || len(imgBytes) < 500 {
+		return "", fmt.Errorf("p-image-edit: image download failed or too small")
+	}
+
+	// Step 2: Build multipart body
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("model", "p-image-edit")
+	_ = mw.WriteField("prompt", instruction)
+	fw, err := mw.CreateFormFile("image", "source.png")
+	if err != nil {
+		return "", err
+	}
+	if _, err = fw.Write(imgBytes); err != nil {
+		return "", err
+	}
+	mw.Close()
+
+	// Step 3: POST to edits endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/v1/images/edits", &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+sk)
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations p-image-edit request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Pollinations p-image-edit %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+
+	var parsed struct {
+		Data []struct {
+			URL     string `json:"url"`
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Data) == 0 {
+		return "", fmt.Errorf("Pollinations p-image-edit parse: empty data")
+	}
+	item := parsed.Data[0]
+	if item.URL != "" {
+		return item.URL, nil
+	}
+	if item.B64JSON != "" {
+		outBytes, err := base64.StdEncoding.DecodeString(item.B64JSON)
+		if err != nil {
+			return "", fmt.Errorf("Pollinations p-image-edit b64 decode: %w", err)
+		}
+		key := fmt.Sprintf("studio/photo-editor/p-image-edit_%d.png", time.Now().UnixNano())
+		return o.uploadOrDataURI(ctx, outBytes, "image/png", key), nil
+	}
+	return "", fmt.Errorf("Pollinations p-image-edit: no url or b64_json in response")
+}
+
 // callPollinationsWhisperAfrican transcribes audio using Pollinations Whisper with African language support.
 // Downloads the audio file, then POSTs multipart to the transcriptions endpoint.
 func (o *AIStudioOrchestrator) callPollinationsWhisperAfrican(ctx context.Context, audioURL, lang string) (string, error) {
@@ -2217,10 +2495,10 @@ func (o *AIStudioOrchestrator) callPollinationsElevenMusic(ctx context.Context, 
 	return o.uploadOrDataURI(ctx, raw, "audio/mpeg", key), nil
 }
 
-// callPollinationsSeedance generates a cinematic image-to-video using Pollinations Seedance.
-// Official documented endpoint: GET gen.pollinations.ai/image/{prompt}?model=seedance&image={srcURL}
-// Paid model (~$0.20/video). Uses sk_ key via Bearer header. Timeout: 180s.
-func (o *AIStudioOrchestrator) callPollinationsSeedance(ctx context.Context, imageURL, prompt string) (string, error) {
+// callPollinationsSeedance is kept for backward compatibility (e.g. admin DB rows that use seedance).
+// NOTE: seedance is a PAID model (1.8 pollen/M). Use callPollinationsVideo (wan-fast, FREE) for
+// cost-effective generation. Only call this when the user explicitly selected a paid seedance plan.
+func (o *AIStudioOrchestrator) callPollinationsSeedance(ctx context.Context, imageURL, prompt string) (string, error) { //nolint:unused
 	return o.callPollinationsVideoModel(ctx, "seedance", imageURL, prompt, 180)
 }
 

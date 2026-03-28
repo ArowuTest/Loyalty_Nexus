@@ -1,5 +1,40 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
 
+export interface PassportStats {
+  total_passports: number;
+  apple_wallet_downloads: number;
+  google_wallet_saves: number;
+  qr_scans_today: number;
+  active_apple_installs: number;
+  active_google_installs: number;
+  total_active_installs: number;
+  removal_rate_pct: number;
+  device_breakdown: { device_type: string; count: number }[];
+  tier_breakdown: { tier: string; count: number }[];
+  top_badge_earners: { user_id: string; phone: string; badge_count: number; tier: string }[];
+}
+
+export interface GhostNudgeLog {
+  id: string;
+  user_id: string;
+  phone_number: string;
+  nudge_type: string;
+  streak_count: number;
+  sent_at: string;
+  delivered: boolean;
+}
+
+export interface USSDSession {
+  id: string;
+  phone_number: string;
+  session_id: string;
+  current_menu: string;
+  started_at: string;
+  last_active: string;
+  is_active: boolean;
+  step_count: number;
+}
+
 class AdminAPI {
   private token: string | null = null;
   setToken(t: string) { this.token = t; typeof window !== "undefined" && localStorage.setItem("nexus_admin_token", t); }
@@ -28,7 +63,8 @@ class AdminAPI {
   createPrize(payload: Omit<Prize,"id">) { return this.req("POST", "/admin/prizes", payload); }
   deletePrize(id: string) { return this.req("DELETE", `/admin/prizes/${id}`); }
   getUsers(page = 0, q = "") { return this.req<{ users: User[]; total: number }>("GET", `/admin/users?offset=${page * 50}${q ? `&q=${encodeURIComponent(q)}` : ""}`); }
-  getFraud()       { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud"); }
+  getUser(id: string) { return this.req<User>("GET", `/admin/users/${id}`); }
+  getFraud()       { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud-events"); }
   getFraudEvents() { return this.getFraud(); }
   resolveFraud(id: string) { return this.req("POST", `/admin/fraud/${id}/resolve`, {}); }
   getRegionalStats() { return this.req<{ stats: RegionalStat[] }>("GET", "/admin/regional-stats"); }
@@ -50,12 +86,8 @@ class AdminAPI {
     const q = qs.toString();
     return this.req<{ items: Generation[]; total: number }>("GET", `/admin/studio-generations${q ? `?${q}` : ""}`);
   }
-  getBroadcasts() { return this.req<{ broadcasts: Broadcast[] }>("GET", "/admin/broadcasts"); }
-  createBroadcast(payload: BroadcastPayload) { return this.req<{ id: string }>("POST", "/admin/broadcasts", payload); }
-  getSubscriptions(page = 0, qs = "") {
-    return this.req<{ users: SubscriptionUser[] }>("GET", `/admin/subscriptions?offset=${page * 50}${qs}`);
-  }
-  updateSubscription(userId: string, payload: UpdateSubPayload) { return this.req("PUT", `/admin/users/${userId}/subscription`, payload); }
+  getBroadcasts() { return this.req<{ broadcasts: Broadcast[] }>("GET", "/admin/notifications/broadcasts"); }
+  createBroadcast(payload: BroadcastPayload) { return this.req<{ id: string }>("POST", "/admin/notifications/broadcast", payload); }
   // Draws management
   getDraws()               { return this.req<{ draws: Draw[] }>("GET", "/admin/draws"); }
   createDraw(d: CreateDrawPayload) { return this.req<Draw>("POST", "/admin/draws", d); }
@@ -69,10 +101,27 @@ class AdminAPI {
   // Regional Wars
   getRegionalWars() { return this.req<{ leaderboard: RegionalStat[] }>("GET", "/admin/regional-wars"); }
   resolveWar(period: string) { return this.req("POST", "/admin/wars/resolve", { period }); }
+  getSecondaryDraws(warId: string) { return this.req<{ draws: WarSecondaryDraw[] }>("GET", `/admin/wars/${warId}/secondary-draws`); }
+  runSecondaryDraw(warId: string, payload: { state: string; winner_count: number; prize_per_winner_kobo: number }) {
+    return this.req<WarSecondaryDraw>("POST", `/admin/wars/${warId}/secondary-draw`, payload);
+  }
+  markSecondaryWinnerPaid(winnerId: string, momoNumber: string) {
+    return this.req<{ status: string }>("POST", `/admin/wars/secondary-draw/winners/${winnerId}/pay`, { momo_number: momoNumber });
+  }
   getHealth() { return this.req<HealthReport>("GET", "/admin/health"); }
   getAIHealth() { return this.req<AIHealthReport>("GET", "/admin/ai-health"); }
+
+  // ── AI Provider Config (dynamic provider registry) ───────────────────────
+  getAIProviders()   { return this.req<AIProvidersResponse>("GET", "/admin/ai-providers"); }
+  getAIProviderMeta(){ return this.req<AIProviderMeta>("GET", "/admin/ai-providers/meta"); }
+  createAIProvider(data: AIProviderFormPayload) { return this.req<AIProviderConfig>("POST", "/admin/ai-providers", data); }
+  updateAIProvider(id: string, data: Partial<AIProviderFormPayload>) { return this.req<AIProviderConfig>("PUT", `/admin/ai-providers/${id}`, data); }
+  deleteAIProvider(id: string) { return this.req<{ status: string }>("DELETE", `/admin/ai-providers/${id}`); }
+  activateAIProvider(id: string)   { return this.req<{ status: string }>("POST", `/admin/ai-providers/${id}/activate`,   {}); }
+  deactivateAIProvider(id: string) { return this.req<{ status: string }>("POST", `/admin/ai-providers/${id}/deactivate`, {}); }
+  testAIProvider(id: string)       { return this.req<AIProviderTestResult>("POST", `/admin/ai-providers/${id}/test`,      {}); }
+
   // ─── MTN Push CSV Upload ──────────────────────────────────────────────────
-  // Upload a CSV file (multipart/form-data). Returns the upload batch summary.
   async uploadMTNPushCSV(file: File, note?: string): Promise<CSVUploadResult> {
     const form = new FormData();
     form.append("file", file);
@@ -97,6 +146,17 @@ class AdminAPI {
     return this.req<{ rows: CSVRowDetail[]; total: number }>("GET", `/admin/mtn-push/csv-upload/${id}/rows?limit=${limit}&offset=${offset}`);
   }
   // ─── Bonus Pulse Point Awards ─────────────────────────────────────────────
+  // ─── Passport Admin ──────────────────────────────────────────────────────
+  getPassportStats() { return this.req<PassportStats>("GET", "/admin/passport/stats"); }
+  getPassportNudgeLog(limit = 50) { return this.req<{ logs: GhostNudgeLog[] }>("GET", `/admin/passport/nudge-log?limit=${limit}`); }
+  getUSSDSessions(limit = 50) { return this.req<{ sessions: USSDSession[] }>("GET", `/admin/ussd/sessions?limit=${limit}`); }
+
+  // ─── Admin Auth ─────────────────────────────────────────────────────────
+  me() { return this.req<{ admin_id: string; email: string; role: string }>("GET", "/admin/auth/me"); }
+  changePassword(oldPassword: string, newPassword: string) {
+    return this.req("POST", "/admin/auth/change-password", { old_password: oldPassword, new_password: newPassword });
+  }
+
   awardBonusPulse(payload: { phone_number: string; points: number; campaign?: string; note?: string }) {
     return this.req<BonusPulseAwardResult>("POST", "/admin/bonus-pulse", payload);
   }
@@ -109,10 +169,31 @@ class AdminAPI {
     const q = qs.toString();
     return this.req<{ records: BonusPulseAwardRecord[]; total: number }>("GET", `/admin/bonus-pulse${q ? `?${q}` : ""}`);
   }
+
+  // ─── Recharge Reward Config ─────────────────────────────────────────────────
+  getRechargeConfig() { return this.req<RechargeConfig>("GET", "/admin/recharge/config"); }
+  updateRechargeConfig(payload: Partial<RechargeConfigPayload>) {
+    return this.req<RechargeConfig>("PUT", "/admin/recharge/config", payload);
+  }
 }
 export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
-export interface Prize { id: string; name: string; prize_type: string; base_value: number; probability: number; daily_inventory: number; is_active: boolean; }
+export interface Prize {
+  id: string;
+  name: string;
+  prize_code?: string;
+  prize_type: string;
+  base_value: number;
+  win_probability_weight: number;
+  daily_inventory_cap?: number;
+  is_active: boolean;
+  is_no_win?: boolean;
+  no_win_message?: string;
+  color_scheme?: string;
+  sort_order?: number;
+  minimum_recharge?: number;
+  icon_name?: string;
+}
 export interface StudioTool {
   id: string; name: string; slug?: string; category: string; provider: string;
   point_cost: number; is_active: boolean; description?: string; icon?: string;
@@ -125,6 +206,35 @@ export interface StudioTool {
 export interface User { id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean; created_at: string; }
 export interface FraudEvent { id: string; user_id: string; event_type: string; severity: string; resolved: boolean; created_at: string; }
 export interface RegionalStat { state: string; total_points: number; active_members: number; rank: number; }
+
+export interface WarSecondaryDrawWinner {
+  id: string;
+  secondary_draw_id: string;
+  war_id: string;
+  state: string;
+  user_id: string;
+  phone_number: string;
+  position: number;
+  prize_kobo: number;
+  momo_number?: string;
+  payment_status: "PENDING_PAYMENT" | "PAID" | "FAILED";
+  paid_at?: string;
+  notes?: string;
+}
+
+export interface WarSecondaryDraw {
+  id: string;
+  war_id: string;
+  state: string;
+  winner_count: number;
+  prize_per_winner_kobo: number;
+  total_pool_kobo: number;
+  participant_count: number;
+  status: "PENDING" | "COMPLETED" | "CANCELLED";
+  executed_at?: string;
+  created_at: string;
+  winners?: WarSecondaryDrawWinner[];
+}
 export const adminAPI = new AdminAPI();
 export default adminAPI;
 export interface BroadcastPayload {
@@ -138,16 +248,6 @@ export interface BroadcastPayload {
 export interface Broadcast {
   id: string; title: string; body: string; type: string;
   target: string; sent_count: number; created_at: string;
-}
-export interface SubscriptionUser {
-  id: string; phone_number: string; tier: string;
-  subscription_status: string; subscription_expires_at: string | null;
-  created_at: string;
-}
-export interface UpdateSubPayload {
-  status: string;   // ACTIVE | FREE | GRACE | SUSPENDED
-  expires_at?: string; // ISO
-  note?: string;
 }
 export interface Draw {
   id: string; name: string; prize_pool_kobo: number;
@@ -252,6 +352,65 @@ export interface Generation {
   created_at: string;
 }
 
+// ── AI Provider Config types ──────────────────────────────────────────────────
+export interface AIProviderConfig {
+  id: string;
+  name: string;
+  slug: string;
+  category: string;
+  template: string;
+  env_key: string;
+  model_id: string;
+  extra_config: Record<string, unknown>;
+  priority: number;
+  is_primary: boolean;
+  is_active: boolean;
+  cost_micros: number;
+  pulse_pts: number;
+  notes: string;
+  has_key: boolean;
+  last_tested_at: string | null;
+  last_test_ok: boolean | null;
+  last_test_msg: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AIProvidersResponse {
+  providers: AIProviderConfig[];
+  grouped: Record<string, AIProviderConfig[]>;
+  total: number;
+}
+
+export interface AIProviderMeta {
+  categories: string[];
+  templates: string[];
+  template_descriptions: Record<string, string>;
+}
+
+export interface AIProviderFormPayload {
+  name: string;
+  slug?: string;
+  category: string;
+  template: string;
+  env_key?: string;
+  api_key?: string;
+  model_id?: string;
+  extra_config?: Record<string, unknown>;
+  priority?: number;
+  is_primary?: boolean;
+  is_active?: boolean;
+  cost_micros?: number;
+  pulse_pts?: number;
+  notes?: string;
+}
+
+export interface AIProviderTestResult {
+  status: "ok" | "failed";
+  message: string;
+  last_tested_at: string;
+}
+
 // ─── Bonus Pulse Point Awards types ─────────────────────────────────────────────
 export interface BonusPulseAwardResult {
   award_id: string;
@@ -313,4 +472,16 @@ export interface CSVRowDetail {
   pulse_points: number;
   draw_entries: number;
   processed_at?: string | null;
+}
+
+// ─── Recharge Reward Config types ──────────────────────────────────────────────
+export interface RechargeConfig {
+  spin_draw_naira_per_credit: number;
+  pulse_naira_per_point: number;
+  min_amount_naira: number;
+}
+export interface RechargeConfigPayload {
+  spin_draw_naira_per_credit: number;
+  pulse_naira_per_point: number;
+  min_amount_naira: number;
 }

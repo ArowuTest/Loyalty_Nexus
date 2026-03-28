@@ -2,57 +2,110 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import adminAPI from "@/lib/api";
+import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 
-export default function LoginPage() {
+export default function AdminLoginPage() {
   const router = useRouter();
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState("");
-  const [step, setStep] = useState<"phone"|"otp">("phone");
-  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const send = async () => {
-    setLoading(true); setError("");
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
     try {
-      await adminAPI.req("POST", "/auth/otp/send", { phone_number: phone, purpose: "login" });
-      setStep("otp");
-    } catch(e: unknown) { setError(e instanceof Error ? e.message : "Failed"); }
-    finally { setLoading(false); }
-  };
-
-  const verify = async () => {
-    setLoading(true); setError("");
-    try {
-      const result = await adminAPI.req<{token: string}>("POST", "/auth/otp/verify", { phone_number: phone, code: otp, purpose: "login" });
+      const result = await adminAPI.req<{
+        token: string;
+        email: string;
+        full_name: string;
+        role: string;
+      }>("POST", "/admin/auth/login", { email, password });
       adminAPI.setToken(result.token);
+      // Store role in localStorage for client-side RBAC checks
+      localStorage.setItem("admin_role", result.role);
+      localStorage.setItem("admin_email", result.email);
+      localStorage.setItem("admin_name", result.full_name);
       router.push("/dashboard");
-    } catch(e: unknown) { setError(e instanceof Error ? e.message : "Invalid OTP"); }
-    finally { setLoading(false); }
+    } catch {
+      setError("Invalid email or password.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div className="card" style={{ width: "100%", maxWidth: 380, padding: 32 }}>
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 40, marginBottom: 8 }}>⚡</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#e2e8ff" }}>Admin Cockpit</h1>
-          <p style={{ color: "#828cb4", fontSize: 13, marginTop: 4 }}>Loyalty Nexus Operations</p>
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center px-4">
+      <div className="w-full max-w-sm space-y-8">
+        {/* Logo */}
+        <div className="text-center space-y-2">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 mb-2">
+            <ShieldCheck size={32} className="text-indigo-400" />
+          </div>
+          <h1 className="text-2xl font-black text-white tracking-tight">Loyalty Nexus</h1>
+          <p className="text-sm text-gray-500 font-semibold uppercase tracking-widest">Admin Console</p>
         </div>
-        {step === "phone" ? (
-          <>
-            <label style={{ color: "#828cb4", fontSize: 12, display: "block", marginBottom: 6 }}>Admin phone number</label>
-            <input className="input" type="tel" placeholder="080X XXX XXXX" value={phone} onChange={e => setPhone(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} style={{ marginBottom: 16 }} />
-            <button className="btn-primary" style={{ width: "100%" }} onClick={send} disabled={loading}>{loading ? "Sending…" : "Send OTP →"}</button>
-          </>
-        ) : (
-          <>
-            <label style={{ color: "#828cb4", fontSize: 12, display: "block", marginBottom: 6 }}>Enter OTP</label>
-            <input className="input" type="number" placeholder="——" value={otp} onChange={e => setOtp(e.target.value)} style={{ marginBottom: 16, textAlign: "center", fontSize: 24, letterSpacing: 12 }} />
-            <button className="btn-primary" style={{ width: "100%", marginBottom: 8 }} onClick={verify} disabled={loading}>{loading ? "Verifying…" : "Enter Dashboard →"}</button>
-            <button className="btn-outline" style={{ width: "100%", fontSize: 13 }} onClick={() => setStep("phone")}>← Change number</button>
-          </>
-        )}
-        {error && <p style={{ color: "#f43f5e", fontSize: 13, marginTop: 12, textAlign: "center" }}>{error}</p>}
+
+        {/* Form */}
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Email</label>
+            <input
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="admin@yourdomain.com"
+              className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white text-sm 
+                         placeholder-gray-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Password</label>
+            <div className="relative">
+              <input
+                type={showPw ? "text" : "password"}
+                required
+                autoComplete="current-password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white text-sm 
+                           placeholder-gray-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/50 pr-12"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+              >
+                {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm font-medium">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-500
+                       text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? "Signing in…" : "Sign In"}
+          </button>
+        </form>
+
+        <p className="text-center text-xs text-gray-600">
+          Admin access is role-based. Contact your super admin if you need access.
+        </p>
       </div>
     </div>
   );

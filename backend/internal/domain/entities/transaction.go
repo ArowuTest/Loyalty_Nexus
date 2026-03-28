@@ -35,6 +35,5 @@ const (
 	TxTypeStudioSpend    TransactionType = "studio_spend"   // Points spent on AI Studio
 	TxTypeStudioRefund   TransactionType = "studio_refund"  // Points refunded on failure
 	TxTypeBonus          TransactionType = "bonus"          // Admin/streak/referral bonus
-	TxTypeSubscription   TransactionType = "subscription"   // Daily draw subscription debit
 	TxTypeExpiry         TransactionType = "expiry"         // Points expired
 )

@@ -9,16 +9,62 @@ import (
 	"github.com/google/uuid"
 
 	"loyalty-nexus/internal/application/services"
+	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/presentation/http/middleware"
 )
 
 // PassportHandler serves Digital Passport endpoints (spec §6).
 type PassportHandler struct {
 	passportSvc *services.PassportService
+	cfg         *config.ConfigManager
 }
 
 func NewPassportHandler(ps *services.PassportService) *PassportHandler {
 	return &PassportHandler{passportSvc: ps}
+}
+
+func (h *PassportHandler) WithConfig(cfg *config.ConfigManager) *PassportHandler {
+	h.cfg = cfg
+	return h
+}
+
+// ─── GET /api/v1/passport/banner-config (public) ─────────────────────────
+// Returns the admin-configured banner message for the dashboard passport banner.
+// This is a public endpoint (no auth required) so the frontend can fetch it
+// before the user logs in.
+func (h *PassportHandler) GetBannerConfig(w http.ResponseWriter, r *http.Request) {
+	getStr := func(key, def string) string {
+		if h.cfg == nil {
+			return def
+		}
+		return h.cfg.GetString(key, def)
+	}
+	getBool := func(key string, def bool) bool {
+		if h.cfg == nil {
+			return def
+		}
+		return h.cfg.GetBool(key, def)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"banner_title":           getStr("passport_banner_title", "Your Digital Passport is ready"),
+		"banner_subtitle":        getStr("passport_banner_subtitle", "Track your Pulse Points and streak right from your lock screen — no app needed."),
+		"banner_cta_ios":         getStr("passport_banner_cta_ios", "Add to Apple Wallet"),
+		"banner_cta_android":     getStr("passport_banner_cta_android", "Save to Google Wallet"),
+		"banner_enabled":         getBool("passport_banner_enabled", true),
+		// Wallet card messages
+		"wallet_streak_expiry_message":  getStr("wallet_streak_expiry_message", "Streak expiring soon!"),
+		"wallet_spin_ready_message":     getStr("wallet_spin_ready_message", "You have a free spin!"),
+		"wallet_tier_upgrade_message":   getStr("wallet_tier_upgrade_message", "You've been promoted!"),
+		"wallet_prize_won_message":      getStr("wallet_prize_won_message", "Prize waiting — open app"),
+		"wallet_broadcast_enabled":      getBool("wallet_broadcast_enabled", false),
+		"wallet_broadcast_label":        getStr("wallet_broadcast_label", "📢 ANNOUNCEMENT"),
+		"wallet_broadcast_message":      getStr("wallet_broadcast_message", ""),
+		"wallet_streak_expiry_enabled":  getBool("wallet_streak_expiry_enabled", true),
+		"wallet_spin_ready_enabled":     getBool("wallet_spin_ready_enabled", true),
+		"wallet_tier_upgrade_enabled":   getBool("wallet_tier_upgrade_enabled", true),
+		"wallet_prize_won_enabled":      getBool("wallet_prize_won_enabled", true),
+	})
 }
 
 // ─── GET /api/v1/passport ─────────────────────────────────────────────────

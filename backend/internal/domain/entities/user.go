@@ -29,9 +29,10 @@ type User struct {
 	MoMoVerifiedAt        *time.Time `db:"momo_verified_at"        gorm:"column:momo_verified_at"         json:"momo_verified_at,omitempty"`
 	WalletPassID          string     `db:"wallet_pass_id"          gorm:"column:wallet_pass_id"           json:"-"`
 	DeviceType            string     `db:"device_type"             gorm:"column:device_type"              json:"device_type"`
-	SubscriptionTier      string     `db:"subscription_tier"       gorm:"column:subscription_tier"        json:"subscription_tier"`
-	SubscriptionStatus    string     `db:"subscription_status"     gorm:"column:subscription_status"      json:"subscription_status"`
-	SubscriptionExpiresAt *time.Time `db:"subscription_expires_at" gorm:"column:subscription_expires_at" json:"subscription_expires_at,omitempty"`
+	// Deprecated: subscription billing removed. Columns retained for zero-downtime migration; hidden from API.
+	SubscriptionTier      string     `db:"subscription_tier"       gorm:"column:subscription_tier"        json:"-"`
+	SubscriptionStatus    string     `db:"subscription_status"     gorm:"column:subscription_status"      json:"-"`
+	SubscriptionExpiresAt *time.Time `db:"subscription_expires_at" gorm:"column:subscription_expires_at" json:"-"`
 	ReferralCode          string     `db:"referral_code"           gorm:"column:referral_code"            json:"referral_code"`
 	ReferredBy            *uuid.UUID `db:"referred_by"             gorm:"column:referred_by"              json:"referred_by,omitempty"`
 	KYCStatus             string     `db:"kyc_status"              gorm:"column:kyc_status"               json:"kyc_status"`

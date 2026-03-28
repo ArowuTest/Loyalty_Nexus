@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  GO_VERSION: "1.23"
+  GO_VERSION: "1.24"
   NODE_VERSION: "22"
 
 jobs:
@@ -50,7 +50,7 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           working-directory: backend
-          version: v1.62.2
+          version: v1.64.8
           args: --timeout=5m --disable=typecheck --enable=govet,errcheck,staticcheck
 
       - name: Run migrations
@@ -58,7 +58,7 @@ jobs:
         env:
           DATABASE_URL: postgres://nexus:nexus_test_secret@localhost:5432/nexus_test?sslmode=disable
         run: |
-          for f in ../database/migrations/*.sql; do
+          for f in ../database/migrations/*.up.sql; do
             psql "$DATABASE_URL" -f "$f" || true
           done
 
@@ -67,7 +67,7 @@ jobs:
 
       - name: Build
         working-directory: backend
-        run: CGO_ENABLED=1 go build ./cmd/api ./cmd/worker
+        run: CGO_ENABLED=1 go build ./cmd/api ./cmd/worker ./cmd/migrate
 
       - name: Unit Tests (SQLite in-memory)
         working-directory: backend
@@ -191,8 +191,9 @@ jobs:
       - name: Build API image
         uses: docker/build-push-action@v6
         with:
-          context: ./backend
-          file: ./backend/Dockerfile
+          context: .
+          file: ./Dockerfile
+          target: api
           push: false
           tags: loyalty-nexus-api:${{ github.sha }}
           cache-from: type=gha

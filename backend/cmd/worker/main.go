@@ -70,7 +70,7 @@ func main() {
 	//   ghost_nudge_warning_hours     (default 4)
 	//   ghost_nudge_min_streak        (default 3)
 	// Zero values are never hardcoded — all come from platform_config table.
-	passportSvc      := services.NewPassportService(db)
+	passportSvc      := services.NewPassportService(db, cfg)
 	ghostNudgeWorker := services.NewGhostNudgeWorker(db, cfg, passportSvc, notifySvc)
 	ghostNudgeWorker.Start()
 	defer ghostNudgeWorker.Stop()

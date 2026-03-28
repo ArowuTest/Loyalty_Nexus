@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"loyalty-nexus/internal/domain/entities"
+	"loyalty-nexus/internal/infrastructure/config"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -15,11 +16,12 @@ import (
 // PassportService manages the Digital Passport — streaks, tiers, badges,
 // milestones, and achievement history. (Master Spec §4 / SRS §3.4)
 type PassportService struct {
-	db *gorm.DB
+	db  *gorm.DB
+	cfg *config.ConfigManager
 }
 
-func NewPassportService(db *gorm.DB) *PassportService {
-	return &PassportService{db: db}
+func NewPassportService(db *gorm.DB, cfg *config.ConfigManager) *PassportService {
+	return &PassportService{db: db, cfg: cfg}
 }
 
 // ── Tier thresholds (lifetime Pulse Points) ────────────────────────────────
