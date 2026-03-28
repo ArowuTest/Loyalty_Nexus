@@ -5,6 +5,11 @@ export interface PassportStats {
   apple_wallet_downloads: number;
   google_wallet_saves: number;
   qr_scans_today: number;
+  active_apple_installs: number;
+  active_google_installs: number;
+  total_active_installs: number;
+  removal_rate_pct: number;
+  device_breakdown: { device_type: string; count: number }[];
   tier_breakdown: { tier: string; count: number }[];
   top_badge_earners: { user_id: string; phone: string; badge_count: number; tier: string }[];
 }

@@ -332,7 +332,8 @@ export default function PassportAdminPage() {
         <div style={{ color: "#828cb4" }}>Loading passport data…</div>
       ) : (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14, marginBottom: 24 }}>
+          {/* Row 1: Historical download counts */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14, marginBottom: 14 }}>
             {[
               { label: "Total Passports",        value: stats?.total_passports ?? 0,         icon: "🪪" },
               { label: "Apple Wallet Downloads",  value: stats?.apple_wallet_downloads ?? 0,  icon: "📱" },
@@ -348,6 +349,64 @@ export default function PassportAdminPage() {
               </div>
             ))}
           </div>
+
+          {/* Row 2: Active installs (currently installed on devices right now) */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14, marginBottom: 24 }}>
+            {[
+              { label: "Active Installs (Total)",  value: stats?.total_active_installs ?? 0,  icon: "✅", color: "#48bb78" },
+              { label: "Active on Apple Wallet",   value: stats?.active_apple_installs ?? 0,  icon: "🍎", color: "#a0aec0" },
+              { label: "Active on Google Wallet",  value: stats?.active_google_installs ?? 0, icon: "🤖", color: "#68d391" },
+              { label: "Removal Rate (Apple)",
+                value: `${(stats?.removal_rate_pct ?? 0).toFixed(1)}%`,
+                icon: "🗑️",
+                color: (stats?.removal_rate_pct ?? 0) > 20 ? "#fc8181" : "#68d391",
+                isString: true },
+            ].map(s => (
+              <div key={s.label} style={{ ...statCardStyle, borderColor: `${s.color}33` }}>
+                <div style={{ fontSize: 26 }}>{s.icon}</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>
+                  {s.isString ? s.value : (s.value as number).toLocaleString()}
+                </div>
+                <div style={{ color: "#828cb4", fontSize: 12 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Device type breakdown */}
+          {stats?.device_breakdown && stats.device_breakdown.length > 0 && (
+            <div style={{ ...cardStyle, marginBottom: 24 }}>
+              <h3 style={{ color: "#e2e8ff", fontSize: 14, fontWeight: 600, marginBottom: 14 }}>
+                📱 Device Type Breakdown
+              </h3>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                {stats.device_breakdown.map((d: { device_type: string; count: number }) => {
+                  const total = stats.device_breakdown.reduce((a: number, b: { count: number }) => a + b.count, 0);
+                  const pct = total > 0 ? Math.round((d.count / total) * 100) : 0;
+                  const deviceIcon = d.device_type === "ios" ? "🍎" : d.device_type === "android" ? "🤖" : d.device_type === "web" ? "🌐" : "❓";
+                  const deviceColor = d.device_type === "ios" ? "#a0aec0" : d.device_type === "android" ? "#68d391" : d.device_type === "web" ? "#63b3ed" : "#828cb4";
+                  return (
+                    <div key={d.device_type} style={{ flex: "1 1 140px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                        <span style={{ color: deviceColor, fontSize: 13, fontWeight: 600 }}>
+                          {deviceIcon} {d.device_type.toUpperCase()}
+                        </span>
+                        <span style={{ color: "#828cb4", fontSize: 12 }}>{d.count.toLocaleString()} ({pct}%)</span>
+                      </div>
+                      <div style={{ height: 6, background: "rgba(255,255,255,0.05)", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{
+                          height: "100%",
+                          width: `${pct}%`,
+                          background: deviceColor,
+                          borderRadius: 3,
+                          transition: "width 0.8s ease",
+                        }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Tier breakdown */}
           {stats?.tier_breakdown && stats.tier_breakdown.length > 0 && (
