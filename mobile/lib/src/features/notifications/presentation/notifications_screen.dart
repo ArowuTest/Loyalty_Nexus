@@ -1,13 +1,93 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:gap/gap.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
 
 // ── Providers ──────────────────────────────────────────────────────────────────
 
-final _notifsProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  return ref.read(notificationsApiProvider).list();
-});
+// ── Paginated state ───────────────────────────────────────────────────────────
+
+class _NotifsState {
+  final List<Map> items;
+  final int unreadCount;
+  final String? cursor;
+  final bool loadingMore;
+  const _NotifsState({
+    this.items = const [], this.unreadCount = 0,
+    this.cursor, this.loadingMore = false,
+  });
+  _NotifsState copyWith({List<Map>? items, int? unreadCount, String? cursor,
+    bool clearCursor = false, bool? loadingMore}) =>
+      _NotifsState(
+        items: items ?? this.items,
+        unreadCount: unreadCount ?? this.unreadCount,
+        cursor: clearCursor ? null : (cursor ?? this.cursor),
+        loadingMore: loadingMore ?? this.loadingMore,
+      );
+}
+
+final _notifsProvider = StateNotifierProvider.autoDispose<_NotifsNotifier, _NotifsState>(
+  (ref) => _NotifsNotifier(ref.read(notificationsApiProvider)),
+);
+
+class _NotifsNotifier extends StateNotifier<_NotifsState> {
+  final NotificationsApi _api;
+  _NotifsNotifier(this._api) : super(const _NotifsState()) { _load(); }
+
+  Future<void> _load({String? afterCursor}) async {
+    try {
+      final Map res = await _api.list() as Map;
+      final items = ((res['notifications'] ?? []) as List).cast<Map>();
+      state = _NotifsState(
+        items: items,
+        unreadCount: res['unread_count'] as int? ?? 0,
+        cursor: res['cursor']?.toString(),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> refresh() => _load();
+
+  Future<void> loadMore() async {
+    if (state.cursor == null || state.loadingMore) return;
+    state = state.copyWith(loadingMore: true);
+    try {
+      final Map res = await _api.list() as Map; // API will support cursor later
+      final more = ((res['notifications'] ?? []) as List).cast<Map>();
+      state = state.copyWith(
+        items: [...state.items, ...more],
+        cursor: more.isEmpty ? null : res['cursor']?.toString(),
+        clearCursor: more.isEmpty,
+        loadingMore: false,
+      );
+    } catch (_) {
+      state = state.copyWith(loadingMore: false);
+    }
+  }
+
+  Future<void> markRead(String id) async {
+    try {
+      await _api.markRead(id);
+      state = state.copyWith(
+        items: state.items.map((n) =>
+          n['id'] == id ? {...n, 'is_read': true} : n).toList(),
+        unreadCount: (state.unreadCount - 1).clamp(0, 9999),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> markAllRead() async {
+    try {
+      await _api.markAllRead();
+      state = state.copyWith(
+        items: state.items.map((n) => {...n, 'is_read': true}).toList(),
+        unreadCount: 0,
+      );
+    } catch (_) {}
+  }
+}
 
 // ── Type → icon/colour mapping (no subscription types) ────────────────────────
 
@@ -32,7 +112,10 @@ class NotificationsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final notifsAsync = ref.watch(_notifsProvider);
+    final state    = ref.watch(_notifsProvider);
+    final notifier = ref.read(_notifsProvider.notifier);
+    final items    = state.items;
+    final unread   = state.unreadCount;
 
     return Scaffold(
       backgroundColor: NexusColors.background,
@@ -40,84 +123,91 @@ class NotificationsScreen extends ConsumerWidget {
         backgroundColor: NexusColors.background,
         title: Row(children: [
           const Text('Notifications 🔔'),
-          const SizedBox(width: 8),
-          notifsAsync.when(
-            data: (d) {
-              final unread = d['unread_count'] as int? ?? 0;
-              return unread > 0
-                  ? Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: NexusColors.primary,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text('$unread',
-                        style: const TextStyle(color: Colors.white, fontSize: 11,
-                          fontWeight: FontWeight.w800)),
-                    )
-                  : const SizedBox.shrink();
-            },
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
-          ),
+          const Gap(8),
+          if (unread > 0)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: NexusColors.primary,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text('$unread',
+                style: const TextStyle(color: Colors.white, fontSize: 11,
+                  fontWeight: FontWeight.w800)),
+            ).animate().scale(),
         ]),
         actions: [
-          notifsAsync.when(
-            data: (d) {
-              final unread = d['unread_count'] as int? ?? 0;
-              return unread > 0
-                  ? TextButton(
-                      onPressed: () async {
-                        await ref.read(notificationsApiProvider).markAllRead();
-                        ref.invalidate(_notifsProvider);
-                      },
-                      style: TextButton.styleFrom(foregroundColor: NexusColors.primary),
-                      child: const Text('Mark all read', style: TextStyle(fontSize: 12)),
-                    )
-                  : const SizedBox.shrink();
-            },
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
-          ),
+          if (unread > 0)
+            TextButton(
+              onPressed: () => notifier.markAllRead(),
+              style: TextButton.styleFrom(foregroundColor: NexusColors.primary),
+              child: const Text('Mark all read', style: TextStyle(fontSize: 12)),
+            ),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () async => ref.invalidate(_notifsProvider),
+        onRefresh: () => notifier.refresh(),
         color: NexusColors.primary,
-        child: notifsAsync.when(
-          loading: () => _LoadingList(),
-          error: (_, __) => _EmptyState(),
-          data: (data) {
-            final items = data['notifications'] as List? ?? [];
-
-            if (items.isEmpty) return _EmptyState();
-
-            // Group: today vs earlier
-            final now   = DateTime.now();
-            final today = DateTime(now.year, now.month, now.day);
-            final todayItems    = <Map>[];
-            final earlierItems  = <Map>[];
-            for (final item in items) {
-              final n = item as Map;
-              final d = DateTime.tryParse(n['created_at']?.toString() ?? '') ?? DateTime(2000);
-              if (d.isAfter(today)) { todayItems.add(n); } else { earlierItems.add(n); }
-            }
-
-            return ListView(children: [
-              if (todayItems.isNotEmpty) ...[
-                _GroupHeader('Today'),
-                ...todayItems.map((n) => _NotifTile(notif: n, ref: ref)),
-              ],
-              if (earlierItems.isNotEmpty) ...[
-                _GroupHeader('Earlier'),
-                ...earlierItems.map((n) => _NotifTile(notif: n, ref: ref)),
-              ],
-              const SizedBox(height: 100),
-            ]);
-          },
-        ),
+        child: items.isEmpty
+            ? ListView(children: [const Gap(80), const _EmptyState()])
+            : _NotifList(items: items, state: state, notifier: notifier),
       ),
     );
+  }
+}
+
+class _NotifList extends StatelessWidget {
+  final List<Map> items;
+  final _NotifsState state;
+  final _NotifsNotifier notifier;
+  const _NotifList({required this.items, required this.state, required this.notifier});
+
+  @override
+  Widget build(BuildContext context) {
+    final now   = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final todayItems   = items.where((n) {
+      final d = DateTime.tryParse(n['created_at']?.toString() ?? '') ?? DateTime(2000);
+      return d.isAfter(today);
+    }).toList();
+    final earlierItems = items.where((n) {
+      final d = DateTime.tryParse(n['created_at']?.toString() ?? '') ?? DateTime(2000);
+      return !d.isAfter(today);
+    }).toList();
+
+    return ListView(children: [
+      if (todayItems.isNotEmpty) ..[
+        const _GroupHeader('Today'),
+        ...todayItems.asMap().entries.map((e) =>
+          _NotifTile(notif: e.value, notifier: notifier)
+              .animate(delay: (e.key * 30).ms).fadeIn().slideX(begin: -0.03, end: 0)),
+      ],
+      if (earlierItems.isNotEmpty) ..[
+        const _GroupHeader('Earlier'),
+        ...earlierItems.asMap().entries.map((e) =>
+          _NotifTile(notif: e.value, notifier: notifier)
+              .animate(delay: (e.key * 20).ms).fadeIn()),
+      ],
+      // Load More
+      if (state.cursor != null)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          child: state.loadingMore
+              ? const Center(child: NexusShimmer(width: double.infinity, height: 44, radius: NexusRadius.md))
+              : OutlinedButton(
+                  onPressed: () => notifier.loadMore(),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: NexusColors.primary,
+                    side: const BorderSide(color: NexusColors.border),
+                    minimumSize: const Size(double.infinity, 0),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: NexusRadius.md),
+                  ),
+                  child: const Text('Load More', style: TextStyle(fontSize: 13)),
+                ),
+        ),
+      const Gap(100),
+    ]);
   }
 }
 
@@ -125,8 +215,8 @@ class NotificationsScreen extends ConsumerWidget {
 
 class _NotifTile extends StatelessWidget {
   final Map notif;
-  final WidgetRef ref;
-  const _NotifTile({required this.notif, required this.ref});
+  final _NotifsNotifier notifier;
+  const _NotifTile({required this.notif, required this.notifier});
 
   @override
   Widget build(BuildContext context) {
@@ -136,10 +226,7 @@ class _NotifTile extends StatelessWidget {
     final date   = _formatDate(notif['created_at']?.toString() ?? '');
 
     return InkWell(
-      onTap: !isRead ? () async {
-        await ref.read(notificationsApiProvider).markRead(notif['id']?.toString() ?? '');
-        ref.invalidate(_notifsProvider);
-      } : null,
+      onTap: !isRead ? () => notifier.markRead(notif['id']?.toString() ?? '') : null,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         padding: const EdgeInsets.all(14),

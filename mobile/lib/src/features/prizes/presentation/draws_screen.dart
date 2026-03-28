@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:gap/gap.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
 
@@ -361,9 +363,28 @@ class _WinnersList extends ConsumerWidget {
         padding: EdgeInsets.symmetric(vertical: 16),
         child: Center(child: NexusShimmer(width: double.infinity, height: 44, radius: NexusRadius.sm)),
       ),
-      error: (_, __) => const Padding(
-        padding: EdgeInsets.all(12),
-        child: Text('Failed to load winners', style: TextStyle(color: NexusColors.textSecondary, fontSize: 12)),
+      error: (_, __) => Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(children: [
+          const Icon(Icons.error_outline_rounded, size: 14, color: NexusColors.red),
+          const Gap(8),
+          const Text('Failed to load winners',
+              style: TextStyle(color: NexusColors.textSecondary, fontSize: 12)),
+          const Spacer(),
+          GestureDetector(
+            onTap: () {
+              ref.invalidate(_winnersProvider(drawId));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Retrying…'),
+                duration: Duration(seconds: 1),
+                behavior: SnackBarBehavior.floating,
+              ));
+            },
+            child: const Text('Retry',
+                style: TextStyle(color: NexusColors.primary, fontSize: 12,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ]),
       ),
       data: (winners) {
         if (winners.isEmpty) {

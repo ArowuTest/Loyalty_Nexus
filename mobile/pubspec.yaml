@@ -37,6 +37,10 @@ dependencies:
   fl_chart: ^0.70.2
   percent_indicator: ^4.2.5
   another_flushbar: ^1.12.30
+  flutter_animate: ^4.5.2
+  gap: ^3.0.1
+  confetti: ^0.8.0
+  connectivity_plus: ^6.1.4
 
   # Device / Platform
   local_auth: ^2.3.0

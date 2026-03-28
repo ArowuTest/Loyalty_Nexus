@@ -17,14 +17,18 @@ void main() async {
   // SharedPreferences — initialised once, injected as provider override
   final prefs = await SharedPreferences.getInstance();
 
-  // Lock to portrait
+  // Lock to portrait only (landscape adds no value for this app)
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-  // System UI
+  // Edge-to-edge: content draws behind status bar & nav bar
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+  // Transparent system bars — theme handles colouring via NavigationBarTheme
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor:                    Colors.transparent,
     statusBarIconBrightness:           Brightness.light,
-    systemNavigationBarColor:          Color(0xFF0F1123),
+    systemNavigationBarColor:          Colors.transparent,
+    systemNavigationBarContrastEnforced: false,
     systemNavigationBarIconBrightness: Brightness.light,
   ));
 

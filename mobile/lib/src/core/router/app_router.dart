@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+// ── Route constants \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nclass AppRoutes {\n  static const home          = '/';\n  static const login         = '/login';\n  static const register      = '/register';\n  static const spin          = '/spin';\n  static const studio        = '/studio';\n  static const wars          = '/wars';\n  static const profile       = '/profile';\n  static const passport      = '/passport';\n  static const prizes        = '/prizes';\n  static const draws         = '/draws';\n  static const pulseAwards   = '/pulse-awards';\n  static const notifications = '/notifications';\n  static const settings      = '/settings';\n}
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';

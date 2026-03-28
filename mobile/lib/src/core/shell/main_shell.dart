@@ -1,10 +1,20 @@
 import 'dart:io';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import '../theme/nexus_theme.dart';
 import '../api/api_client.dart';
+
+// ── Connectivity provider ───────────────────────────────────────────────────────────
+
+final _connectivityProvider = StreamProvider.autoDispose<bool>((ref) async* {
+  yield* Connectivity().onConnectivityChanged.map(
+    (results) => !results.contains(ConnectivityResult.none));
+});
 
 // ─── Unread count provider ────────────────────────────────────────────────────
 
@@ -37,21 +47,46 @@ class MainShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final current   = navigationShell.currentIndex;
+    final current    = navigationShell.currentIndex;
     final unreadAsync = ref.watch(_unreadCountProvider);
-    final unread    = unreadAsync.valueOrNull ?? 0;
+    final unread     = unreadAsync.valueOrNull ?? 0;
+    final isOnline   = ref.watch(_connectivityProvider).valueOrNull ?? true;
 
     return Scaffold(
-      body: navigationShell,
+      body: Column(children: [
+        // Offline banner — slides in from top when connectivity lost
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 350),
+          child: isOnline ? const SizedBox.shrink() : _OfflineBanner(),
+        ),
+        Expanded(child: navigationShell),
+      ]),
       extendBody: true,
       bottomNavigationBar: _BottomBar(
-        tabs:     _tabs,
-        current:  current,
-        unread:   unread,
-        onTap:    _onTap,
+        tabs:    _tabs,
+        current: current,
+        unread:  unread,
+        onTap:   _onTap,
       ),
     );
   }
+}
+
+// ─── Offline banner ───────────────────────────────────────────────────────────
+
+class _OfflineBanner extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    color: const Color(0xFF7f1d1d),
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Icon(Icons.wifi_off_rounded, size: 14, color: Colors.white),
+      Gap(8),
+      Text('No internet connection',
+          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+    ]),
+  ).animate().slideY(begin: -1, end: 0, duration: 300.ms, curve: Curves.easeOut);
 }
 
 // ─── Bottom bar ───────────────────────────────────────────────────────────────

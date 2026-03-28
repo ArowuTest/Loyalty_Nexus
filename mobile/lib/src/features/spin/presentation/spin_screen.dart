@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:confetti/confetti.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
@@ -118,6 +121,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
     with TickerProviderStateMixin {
   late final AnimationController _wheelCtrl;
   late final Animation<double> _wheelAnim;
+  late final ConfettiController _confettiCtrl;
 
   double _currentAngle = 0;
   bool _spinning = false;
@@ -128,6 +132,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
   @override
   void initState() {
     super.initState();
+    _confettiCtrl = ConfettiController(duration: const Duration(seconds: 3));
     _wheelCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 4600),
@@ -144,6 +149,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
 
   @override
   void dispose() {
+    _confettiCtrl.dispose();
     _wheelCtrl.dispose();
     super.dispose();
   }
@@ -188,6 +194,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
     });
     final prizeType = _outcome?['spin_result']?['prize_type'] ?? 'try_again';
     if (prizeType != 'try_again') {
+      _confettiCtrl.play(); // 🎉 fire confetti on any real win
       _showSnack('🎉 ${_outcome?['prize_label'] ?? 'You won!'}');
     }
     // Refresh wallet + history
@@ -229,7 +236,8 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
           ),
         ],
       ),
-      body: wheelAsync.when(
+      body: Stack(children: [
+        wheelAsync.when(
         loading: () => _SpinShimmer(),
         error:   (_, __) => _buildErrorState(),
         data: (segs) {
@@ -309,7 +317,23 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
             ),
           );
         },
-      ),
+        ),
+        // Confetti cannon — fires from top-center on win
+        Align(
+          alignment: Alignment.topCenter,
+          child: ConfettiWidget(
+            confettiController: _confettiCtrl,
+            blastDirectionality: BlastDirectionality.explosive,
+            numberOfParticles: 40,
+            gravity: 0.3,
+            emissionFrequency: 0.05,
+            colors: const [
+              Color(0xFF5f72f9), Color(0xFFf9c74f), Color(0xFF10b981),
+              Color(0xFFf43f5e), Color(0xFF06b6d4), Color(0xFFa78bfa),
+            ],
+          ),
+        ),
+      ]),
     );
   }
 
@@ -608,69 +632,98 @@ class _ResultCard extends StatelessWidget {
   final VoidCallback onReset;
   const _ResultCard({required this.outcome, required this.onReset});
 
+  static const _prizeIcons = {
+    'airtime':      ('📱', Color(0xFF60a5fa)),
+    'data_bundle':  ('📶', Color(0xFFa78bfa)),
+    'pulse_points': ('⚡', Color(0xFFf9c74f)),
+    'momo_cash':    ('💰', Color(0xFF4ade80)),
+    'try_again':    ('🔄', Color(0xFF6b7280)),
+  };
+
   @override
   Widget build(BuildContext context) {
     final prizeType  = outcome['spin_result']?['prize_type']?.toString() ?? 'try_again';
     final prizeLabel = outcome['prize_label']?.toString() ?? '';
+    final needsMomo  = outcome['needs_momo_setup'] as bool? ?? false;
     final isWin      = prizeType != 'try_again';
+    final iconData   = _prizeIcons[prizeType] ?? ('🎁', NexusColors.primary);
 
-    String subText = '';
-    if (prizeType == 'momo_cash') {
-      subText = 'Go to My Prizes to submit your bank/MoMo details.';
+    String subText;
+    if (needsMomo) {
+      subText = '⚠️ Add your MoMo number in Settings to receive your cash prize.';
+    } else if (prizeType == 'momo_cash') {
+      subText = 'Cash will be sent to your linked MoMo number within 24 hours.';
     } else if (prizeType == 'pulse_points') {
-      subText = 'Points added to your wallet!';
-    } else if (isWin) {
-      subText = 'Being credited to your phone within 5–10 minutes.';
+      subText = 'Points added to your wallet instantly! ⚡';
+    } else if (prizeType == 'airtime') {
+      subText = 'Airtime credited to your MTN line within 5–10 minutes.';
+    } else if (prizeType == 'data_bundle') {
+      subText = 'Data bundle activated on your MTN line within 5–10 minutes.';
     } else {
-      subText = 'Recharge to earn another spin chance!';
+      subText = 'Better luck next time! Recharge to earn another spin credit.';
     }
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 350),
+    return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: isWin
             ? LinearGradient(
-                colors: [NexusColors.primary.withOpacity(0.15), NexusColors.gold.withOpacity(0.08)],
+                colors: [NexusColors.primary.withOpacity(0.12), iconData.$2.withOpacity(0.08)],
                 begin: Alignment.topLeft, end: Alignment.bottomRight)
             : null,
-        color: isWin ? null : NexusColors.background,
+        color: isWin ? null : NexusColors.surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isWin ? NexusColors.gold.withOpacity(0.4) : NexusColors.border),
+          color: isWin ? iconData.$2.withOpacity(0.4) : NexusColors.border),
       ),
       child: Column(children: [
-        if (isWin) ...[
-          const Icon(Icons.emoji_events_rounded, color: NexusColors.gold, size: 44),
-          const SizedBox(height: 8),
-          const Text('🎉 You Won!',
-            style: TextStyle(color: NexusColors.gold, fontSize: 12,
-              fontWeight: FontWeight.w800, letterSpacing: 1.5)),
-          const SizedBox(height: 6),
+        if (isWin) ..[
+          Text(iconData.$1, style: const TextStyle(fontSize: 48))
+              .animate()
+              .scale(begin: const Offset(0.5, 0.5), end: const Offset(1, 1),
+                  curve: Curves.elasticOut, duration: 600.ms),
+          const Gap(8),
+          const Text('YOU WON!',
+            style: TextStyle(color: NexusColors.gold, fontSize: 11,
+              fontWeight: FontWeight.w900, letterSpacing: 2)),
+          const Gap(6),
           Text(prizeLabel,
-            style: const TextStyle(color: Colors.white, fontSize: 22,
-              fontWeight: FontWeight.w800),
+            style: TextStyle(color: iconData.$2, fontSize: 24,
+              fontWeight: FontWeight.w900),
             textAlign: TextAlign.center),
-        ] else ...[
-          Icon(Icons.refresh_rounded, color: NexusColors.textSecondary.withOpacity(0.5), size: 36),
-          const SizedBox(height: 8),
-          const Text('Not this time',
+        ] else ..[
+          Text(iconData.$1, style: const TextStyle(fontSize: 40))
+              .animate().shake(hz: 3, curve: Curves.easeInOut),
+          const Gap(8),
+          const Text('Not this time…',
             style: TextStyle(color: NexusColors.textSecondary, fontSize: 16,
               fontWeight: FontWeight.w600)),
         ],
-        const SizedBox(height: 8),
+        const Gap(10),
         Text(subText,
-          style: const TextStyle(color: NexusColors.textSecondary, fontSize: 12),
+          style: const TextStyle(color: NexusColors.textSecondary, fontSize: 12, height: 1.5),
           textAlign: TextAlign.center),
-        const SizedBox(height: 14),
+        if (needsMomo) ..[
+          const Gap(12),
+          FilledButton.icon(
+            onPressed: () => context.push('/settings'),
+            icon: const Icon(Icons.phone_android_rounded, size: 14),
+            label: const Text('Add MoMo Number'),
+            style: FilledButton.styleFrom(
+              backgroundColor: NexusColors.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+          ),
+        ],
+        const Gap(12),
         TextButton(
           onPressed: onReset,
           style: TextButton.styleFrom(foregroundColor: NexusColors.textSecondary),
-          child: const Text('Spin Again', style: TextStyle(fontSize: 13)),
+          child: const Text('Spin Again →', style: TextStyle(fontSize: 13)),
         ),
       ]),
-    );
+    ).animate().fadeIn(duration: 350.ms).slideY(begin: 0.1, end: 0);
   }
 }
 
