@@ -98,6 +98,11 @@ class UserApi {
     return Map<String, dynamic>.from(r as Map);
   }
 
+  Future<Map<String, dynamic>> getBonusPulseAwards() async {
+    final r = await _dio.apiGet<Map>('/user/bonus-pulse');
+    return Map<String, dynamic>.from(r as Map);
+  }
+
   Future<void> requestMoMoLink(String msisdn) =>
       _dio.apiPost('/user/momo/request', data: {'msisdn': msisdn});
 
