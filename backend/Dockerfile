@@ -40,7 +40,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
       ./cmd/migrate
 
 # ─── Stage 2: API Runtime ───────────────────────────────────────────────────
-# Uses alpine so the entrypoint shell script can run migrations before the API.
+# Uses alpine:3.19 so the entrypoint shell script can execute.
 FROM alpine:3.19 AS api
 
 RUN apk add --no-cache ca-certificates tzdata
@@ -52,15 +52,9 @@ COPY --from=builder /bin/migrate /migrate
 # at /app/migrations at runtime or MIGRATIONS_DIR must point to them.
 # The repo-root Dockerfile copies database/migrations/ automatically.
 
-COPY <<'EOF' /entrypoint.sh
-#!/bin/sh
-set -e
-echo "[entrypoint] Running database migrations..."
-/migrate up
-echo "[entrypoint] Migrations complete. Starting API..."
-exec /api
-EOF
-
+# Entrypoint script must be provided at build time or mounted.
+# For local dev: docker build -f backend/Dockerfile --target api .
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV MIGRATIONS_DIR=/app/migrations

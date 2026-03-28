@@ -11,7 +11,7 @@
 #  Migration strategy
 #  ──────────────────
 #  golang-migrate/v4 tracks applied versions in schema_migrations.
-#  The entrypoint script runs `/migrate up` before starting the API.
+#  entrypoint.sh runs /migrate up before starting /api on every deploy.
 #  This is fully idempotent — already-applied migrations are skipped.
 #  If any migration fails, the container exits non-zero and Render keeps
 #  the previous healthy version live (zero-downtime guarantee).
@@ -56,8 +56,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
       ./cmd/migrate
 
 # ─── Stage 2: API Runtime ───────────────────────────────────────────────────
-# Uses alpine (not distroless) so the entrypoint shell script can run.
-# The /migrate binary runs all pending SQL migrations before /api starts.
+# Uses alpine:3.19 so the entrypoint shell script can execute.
 FROM alpine:3.19 AS api
 
 RUN apk add --no-cache ca-certificates tzdata
@@ -69,16 +68,8 @@ COPY --from=builder /bin/migrate /migrate
 # SQL migration files
 COPY database/migrations/        /app/migrations/
 
-# Entrypoint: run migrations first, then start the API
-COPY <<'EOF' /entrypoint.sh
-#!/bin/sh
-set -e
-echo "[entrypoint] Running database migrations..."
-/migrate up
-echo "[entrypoint] Migrations complete. Starting API..."
-exec /api
-EOF
-
+# Entrypoint script: run migrations first, then start the API
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV MIGRATIONS_DIR=/app/migrations
