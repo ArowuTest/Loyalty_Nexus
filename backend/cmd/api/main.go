@@ -79,7 +79,7 @@ func main() {
 	studioSvc     := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
 	hlrSvc        := services.NewHLRService(hlrRepo)
 	warssSvc      := services.NewRegionalWarsService(warsRepo, userRepo, txRepo, cfg, db)
-	passportSvc   := services.NewPassportService(db)
+	passportSvc   := services.NewPassportService(db, cfg)
 	fraudSvc      := services.NewFraudService(db)
 	claimSvc      := services.NewClaimService(prizeRepo, userRepo, momoSvc, fulfillSvc)
 	adminClaimSvc := services.NewAdminClaimService(prizeRepo, momoSvc)
@@ -143,7 +143,7 @@ func main() {
 
 	warsH     := handlers.NewWarsHandler(warssSvc, leaderboardHub)
 	drawH     := handlers.NewDrawHandler(drawSvc)
-	passportH := handlers.NewPassportHandler(passportSvc)
+	passportH := handlers.NewPassportHandler(passportSvc).WithConfig(cfg)
 	fraudH    := handlers.NewFraudHandler(fraudSvc)
 
 	// ─── Router ───────────────────────────────────────────────
@@ -160,6 +160,9 @@ func main() {
 	// ─── Auth (public) ────────────────────────────────────────
 	mux.HandleFunc("POST /api/v1/auth/otp/send", authH.SendOTP)
 	mux.HandleFunc("POST /api/v1/auth/otp/verify", authH.VerifyOTP)
+
+	// ─── Passport banner config (public — no auth required) ──
+	mux.HandleFunc("GET /api/v1/passport/banner-config", passportH.GetBannerConfig)
 
 
 

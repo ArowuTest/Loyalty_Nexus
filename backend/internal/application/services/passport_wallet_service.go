@@ -232,7 +232,7 @@ func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uu
 		prizeWon = unclaimedCount > 0
 	}
 
-	headerMsg := ResolvePassHeaderMessage(isStreakExpiring, spinReady, tierUpgraded, prizeWon, passport.Tier)
+	headerMsg := ResolvePassHeaderMessage(isStreakExpiring, spinReady, tierUpgraded, prizeWon, passport.Tier, svc.cfg)
 	headerField := map[string]interface{}{
 		"key":   "tier",
 		"label": headerMsg.Label,
@@ -353,32 +353,64 @@ type PassHeaderMessage struct {
 
 // ResolvePassHeaderMessage returns the highest-priority contextual header message
 // for the wallet card based on the user's current state.
-// This drives the lock-screen message the user sees without opening the app.
-func ResolvePassHeaderMessage(isStreakExpiring, spinReady, tierUpgraded, prizeWon bool, tier string) PassHeaderMessage {
+// All message strings and enable/disable toggles are read from ConfigManager
+// (network_configs table) so they can be changed from the admin panel without
+// a code deploy. cfg may be nil (falls back to hardcoded defaults).
+func ResolvePassHeaderMessage(isStreakExpiring, spinReady, tierUpgraded, prizeWon bool, tier string, cfg interface {
+	GetString(string, string) string
+	GetBool(string, bool) bool
+}) PassHeaderMessage {
+	// Helper to read config with fallback
+	getStr := func(key, def string) string {
+		if cfg == nil {
+			return def
+		}
+		return cfg.GetString(key, def)
+	}
+	getBool := func(key string, def bool) bool {
+		if cfg == nil {
+			return def
+		}
+		return cfg.GetBool(key, def)
+	}
+
+	// Broadcast message takes highest priority when enabled
+	if getBool("wallet_broadcast_enabled", false) {
+		broadcastLabel := getStr("wallet_broadcast_label", "📢 ANNOUNCEMENT")
+		broadcastMsg   := getStr("wallet_broadcast_message", "")
+		if broadcastMsg != "" {
+			return PassHeaderMessage{
+				Label:   broadcastLabel,
+				Value:   broadcastMsg,
+				Message: broadcastMsg + " %@",
+			}
+		}
+	}
+
 	switch {
-	case isStreakExpiring:
+	case isStreakExpiring && getBool("wallet_streak_expiry_enabled", true):
 		return PassHeaderMessage{
 			Label:   "⚠️ ALERT",
-			Value:   "Streak expiring soon!",
-			Message: "Recharge now to save your streak! %@",
+			Value:   getStr("wallet_streak_expiry_message", "Streak expiring soon!"),
+			Message: getStr("wallet_streak_expiry_message", "Streak expiring soon!") + " Recharge now! %@",
 		}
-	case spinReady:
+	case spinReady && getBool("wallet_spin_ready_enabled", true):
 		return PassHeaderMessage{
 			Label:   "🎰 SPIN READY",
-			Value:   "You have a free spin!",
-			Message: "Open Loyalty Nexus to spin and win up to ₦5,000! %@",
+			Value:   getStr("wallet_spin_ready_message", "You have a free spin!"),
+			Message: getStr("wallet_spin_ready_message", "You have a free spin!") + " Open app to win up to ₦5,000! %@",
 		}
-	case tierUpgraded:
+	case tierUpgraded && getBool("wallet_tier_upgrade_enabled", true):
 		return PassHeaderMessage{
 			Label:   "🎉 TIER UP!",
-			Value:   tier + " Member",
-			Message: "You've reached " + tier + " tier! %@",
+			Value:   getStr("wallet_tier_upgrade_message", "You've been promoted!") + " " + tier,
+			Message: getStr("wallet_tier_upgrade_message", "You've been promoted!") + " You're now " + tier + "! %@",
 		}
-	case prizeWon:
+	case prizeWon && getBool("wallet_prize_won_enabled", true):
 		return PassHeaderMessage{
 			Label:   "🏆 YOU WON!",
-			Value:   "Prize waiting — open app",
-			Message: "You won a prize on Loyalty Nexus! Open the app to claim. %@",
+			Value:   getStr("wallet_prize_won_message", "Prize waiting — open app"),
+			Message: getStr("wallet_prize_won_message", "Prize waiting — open app") + " %@",
 		}
 	default:
 		return PassHeaderMessage{

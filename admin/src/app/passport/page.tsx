@@ -18,6 +18,25 @@ const PASSPORT_CONFIG_KEYS = {
   USSD_SHORT_CODE:      "ussd_short_code",
   USSD_TIMEOUT:         "ussd_session_timeout_seconds",
   USSD_MAX_DEPTH:       "ussd_max_menu_depth",
+  // Dashboard banner
+  BANNER_ENABLED:       "passport_banner_enabled",
+  BANNER_TITLE:         "passport_banner_title",
+  BANNER_SUBTITLE:      "passport_banner_subtitle",
+  BANNER_CTA_IOS:       "passport_banner_cta_ios",
+  BANNER_CTA_ANDROID:   "passport_banner_cta_android",
+  // Wallet card messages
+  WALLET_STREAK_EXPIRY_ENABLED:  "wallet_streak_expiry_enabled",
+  WALLET_STREAK_EXPIRY_MSG:      "wallet_streak_expiry_message",
+  WALLET_SPIN_READY_ENABLED:     "wallet_spin_ready_enabled",
+  WALLET_SPIN_READY_MSG:         "wallet_spin_ready_message",
+  WALLET_TIER_UPGRADE_ENABLED:   "wallet_tier_upgrade_enabled",
+  WALLET_TIER_UPGRADE_MSG:       "wallet_tier_upgrade_message",
+  WALLET_PRIZE_WON_ENABLED:      "wallet_prize_won_enabled",
+  WALLET_PRIZE_WON_MSG:          "wallet_prize_won_message",
+  // Broadcast
+  WALLET_BROADCAST_ENABLED:      "wallet_broadcast_enabled",
+  WALLET_BROADCAST_LABEL:        "wallet_broadcast_label",
+  WALLET_BROADCAST_MSG:          "wallet_broadcast_message",
 };
 
 // ─── Config hook (same pattern as points-config/page.tsx) ─────────────────────
@@ -615,6 +634,130 @@ export default function PassportAdminPage() {
                   label="Wallet Pass Push Enabled"
                   desc="Push updated Apple/Google Wallet passes during Ghost Nudge runs. Disable to pause wallet pushes independently."
                   configKey={PASSPORT_CONFIG_KEYS.NUDGE_WALLET_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+              </div>
+
+              {/* Dashboard Banner */}
+              <p style={sectionHeadStyle}>🎫 Dashboard Passport Banner</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, marginBottom: 8 }}>
+                <ToggleField
+                  label="Banner Enabled"
+                  desc="Show the 'Download Your Passport' banner on the user dashboard. Disable to hide it globally."
+                  configKey={PASSPORT_CONFIG_KEYS.BANNER_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Banner Title"
+                  desc="Main heading shown on the dashboard passport banner."
+                  configKey={PASSPORT_CONFIG_KEYS.BANNER_TITLE}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Banner Subtitle"
+                  desc="Supporting text below the banner title."
+                  configKey={PASSPORT_CONFIG_KEYS.BANNER_SUBTITLE}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="iOS CTA Text"
+                  desc="Button text shown to iPhone users on the banner."
+                  configKey={PASSPORT_CONFIG_KEYS.BANNER_CTA_IOS}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Android CTA Text"
+                  desc="Button text shown to Android users on the banner."
+                  configKey={PASSPORT_CONFIG_KEYS.BANNER_CTA_ANDROID}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+              </div>
+
+              {/* Wallet Card Messages */}
+              <p style={sectionHeadStyle}>💳 Wallet Card Lock-Screen Messages</p>
+              <div style={{ ...cardStyle, marginBottom: 12, padding: "10px 14px" }}>
+                <p style={{ color: "#828cb4", fontSize: 12, margin: 0 }}>
+                  These messages appear on the user&apos;s lock screen via Apple Wallet / Google Wallet.
+                  Changes take effect on the next Ghost Nudge tick — no deploy needed.
+                  <strong style={{ color: "#9cb7ff" }}> Broadcast overrides all other messages when enabled.</strong>
+                </p>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, marginBottom: 8 }}>
+                <ToggleField
+                  label="Streak Expiry Push Enabled"
+                  desc="Push a wallet card update when a user's streak is about to expire."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_STREAK_EXPIRY_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Streak Expiry Message"
+                  desc="Text shown on the wallet card when streak is expiring."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_STREAK_EXPIRY_MSG}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <ToggleField
+                  label="Spin Ready Push Enabled"
+                  desc="Push a wallet card update when the user has spin credits available."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_SPIN_READY_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Spin Ready Message"
+                  desc="Text shown on the wallet card when a free spin is available."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_SPIN_READY_MSG}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <ToggleField
+                  label="Tier Upgrade Push Enabled"
+                  desc="Push a wallet card update when the user is promoted to a new tier."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_TIER_UPGRADE_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Tier Upgrade Message"
+                  desc="Text shown on the wallet card after a tier upgrade."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_TIER_UPGRADE_MSG}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <ToggleField
+                  label="Prize Won Push Enabled"
+                  desc="Push a wallet card update when the user has an unclaimed prize."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_PRIZE_WON_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Prize Won Message"
+                  desc="Text shown on the wallet card when an unclaimed prize is waiting."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_PRIZE_WON_MSG}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+              </div>
+
+              {/* Broadcast Message */}
+              <p style={sectionHeadStyle}>📢 Broadcast Message (overrides all card messages)</p>
+              <div style={{ ...cardStyle, marginBottom: 12, padding: "10px 14px", border: "1px solid rgba(234,179,8,0.3)" }}>
+                <p style={{ color: "#fbbf24", fontSize: 12, margin: 0 }}>
+                  ⚠️ When broadcast is enabled, ALL wallet cards will show this message regardless of user state.
+                  Use for promotions, double-points events, or announcements. Disable when done.
+                </p>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, marginBottom: 8 }}>
+                <ToggleField
+                  label="Broadcast Enabled"
+                  desc="When ON, the broadcast message overrides all other wallet card messages for every user."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_BROADCAST_ENABLED}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Broadcast Label"
+                  desc="Short label shown above the broadcast message on the wallet card (e.g. '📢 ANNOUNCEMENT')."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_BROADCAST_LABEL}
+                  configs={configs} saving={saving} saved={saved} onSave={save}
+                />
+                <TextField
+                  label="Broadcast Message"
+                  desc="The message shown on every user's wallet card lock screen. Keep it under 40 characters."
+                  configKey={PASSPORT_CONFIG_KEYS.WALLET_BROADCAST_MSG}
                   configs={configs} saving={saving} saved={saved} onSave={save}
                 />
               </div>

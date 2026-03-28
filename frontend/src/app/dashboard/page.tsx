@@ -15,16 +15,50 @@ import {
 
 // ─── Digital Passport Banner ─────────────────────────────────────────────────
 
+interface BannerConfig {
+  banner_enabled:    boolean;
+  banner_title:      string;
+  banner_subtitle:   string;
+  banner_cta_ios:    string;
+  banner_cta_android: string;
+}
+
+const DEFAULT_BANNER_CONFIG: BannerConfig = {
+  banner_enabled:    true,
+  banner_title:      "Your Digital Passport is ready",
+  banner_subtitle:   "Track your Pulse Points and streak right from your lock screen — no app needed.",
+  banner_cta_ios:    "Add to Apple Wallet",
+  banner_cta_android: "Add to Google Wallet",
+};
+
 function PassportBanner({ points, streak }: { points: number; streak: number }) {
   const [dismissed, setDismissed] = useState(true); // start hidden to avoid flash
   const [isIOS, setIsIOS]         = useState(false);
   const [mounted, setMounted]     = useState(false);
+  const [bannerCfg, setBannerCfg] = useState<BannerConfig>(DEFAULT_BANNER_CONFIG);
 
   useEffect(() => {
     const alreadyDismissed = localStorage.getItem("passport_banner_dismissed") === "1";
     setDismissed(alreadyDismissed);
     setIsIOS(/iphone|ipad|ipod/i.test(navigator.userAgent));
     setMounted(true);
+    // Fetch admin-controlled banner config (public endpoint, no auth required)
+    fetch("/api/v1/passport/banner-config")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) {
+          setBannerCfg({
+            banner_enabled:    data.banner_enabled !== false,
+            banner_title:      data.banner_title      || DEFAULT_BANNER_CONFIG.banner_title,
+            banner_subtitle:   data.banner_subtitle   || DEFAULT_BANNER_CONFIG.banner_subtitle,
+            banner_cta_ios:    data.banner_cta_ios    || DEFAULT_BANNER_CONFIG.banner_cta_ios,
+            banner_cta_android: data.banner_cta_android || DEFAULT_BANNER_CONFIG.banner_cta_android,
+          });
+          // If admin disabled the banner globally, treat as dismissed
+          if (data.banner_enabled === false) setDismissed(true);
+        }
+      })
+      .catch(() => {}); // silently fall back to defaults
   }, []);
 
   const handleDismiss = () => {
@@ -83,11 +117,12 @@ function PassportBanner({ points, streak }: { points: number; streak: number }) 
             {/* Text */}
             <div className="flex-1 min-w-0">
               <p className="text-white font-black text-sm leading-snug">
-                🎫 Your Digital Passport is ready
+                🎫 {bannerCfg.banner_title}
               </p>
               <p className="text-white/50 text-[12px] mt-0.5 leading-relaxed">
                 Track your <strong className="text-blue-300">{formatPoints(points)} pts</strong>
-                {streak > 0 && <> and <strong className="text-orange-400">Day {streak} streak</strong></>} right from your lock screen — no app needed.
+                {streak > 0 && <> and <strong className="text-orange-400">Day {streak} streak</strong></>}{" "}
+                {bannerCfg.banner_subtitle}
               </p>
 
               {/* CTA buttons */}
@@ -102,7 +137,7 @@ function PassportBanner({ points, streak }: { points: number; streak: number }) 
                     }}
                   >
                     {isIOS ? <Smartphone size={13} /> : <Wallet size={13} />}
-                    {isIOS ? "Add to Apple Wallet" : "Add to Google Wallet"}
+                    {isIOS ? bannerCfg.banner_cta_ios : bannerCfg.banner_cta_android}
                   </button>
                 </Link>
                 <Link href="/passport">
