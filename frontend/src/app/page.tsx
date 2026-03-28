@@ -360,18 +360,24 @@ export default function HomePage() {
           </div>
 
           {/* Feature pills */}
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.28 }}
-            className="flex flex-wrap items-center justify-center gap-2 mb-10">
-            {[
-              { icon: "↺", text: "Free spin on ₦1,000+ recharge" },
-              { icon: "🏆", text: "Win up to ₦5,000 instantly" },
-              { icon: "⚡", text: "Pulse Points on every recharge" },
-              { icon: "✦", text: "30+ AI tools unlocked" },
-            ].map(({ icon, text }) => (
-              <div key={text} className="glass border border-white/[0.10] rounded-full px-4 py-1.5 text-[13px] font-semibold text-white/60 flex items-center gap-1.5">
-                <span>{icon}</span>{text}
-              </div>
-            ))}
+          <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+            className="flex flex-wrap items-center justify-center gap-2 mb-9">
+            <div className="inline-flex items-center gap-2 glass rounded-full px-3.5 py-1.5 border border-white/[0.07]">
+              <RotateCcw className="w-3.5 h-3.5 text-gold-500" />
+              <span className="text-xs font-semibold text-white/60">Free spin on ₦1,000+ recharge</span>
+            </div>
+            <div className="inline-flex items-center gap-2 glass rounded-full px-3.5 py-1.5 border border-white/[0.07]">
+              <Trophy className="w-3.5 h-3.5 text-green-400" />
+              <span className="text-xs font-semibold text-white/60">Win up to ₦5,000 instantly</span>
+            </div>
+            <div className="inline-flex items-center gap-2 glass rounded-full px-3.5 py-1.5 border border-white/[0.07]">
+              <Zap className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-xs font-semibold text-white/60">Pulse Points on every recharge</span>
+            </div>
+            <div className="inline-flex items-center gap-2 glass rounded-full px-3.5 py-1.5 border border-white/[0.07]">
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span className="text-xs font-semibold text-white/60">30+ AI tools unlocked</span>
+            </div>
           </motion.div>
 
           {/* CTA buttons */}
@@ -384,11 +390,11 @@ export default function HomePage() {
               Start Earning — It's Free
               <ArrowRight className="w-4 h-4" />
             </button>
-            <button onClick={openAuth}
-              className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
+            <Link href="/studio"
+              className="inline-flex items-center justify-center gap-2 glass rounded-2xl h-14 px-8 text-[15px] font-semibold border border-white/[0.12] text-white hover:border-white/25 transition-all duration-200 w-full sm:w-auto">
               <Sparkles className="w-4 h-4 text-gold-500" />
               Try AI Studio Free
-            </button>
+            </Link>
           </motion.div>
 
           {/* Social proof — avatar stack + star rating */}
@@ -412,6 +418,32 @@ export default function HomePage() {
 
       {/* Live ticker */}
       <LiveTicker />
+
+      {/* Stats bar */}
+      <section className="py-16 relative">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+            {[
+              { label: "Active Users",        value: 84231,     suffix: "+",  icon: Users,    color: "#F5A623", pre: "" },
+              { label: "AI Generations",       value: 1247903,   suffix: "+",  icon: Sparkles, color: "#00D4FF", pre: "" },
+              { label: "Pulse Points Issued",  value: 92000000,  suffix: "+",  icon: Zap,      color: "#10B981", pre: "" },
+              { label: "Prize Money Won",      value: 18000000,  suffix: "+",  icon: Trophy,   color: "#8B5CF6", pre: "₦" },
+            ].map(({ label, value, suffix, icon: Icon, color, pre }) => (
+              <div key={label} className="glass rounded-2xl p-5 border border-white/[0.06] flex flex-col gap-2 hover:border-white/[0.14] transition-all duration-300">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg" style={{ background: `${color}18` }}>
+                    <Icon className="w-4 h-4" style={{ color }} />
+                  </div>
+                  <span className="text-xs font-semibold text-white/50">{label}</span>
+                </div>
+                <p className="text-2xl sm:text-3xl font-black tracking-tight" style={{ color }}>
+                  {pre}<Counter to={value} suffix={suffix} />
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* ══════════════════════════════════════════════════════
           HOW IT WORKS
