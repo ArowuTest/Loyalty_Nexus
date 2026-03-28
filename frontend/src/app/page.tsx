@@ -71,6 +71,27 @@ const TOOL_CARDS = [
   { slug: "bg-remover",       name: "BG Remover",        emoji: "✂️", description: "Remove image backgrounds instantly with AI.", icon: Camera },
 ];
 
+// ─── Floating tool card ──────────────────────────────────────
+function FloatingToolCard({ emoji, label, pts, delay, className }: {
+  emoji: string; label: string; pts: string; delay: number; className?: string;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20, scale: 0.90 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: "spring", stiffness: 200, damping: 26, delay }}
+      className={`border-gold-gradient rounded-2xl px-4 py-3 flex items-center gap-3 select-none pointer-events-none ${className ?? ""}`}
+      style={{ animation: `float-y ${3.5 + delay}s ease-in-out infinite` }}
+    >
+      <span className="text-2xl">{emoji}</span>
+      <div>
+        <p className="text-[13px] font-bold text-white leading-tight">{label}</p>
+        <p className="text-[11px] font-mono text-gold-400">{pts}</p>
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── Animated counter ─────────────────────────────────────────
 function Counter({ to, suffix = "", duration = 1800, prefix = "" }: { to: number; suffix?: string; duration?: number; prefix?: string }) {
   const [count, setCount] = useState(0);
@@ -396,6 +417,14 @@ export default function HomePage() {
               Try AI Studio Free
             </Link>
           </motion.div>
+
+          {/* Floating tool cards — desktop only */}
+          <div className="hidden lg:block">
+            <FloatingToolCard emoji="📸" label="AI Photo"        pts="10 pts" delay={0.6}  className="absolute left-[3%] top-[32%]" />
+            <FloatingToolCard emoji="🤖" label="Ask Nexus"       pts="FREE"   delay={0.75} className="absolute left-[1%] top-[56%]" />
+            <FloatingToolCard emoji="🎦" label="Video Cinematic" pts="65 pts" delay={0.65} className="absolute right-[3%] top-[30%]" />
+            <FloatingToolCard emoji="💼" label="Business Plan"   pts="30 pts" delay={0.80} className="absolute right-[1%] top-[55%]" />
+          </div>
 
           {/* Social proof — avatar stack + star rating */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.44 }}
