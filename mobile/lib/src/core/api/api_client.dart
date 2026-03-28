@@ -157,10 +157,20 @@ class StudioApi {
     return (r as Map)['generations'] as List? ?? [];
   }
 
-  Future<Map<String, dynamic>> sendChat(String message, String? sessionId) async {
-    final r = await _dio.apiPost<Map>('/studio/chat',
-        data: {'message': message, if (sessionId != null) 'session_id': sessionId});
+  Future<Map<String, dynamic>> sendChat(String message, String? toolSlug, {String? sessionId}) async {
+    final r = await _dio.apiPost<Map>('/studio/chat', data: {
+      'message': message,
+      if (sessionId != null) 'session_id': sessionId,
+      if (toolSlug != null) 'tool_slug': toolSlug,
+    });
     return Map<String, dynamic>.from(r as Map);
+  }
+
+  Future<Map<String, dynamic>> getChatUsage() async {
+    try {
+      final r = await _dio.apiGet<Map>('/studio/chat/usage');
+      return Map<String, dynamic>.from(r as Map);
+    } catch (_) { return {}; }
   }
 }
 
