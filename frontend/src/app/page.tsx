@@ -7,6 +7,7 @@ import {
   Zap, Sparkles, ArrowRight, RotateCcw, Lock, ChevronRight,
   Trophy, MapPin, Users, Gift, Star, Clock, Swords,
   Brain, Camera, Video, Mic, BookOpen, BarChart2,
+  Play, Phone, Wallet,
 } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import NavBar from "@/components/landing/NavBar";
@@ -70,6 +71,37 @@ const TOOL_CARDS = [
   { slug: "marketing-jingle", name: "Marketing Jingle",  emoji: "🎵", description: "Create catchy jingles for your brand or product.", icon: Mic },
   { slug: "bg-remover",       name: "BG Remover",        emoji: "✂️", description: "Remove image backgrounds instantly with AI.", icon: Camera },
 ];
+
+// ─── Floating AI tool card (hero decoration) ─────────────────
+function FloatingToolCard({ emoji, label, pts, delay, className }: {
+  emoji: string; label: string; pts: string; delay: number; className?: string;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20, scale: 0.90 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: "spring", stiffness: 200, damping: 26, delay }}
+      className={`glass border border-gold-500/20 rounded-2xl px-4 py-3 flex items-center gap-3 select-none ${className ?? ""}`}
+      style={{ animation: `float-y ${3.5 + delay}s ease-in-out infinite`, boxShadow: "0 0 20px rgba(245,166,35,0.10)" }}
+    >
+      <span className="text-2xl">{emoji}</span>
+      <div>
+        <p className="text-[13px] font-bold text-white leading-tight">{label}</p>
+        <p className="text-[11px] font-mono text-gold-400">{pts}</p>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Feature pill with icon ────────────────────────────────────
+function FeaturePill({ icon: Icon, label, color }: { icon: React.ElementType; label: string; color: string }) {
+  return (
+    <div className="inline-flex items-center gap-2 glass rounded-full px-3.5 py-1.5 border border-white/[0.07]">
+      <Icon className={`w-3.5 h-3.5 ${color}`} />
+      <span className="text-xs font-semibold text-white/55">{label}</span>
+    </div>
+  );
+}
 
 // ─── Animated counter ─────────────────────────────────────────
 function Counter({ to, suffix = "", duration = 1800, prefix = "" }: { to: number; suffix?: string; duration?: number; prefix?: string }) {
@@ -360,60 +392,101 @@ export default function HomePage() {
           </div>
 
           {/* Feature pills */}
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.28 }}
-            className="flex flex-wrap items-center justify-center gap-2 mb-10">
-            {[
-              { icon: "⚡", text: "Instant spin on recharge" },
-              { icon: "🤖", text: "30+ AI tools" },
-              { icon: "⚔️", text: "Regional Wars" },
-              { icon: "🇳🇬", text: "MTN Nigeria only" },
-            ].map(({ icon, text }) => (
-              <div key={text} className="glass border border-white/[0.10] rounded-full px-4 py-1.5 text-[13px] font-semibold text-white/60 flex items-center gap-1.5">
-                <span>{icon}</span>{text}
-              </div>
-            ))}
+          <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+            className="flex flex-wrap items-center justify-center gap-2 mb-9">
+            <FeaturePill icon={RotateCcw} label="Free spin on ₦1,000+ recharge" color="text-gold-400" />
+            <FeaturePill icon={Trophy}    label="Win up to ₦5,000 instantly"     color="text-cyan-400" />
+            <FeaturePill icon={Zap}       label="Pulse Points on every recharge" color="text-emerald-400" />
+            <FeaturePill icon={Sparkles}  label="30+ AI tools unlocked"          color="text-violet-400" />
           </motion.div>
 
           {/* CTA buttons */}
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
-            className="flex flex-col sm:flex-row items-center gap-3 mb-16">
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.30 }}
+            className="flex flex-col sm:flex-row gap-3 mb-8">
             <button onClick={openAuth}
-              className="btn-gold rounded-2xl h-14 px-8 text-[15px] font-black inline-flex items-center gap-2 w-full sm:w-auto justify-center"
-              style={{ boxShadow: "0 0 24px rgba(245,166,35,0.4)" }}>
+              className="btn-gold rounded-2xl h-14 px-8 text-[15px] font-black inline-flex items-center justify-center gap-2 min-w-[220px]"
+              style={{ boxShadow: "0 0 28px rgba(245,166,35,0.45)" }}>
               <Zap className="w-5 h-5" />
-              Start Earning Free
-              <ArrowRight className="w-4 h-4" />
+              Start Earning — It&apos;s Free
             </button>
             <Link href="/studio">
-              <button className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
-                <Sparkles className="w-4 h-4 text-gold-500" />
-                Explore AI Studio
+              <button className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center justify-center gap-2 min-w-[200px] w-full">
+                <Play className="w-4 h-4 fill-current" />
+                Try AI Studio Free
               </button>
             </Link>
           </motion.div>
 
-          {/* Stats row */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}
-            className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full max-w-3xl">
-            {[
-              { to: 84231,   suffix: "+",  label: "Active Users",       prefix: "" },
-              { to: 18,      suffix: "M+", label: "Naira in Prizes",    prefix: "₦" },
-              { to: 1200000, suffix: "+",  label: "AI Creations",       prefix: "" },
-              { to: 37,      suffix: "",   label: "States Competing",   prefix: "" },
-            ].map(({ to, suffix, label, prefix }) => (
-              <div key={label} className="glass rounded-2xl border border-white/[0.08] p-4 text-center">
-                <div className="text-2xl sm:text-3xl font-black text-white mb-1">
-                  <Counter to={to} suffix={suffix} prefix={prefix} />
-                </div>
-                <div className="text-[12px] text-white/40 font-medium">{label}</div>
-              </div>
-            ))}
+          {/* Social proof row */}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.40 }}
+            className="flex items-center gap-4 text-sm text-white/50 mb-4">
+            <div className="flex -space-x-2.5">
+              {["C","T","A","E","F","K"].map((l, i) => (
+                <div key={i}
+                  className="w-8 h-8 rounded-full border-2 flex items-center justify-center text-[11px] font-black text-black"
+                  style={{
+                    borderColor: "#0d0e14",
+                    background: ["#F5A623","#FFE066","#00D4FF","#8B5CF6","#10B981","#F472B6"][i],
+                  }}
+                >{l}</div>
+              ))}
+            </div>
+            <div className="hidden sm:flex items-center gap-1">
+              {[...Array(5)].map((_,i) => <Star key={i} className="w-3.5 h-3.5 fill-gold-400 text-gold-400" />)}
+            </div>
+            <span><strong className="text-white">4.9/5</strong> from 12,000+ reviews</span>
           </motion.div>
+
+          {/* Floating tool cards — desktop only */}
+          <div className="hidden lg:block">
+            <FloatingToolCard emoji="📸" label="AI Photo"        pts="10 pts"  delay={0.6}
+              className="absolute left-[3%] top-[32%]" />
+            <FloatingToolCard emoji="🤖" label="Ask Nexus"       pts="FREE"    delay={0.75}
+              className="absolute left-[1%] top-[56%]" />
+            <FloatingToolCard emoji="🎬" label="Video Cinematic" pts="65 pts"  delay={0.65}
+              className="absolute right-[3%] top-[30%]" />
+            <FloatingToolCard emoji="💼" label="Business Plan"   pts="30 pts"  delay={0.80}
+              className="absolute right-[1%] top-[55%]" />
+          </div>
         </motion.div>
+
+        {/* Bottom gradient fade */}
+        <div className="absolute bottom-0 left-0 right-0 h-32 pointer-events-none"
+          style={{ background: "linear-gradient(to bottom, transparent, #0d0e14)" }} />
       </section>
 
       {/* Live ticker */}
       <LiveTicker />
+
+      {/* ══════════════════════════════════════════════════════
+          STATS BAR
+      ══════════════════════════════════════════════════════ */}
+      <section className="py-16 relative">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6">
+          <StaggerGrid className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+            {[
+              { label: "Active Users",        value: 84231,     suffix: "+",  icon: Users,    color: "#F5A623", pre: "" },
+              { label: "AI Generations",      value: 1247903,   suffix: "+",  icon: Sparkles, color: "#00D4FF", pre: "" },
+              { label: "Pulse Points Issued", value: 92000000,  suffix: "+",  icon: Zap,      color: "#10B981", pre: "" },
+              { label: "Prize Money Won",     value: 18000000,  suffix: "+",  icon: Trophy,   color: "#8B5CF6", pre: "₦" },
+            ].map(({ label, value, suffix, icon: Icon, color, pre }) => (
+              <motion.div key={label} variants={fadeUp}>
+                <div className="glass rounded-2xl p-5 border border-white/[0.06] flex flex-col gap-2 hover:border-white/[0.14] transition-all duration-300">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-lg" style={{ background: `${color}18` }}>
+                      <Icon className="w-4 h-4" style={{ color }} />
+                    </div>
+                    <span className="text-xs font-semibold text-white/45">{label}</span>
+                  </div>
+                  <p className="text-2xl sm:text-3xl font-black tracking-tight" style={{ color }}>
+                    {pre}<Counter to={value} suffix={suffix} />
+                  </p>
+                </div>
+              </motion.div>
+            ))}
+          </StaggerGrid>
+        </div>
+      </section>
 
       {/* ══════════════════════════════════════════════════════
           HOW IT WORKS
