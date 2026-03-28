@@ -28,10 +28,25 @@ func main() {
 	defer stop()
 
 	// ─── Database ─────────────────────────────────────────────
-	db, err := gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("DB connect: %v", err)
+	// Retry DB connection up to 10 times with 3s backoff.
+	// On Render, the internal DB hostname is always reachable but may take
+	// a few seconds to accept connections after a cold start.
+	var (
+		db  *gorm.DB
+		err error
+	)
+	for attempt := 1; attempt <= 10; attempt++ {
+		db, err = gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
+		if err == nil {
+			break
+		}
+		log.Printf("[DB] connect attempt %d/10 failed: %v — retrying in 3s...", attempt, err)
+		time.Sleep(3 * time.Second)
 	}
+	if err != nil {
+		log.Fatalf("[DB] could not connect after 10 attempts: %v", err)
+	}
+	log.Println("[DB] connected successfully")
 
 	// ─── Redis ────────────────────────────────────────────────
 	// redis.ParseURL handles redis://, rediss://, and plain host:port formats.
