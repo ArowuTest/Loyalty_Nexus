@@ -4,20 +4,29 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'src/core/theme/nexus_theme.dart';
 import 'src/core/router/app_router.dart';
+import 'src/core/notifications/push_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Firebase initialisation — options loaded from google-services.json / GoogleService-Info.plist
+  // Firebase must be initialised before FCM background handler runs
   await Firebase.initializeApp();
 
+  // Lock orientation to portrait
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+  // Dark status bar
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
+    statusBarColor:             Colors.transparent,
+    statusBarIconBrightness:    Brightness.light,
+    systemNavigationBarColor:   Color(0xFF0D0F1E),
+    systemNavigationBarIconBrightness: Brightness.light,
   ));
+
   runApp(const ProviderScope(child: LoyaltyNexusApp()));
 }
+
+// ─── App root ─────────────────────────────────────────────────────────────────
 
 class LoyaltyNexusApp extends ConsumerStatefulWidget {
   const LoyaltyNexusApp({super.key});
@@ -25,32 +34,36 @@ class LoyaltyNexusApp extends ConsumerStatefulWidget {
 }
 
 class _LoyaltyNexusAppState extends ConsumerState<LoyaltyNexusApp> {
+  PushNotificationService? _pushService;
+
   @override
   void initState() {
     super.initState();
-    // Push notifications initialised after first build so ref is available
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // Only initialise when user is authenticated (token will be skipped if not)
-      try {
-        from(context, ref);
-      } catch (_) {}
-    });
+    // Initialise push notifications on the first frame
+    // (router must be available first)
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initPush());
   }
 
-  // Trigger FCM setup lazily — the service ignores the call if no auth token exists
-  static void from(BuildContext ctx, WidgetRef ref) {
-    // Push init is handled inside auth flow after login
-    // See auth_provider.dart → on login success
+  void _initPush() {
+    final router    = ref.read(appRouterProvider);
+    final container = ProviderScope.containerOf(context);
+
+    _pushService = PushNotificationService(
+      container: container,
+      router:    router,
+    );
+    _pushService!.init();
   }
 
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(appRouterProvider);
+
     return MaterialApp.router(
-      title: 'Loyalty Nexus',
+      title:                    'Loyalty Nexus',
       debugShowCheckedModeBanner: false,
-      theme: NexusTheme.dark(),
-      routerConfig: router,
+      theme:                    NexusTheme.dark(),
+      routerConfig:             router,
     );
   }
 }
