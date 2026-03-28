@@ -5,9 +5,6 @@
   "outputDirectory": ".next",
   "installCommand": "npm ci",
   "regions": ["fra1"],
-  "env": {
-    "NEXT_PUBLIC_API_URL": "@nexus_api_url"
-  },
   "headers": [
     {
       "source": "/(.*)",
