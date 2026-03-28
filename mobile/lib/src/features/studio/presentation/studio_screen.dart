@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:gap/gap.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
@@ -70,15 +74,8 @@ class _GalleryNotifier extends StateNotifier<_GalleryState> {
   @override void dispose() { _poll?.cancel(); super.dispose(); }
 }
 
-final _chatUsageProvider = FutureProvider.autoDispose<Map<String, int>?>((ref) async {
-  try {
-    final res = await ref.read(studioApiProvider).getChatUsage();
-    if (res is Map && res['used'] != null) {
-      return {'used': res['used'] as int, 'limit': (res['limit'] as int?) ?? 100};
-    }
-  } catch (_) {}
-  return null;
-});
+// Note: Chat usage is now loaded directly in _StudioScreenState._loadUsage()
+// and tracked locally via _chatUsage state field for optimistic updates.
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Data models
@@ -296,8 +293,12 @@ class _Message {
   final String role, content;
   final ChatMode mode;
   final DateTime ts;
-  const _Message({required this.role, required this.content,
-    this.mode = ChatMode.general, required this.ts});
+  final String? provider;  // AI provider label from backend (e.g. 'gpt-4o-mini')
+  const _Message({
+    required this.role, required this.content,
+    this.mode = ChatMode.general, required this.ts,
+    this.provider,
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -312,6 +313,8 @@ class StudioScreen extends ConsumerStatefulWidget {
 class _StudioScreenState extends ConsumerState<StudioScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabs;
+  static const _storage = FlutterSecureStorage();
+  static const _sessionKey = 'nexus_chat_session';
 
   // ── Chat state ──
   final List<_Message> _messages = [
@@ -320,10 +323,12 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
                "I can help with business ideas, explain anything, draft content, and more. "
                "What's on your mind?"),
   ];
-  ChatMode _chatMode = ChatMode.general;
-  final _chatCtrl   = TextEditingController();
-  bool  _sending    = false;
-  final _scrollCtrl = ScrollController();
+  ChatMode _chatMode   = ChatMode.general;
+  final _chatCtrl      = TextEditingController();
+  bool  _sending       = false;
+  final _scrollCtrl    = ScrollController();
+  String? _sessionId;          // persisted across launches for memory continuity
+  Map<String, int>? _chatUsage; // {used, limit}
 
   // ── Tools state ──
   String  _searchQuery    = '';
@@ -335,6 +340,26 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
     super.initState();
     _tabs = TabController(length: 3, vsync: this);
     _tabs.addListener(() => setState(() {}));
+    _initSession();
+    _loadUsage();
+  }
+
+  /// Restore or create a session ID for backend memory continuity.
+  Future<void> _initSession() async {
+    String? stored = await _storage.read(key: _sessionKey);
+    stored ??= 'sess_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(0xFFFFFF).toRadixString(16)}';
+    await _storage.write(key: _sessionKey, value: stored);
+    if (mounted) setState(() => _sessionId = stored);
+  }
+
+  Future<void> _loadUsage() async {
+    try {
+      final r = await ref.read(studioApiProvider).getChatUsage();
+      if (!mounted) return;
+      final used  = (r as Map)['used'] as int? ?? 0;
+      final limit = (r)['limit'] as int? ?? 100;
+      setState(() => _chatUsage = {'used': used, 'limit': limit});
+    } catch (_) {}
   }
 
   @override
@@ -351,10 +376,26 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
     });
     _scrollToBottom();
     try {
-      final res = await ref.read(studioApiProvider).sendChat(text, _chatMode.toolSlug, sessionId: null);
-      final reply = (res as Map)['response']?.toString() ?? 'No response';
+      final res = await ref.read(studioApiProvider).sendChat(
+        text, _chatMode.toolSlug, sessionId: _sessionId);
+      final reply    = (res as Map)['response']?.toString() ?? 'No response';
+      final provider = res['provider']?.toString();
+      final count    = res['message_count'] as int?;
+      // Update session ID if backend issues a new one
+      final newSid = res['session_id']?.toString();
+      if (newSid != null && newSid != _sessionId) {
+        _sessionId = newSid;
+        await _storage.write(key: _sessionKey, value: newSid);
+      }
       setState(() {
-        _messages.add(_Message(role: 'assistant', content: reply, mode: _chatMode, ts: DateTime.now()));
+        _messages.add(_Message(
+          role: 'assistant', content: reply, mode: _chatMode,
+          ts: DateTime.now(), provider: provider));
+        if (count != null) {
+          _chatUsage = {'used': count, 'limit': _chatUsage?['limit'] ?? 100};
+        } else if (_chatUsage != null) {
+          _chatUsage = {'used': (_chatUsage!['used']! + 1), 'limit': _chatUsage!['limit']!};
+        }
       });
     } catch (e) {
       setState(() {
@@ -376,12 +417,29 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
     });
   }
 
-  void _clearChat() => setState(() {
-    _messages
-      ..clear()
-      ..add(_Message(role: 'assistant', ts: DateTime.now(),
-        content: "Hey! 👋 I'm Nexus AI. What can I help you with?"));
-  });
+  Future<void> _clearChat() async {
+    // Destroy the session so the backend starts fresh memory
+    await _storage.delete(key: _sessionKey);
+    _sessionId = null;
+    await _initSession(); // generate a new one
+    setState(() {
+      _messages
+        ..clear()
+        ..add(_Message(role: 'assistant', ts: DateTime.now(),
+          content: "Hey! 👋 I'm Nexus AI. What can I help you with?"));
+    });
+  }
+
+  /// Injects a summarise prompt into the input field
+  void _summariseChat() {
+    if (_messages.length < 4) return;
+    _chatCtrl.text =
+        'Please summarise our conversation so far in 3–5 bullet points. '
+        'Focus on topics covered and any decisions or advice given.';
+    _chatCtrl.selection = TextSelection.fromPosition(
+        TextPosition(offset: _chatCtrl.text.length));
+    setState(() {});
+  }
 
   // ── Launch tool ──
   void _openTool(StudioTool tool) {
@@ -469,8 +527,9 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
             messages: _messages, mode: _chatMode, sending: _sending,
             controller: _chatCtrl, scrollController: _scrollCtrl,
             onSend: _sendChat, onClear: _clearChat,
+            onSummarise: _summariseChat,
             onModeChange: (m) => setState(() => _chatMode = m),
-            chatUsageAsync: ref.watch(_chatUsageProvider),
+            chatUsage: _chatUsage,
           ),
           _ToolsTab(
             userPoints: userPoints,
@@ -621,21 +680,22 @@ class _ChatTab extends StatelessWidget {
   final bool sending;
   final TextEditingController controller;
   final ScrollController scrollController;
-  final VoidCallback onSend, onClear;
+  final VoidCallback onSend, onClear, onSummarise;
   final ValueChanged<ChatMode> onModeChange;
-  final AsyncValue<Map<String, int>?> chatUsageAsync;
+  final Map<String, int>? chatUsage;
 
   const _ChatTab({
     required this.messages, required this.mode, required this.sending,
     required this.controller, required this.scrollController,
-    required this.onSend, required this.onClear, required this.onModeChange,
-    required this.chatUsageAsync,
+    required this.onSend, required this.onClear, required this.onSummarise,
+    required this.onModeChange, required this.chatUsage,
   });
 
   @override
   Widget build(BuildContext context) {
+    final canSummarise = messages.length >= 4;
     return Column(children: [
-      // Mode switcher
+      // ── Mode switcher ──────────────────────────────────────────────────────
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
         child: Row(children: ChatMode.values.map((m) {
@@ -666,7 +726,7 @@ class _ChatTab extends StatelessWidget {
         }).toList()),
       ),
 
-      // Mode description + usage counter
+      // ── Mode description + usage counter ───────────────────────────────────
       Padding(
         padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
         child: Row(children: [
@@ -678,44 +738,45 @@ class _ChatTab extends StatelessWidget {
             },
             style: const TextStyle(color: NexusColors.textSecondary, fontSize: 10),
           )),
-          chatUsageAsync.when(
-            data: (u) => u == null ? const SizedBox.shrink()
-                : Text('${u['used']}/${u['limit']}',
-                    style: const TextStyle(color: NexusColors.textSecondary, fontSize: 10)),
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
-          ),
+          if (chatUsage != null)
+            Text('${chatUsage!['used']}/${chatUsage!['limit']} msgs',
+                style: const TextStyle(color: NexusColors.textSecondary, fontSize: 10)),
         ]),
       ),
 
       const SizedBox(height: 8),
 
-      // Messages
+      // ── Messages list ──────────────────────────────────────────────────────
       Expanded(
         child: ListView.builder(
           controller: scrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
           itemCount: messages.length + (sending ? 1 : 0),
           itemBuilder: (ctx, i) {
             if (sending && i == messages.length) return _ThinkingBubble(mode: mode);
-            return _ChatBubble(msg: messages[i]);
+            return _ChatBubble(msg: messages[i])
+                .animate(key: ValueKey(messages[i].ts))
+                .fadeIn(duration: 250.ms)
+                .slideY(begin: 0.05, end: 0);
           },
         ),
       ),
 
-      // Input
+      // ── Input area ─────────────────────────────────────────────────────────
       Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
         decoration: BoxDecoration(
           color: NexusColors.surface,
           border: const Border(top: BorderSide(color: NexusColors.border)),
         ),
         child: Column(children: [
-          Row(children: [
+          // Main input row
+          Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Expanded(
               child: TextField(
                 controller: controller,
                 onSubmitted: (_) => onSend(),
+                maxLines: 4, minLines: 1,
                 style: const TextStyle(color: NexusColors.textPrimary, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: mode.placeholder,
@@ -735,28 +796,44 @@ class _ChatTab extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              child: GestureDetector(
-                onTap: onSend,
-                child: Container(
-                  width: 44, height: 44,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(colors: [
-                      mode.color, mode.color.withOpacity(0.7),
-                    ], begin: Alignment.topLeft, end: Alignment.bottomRight),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: sending
-                      ? const Center(child: SizedBox(width: 20, height: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
-                      : const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+            GestureDetector(
+              onTap: onSend,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [mode.color, mode.color.withOpacity(0.7)],
+                    begin: Alignment.topLeft, end: Alignment.bottomRight),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [BoxShadow(
+                    color: mode.color.withOpacity(0.3),
+                    blurRadius: 8, offset: const Offset(0, 3))],
                 ),
+                child: sending
+                    ? const Center(child: SizedBox(width: 20, height: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
+                    : const Icon(Icons.send_rounded, color: Colors.white, size: 18),
               ),
             ),
           ]),
-          const SizedBox(height: 4),
-          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          const SizedBox(height: 8),
+
+          // ── Action row: Summarise / New chat ─────────────────────────────
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            // Summarise button — only enabled when ≥4 messages
+            GestureDetector(
+              onTap: canSummarise ? onSummarise : null,
+              child: Row(children: [
+                Icon(Icons.summarize_rounded, size: 11,
+                  color: canSummarise ? mode.color : NexusColors.textSecondary.withOpacity(0.4)),
+                const SizedBox(width: 3),
+                Text('Summarise', style: TextStyle(
+                  color: canSummarise ? mode.color : NexusColors.textSecondary.withOpacity(0.4),
+                  fontSize: 10, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+            // New chat
             GestureDetector(
               onTap: onClear,
               child: const Row(children: [
@@ -772,92 +849,349 @@ class _ChatTab extends StatelessWidget {
   }
 }
 
-class _ChatBubble extends StatelessWidget {
-  final _Message msg;
-  const _ChatBubble({required this.msg});
+// ── Rich message renderer ──────────────────────────────────────────────────────
+// Parses: fenced ```lang\ncode\n```, **bold**, `inline`, plain text / newlines
+
+class _RichMessage extends StatefulWidget {
+  final String content;
+  final ChatMode mode;
+  const _RichMessage({required this.content, required this.mode});
+  @override State<_RichMessage> createState() => _RichMessageState();
+}
+
+class _RichMessageState extends State<_RichMessage> {
+  int? _copiedIdx;
+
+  void _copyCode(String code, int idx) {
+    Clipboard.setData(ClipboardData(text: code));
+    setState(() => _copiedIdx = idx);
+    Future.delayed(const Duration(milliseconds: 1800), () {
+      if (mounted) setState(() => _copiedIdx = null);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    // Split by fenced code blocks
+    final regex = RegExp(r'```[\s\S]*?```');
+    final parts  = widget.content.split(regex);
+    final blocks = regex.allMatches(widget.content).toList();
+
+    final widgets = <Widget>[];
+    for (int i = 0; i < parts.length; i++) {
+      // Plain text part
+      if (parts[i].isNotEmpty) {
+        widgets.add(_buildText(parts[i]));
+      }
+      // Code block
+      if (i < blocks.length) {
+        final raw        = blocks[i].group(0)!;
+        final firstNL    = raw.indexOf('\n');
+        final lang       = firstNL > 3 ? raw.substring(3, firstNL).trim() : 'code';
+        final lastFence  = raw.lastIndexOf('```');
+        final code       = firstNL >= 0 && lastFence > firstNL
+            ? raw.substring(firstNL + 1, lastFence).trim()
+            : '';
+        final copied     = _copiedIdx == i;
+        widgets.add(Container(
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF030712),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withOpacity(0.1)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            // Header bar
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F1726),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+              ),
+              child: Row(children: [
+                Text(lang.toUpperCase(),
+                  style: const TextStyle(color: Color(0xFF6b7280),
+                      fontSize: 9, fontFamily: 'monospace', letterSpacing: 0.8)),
+                const Spacer(),
+                GestureDetector(
+                  onTap: () => _copyCode(code, i),
+                  child: Row(children: [
+                    Icon(copied ? Icons.check_rounded : Icons.copy_rounded,
+                      size: 13, color: copied ? NexusColors.green : const Color(0xFF6b7280)),
+                    const SizedBox(width: 4),
+                    Text(copied ? 'Copied!' : 'Copy',
+                      style: TextStyle(
+                        color: copied ? NexusColors.green : const Color(0xFF6b7280),
+                        fontSize: 10)),
+                  ]),
+                ),
+              ]),
+            ),
+            // Code body
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.all(12),
+              child: SelectableText(code,
+                style: const TextStyle(color: Color(0xFF86efac),
+                    fontFamily: 'monospace', fontSize: 11.5, height: 1.55)),
+            ),
+          ]),
+        ));
+      }
+    }
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: widgets);
+  }
+
+  /// Renders plain-text with **bold** and `inline code` support.
+  Widget _buildText(String text) {
+    final lines = text.split('\n');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: lines.map((line) {
+        if (line.trim().isEmpty) return const SizedBox(height: 4);
+        // Split into chunks: **bold**, `inline`, plain
+        final chunks = _parseInline(line);
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: Text.rich(TextSpan(children: chunks),
+            style: TextStyle(
+              color: widget.mode == ChatMode.code
+                  ? const Color(0xFF86efac).withOpacity(0.9)
+                  : NexusColors.textPrimary,
+              fontSize: 13, height: 1.5)),
+        );
+      }).toList(),
+    );
+  }
+
+  List<InlineSpan> _parseInline(String line) {
+    final spans = <InlineSpan>[];
+    // Regex: **bold** or `inline`
+    final re = RegExp(r'\*\*([^*]+)\*\*|`([^`]+)`');
+    int cursor = 0;
+    for (final m in re.allMatches(line)) {
+      if (m.start > cursor) {
+        spans.add(TextSpan(text: line.substring(cursor, m.start)));
+      }
+      if (m.group(1) != null) {
+        // **bold**
+        spans.add(TextSpan(text: m.group(1),
+          style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white)));
+      } else if (m.group(2) != null) {
+        // `inline code`
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.white.withOpacity(0.12)),
+            ),
+            child: Text(m.group(2)!,
+              style: const TextStyle(fontFamily: 'monospace',
+                  color: Color(0xFF86efac), fontSize: 11.5)),
+          ),
+        ));
+      }
+      cursor = m.end;
+    }
+    if (cursor < line.length) spans.add(TextSpan(text: line.substring(cursor)));
+    return spans;
+  }
+}
+
+// ── Chat bubble ────────────────────────────────────────────────────────────────
+
+class _ChatBubble extends StatefulWidget {
+  final _Message msg;
+  const _ChatBubble({required this.msg});
+  @override State<_ChatBubble> createState() => _ChatBubbleState();
+}
+
+class _ChatBubbleState extends State<_ChatBubble> {
+  bool _copied = false;
+
+  void _copyMessage() {
+    Clipboard.setData(ClipboardData(text: widget.msg.content));
+    setState(() => _copied = true);
+    Future.delayed(const Duration(milliseconds: 1600), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  String _formatTime(DateTime dt) {
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final msg    = widget.msg;
     final isUser = msg.role == 'user';
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Column(
+        crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
-          if (!isUser) ...[
-            CircleAvatar(radius: 14,
-              backgroundColor: msg.mode.color.withOpacity(0.15),
-              child: Text(msg.mode.emoji, style: const TextStyle(fontSize: 12))),
-            const SizedBox(width: 8),
-          ],
-          Flexible(child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: isUser ? msg.mode.color : NexusColors.surface,
-              borderRadius: BorderRadius.only(
-                topLeft:     const Radius.circular(18),
-                topRight:    const Radius.circular(18),
-                bottomLeft:  Radius.circular(isUser ? 18 : 4),
-                bottomRight: Radius.circular(isUser ? 4 : 18),
-              ),
-              border: isUser ? null : Border.all(color: NexusColors.border),
+          Row(
+            mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              // AI avatar
+              if (!isUser) ...[
+                CircleAvatar(
+                  radius: 15,
+                  backgroundColor: msg.mode.color.withOpacity(0.12),
+                  child: Text(msg.mode.emoji, style: const TextStyle(fontSize: 13)),
+                ),
+                const SizedBox(width: 8),
+              ],
+              // Bubble
+              Flexible(child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  gradient: isUser ? LinearGradient(
+                    colors: [msg.mode.color, msg.mode.color.withOpacity(0.75)],
+                    begin: Alignment.topLeft, end: Alignment.bottomRight,
+                  ) : null,
+                  color: isUser ? null : NexusColors.surface,
+                  borderRadius: BorderRadius.only(
+                    topLeft:     const Radius.circular(18),
+                    topRight:    const Radius.circular(18),
+                    bottomLeft:  Radius.circular(isUser ? 18 : 4),
+                    bottomRight: Radius.circular(isUser ? 4 : 18),
+                  ),
+                  border: isUser ? null : Border.all(color: NexusColors.border),
+                  boxShadow: [BoxShadow(
+                    color: Colors.black.withOpacity(0.12),
+                    blurRadius: 6, offset: const Offset(0, 2))],
+                ),
+                child: isUser
+                    ? SelectableText(msg.content,
+                        style: const TextStyle(color: Colors.white,
+                            fontSize: 13, height: 1.45))
+                    : _RichMessage(content: msg.content, mode: msg.mode),
+              )),
+              // User avatar
+              if (isUser) ...[
+                const SizedBox(width: 8),
+                CircleAvatar(
+                  radius: 15,
+                  backgroundColor: NexusColors.primary.withOpacity(0.15),
+                  child: const Icon(Icons.person_rounded, size: 15, color: NexusColors.primary),
+                ),
+              ],
+            ],
+          ),
+
+          // ── Meta row: provider label + timestamp + copy button ────────────
+          Padding(
+            padding: EdgeInsets.only(
+              left: isUser ? 0 : 38,
+              right: isUser ? 38 : 0,
+              top: 3),
+            child: Row(
+              mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+              children: [
+                if (!isUser && msg.provider != null) ...[
+                  Text(msg.provider!,
+                    style: const TextStyle(color: NexusColors.textSecondary,
+                        fontSize: 9, fontStyle: FontStyle.italic)),
+                  const SizedBox(width: 6),
+                ],
+                Text(_formatTime(msg.ts),
+                  style: const TextStyle(color: NexusColors.textSecondary, fontSize: 9)),
+                // Copy button — only for assistant messages
+                if (!isUser) ...[
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: _copyMessage,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: _copied
+                          ? const Icon(Icons.check_rounded, size: 13, color: NexusColors.green, key: ValueKey('check'))
+                          : const Icon(Icons.copy_rounded, size: 13, color: NexusColors.textSecondary, key: ValueKey('copy')),
+                    ),
+                  ),
+                ],
+              ],
             ),
-            child: SelectableText(msg.content,
-              style: TextStyle(
-                color: isUser ? Colors.white : NexusColors.textPrimary,
-                fontSize: 13, height: 1.45)),
-          )),
-          if (isUser) ...[
-            const SizedBox(width: 8),
-            CircleAvatar(radius: 14,
-              backgroundColor: NexusColors.primary.withOpacity(0.15),
-              child: const Icon(Icons.person_rounded, size: 14, color: NexusColors.primary)),
-          ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _ThinkingBubble extends StatelessWidget {
+// ── Animated typing indicator ──────────────────────────────────────────────────
+
+class _ThinkingBubble extends StatefulWidget {
   final ChatMode mode;
   const _ThinkingBubble({required this.mode});
+  @override State<_ThinkingBubble> createState() => _ThinkingBubbleState();
+}
+
+class _ThinkingBubbleState extends State<_ThinkingBubble>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 4),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-      CircleAvatar(radius: 14,
-        backgroundColor: mode.color.withOpacity(0.15),
-        child: Text(mode.emoji, style: const TextStyle(fontSize: 12))),
-      const SizedBox(width: 8),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: NexusColors.surface,
-          borderRadius: const BorderRadius.only(
-            topLeft: Radius.circular(18), topRight: Radius.circular(18),
-            bottomRight: Radius.circular(18), bottomLeft: Radius.circular(4)),
-          border: Border.all(color: NexusColors.border),
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(duration: const Duration(milliseconds: 900), vsync: this)
+      ..repeat();
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+        CircleAvatar(
+          radius: 15,
+          backgroundColor: widget.mode.color.withOpacity(0.12),
+          child: Text(widget.mode.emoji, style: const TextStyle(fontSize: 13)),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: List.generate(3, (i) =>
-          Container(
-            margin: EdgeInsets.only(right: i < 2 ? 4 : 0),
-            width: 6, height: 6,
-            decoration: BoxDecoration(color: mode.color, shape: BoxShape.circle),
-            child: TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: 1),
-              duration: const Duration(milliseconds: 600),
-              curve: Curves.easeInOut,
-              builder: (_, v, child) => Opacity(opacity: 0.3 + 0.7 * v, child: child),
-              child: Container(width: 6, height: 6,
-                decoration: BoxDecoration(color: mode.color, shape: BoxShape.circle)),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: NexusColors.surface,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(18), topRight: Radius.circular(18),
+              bottomRight: Radius.circular(18), bottomLeft: Radius.circular(4)),
+            border: Border.all(color: NexusColors.border),
+          ),
+          child: AnimatedBuilder(
+            animation: _ctrl,
+            builder: (_, __) => Row(mainAxisSize: MainAxisSize.min,
+              children: List.generate(3, (i) {
+                // Each dot peaks at a different phase
+                final phase = ((_ctrl.value * 3) - i).clamp(0.0, 1.0);
+                final bounce = (phase < 0.5 ? phase * 2 : (1 - phase) * 2);
+                return Transform.translate(
+                  offset: Offset(0, -4 * bounce),
+                  child: Container(
+                    width: 7, height: 7,
+                    margin: EdgeInsets.only(right: i < 2 ? 4 : 0),
+                    decoration: BoxDecoration(
+                      color: widget.mode.color.withOpacity(0.4 + 0.6 * bounce),
+                      shape: BoxShape.circle),
+                  ),
+                );
+              }),
             ),
           ),
-        )),
-      ),
-    ]),
-  );
+        ),
+      ]),
+    );
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
