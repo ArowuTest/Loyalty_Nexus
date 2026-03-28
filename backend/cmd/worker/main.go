@@ -28,10 +28,16 @@ func main() {
 	}
 
 	// ─── Redis ────────────────────────────────────────────────
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     os.Getenv("REDIS_URL"),
-		Password: os.Getenv("REDIS_PASSWORD"),
-	})
+	// redis.ParseURL handles redis://, rediss://, and plain host:port formats.
+	var rdb *redis.Client
+	if redisOpts, parseErr := redis.ParseURL(os.Getenv("REDIS_URL")); parseErr == nil {
+		rdb = redis.NewClient(redisOpts)
+	} else {
+		rdb = redis.NewClient(&redis.Options{
+			Addr:     os.Getenv("REDIS_URL"),
+			Password: os.Getenv("REDIS_PASSWORD"),
+		})
+	}
 	_ = rdb
 
 	// ─── Config ───────────────────────────────────────────────

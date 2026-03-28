@@ -34,10 +34,17 @@ func main() {
 	}
 
 	// ─── Redis ────────────────────────────────────────────────
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     os.Getenv("REDIS_URL"),
-		Password: os.Getenv("REDIS_PASSWORD"),
-	})
+	// redis.ParseURL handles redis://, rediss://, and plain host:port formats.
+	var rdb *redis.Client
+	if redisOpts, parseErr := redis.ParseURL(os.Getenv("REDIS_URL")); parseErr == nil {
+		rdb = redis.NewClient(redisOpts)
+	} else {
+		// Fallback: treat REDIS_URL as plain host:port (e.g. "localhost:6379")
+		rdb = redis.NewClient(&redis.Options{
+			Addr:     os.Getenv("REDIS_URL"),
+			Password: os.Getenv("REDIS_PASSWORD"),
+		})
+	}
 
 	// ─── Config Manager (reads all rules from network_configs) ──
 	cfg := config.NewConfigManager(db)
