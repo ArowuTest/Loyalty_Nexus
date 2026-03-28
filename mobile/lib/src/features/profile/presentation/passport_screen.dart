@@ -4,7 +4,6 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
@@ -189,17 +188,14 @@ class _PassportScreenState extends ConsumerState<PassportScreen>
   }
 
   void _share(Map<String, dynamic> passport) {
-    final tier    = passport['tier']?.toString() ?? 'BRONZE';
-    final pts     = passport['lifetime_points'] as int? ?? 0;
-    final phone   = passport['phone_number']?.toString() ?? '';
-    final code    = passport['referral_code']?.toString() ?? phone;
-    final message = '🏆 I\'m a $tier member on Loyalty Nexus with ${_fmtPts(pts)} Pulse Points!\n'
-        '📱 Recharge MTN · Earn Points · Spin to Win!\n\n'
-        '👉 Use my referral code: $code\n'
-        'Download: https://loyaltynexus.app';
-    SharePlus.instance.share(ShareParams(
-      text:    message,
-      subject: 'Join me on Loyalty Nexus!',
+    final tier = passport['tier']?.toString() ?? 'BRONZE';
+    final pts  = passport['lifetime_points'] as int? ?? 0;
+    final text = 'I\'m a $tier member on Loyalty Nexus with ${_fmtPts(pts)} Pulse Points! ⚡';
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Copied to clipboard! 🎯'),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: NexusColors.green,
     ));
   }
 
@@ -507,7 +503,6 @@ class _OverviewTab extends StatelessWidget {
     final streak      = passport['streak_count'] as int? ?? 0;
     final longestStreak = passport['longest_streak'] as int? ?? 0;
     final totalSpins  = passport['total_spins'] as int? ?? 0;
-    final referrals   = passport['referral_count'] as int? ?? 0;
     final phone       = passport['phone_number']?.toString() ?? '';
     final state       = passport['state']?.toString();
 
@@ -526,7 +521,6 @@ class _OverviewTab extends StatelessWidget {
           _StatCard('🔥', 'Current Streak', '$streak days', const Color(0xFFf97316)),
           _StatCard('📈', 'Longest Streak', '$longestStreak days', NexusColors.green),
           _StatCard('🎡', 'Total Spins', '$totalSpins', const Color(0xFF8B5CF6)),
-          _StatCard('👥', 'Referrals', '$referrals friends', NexusColors.primary),
         ],
       ),
 
@@ -554,13 +548,6 @@ class _OverviewTab extends StatelessWidget {
       _SectionTitle('Points Journey'),
       const SizedBox(height: 10),
       _PointsSparkline(lifetimePoints: life),
-
-      const SizedBox(height: 20),
-
-      // Referral
-      _SectionTitle('Refer & Earn'),
-      const SizedBox(height: 10),
-      _ReferralCard(passport: passport),
     ]);
   }
 }
@@ -941,127 +928,3 @@ class _PointsSparkline extends StatelessWidget {
   }
 }
 
-// ── Referral Card ─────────────────────────────────────────────────────────────
-class _ReferralCard extends StatelessWidget {
-  final Map<String, dynamic> passport;
-  const _ReferralCard({required this.passport});
-
-  @override
-  Widget build(BuildContext context) {
-    final code      = passport['referral_code']?.toString()
-        ?? passport['phone_number']?.toString() ?? '—';
-    final count     = passport['referral_count'] as int? ?? 0;
-    final earned    = passport['referral_points_earned'] as int? ?? 0;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [const Color(0xFF1A2040), const Color(0xFF141830)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: NexusColors.primary.withOpacity(0.3)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Stats row
-        Row(children: [
-          _RefStat(label: 'Friends Referred', value: '$count'),
-          const SizedBox(width: 16),
-          _RefStat(label: 'Points Earned',    value: _fmtN(earned)),
-        ]),
-        const SizedBox(height: 14),
-        const Divider(color: NexusColors.border, height: 1),
-        const SizedBox(height: 14),
-
-        // Code display
-        const Text('Your referral code',
-            style: TextStyle(color: NexusColors.textSecondary, fontSize: 11,
-                fontWeight: FontWeight.w600, letterSpacing: 0.5)),
-        const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: NexusColors.background,
-              borderRadius: NexusRadius.md,
-              border: Border.all(color: NexusColors.primary.withOpacity(0.4)),
-            ),
-            child: Text(code, style: const TextStyle(color: NexusColors.primary,
-                fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 3)),
-          )),
-          const SizedBox(width: 10),
-          // Copy
-          _IconBtn(
-            icon: Icons.copy_rounded, tooltip: 'Copy',
-            onTap: () {
-              Clipboard.setData(ClipboardData(text: code));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Referral code copied! 🎯'),
-                    behavior: SnackBarBehavior.floating,
-                    backgroundColor: NexusColors.green),
-              );
-            },
-          ),
-          const SizedBox(width: 8),
-          // Share
-          _IconBtn(
-            icon: Icons.share_rounded, tooltip: 'Share',
-            onTap: () {
-              final msg = '🏆 Join me on Loyalty Nexus!\n'
-                  '📱 Recharge MTN · Earn Points · Spin to Win!\n\n'
-                  '👉 Use my code: $code\n'
-                  'https://loyaltynexus.app';
-              SharePlus.instance.share(ShareParams(text: msg, subject: 'Join Loyalty Nexus!'));
-            },
-          ),
-        ]),
-        const SizedBox(height: 12),
-        const Text(
-          'You earn bonus points for every friend who signs up & recharges using your code.',
-          style: TextStyle(color: NexusColors.textSecondary, fontSize: 11),
-        ),
-      ]),
-    );
-  }
-
-  String _fmtN(int n) {
-    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
-    return '$n';
-  }
-}
-
-class _RefStat extends StatelessWidget {
-  final String label, value;
-  const _RefStat({required this.label, required this.value});
-  @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Text(value, style: const TextStyle(color: NexusColors.primary,
-        fontSize: 22, fontWeight: FontWeight.w900)),
-    Text(label, style: const TextStyle(color: NexusColors.textSecondary,
-        fontSize: 11, fontWeight: FontWeight.w500)),
-  ]);
-}
-
-class _IconBtn extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-  const _IconBtn({required this.icon, required this.tooltip, required this.onTap});
-  @override
-  Widget build(BuildContext context) => Tooltip(
-    message: tooltip,
-    child: GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 44, height: 44,
-        decoration: BoxDecoration(
-          color: NexusColors.primaryGlow,
-          borderRadius: NexusRadius.md,
-          border: Border.all(color: NexusColors.primary.withOpacity(0.3)),
-        ),
-        child: Icon(icon, color: NexusColors.primary, size: 20),
-      ),
-    ),
-  );
-}

@@ -113,6 +113,13 @@ final myWarRankProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref
   return null;
 });
 
+final _dashUnreadProvider = FutureProvider.autoDispose<int>((ref) async {
+  try {
+    final r = await ref.read(notificationsApiProvider).list(limit: 1);
+    return (r['unread_count'] as int?) ?? 0;
+  } catch (_) { return 0; }
+});
+
 // ── Tier helpers ───────────────────────────────────────────────────────────────
 
 const _tierThresholds = {'BRONZE': 0, 'SILVER': 2000, 'GOLD': 10000, 'PLATINUM': 50000};
@@ -178,11 +185,34 @@ class DashboardScreen extends ConsumerWidget {
                 ),
               ]),
               actions: [
-                IconButton(
-                  icon: const Icon(Icons.notifications_outlined),
-                  color: NexusColors.textSecondary,
-                  onPressed: () => context.push('/notifications'),
-                ),
+                // Bell with live unread badge
+                Consumer(builder: (_, ref, __) {
+                  final unread = ref.watch(_dashUnreadProvider).valueOrNull ?? 0;
+                  return Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.notifications_outlined),
+                        color: NexusColors.textSecondary,
+                        onPressed: () => context.push('/notifications'),
+                      ),
+                      if (unread > 0)
+                        Positioned(
+                          right: 6, top: 6,
+                          child: Container(
+                            width: 16, height: 16,
+                            decoration: const BoxDecoration(
+                              color: NexusColors.red, shape: BoxShape.circle),
+                            child: Center(child: Text(
+                              unread > 9 ? '9+' : '$unread',
+                              style: const TextStyle(color: Colors.white,
+                                  fontSize: 9, fontWeight: FontWeight.w800),
+                            )),
+                          ),
+                        ),
+                    ],
+                  );
+                }),
                 IconButton(
                   icon: const Icon(Icons.settings_outlined),
                   color: NexusColors.textSecondary,
