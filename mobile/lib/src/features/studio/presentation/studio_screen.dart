@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
+import '../templates/template_registry.dart';
+import '../templates/template_types.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Providers
@@ -86,6 +88,21 @@ class StudioTool {
   bool get isNew => _newSlugs.contains(slug);
   bool get isChatTool => slug == 'web-search-ai' || slug == 'code-helper';
   bool get isPremium => pointCost >= 20;
+
+  /// Converts to a Map that TemplateRegistry / TemplateProps can read.
+  Map<String, dynamic> toJson() => {
+    'id':               id,
+    'slug':             slug,
+    'name':             name,
+    'description':      description,
+    'category':         category,
+    'point_cost':       pointCost,
+    'entry_point_cost': entryPointCost,
+    'is_free':          isFree,
+    'ui_template':      uiTemplate,
+    // ui_config is loaded from the API — the template will fall back to defaults
+    // if ui_config is absent. StudioTool doesn't cache it yet; see: startGeneration.
+  };
 }
 
 // Tool slugs that are new / highlighted
@@ -1774,53 +1791,9 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
 
     const SizedBox(height: 16),
 
-    // URL input (for image/audio tools that need a URL)
-    if (_needsUrl) ...[
-      const Text('URL Input',
-        style: TextStyle(color: NexusColors.textSecondary, fontSize: 11,
-          fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-      const SizedBox(height: 6),
-      TextField(
-        controller: _urlCtrl,
-        style: const TextStyle(color: NexusColors.textPrimary, fontSize: 13),
-        decoration: InputDecoration(
-          hintText: _urlHint(),
-          hintStyle: const TextStyle(color: NexusColors.textSecondary, fontSize: 12),
-          filled: true, fillColor: NexusColors.background,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: NexusColors.border)),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: NexusColors.border)),
-        ),
-      ),
-      const SizedBox(height: 12),
-    ],
-
-    // Main prompt
-    Text(_needsSecondPrompt ? 'Describe the edit / motion' : 'Prompt',
-      style: const TextStyle(color: NexusColors.textSecondary, fontSize: 11,
-        fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-    const SizedBox(height: 6),
-    TextField(
-      controller: _promptCtrl,
-      maxLines: 4, minLines: 3,
-      style: const TextStyle(color: NexusColors.textPrimary, fontSize: 13),
-      decoration: InputDecoration(
-        hintText: _promptHint(),
-        hintStyle: const TextStyle(color: NexusColors.textSecondary, fontSize: 12),
-        filled: true, fillColor: NexusColors.background,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: NexusColors.border)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: NexusColors.border)),
-      ),
-    ),
-
-    const SizedBox(height: 14),
-
-    // Points summary
+    // ── Points balance bar (always visible above template) ──
     Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: _isFree ? NexusColors.green.withOpacity(0.05)
             : _canAfford ? const Color(0x0CF5A623)
@@ -1832,63 +1805,40 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
               : const Color(0x33ef4444))),
       child: _isFree
           ? const Row(children: [
-              Icon(Icons.check_circle_rounded, size: 14, color: NexusColors.green),
+              Icon(Icons.check_circle_rounded, size: 13, color: NexusColors.green),
               SizedBox(width: 8),
               Text('Free generation — no points used',
-                style: TextStyle(color: NexusColors.green, fontSize: 13, fontWeight: FontWeight.w600)),
+                style: TextStyle(color: NexusColors.green, fontSize: 12, fontWeight: FontWeight.w600)),
             ])
-          : Column(children: [
-              _PointRow('Generation cost', '−${widget.tool.pointCost} pts', Colors.white),
-              const SizedBox(height: 4),
-              _PointRow('Your balance', '${widget.userPoints} pts', NexusColors.gold),
-              const Divider(color: NexusColors.border, height: 12),
-              _PointRow('After generation',
-                _canAfford ? '$after pts remaining' : 'Need ${widget.tool.pointCost - widget.userPoints} more pts',
+          : Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              _PointRow('Cost', '−${widget.tool.pointCost} pts', Colors.white70),
+              _PointRow('Balance', '${widget.userPoints} pts', NexusColors.gold),
+              _PointRow('After',
+                _canAfford
+                    ? '${widget.userPoints - widget.tool.pointCost} pts'
+                    : 'Need ${widget.tool.pointCost - widget.userPoints} more',
                 _canAfford ? NexusColors.gold : const Color(0xFFef4444)),
             ]),
     ),
 
-    const SizedBox(height: 14),
+    const SizedBox(height: 20),
 
-    // Action buttons
-    Row(children: [
-      Expanded(child: OutlinedButton(
-        onPressed: widget.onClose,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: NexusColors.textSecondary,
-          side: const BorderSide(color: NexusColors.border),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-        child: const Text('Cancel'))),
-      const SizedBox(width: 10),
-      Expanded(child: ElevatedButton.icon(
-        onPressed: _canAfford && !_generating ? _onGenerate : null,
-        icon: _generating
-            ? const SizedBox(width: 16, height: 16,
-                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-            : const Icon(Icons.auto_awesome_rounded, size: 16),
-        label: Text(_isFree ? 'Generate (Free)'
-            : _generating ? 'Starting…'
-            : 'Use ${widget.tool.pointCost} pts → Generate'),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: NexusColors.gold,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-      )),
-    ]),
+    // ── Purpose-built template (has its own Generate button) ──
+    TemplateRegistry.build(
+      tool: widget.tool.toJson(),
+      onSubmit: (payload) => _doGenerateWithPayload(payload),
+      isLoading: _generating,
+      userPoints: widget.userPoints,
+    ),
   ]);
 
-  void _onGenerate() {
-    final prompt = _promptCtrl.text.trim();
-    if (prompt.isEmpty && !_needsUrl) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Please enter a prompt first'),
-        behavior: SnackBarBehavior.floating));
-      return;
-    }
-    setState(() => _showConfirm = true);
+  /// Called by TemplateRegistry templates when the user taps Generate.
+  void _doGenerateWithPayload(GeneratePayload payload) {
+    if (_generating) return;
+    _doGenerateRaw(payload.toJson());
   }
+
+  void _onGenerate() => setState(() => _showConfirm = true);
 
   Widget _buildConfirmModal(int after) => GestureDetector(
     onTap: () => setState(() => _showConfirm = false),
@@ -1954,17 +1904,11 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
     ),
   );
 
-  Future<void> _doGenerate() async {
+  Future<void> _doGenerateRaw(Map<String, dynamic> payload) async {
     setState(() { _generating = true; _showConfirm = false; });
     try {
-      // Build payload — include URL if needed
-      String prompt = _promptCtrl.text.trim();
-      if (_needsUrl && _urlCtrl.text.isNotEmpty) {
-        final envelope = {'prompt': prompt, 'url': _urlCtrl.text.trim()};
-        prompt = jsonEncode(envelope);
-      }
       await ref.read(studioApiProvider)
-          .startGeneration(widget.tool.slug, {'prompt': prompt});
+          .startGeneration(widget.tool.slug, payload);
       widget.onGenerated();
     } catch (e) {
       setState(() => _generating = false);
@@ -1975,6 +1919,12 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
           backgroundColor: const Color(0xFFef4444)));
       }
     }
+  }
+
+  Future<void> _doGenerate() async {
+    // Legacy path (used by confirm modal). Build minimal payload from old form.
+    final prompt = _promptCtrl.text.trim();
+    await _doGenerateRaw({'prompt': prompt});
   }
 
   String _urlHint() => switch (widget.tool.slug) {
