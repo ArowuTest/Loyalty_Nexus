@@ -188,6 +188,20 @@ class APIClient {
   // ── Chat usage quota ──────────────────────────────────────────────────────
   getChatUsage() { return this.request("GET", "/studio/chat/usage"); }
 
+  // ── Notifications ─────────────────────────────────────────────────────────
+  getNotifications(cursor?: string) {
+    return this.request("GET", "/notifications" + (cursor ? `?cursor=${cursor}` : ""));
+  }
+  markNotificationRead(id: string) {
+    return this.request("POST", `/notifications/${id}/read`, {});
+  }
+  markAllNotificationsRead() {
+    return this.request("POST", "/notifications/read-all", {});
+  }
+  registerPushToken(token: string, platform: string) {
+    return this.request("POST", "/notifications/push-token", { token, platform });
+  }
+
   // ── Dispute & Session ─────────────────────────────────────────────────────
   disputeGeneration(genId: string): Promise<{ message: string; refunded: boolean }> {
     return this.request("POST", `/studio/generate/${genId}/dispute`, {});

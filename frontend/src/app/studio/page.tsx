@@ -327,12 +327,12 @@ function WalletBar({ userPoints }: { userPoints: number }) {
       </div>
       {isLow ? (
         <Link
-          href="/subscription"
+          href="/dashboard"
           className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl
                      bg-amber-500/20 text-amber-300 border border-amber-500/30
                      hover:bg-amber-500/30 transition-all flex-shrink-0"
         >
-          <CreditCard size={12} /> Top Up
+          <Zap size={12} />  Recharge
         </Link>
       ) : (
         <div className="flex items-center gap-1 text-white/25 text-[10px] flex-shrink-0">
@@ -609,11 +609,11 @@ function ConfirmModal({
               <button onClick={onCancel} className="nexus-btn-outline flex-1 text-sm py-3">Cancel</button>
               {!canAfford && !isFree ? (
                 <Link
-                  href="/subscription"
+                  href="/dashboard"
                   className="flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2
                              bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90"
                 >
-                  <CreditCard size={15} /> Top Up Points
+                  <CreditCard size={15} /> Recharge MTN
                 </Link>
               ) : (
                 <button
@@ -1359,10 +1359,10 @@ function ToolDrawer({
               <p className="text-white/30 text-xs">Top up your PulsePoints to unlock this tool. Your points never expire.</p>
               <div className="flex gap-2">
                 <button onClick={onClose} className="flex-1 nexus-btn-outline text-sm py-3">Back</button>
-                <Link href="/subscription"
+                <Link href="/dashboard"
                   className="flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2
                              bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90">
-                  <CreditCard size={15} /> Top Up Points
+                  <CreditCard size={15} /> Recharge MTN
                 </Link>
               </div>
             </div>
@@ -1448,7 +1448,7 @@ function ToolDrawer({
                       </span>
                     </div>
                     {!canAfford && (
-                      <Link href="/subscription"
+                      <Link href="/dashboard"
                         className="mt-1 w-full py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 text-xs
                                    bg-gradient-to-r from-amber-600 to-orange-600 text-white hover:opacity-90 transition-all">
                         <CreditCard size={13} /> Top Up to Continue

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useStore } from "@/store/useStore";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Zap, Wand2, Gift, Ticket, Settings, LogOut, Shield
+  LayoutDashboard, Zap, Wand2, Gift, Ticket, Settings, LogOut, Shield, Bell
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -68,6 +68,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
         </nav>
         <div className="flex items-center gap-3">
           <span className={cn("tier-badge", `tier-${user?.tier || "BRONZE"}`)}>{user?.tier || "BRONZE"}</span>
+          <Link href="/notifications" className="text-[rgb(130_140_180)] hover:text-white transition-colors">
+            <Bell size={18} />
+          </Link>
           <Link href="/settings" className="text-[rgb(130_140_180)] hover:text-white transition-colors">
             <Settings size={18} />
           </Link>
