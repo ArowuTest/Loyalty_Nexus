@@ -7,7 +7,6 @@ import {
   Zap, Sparkles, ArrowRight, RotateCcw, Lock, ChevronRight,
   Trophy, MapPin, Users, Gift, Star, Clock, Swords,
   Brain, Camera, Video, Mic, BookOpen, BarChart2,
-  Play,
 } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import NavBar from "@/components/landing/NavBar";
@@ -259,27 +258,6 @@ function DemoSpinWheel({ onLoginClick }: { onLoginClick: () => void }) {
   );
 }
 
-// ─── Floating AI tool card (hero decoration) — mirrors original landing exactly
-function FloatingToolCard({ emoji, label, pts, delay, className }: {
-  emoji: string; label: string; pts: string; delay: number; className?: string;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20, scale: 0.90 }}
-      animate={{ opacity: 1, y: 0,  scale: 1 }}
-      transition={{ type: "spring", stiffness: 200, damping: 26, delay }}
-      className={`glass border-gold-gradient rounded-2xl px-4 py-3 flex items-center gap-3 select-none ${className ?? ""}`}
-      style={{ animation: `float-y ${3.5 + delay}s ease-in-out infinite` }}
-    >
-      <span className="text-2xl">{emoji}</span>
-      <div>
-        <p className="text-[13px] font-bold text-white leading-tight">{label}</p>
-        <p className="text-[11px] font-mono text-gold-500">{pts}</p>
-      </div>
-    </motion.div>
-  );
-}
-
 // ─── Main page ────────────────────────────────────────────────
 export default function HomePage() {
   const [authOpen, setAuthOpen]           = useState(false);
@@ -349,7 +327,7 @@ export default function HomePage() {
         <div className="absolute inset-0 pointer-events-none opacity-[0.025]"
           style={{ backgroundImage: "linear-gradient(rgba(240,242,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(240,242,255,1) 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
         <motion.div style={{ y: heroY, opacity: heroOpacity }}
-          className="z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 pt-36 pb-16 flex flex-col items-center">
+          className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 pt-36 pb-16 flex flex-col items-center">
           {/* Live badge */}
           <motion.div initial={{ opacity: 0, y: 16, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ type: "spring", stiffness: 280, damping: 24, delay: 0.05 }}
@@ -381,82 +359,41 @@ export default function HomePage() {
             </motion.p>
           </div>
 
-          {/* Feature pills — exactly matching reference design */}
-          <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-            className="flex flex-wrap items-center justify-center gap-2 mb-9">
+          {/* Feature pills */}
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.28 }}
+            className="flex flex-wrap items-center justify-center gap-2 mb-10">
             {[
-              { icon: <RotateCcw className="w-3.5 h-3.5" />, text: "Free spin on ₦1,000+ recharge", color: "text-gold-500" },
-              { icon: <Trophy    className="w-3.5 h-3.5" />, text: "Win up to ₦5,000 instantly",     color: "text-emerald-400" },
-              { icon: <Zap       className="w-3.5 h-3.5" />, text: "Pulse Points on every recharge", color: "text-cyan-400" },
-              { icon: <Sparkles  className="w-3.5 h-3.5" />, text: "30+ AI tools unlocked",          color: "text-violet-400" },
-            ].map(({ icon, text, color }) => (
-              <div key={text} className="inline-flex items-center gap-2 glass rounded-full px-3.5 py-1.5 border border-white/[0.07]">
-                <span className={color}>{icon}</span>
-                <span className="text-xs font-semibold text-white/60">{text}</span>
+              { icon: "↺", text: "Free spin on ₦1,000+ recharge" },
+              { icon: "🏆", text: "Win up to ₦5,000 instantly" },
+              { icon: "⚡", text: "Pulse Points on every recharge" },
+              { icon: "✦", text: "30+ AI tools unlocked" },
+            ].map(({ icon, text }) => (
+              <div key={text} className="glass border border-white/[0.10] rounded-full px-4 py-1.5 text-[13px] font-semibold text-white/60 flex items-center gap-1.5">
+                <span>{icon}</span>{text}
               </div>
             ))}
           </motion.div>
 
           {/* CTA buttons */}
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
-            className="flex flex-col sm:flex-row items-center gap-3 mb-6">
+            className="flex flex-col sm:flex-row items-center gap-3 mb-16">
             <button onClick={openAuth}
-              className="btn-gold rounded-2xl h-14 px-9 text-[15px] font-black inline-flex items-center gap-2 w-full sm:w-auto justify-center"
-              style={{ boxShadow: "0 0 28px rgba(245,166,35,0.45)" }}>
+              className="btn-gold rounded-2xl h-14 px-8 text-[15px] font-black inline-flex items-center gap-2 w-full sm:w-auto justify-center"
+              style={{ boxShadow: "0 0 24px rgba(245,166,35,0.4)" }}>
               <Zap className="w-5 h-5" />
-              Start Earning — It&apos;s Free
+              Start Earning — It's Free
               <ArrowRight className="w-4 h-4" />
             </button>
-            <button onClick={openAuth}
-              className="glass border border-white/[0.14] rounded-2xl h-14 px-9 text-[15px] font-semibold text-white hover:border-gold-500/40 hover:bg-white/[0.05] transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
-              <Sparkles className="w-4 h-4 text-gold-500" />
-              Try AI Studio Free
-            </button>
+            <Link href="/studio">
+              <button className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
+                <Sparkles className="w-4 h-4 text-gold-500" />
+                Explore AI Studio
+              </button>
+            </Link>
           </motion.div>
 
-          {/* Social proof — avatar stack + stars */}
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.40 }}
-            className="flex items-center gap-4 text-sm text-white/50 mb-14">
-            <div className="flex -space-x-2.5">
-              {(["C","T","A","E","F","K"] as const).map((l, i) => (
-                <div key={i}
-                  className="w-8 h-8 rounded-full border-2 flex items-center justify-center text-[11px] font-black text-black"
-                  style={{
-                    borderColor: "#0d0e14",
-                    background: ["#F5A623","#FFE066","#00D4FF","#8B5CF6","#10B981","#F472B6"][i],
-                  }}
-                >{l}</div>
-              ))}
-            </div>
-            <div className="hidden sm:flex items-center gap-1">
-              {[...Array(5)].map((_, i) => (
-                <Star key={i} className="w-3.5 h-3.5 fill-gold-500 text-gold-500" />
-              ))}
-            </div>
-            <span><strong className="text-white">4.9/5</strong> from 12,000+ reviews</span>
-          </motion.div>
-
-          {/* 4 trust signal icons */}
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.48 }}
-            className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-3xl mb-10">
-            {[
-              { icon: <Zap className="w-5 h-5" />,       color: "#F5A623", title: "Free Spin",        sub: "on ₦1,000+ recharge" },
-              { icon: <Trophy className="w-5 h-5" />,     color: "#10B981", title: "Win ₦5,000",       sub: "instant cash prizes" },
-              { icon: <Sparkles className="w-5 h-5" />,   color: "#00D4FF", title: "30+ AI Tools",     sub: "earn from recharges" },
-              { icon: <Swords className="w-5 h-5" />,     color: "#8B5CF6", title: "Regional Wars",    sub: "₦500K prize pool" },
-            ].map(({ icon, color, title, sub }) => (
-              <div key={title} className="glass rounded-2xl border border-white/[0.08] p-4 flex flex-col items-center text-center gap-2">
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: `${color}18`, border: `1px solid ${color}30`, color }}>
-                  {icon}
-                </div>
-                <div className="text-[13px] font-black text-white">{title}</div>
-                <div className="text-[11px] text-white/40 leading-snug">{sub}</div>
-              </div>
-            ))}
-          </motion.div>
-
-          {/* Stats row — coloured numbers */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.55 }}
+          {/* Stats row */}
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}
             className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full max-w-3xl">
             {[
               { to: 84231,   suffix: "+",  label: "Active Users",     prefix: "",  color: "#F5A623" },
@@ -464,21 +401,14 @@ export default function HomePage() {
               { to: 1200000, suffix: "+",  label: "AI Creations",     prefix: "",  color: "#00D4FF" },
               { to: 37,      suffix: "",   label: "States Competing", prefix: "",  color: "#8B5CF6" },
             ].map(({ to, suffix, label, prefix, color }) => (
-              <div key={label} className="glass rounded-2xl border border-white/[0.08] p-4 text-center" style={{ borderColor: `${color}20` }}>
+              <div key={label} className="glass rounded-2xl border border-white/[0.08] p-4 text-center" style={{ borderColor: `${color}22` }}>
                 <div className="text-2xl sm:text-3xl font-black mb-1" style={{ color }}>
                   <Counter to={to} suffix={suffix} prefix={prefix} />
                 </div>
-                <div className="text-[12px] text-white/45 font-medium">{label}</div>
+                <div className="text-[12px] text-white/40 font-medium">{label}</div>
               </div>
             ))}
           </motion.div>
-          {/* Floating tool cards — desktop only, exactly as original landing */}
-          <div className="hidden lg:block">
-            <FloatingToolCard emoji="📸" label="AI Photo"        pts="10 pts"  delay={0.60} className="absolute left-[3%] top-[32%]" />
-            <FloatingToolCard emoji="🤖" label="Ask Nexus"       pts="FREE"    delay={0.75} className="absolute left-[1%] top-[56%]" />
-            <FloatingToolCard emoji="🎬" label="Video Cinematic" pts="65 pts" delay={0.65} className="absolute right-[3%] top-[30%]" />
-            <FloatingToolCard emoji="💼" label="Business Plan"   pts="30 pts"  delay={0.80} className="absolute right-[1%] top-[55%]" />
-          </div>
         </motion.div>
       </section>
 
