@@ -7,7 +7,7 @@ import {
   Zap, Sparkles, ArrowRight, RotateCcw, Lock, ChevronRight,
   Trophy, MapPin, Users, Gift, Star, Clock, Swords,
   Brain, Camera, Video, Mic, BookOpen, BarChart2,
-  Music, Wand2, FileText, ImageIcon, Cpu, Globe,
+  Play,
 } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import NavBar from "@/components/landing/NavBar";
@@ -259,6 +259,36 @@ function DemoSpinWheel({ onLoginClick }: { onLoginClick: () => void }) {
   );
 }
 
+// ─── Floating AI tool card (hero side decoration) ────────────
+function FloatingToolCard({
+  emoji, label, pts, delay, style,
+}: {
+  emoji: string; label: string; pts: string; delay: number; style?: React.CSSProperties;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20, scale: 0.90 }}
+      animate={{ opacity: 1, y: 0,  scale: 1 }}
+      transition={{ type: "spring", stiffness: 200, damping: 26, delay }}
+      className="absolute rounded-2xl px-4 py-3 flex items-center gap-3 select-none pointer-events-none"
+      style={{
+        animation: `float-y ${3.5 + delay}s ease-in-out infinite`,
+        backdropFilter: "blur(24px) saturate(160%)",
+        WebkitBackdropFilter: "blur(24px) saturate(160%)",
+        background: "linear-gradient(rgba(17,18,25,0.82), rgba(17,18,25,0.82)) padding-box, linear-gradient(135deg, #F5A623, #FFE066, #F59E0B) border-box",
+        border: "1px solid transparent",
+        ...style,
+      }}
+    >
+      <span className="text-2xl">{emoji}</span>
+      <div>
+        <p className="text-[13px] font-bold text-white leading-tight">{label}</p>
+        <p className="text-[11px] font-mono" style={{ color: "#F5A623" }}>{pts}</p>
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────
 export default function HomePage() {
   const [authOpen, setAuthOpen]           = useState(false);
@@ -360,30 +390,19 @@ export default function HomePage() {
             </motion.p>
           </div>
 
-          {/* Floating AI tool cards */}
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.26 }}
-            className="flex flex-wrap items-center justify-center gap-2.5 mb-10">
+          {/* Feature pills — exactly matching reference design */}
+          <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+            className="flex flex-wrap items-center justify-center gap-2 mb-9">
             {[
-              { icon: <Camera className="w-3.5 h-3.5" />,    label: "AI Photo",      pts: "10 pts",  color: "#F5A623",  bg: "rgba(245,166,35,0.10)",   border: "rgba(245,166,35,0.25)" },
-              { icon: <Video className="w-3.5 h-3.5" />,     label: "Video Cinematic", pts: "65 pts", color: "#00D4FF",  bg: "rgba(0,212,255,0.10)",    border: "rgba(0,212,255,0.25)" },
-              { icon: <Brain className="w-3.5 h-3.5" />,     label: "Ask Nexus",    pts: "FREE",    color: "#10B981",  bg: "rgba(16,185,129,0.10)",   border: "rgba(16,185,129,0.25)" },
-              { icon: <BarChart2 className="w-3.5 h-3.5" />, label: "Business Plan", pts: "30 pts", color: "#8B5CF6",  bg: "rgba(139,92,246,0.10)",   border: "rgba(139,92,246,0.25)" },
-              { icon: <Music className="w-3.5 h-3.5" />,     label: "Jingle AI",    pts: "45 pts",  color: "#EC4899",  bg: "rgba(236,72,153,0.10)",   border: "rgba(236,72,153,0.25)" },
-              { icon: <ImageIcon className="w-3.5 h-3.5" />, label: "BG Remover",   pts: "3 pts",   color: "#F59E0B",  bg: "rgba(245,158,11,0.10)",   border: "rgba(245,158,11,0.25)" },
-              { icon: <Wand2 className="w-3.5 h-3.5" />,     label: "AI Avatar",    pts: "15 pts",  color: "#A78BFA",  bg: "rgba(167,139,250,0.10)",  border: "rgba(167,139,250,0.25)" },
-              { icon: <FileText className="w-3.5 h-3.5" />,  label: "Voice to Plan", pts: "35 pts", color: "#34D399",  bg: "rgba(52,211,153,0.10)",   border: "rgba(52,211,153,0.25)" },
-            ].map(({ icon, label, pts, color, bg, border }) => (
-              <motion.div
-                key={label}
-                whileHover={{ scale: 1.06, y: -2 }}
-                transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                className="flex items-center gap-2 rounded-2xl px-3.5 py-2 border cursor-default select-none"
-                style={{ background: bg, borderColor: border }}
-              >
-                <span style={{ color }}>{icon}</span>
-                <span className="text-[12px] font-bold text-white/80">{label}</span>
-                <span className="text-[11px] font-black rounded-full px-2 py-0.5" style={{ background: `${color}22`, color }}>{pts}</span>
-              </motion.div>
+              { icon: <RotateCcw className="w-3.5 h-3.5" />, text: "Free spin on ₦1,000+ recharge", color: "text-gold-500" },
+              { icon: <Trophy    className="w-3.5 h-3.5" />, text: "Win up to ₦5,000 instantly",     color: "text-emerald-400" },
+              { icon: <Zap       className="w-3.5 h-3.5" />, text: "Pulse Points on every recharge", color: "text-cyan-400" },
+              { icon: <Sparkles  className="w-3.5 h-3.5" />, text: "30+ AI tools unlocked",          color: "text-violet-400" },
+            ].map(({ icon, text, color }) => (
+              <div key={text} className="inline-flex items-center gap-2 glass rounded-full px-3.5 py-1.5 border border-white/[0.07]">
+                <span className={color}>{icon}</span>
+                <span className="text-xs font-semibold text-white/60">{text}</span>
+              </div>
             ))}
           </motion.div>
 
@@ -404,16 +423,26 @@ export default function HomePage() {
             </button>
           </motion.div>
 
-          {/* Social proof */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.42 }}
-            className="flex items-center gap-2.5 mb-14">
-            <div className="flex">
-              {[...Array(5)].map((_, i) => (
-                <Star key={i} className="w-4 h-4 fill-gold-500 text-gold-500" />
+          {/* Social proof — avatar stack + stars */}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.40 }}
+            className="flex items-center gap-4 text-sm text-white/50 mb-14">
+            <div className="flex -space-x-2.5">
+              {(["C","T","A","E","F","K"] as const).map((l, i) => (
+                <div key={i}
+                  className="w-8 h-8 rounded-full border-2 flex items-center justify-center text-[11px] font-black text-black"
+                  style={{
+                    borderColor: "#0d0e14",
+                    background: ["#F5A623","#FFE066","#00D4FF","#8B5CF6","#10B981","#F472B6"][i],
+                  }}
+                >{l}</div>
               ))}
             </div>
-            <span className="text-[13px] font-bold text-white">4.9/5</span>
-            <span className="text-[13px] text-white/35">from 12,000+ reviews</span>
+            <div className="hidden sm:flex items-center gap-1">
+              {[...Array(5)].map((_, i) => (
+                <Star key={i} className="w-3.5 h-3.5 fill-gold-500 text-gold-500" />
+              ))}
+            </div>
+            <span><strong className="text-white">4.9/5</strong> from 12,000+ reviews</span>
           </motion.div>
 
           {/* 4 trust signal icons */}
@@ -452,6 +481,13 @@ export default function HomePage() {
               </div>
             ))}
           </motion.div>
+          {/* Floating tool cards — desktop only, absolutely positioned left & right */}
+          <div className="hidden lg:block">
+            <FloatingToolCard emoji="📸" label="AI Photo"        pts="10 pts"  delay={0.60} style={{ left: "3%",  top: "32%" }} />
+            <FloatingToolCard emoji="🤖" label="Ask Nexus"       pts="FREE"    delay={0.75} style={{ left: "1%",  top: "56%" }} />
+            <FloatingToolCard emoji="🎬" label="Video Cinematic" pts="65 pts" delay={0.65} style={{ right: "3%", top: "30%" }} />
+            <FloatingToolCard emoji="💼" label="Business Plan"   pts="30 pts"  delay={0.80} style={{ right: "1%", top: "55%" }} />
+          </div>
         </motion.div>
       </section>
 
