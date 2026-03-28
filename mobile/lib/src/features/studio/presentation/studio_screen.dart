@@ -18,30 +18,54 @@ final _toolsProvider = FutureProvider.autoDispose<List<StudioTool>>((ref) async 
   return (raw as List).map((e) => StudioTool.fromMap(e as Map)).toList();
 });
 
-final _galleryProvider = StateNotifierProvider.autoDispose<_GalleryNotifier, List<Generation>>(
+final _galleryProvider = StateNotifierProvider.autoDispose<_GalleryNotifier, _GalleryState>(
   (ref) => _GalleryNotifier(ref.read(studioApiProvider)),
 );
 
-class _GalleryNotifier extends StateNotifier<List<Generation>> {
+// Loading state wrapper
+class _GalleryState {
+  final List<Generation> items;
+  final bool loading;
+  const _GalleryState({this.items = const [], this.loading = true});
+  _GalleryState copyWith({List<Generation>? items, bool? loading}) =>
+      _GalleryState(items: items ?? this.items, loading: loading ?? this.loading);
+}
+
+class _GalleryNotifier extends StateNotifier<_GalleryState> {
   final StudioApi _api;
   Timer? _poll;
-  _GalleryNotifier(this._api) : super([]) { _fetch(); }
+  _GalleryNotifier(this._api) : super(const _GalleryState()) { _fetch(); }
 
   Future<void> _fetch() async {
     try {
       final raw = await _api.getGallery();
-      state = (raw as List).map((e) => Generation.fromMap(e as Map)).toList();
+      final items = (raw as List).map((e) => Generation.fromMap(e as Map)).toList();
+      state = state.copyWith(items: items, loading: false);
       // Auto-poll if any pending
-      if (state.any((g) => g.status == 'pending' || g.status == 'processing')) {
+      if (items.any((g) => g.status == 'pending' || g.status == 'processing')) {
         _poll?.cancel();
         _poll = Timer.periodic(const Duration(seconds: 4), (_) => _fetch());
       } else {
         _poll?.cancel();
       }
-    } catch (_) {}
+    } catch (_) {
+      state = state.copyWith(loading: false);
+    }
   }
 
-  void refresh() { _poll?.cancel(); _fetch(); }
+  Future<void> refresh() async {
+    _poll?.cancel();
+    state = state.copyWith(loading: true);
+    await _fetch();
+  }
+
+  Future<void> delete(String generationId) async {
+    try {
+      await _api.deleteGeneration(generationId);
+      state = state.copyWith(
+        items: state.items.where((g) => g.id != generationId).toList());
+    } catch (_) {}
+  }
 
   @override void dispose() { _poll?.cancel(); super.dispose(); }
 }
@@ -457,8 +481,9 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
             onToolTap: _openTool,
           ),
           _GalleryTab(
-            gallery: ref.watch(_galleryProvider),
+            galleryState: ref.watch(_galleryProvider),
             onRefresh: () => ref.read(_galleryProvider.notifier).refresh(),
+            onDelete: (id) => ref.read(_galleryProvider.notifier).delete(id),
             onRegenerate: (g) {
               ref.read(_toolsProvider).whenData((tools) {
                 final tool = tools.firstWhere(
@@ -493,8 +518,8 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
   }
 
   Tab _buildGalleryTab() {
-    final gens = ref.watch(_galleryProvider);
-    final pending = gens.where((g) => g.status == 'pending' || g.status == 'processing').length;
+    final gs = ref.watch(_galleryProvider);
+    final pending = gs.items.where((g) => g.status == 'pending' || g.status == 'processing').length;
     if (pending > 0) {
       return Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
         const Text('🖼 Gallery'),
@@ -1154,31 +1179,52 @@ class _Badge extends StatelessWidget {
 // ══════════════════════════════════════════════════════════════════════════════
 
 class _GalleryTab extends StatelessWidget {
-  final List<Generation> gallery;
-  final VoidCallback onRefresh;
+  final _GalleryState galleryState;
+  final Future<void> Function() onRefresh;
   final ValueChanged<Generation> onRegenerate;
-  const _GalleryTab({required this.gallery, required this.onRefresh, required this.onRegenerate});
+  final ValueChanged<String> onDelete;
+  const _GalleryTab({
+    required this.galleryState, required this.onRefresh,
+    required this.onRegenerate, required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (gallery.isEmpty) return Center(
-      child: Padding(padding: const EdgeInsets.all(32), child: Column(
-        mainAxisAlignment: MainAxisAlignment.center, children: [
-          const Icon(Icons.photo_library_outlined, size: 64, color: NexusColors.textSecondary),
-          const SizedBox(height: 16),
-          const Text('No generations yet',
-            style: TextStyle(color: NexusColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          const Text('Use a tool to create something amazing',
-            style: TextStyle(color: NexusColors.textSecondary, fontSize: 13),
-            textAlign: TextAlign.center),
-        ],
-      )),
+    // Loading skeleton
+    if (galleryState.loading) {
+      return ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+        itemCount: 4,
+        itemBuilder: (_, __) => Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: NexusShimmer(width: double.infinity, height: 130, radius: NexusRadius.md),
+        ),
+      );
+    }
+
+    final gallery = galleryState.items;
+
+    // Empty state
+    if (gallery.isEmpty) return RefreshIndicator(
+      onRefresh: onRefresh,
+      color: NexusColors.primary,
+      child: ListView(padding: const EdgeInsets.all(32), children: [
+        const SizedBox(height: 60),
+        const Icon(Icons.photo_library_outlined, size: 64, color: NexusColors.textSecondary),
+        const SizedBox(height: 16),
+        const Text('No generations yet',
+          style: TextStyle(color: NexusColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w600),
+          textAlign: TextAlign.center),
+        const SizedBox(height: 8),
+        const Text('Use a tool from the Tools tab to create something amazing',
+          style: TextStyle(color: NexusColors.textSecondary, fontSize: 13),
+          textAlign: TextAlign.center),
+      ]),
     );
 
     return Column(children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${gallery.length} generation${gallery.length != 1 ? 's' : ''}',
@@ -1191,23 +1237,54 @@ class _GalleryTab extends StatelessWidget {
         ]),
       ),
       Expanded(
-        child: ListView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-          itemCount: gallery.length,
-          itemBuilder: (_, i) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _GenerationCard(gen: gallery[i], onRegenerate: onRegenerate),
+        child: RefreshIndicator(
+          onRefresh: onRefresh,
+          color: NexusColors.primary,
+          child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+            itemCount: gallery.length,
+            itemBuilder: (_, i) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _GenerationCard(
+                gen: gallery[i],
+                onRegenerate: onRegenerate,
+                onDelete: () => _confirmDelete(context, gallery[i].id),
+              ),
+            ),
           ),
         ),
       ),
     ]);
+  }
+
+  void _confirmDelete(BuildContext context, String id) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: NexusColors.surface,
+        title: const Text('Delete generation?',
+            style: TextStyle(color: NexusColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
+        content: const Text('This cannot be undone.',
+            style: TextStyle(color: NexusColors.textSecondary, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          TextButton(
+            onPressed: () { Navigator.pop(context); onDelete(id); },
+            child: const Text('Delete', style: TextStyle(color: NexusColors.red)),
+          ),
+        ],
+      ),
+    );
   }
 }
 
 class _GenerationCard extends StatelessWidget {
   final Generation gen;
   final ValueChanged<Generation> onRegenerate;
-  const _GenerationCard({required this.gen, required this.onRegenerate});
+  final VoidCallback onDelete;
+  const _GenerationCard({required this.gen, required this.onRegenerate, required this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -1231,6 +1308,12 @@ class _GenerationCard extends StatelessWidget {
               color: NexusColors.textSecondary, fontSize: 10)),
             const SizedBox(width: 6),
             _StatusPill(status: gen.status),
+            const SizedBox(width: 4),
+            GestureDetector(
+              onTap: onDelete,
+              child: const Icon(Icons.delete_outline_rounded,
+                  size: 16, color: NexusColors.textMuted),
+            ),
           ]),
         ),
 

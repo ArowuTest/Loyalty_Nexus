@@ -3,28 +3,99 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/auth/auth_provider.dart';
+import '../../../core/cache/cache_service.dart';
 import '../../../core/theme/nexus_theme.dart';
 
 // ── Providers ──────────────────────────────────────────────────────────────────
 
+// ── Stale-while-revalidate cache helper ───────────────────────────────────────
+// Returns cached data instantly (so UI never shows blank), then fetches fresh
+// data and updates the UI automatically via Riverpod's rebuild.
+
 final walletProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  return ref.read(userApiProvider).getWallet();
+  final cache = ref.read(cacheServiceProvider);
+  final cached = cache.getMap(CacheKeys.wallet, maxAgeMinutes: 5);
+  if (cached != null) {
+    // schedule background refresh after returning cached data
+    Future.microtask(() async {
+      try {
+        final fresh = await ref.read(userApiProvider).getWallet();
+        await cache.put(CacheKeys.wallet, fresh);
+      } catch (_) {}
+    });
+    return cached;
+  }
+  final data = await ref.read(userApiProvider).getWallet();
+  await cache.put(CacheKeys.wallet, data);
+  return data;
 });
 
 final profileProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  return ref.read(userApiProvider).getProfile();
+  final cache = ref.read(cacheServiceProvider);
+  final cached = cache.getMap(CacheKeys.profile, maxAgeMinutes: 10);
+  if (cached != null) {
+    Future.microtask(() async {
+      try {
+        final fresh = await ref.read(userApiProvider).getProfile();
+        await cache.put(CacheKeys.profile, fresh);
+      } catch (_) {}
+    });
+    return cached;
+  }
+  final data = await ref.read(userApiProvider).getProfile();
+  await cache.put(CacheKeys.profile, data);
+  return data;
 });
 
 final passportProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  return ref.read(userApiProvider).getPassport();
+  final cache = ref.read(cacheServiceProvider);
+  final cached = cache.getMap(CacheKeys.passport, maxAgeMinutes: 5);
+  if (cached != null) {
+    Future.microtask(() async {
+      try {
+        final fresh = await ref.read(userApiProvider).getPassport();
+        await cache.put(CacheKeys.passport, fresh);
+      } catch (_) {}
+    });
+    return cached;
+  }
+  final data = await ref.read(userApiProvider).getPassport();
+  await cache.put(CacheKeys.passport, data);
+  return data;
 });
 
 final warsLeaderboardProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
-  return ref.read(warsApiProvider).getLeaderboard();
+  final cache = ref.read(cacheServiceProvider);
+  final cached = cache.getList(CacheKeys.leaderboard, maxAgeMinutes: 3);
+  if (cached != null) {
+    Future.microtask(() async {
+      try {
+        final fresh = await ref.read(warsApiProvider).getLeaderboard();
+        await cache.putList(CacheKeys.leaderboard, fresh);
+      } catch (_) {}
+    });
+    return cached;
+  }
+  final data = await ref.read(warsApiProvider).getLeaderboard();
+  await cache.putList(CacheKeys.leaderboard, data);
+  return data;
 });
 
 final transactionsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
-  return ref.read(userApiProvider).getTransactions();
+  final cache = ref.read(cacheServiceProvider);
+  final cached = cache.getList(CacheKeys.transactions, maxAgeMinutes: 2);
+  if (cached != null) {
+    Future.microtask(() async {
+      try {
+        final fresh = await ref.read(userApiProvider).getTransactions();
+        await cache.putList(CacheKeys.transactions, fresh);
+      } catch (_) {}
+    });
+    return cached;
+  }
+  final data = await ref.read(userApiProvider).getTransactions();
+  await cache.putList(CacheKeys.transactions, data);
+  return data;
 });
 
 final bonusPulseProvider = FutureProvider.autoDispose<int>((ref) async {

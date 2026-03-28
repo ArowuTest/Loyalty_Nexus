@@ -81,7 +81,7 @@ class DrawsScreen extends ConsumerWidget {
         ],
       ),
       body: drawsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(color: NexusColors.gold)),
+        loading: () => _DrawsShimmer(),
         error: (e, _) => Center(child: Column(
           mainAxisAlignment: MainAxisAlignment.center, children: [
             const Icon(Icons.wifi_off_rounded, size: 52, color: NexusColors.textSecondary),
@@ -359,8 +359,7 @@ class _WinnersList extends ConsumerWidget {
     return winnersAsync.when(
       loading: () => const Padding(
         padding: EdgeInsets.symmetric(vertical: 16),
-        child: Center(child: SizedBox(width: 20, height: 20,
-            child: CircularProgressIndicator(color: NexusColors.gold, strokeWidth: 2))),
+        child: Center(child: NexusShimmer(width: double.infinity, height: 44, radius: NexusRadius.sm)),
       ),
       error: (_, __) => const Padding(
         padding: EdgeInsets.all(12),
@@ -479,4 +478,17 @@ class _StatTile extends StatelessWidget {
           fontSize: 12, fontWeight: FontWeight.w800)),
     ]),
   ));
+}
+
+// ── Draws shimmer ─────────────────────────────────────────────────────────────
+class _DrawsShimmer extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => ListView.builder(
+    padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+    itemCount: 4,
+    itemBuilder: (_, __) => Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: NexusShimmer(width: double.infinity, height: 140, radius: NexusRadius.md),
+    ),
+  );
 }

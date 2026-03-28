@@ -230,7 +230,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
         ],
       ),
       body: wheelAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(color: NexusColors.primary)),
+        loading: () => _SpinShimmer(),
         error:   (_, __) => _buildErrorState(),
         data: (segs) {
           final credits = walletAsync.valueOrNull?['spin_credits'] as int? ?? 0;
@@ -810,4 +810,29 @@ class _HistoryRow extends StatelessWidget {
     final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return '${d.day} ${months[d.month - 1]}';
   }
+}
+
+// ── Spin shimmer ──────────────────────────────────────────────────────────────
+class _SpinShimmer extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    padding: const EdgeInsets.all(24),
+    child: Column(children: const [
+      // Wheel placeholder
+      NexusShimmer(width: 300, height: 300, radius: BorderRadius.all(Radius.circular(150))),
+      SizedBox(height: 28),
+      // Credits bar
+      NexusShimmer(width: double.infinity, height: 52, radius: NexusRadius.md),
+      SizedBox(height: 20),
+      // Spin button
+      NexusShimmer(width: double.infinity, height: 56, radius: NexusRadius.lg),
+      SizedBox(height: 24),
+      // History rows
+      NexusShimmer(width: double.infinity, height: 44, radius: NexusRadius.sm),
+      SizedBox(height: 8),
+      NexusShimmer(width: double.infinity, height: 44, radius: NexusRadius.sm),
+      SizedBox(height: 8),
+      NexusShimmer(width: double.infinity, height: 44, radius: NexusRadius.sm),
+    ]),
+  );
 }

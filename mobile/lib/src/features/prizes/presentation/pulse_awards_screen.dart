@@ -50,7 +50,7 @@ class PulseAwardsScreen extends ConsumerWidget {
         ],
       ),
       body: dataAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(color: NexusColors.gold)),
+        loading: () => _PulseShimmer(),
         error: (e, _) => Center(child: Column(
           mainAxisAlignment: MainAxisAlignment.center, children: [
             const Icon(Icons.wifi_off_rounded, size: 52, color: NexusColors.textSecondary),
@@ -217,4 +217,17 @@ class _AwardCard extends StatelessWidget {
       ]),
     );
   }
+}
+
+// ── Shimmer ───────────────────────────────────────────────────────────────────
+class _PulseShimmer extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => ListView.builder(
+    padding: const EdgeInsets.all(16),
+    itemCount: 6,
+    itemBuilder: (_, __) => Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: NexusShimmer(width: double.infinity, height: 76, radius: NexusRadius.md),
+    ),
+  );
 }

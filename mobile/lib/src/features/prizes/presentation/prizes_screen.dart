@@ -183,7 +183,7 @@ class _PrizesScreenState extends ConsumerState<PrizesScreen>
         ),
       ),
       body: winsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator(color: NexusColors.gold)),
+        loading: () => _PrizesShimmer(),
         error: (e, _) => _ErrorView(onRetry: () => ref.invalidate(_winsProvider)),
         data: (all) => TabBarView(
           controller: _tabs,
@@ -613,4 +613,17 @@ class _ErrorView extends StatelessWidget {
       ElevatedButton(onPressed: onRetry, child: const Text('Retry')),
     ],
   ));
+}
+
+// ── Prizes shimmer ────────────────────────────────────────────────────────────
+class _PrizesShimmer extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => ListView.builder(
+    padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+    itemCount: 5,
+    itemBuilder: (_, __) => Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: NexusShimmer(width: double.infinity, height: 100, radius: NexusRadius.md),
+    ),
+  );
 }
