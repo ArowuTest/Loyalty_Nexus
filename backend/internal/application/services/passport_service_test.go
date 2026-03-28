@@ -181,7 +181,8 @@ func TestPassportService_BuildPKPass(t *testing.T) {
 	svc := services.NewPassportService(db, cfg)
 	ctx := context.Background()
 	userID := uuid.New()
-	db.Exec(`INSERT INTO users (id, phone_number, tier, streak_count, lifetime_points, total_spins) VALUES (?, '2348012345678', 'BRONZE', 0, 0, 0)`, userID)
+	// Insert a GOLD-tier user (lifetime_points >= 10000 threshold)
+	db.Exec(`INSERT INTO users (id, phone_number, tier, streak_count, lifetime_points, total_spins) VALUES (?, '2348012345678', 'GOLD', 3, 12000, 5)`, userID)
 	db.Exec(`INSERT INTO wallets (id, user_id, pulse_points, spin_credits, recharge_counter) VALUES (?, ?, 500, 1, 0)`, uuid.New(), userID)
 
 	pass, err := svc.BuildPKPass(ctx, userID)
