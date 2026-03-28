@@ -376,7 +376,7 @@ export default function HomePage() {
 
           {/* CTA buttons */}
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
-            className="flex flex-col sm:flex-row items-center gap-3 mb-16">
+            className="flex flex-col sm:flex-row items-center gap-3 mb-8">
             <button onClick={openAuth}
               className="btn-gold rounded-2xl h-14 px-8 text-[15px] font-black inline-flex items-center gap-2 w-full sm:w-auto justify-center"
               style={{ boxShadow: "0 0 24px rgba(245,166,35,0.4)" }}>
@@ -384,30 +384,28 @@ export default function HomePage() {
               Start Earning — It's Free
               <ArrowRight className="w-4 h-4" />
             </button>
-            <Link href="/studio">
-              <button className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
-                <Sparkles className="w-4 h-4 text-gold-500" />
-                Explore AI Studio
-              </button>
-            </Link>
+            <button onClick={openAuth}
+              className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
+              <Sparkles className="w-4 h-4 text-gold-500" />
+              Try AI Studio Free
+            </button>
           </motion.div>
 
-          {/* Stats row */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}
-            className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full max-w-3xl">
-            {[
-              { to: 84231,   suffix: "+",  label: "Active Users",     prefix: "",  color: "#F5A623" },
-              { to: 18,      suffix: "M+", label: "Naira in Prizes",  prefix: "₦", color: "#10B981" },
-              { to: 1200000, suffix: "+",  label: "AI Creations",     prefix: "",  color: "#00D4FF" },
-              { to: 37,      suffix: "",   label: "States Competing", prefix: "",  color: "#8B5CF6" },
-            ].map(({ to, suffix, label, prefix, color }) => (
-              <div key={label} className="glass rounded-2xl border border-white/[0.08] p-4 text-center" style={{ borderColor: `${color}22` }}>
-                <div className="text-2xl sm:text-3xl font-black mb-1" style={{ color }}>
-                  <Counter to={to} suffix={suffix} prefix={prefix} />
+          {/* Social proof — avatar stack + star rating */}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.44 }}
+            className="flex items-center gap-3 mb-0">
+            <div className="flex -space-x-2">
+              {["#F5A623","#FFE066","#00D4FF","#8B5CF6","#10B981","#F472B6"].map((bg, i) => (
+                <div key={i} className="w-8 h-8 rounded-full border-2 flex items-center justify-center text-[10px] font-black text-black"
+                  style={{ borderColor: "#0d0e14", background: bg }}>
+                  {"CTAEFK"[i]}
                 </div>
-                <div className="text-[12px] text-white/40 font-medium">{label}</div>
-              </div>
-            ))}
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              {[...Array(5)].map((_,i) => <Star key={i} className="w-3.5 h-3.5 fill-gold-500 text-gold-500" />)}
+            </div>
+            <span className="text-[13px] text-white/50"><strong className="text-white">4.9/5</strong> · 12,000+ users</span>
           </motion.div>
         </motion.div>
       </section>
