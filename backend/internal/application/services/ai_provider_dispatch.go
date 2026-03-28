@@ -111,7 +111,9 @@ func (o *AIStudioOrchestrator) callByTemplate(
 	case entities.TemplatePollVideo:
 		model := p.ModelID
 		if model == "" {
-			model = "seedance"
+			// Default changed from seedance (PAID, 1.8 pollen/M) to wan-fast (FREE, 91.4% success)
+			// ltx-2 was also removed (OFF, 5.3% success)
+			model = "wan-fast"
 		}
 		outputURL, err = o.callPollinationsVideoModel(ctx, model, in.ImageURL, in.Prompt, 180)
 
