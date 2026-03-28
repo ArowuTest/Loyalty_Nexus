@@ -259,31 +259,22 @@ function DemoSpinWheel({ onLoginClick }: { onLoginClick: () => void }) {
   );
 }
 
-// ─── Floating AI tool card (hero side decoration) ────────────
-function FloatingToolCard({
-  emoji, label, pts, delay, style,
-}: {
-  emoji: string; label: string; pts: string; delay: number; style?: React.CSSProperties;
+// ─── Floating AI tool card (hero decoration) — mirrors original landing exactly
+function FloatingToolCard({ emoji, label, pts, delay, className }: {
+  emoji: string; label: string; pts: string; delay: number; className?: string;
 }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20, scale: 0.90 }}
       animate={{ opacity: 1, y: 0,  scale: 1 }}
       transition={{ type: "spring", stiffness: 200, damping: 26, delay }}
-      className="absolute rounded-2xl px-4 py-3 flex items-center gap-3 select-none pointer-events-none"
-      style={{
-        animation: `float-y ${3.5 + delay}s ease-in-out infinite`,
-        backdropFilter: "blur(24px) saturate(160%)",
-        WebkitBackdropFilter: "blur(24px) saturate(160%)",
-        background: "linear-gradient(rgba(17,18,25,0.82), rgba(17,18,25,0.82)) padding-box, linear-gradient(135deg, #F5A623, #FFE066, #F59E0B) border-box",
-        border: "1px solid transparent",
-        ...style,
-      }}
+      className={`glass border-gold-gradient rounded-2xl px-4 py-3 flex items-center gap-3 select-none ${className ?? ""}`}
+      style={{ animation: `float-y ${3.5 + delay}s ease-in-out infinite` }}
     >
       <span className="text-2xl">{emoji}</span>
       <div>
         <p className="text-[13px] font-bold text-white leading-tight">{label}</p>
-        <p className="text-[11px] font-mono" style={{ color: "#F5A623" }}>{pts}</p>
+        <p className="text-[11px] font-mono text-gold-500">{pts}</p>
       </div>
     </motion.div>
   );
@@ -358,7 +349,7 @@ export default function HomePage() {
         <div className="absolute inset-0 pointer-events-none opacity-[0.025]"
           style={{ backgroundImage: "linear-gradient(rgba(240,242,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(240,242,255,1) 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
         <motion.div style={{ y: heroY, opacity: heroOpacity }}
-          className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 pt-36 pb-16 flex flex-col items-center">
+          className="z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 pt-36 pb-16 flex flex-col items-center">
           {/* Live badge */}
           <motion.div initial={{ opacity: 0, y: 16, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ type: "spring", stiffness: 280, damping: 24, delay: 0.05 }}
@@ -481,12 +472,12 @@ export default function HomePage() {
               </div>
             ))}
           </motion.div>
-          {/* Floating tool cards — desktop only, absolutely positioned left & right */}
+          {/* Floating tool cards — desktop only, exactly as original landing */}
           <div className="hidden lg:block">
-            <FloatingToolCard emoji="📸" label="AI Photo"        pts="10 pts"  delay={0.60} style={{ left: "3%",  top: "32%" }} />
-            <FloatingToolCard emoji="🤖" label="Ask Nexus"       pts="FREE"    delay={0.75} style={{ left: "1%",  top: "56%" }} />
-            <FloatingToolCard emoji="🎬" label="Video Cinematic" pts="65 pts" delay={0.65} style={{ right: "3%", top: "30%" }} />
-            <FloatingToolCard emoji="💼" label="Business Plan"   pts="30 pts"  delay={0.80} style={{ right: "1%", top: "55%" }} />
+            <FloatingToolCard emoji="📸" label="AI Photo"        pts="10 pts"  delay={0.60} className="absolute left-[3%] top-[32%]" />
+            <FloatingToolCard emoji="🤖" label="Ask Nexus"       pts="FREE"    delay={0.75} className="absolute left-[1%] top-[56%]" />
+            <FloatingToolCard emoji="🎬" label="Video Cinematic" pts="65 pts" delay={0.65} className="absolute right-[3%] top-[30%]" />
+            <FloatingToolCard emoji="💼" label="Business Plan"   pts="30 pts"  delay={0.80} className="absolute right-[1%] top-[55%]" />
           </div>
         </motion.div>
       </section>
