@@ -40,20 +40,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── NATS JetStream (event broker) ───────────────────────────
-  nats:
-    image: nats:2.10-alpine
-    restart: unless-stopped
-    command: ["-js", "-m", "8222"]
-    ports:
-      - "127.0.0.1:4222:4222"
-      - "127.0.0.1:8222:8222"  # Monitoring
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:8222/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   # ─── Loyalty Nexus API ───────────────────────────────────────
   api:
     build:
@@ -66,7 +52,6 @@ services:
       DATABASE_URL: postgres://${DB_USER:-nexus}:${DB_PASSWORD}@db:5432/${DB_NAME:-loyalty_nexus}?sslmode=disable
       REDIS_URL: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-      NATS_URL: nats://nats:4222
       PORT: 8080
     ports:
       - "8080:8080"
@@ -74,8 +59,6 @@ services:
       db:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      nats:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:8080/health"]
@@ -95,7 +78,6 @@ services:
       DATABASE_URL: postgres://${DB_USER:-nexus}:${DB_PASSWORD}@db:5432/${DB_NAME:-loyalty_nexus}?sslmode=disable
       REDIS_URL: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-      NATS_URL: nats://nats:4222
     depends_on:
       db:
         condition: service_healthy

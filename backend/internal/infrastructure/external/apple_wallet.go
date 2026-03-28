@@ -151,9 +151,11 @@ func (s *AppleWalletSigner) PassTypeID() string {
 }
 
 // TeamID returns the configured Apple Team ID.
+// Returns an empty string when APPLE_TEAM_ID is not set; callers should check
+// IsConfigured() before generating production passes.
 func (s *AppleWalletSigner) TeamID() string {
 	if s == nil || s.teamID == "" {
-		return "XXXXXXXXXX"
+		return ""
 	}
 	return s.teamID
 }

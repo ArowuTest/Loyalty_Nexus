@@ -153,7 +153,7 @@ func (svc *PassportService) BuildApplePKPassBytes(ctx context.Context, userID uu
 	}
 
 	passTypeID := "pass.ng.loyaltynexus.passport"
-	teamID     := "XXXXXXXXXX"
+	teamID     := "" // Populated from APPLE_TEAM_ID env var via appleWalletSigner.TeamID()
 	if appleWalletSigner != nil {
 		passTypeID = appleWalletSigner.PassTypeID()
 		teamID     = appleWalletSigner.TeamID()
