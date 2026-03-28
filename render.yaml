@@ -2,8 +2,6 @@
 #  LOYALTY NEXUS — Render.com Infrastructure Definition
 #  Docs: https://render.com/docs/yaml-spec
 # ═══════════════════════════════════════════════════════════════════════════
-# IMPORTANT: Update the `repo` field to your actual GitHub repository URL
-#            before connecting this file to Render's Blueprint.
 
 services:
 
@@ -13,42 +11,57 @@ services:
     runtime: docker
     repo: https://github.com/ArowuTest/Loyalty_Nexus
     branch: main
-    # rootDir is intentionally NOT set — we use the repo root Dockerfile
-    # which has access to both backend/ and database/migrations/.
     dockerfilePath: ./Dockerfile
     dockerContext: .
     dockerBuildTarget: api
-    # preDeployCommand runs /migrate (embedded in the api image alongside /api)
-    # before the new API version goes live on every deploy.
-    # golang-migrate tracks applied versions in schema_migrations — fully idempotent.
-    # If any migration fails, Render aborts the deploy and keeps the previous version live.
+
+    # preDeployCommand runs /migrate up BEFORE the new container starts.
+    # Uses MIGRATE_DATABASE_URL (external hostname + ?sslmode=require) so
+    # it works from Render's pre-deploy runner which has no internal network.
+    # golang-migrate is idempotent — already-applied migrations are skipped.
+    # If a migration fails → deploy aborts → previous version stays live.
     preDeployCommand: "/migrate up"
-    healthCheckPath: /api/v1/health
-    plan: free                       # upgrade to starter ($7/mo) before real users
+
+    # Render web services always bind on port 10000.
+    # The Go API reads PORT env var and defaults to 8080 — we override here.
+    # Health check hits /health (plain path, not /api/v1/health).
+    healthCheckPath: /health
+    plan: starter
     autoDeploy: true
+
     envVars:
       # ── Server ───────────────────────────────────────────────────────────
+      - key: PORT
+        value: "10000"
       - key: GO_ENV
         value: production
       - key: ENVIRONMENT
         value: production
-      - key: PORT
-        value: 8080
       - key: OPERATION_MODE
-        value: independent            # independent | pilot | national
+        value: independent
 
-      # ── Database & Cache ─────────────────────────────────────────────────
+      # ── Database ─────────────────────────────────────────────────────────
+      # DATABASE_URL uses the internal hostname (fast, no SSL needed at runtime)
       - key: DATABASE_URL
         fromDatabase:
           name: loyalty-nexus-db
           property: connectionString
+
+      # MIGRATE_DATABASE_URL uses the external hostname + SSL for preDeployCommand
+      # (the pre-deploy runner does not have access to Render's internal network)
+      - key: MIGRATE_DATABASE_URL
+        fromDatabase:
+          name: loyalty-nexus-db
+          property: connectionStringPsql
+
+      # ── Redis ─────────────────────────────────────────────────────────────
       - key: REDIS_URL
         fromService:
           type: redis
           name: loyalty-nexus-redis
           property: connectionString
 
-      # ── Security (set manually in Render Dashboard → Environment) ────────
+      # ── Security ─────────────────────────────────────────────────────────
       - key: JWT_SECRET
         sync: false
       - key: JWT_EXPIRY_HOURS
@@ -56,7 +69,7 @@ services:
       - key: ADMIN_JWT_EXPIRY_HOURS
         value: "8"
       - key: AES_256_KEY
-        sync: false                   # 64 hex chars (256-bit)
+        sync: false
 
       # ── AI / LLM Providers ───────────────────────────────────────────────
       - key: GROQ_API_KEY
@@ -88,9 +101,9 @@ services:
       - key: GOOGLE_TRANSLATE_API_KEY
         sync: false
 
-      # ── Asset Storage (S3 / Cloudflare R2 / MinIO) ───────────────────────
+      # ── Asset Storage ─────────────────────────────────────────────────────
       - key: STORAGE_BACKEND
-        sync: false                   # s3 | gcs | local
+        sync: false
       - key: STORAGE_CDN_BASE_URL
         sync: false
       - key: AWS_S3_BUCKET
@@ -102,11 +115,11 @@ services:
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
       - key: AWS_S3_ENDPOINT
-        sync: false                   # leave blank for AWS; set for R2/MinIO
+        sync: false
 
       # ── Background Removal ───────────────────────────────────────────────
       - key: REMBG_SERVICE_URL
-        sync: false                   # e.g. https://rembg.your-domain.com
+        sync: false
       - key: REMOVEBG_API_KEY
         sync: false
 
@@ -130,7 +143,7 @@ services:
       - key: VTPASS_BASE_URL
         value: https://vtpass.com/api
       - key: VTPASS_ENV
-        value: sandbox                # change to production when ready
+        value: sandbox
       - key: MTN_MOMO_BASE_URL
         value: https://sandbox.momodeveloper.mtn.com
       - key: MTN_MOMO_SUBSCRIPTION_KEY
@@ -142,15 +155,15 @@ services:
       - key: MTN_MOMO_ENVIRONMENT
         value: sandbox
       - key: MOMO_CALLBACK_URL
-        sync: false                   # https://<render-url>/api/v1/momo/callback
+        sync: false
 
       # ── CORS / Frontend URLs ─────────────────────────────────────────────
       - key: FRONTEND_URL
-        sync: false                   # e.g. https://loyalty-nexus.vercel.app
+        sync: false
       - key: ADMIN_URL
-        sync: false                   # e.g. https://loyalty-nexus-admin.vercel.app
+        sync: false
       - key: CORS_ORIGINS
-        sync: false                   # comma-separated list of allowed origins
+        sync: false
 
       # ── Fraud Guard Thresholds ───────────────────────────────────────────
       - key: FRAUD_MAX_RECHARGE_24H
@@ -175,7 +188,7 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     dockerBuildTarget: worker
-    plan: free
+    plan: starter
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
@@ -213,6 +226,6 @@ services:
 databases:
   # ─── PostgreSQL ───────────────────────────────────────────────────────────
   - name: loyalty-nexus-db
-    plan: basic_256mb               # paid plan — no 90-day expiry
+    plan: basic_256mb
     databaseName: nexus
     user: nexus

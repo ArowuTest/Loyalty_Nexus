@@ -5,14 +5,16 @@
 #  Stages
 #  ──────
 #  builder   Compiles all Go binaries: api, worker, migrate
-#  api       Alpine runtime — runs migrations then serves HTTP on :8080
+#  api       Alpine runtime — serves HTTP on :10000 (Render's required port)
 #  worker    Alpine runtime — background job processor
 #
 #  Migration strategy
 #  ──────────────────
-#  golang-migrate/v4 tracks applied versions in schema_migrations.
-#  entrypoint.sh runs /migrate up before starting /api on every deploy.
-#  This is fully idempotent — already-applied migrations are skipped.
+#  The /migrate binary is embedded in the api image.
+#  Render's preDeployCommand runs "/migrate up" before each new version
+#  goes live, using MIGRATE_DATABASE_URL (external hostname + SSL).
+#  golang-migrate tracks applied versions in schema_migrations — fully
+#  idempotent, safe to re-run on every deploy.
 #  If any migration fails, the container exits non-zero and Render keeps
 #  the previous healthy version live (zero-downtime guarantee).
 # ═══════════════════════════════════════════════════════════════════════════
@@ -24,8 +26,8 @@ RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app
 
-# Copy module manifests first — Docker layer cache is only invalidated
-# when go.mod or go.sum change, not on every source file change.
+# Copy module manifests first — Docker layer cache only invalidated when
+# go.mod / go.sum change, not on every source file change.
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
@@ -56,25 +58,29 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
       ./cmd/migrate
 
 # ─── Stage 2: API Runtime ───────────────────────────────────────────────────
-# Uses alpine:3.19 so the entrypoint shell script can execute.
 FROM alpine:3.19 AS api
 
 RUN apk add --no-cache ca-certificates tzdata
 
-# API and migration binaries
+# API binary — binds to PORT env var (Render injects PORT=10000)
 COPY --from=builder /bin/api     /api
+
+# Migrate binary — called by Render's preDeployCommand before each deploy
 COPY --from=builder /bin/migrate /migrate
 
-# SQL migration files
+# SQL migration files — needed by both entrypoint and preDeployCommand
 COPY database/migrations/        /app/migrations/
 
-# Entrypoint script: run migrations first, then start the API
+# Lightweight entrypoint: just starts /api immediately.
+# Migrations are handled separately by preDeployCommand — never block startup.
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV MIGRATIONS_DIR=/app/migrations
 
-EXPOSE 8080
+# Render requires port 10000 for web services
+EXPOSE 10000
+
 ENTRYPOINT ["/entrypoint.sh"]
 
 # ─── Stage 3: Worker Runtime ────────────────────────────────────────────────
