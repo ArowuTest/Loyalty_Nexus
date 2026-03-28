@@ -11,14 +11,18 @@ services:
   - type: web
     name: loyalty-nexus-api
     runtime: docker
-    repo: https://github.com/ArowuTest/Loyalty_Nexus   # ← update to real repo
+    repo: https://github.com/ArowuTest/Loyalty_Nexus
     branch: main
-    rootDir: backend
+    # rootDir is intentionally NOT set — we use the repo root Dockerfile
+    # which has access to both backend/ and database/migrations/.
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerBuildTarget: api           # targets the `api` stage (not `worker`, the last stage)
-    # Render builds the `api` target automatically from the multi-stage Dockerfile.
-    # The distroless image exposes /api binary on port 8080.
+    dockerBuildTarget: api
+    # preDeployCommand runs /migrate (embedded in the api image alongside /api)
+    # before the new API version goes live on every deploy.
+    # golang-migrate tracks applied versions in schema_migrations — fully idempotent.
+    # If any migration fails, Render aborts the deploy and keeps the previous version live.
+    preDeployCommand: "/migrate up"
     healthCheckPath: /api/v1/health
     plan: free                       # upgrade to starter ($7/mo) before real users
     autoDeploy: true
@@ -166,12 +170,11 @@ services:
   - type: worker
     name: loyalty-nexus-worker
     runtime: docker
-    repo: https://github.com/ArowuTest/Loyalty_Nexus   # ← same repo
+    repo: https://github.com/ArowuTest/Loyalty_Nexus
     branch: main
-    rootDir: backend
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerBuildTarget: worker        # targets the `worker` stage explicitly
+    dockerBuildTarget: worker
     plan: free
     autoDeploy: true
     envVars:
@@ -210,8 +213,6 @@ services:
 databases:
   # ─── PostgreSQL ───────────────────────────────────────────────────────────
   - name: loyalty-nexus-db
-    plan: free                        # 1 GB storage; expires 90 days — upgrade for prod
+    plan: basic_256mb               # paid plan — no 90-day expiry
     databaseName: nexus
     user: nexus
-    # NOTE: Render free DBs expire after 90 days. Run migrations immediately after
-    # first provision using the shell tab (see DEPLOYMENT.md § Running DB Migrations).

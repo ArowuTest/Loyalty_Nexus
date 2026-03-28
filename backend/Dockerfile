@@ -1,12 +1,12 @@
-# Loyalty Nexus Backend — Multi-stage Dockerfile
-# Stage: builder → api → worker
+# ═══════════════════════════════════════════════════════════════════════════
+#  Loyalty Nexus Backend — Multi-Stage Dockerfile
+#  Build context: backend/ directory (for local development)
 #
-# RENDER DEPLOYMENT NOTE:
-#   Build context is the `backend/` directory (rootDir in render.yaml).
-#   database/migrations/ lives at the repo root and is NOT in this build context.
-#   Run migrations separately via Render Shell or a pre-deploy job (see DEPLOYMENT.md §2).
+#  NOTE: For Render deployments use the repo-root Dockerfile which has
+#  access to database/migrations/. This file is for local dev and CI only.
+# ═══════════════════════════════════════════════════════════════════════════
 
-# ─── Stage 1: Builder ───────────────────────────────────────────
+# ─── Stage 1: Builder ───────────────────────────────────────────────────────
 FROM golang:1.22-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
@@ -14,39 +14,53 @@ RUN apk add --no-cache git ca-certificates tzdata
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
-
 COPY . .
 
-# Build API binary
-# NOTE: `git describe` is removed — it requires .git which is not in the build context
-# on Render (rootDir: backend). Pass VERSION as a build-arg or embed a static value.
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-w -s -X main.version=${VERSION}" \
-    -o /bin/api ./cmd/api
 
-# Build worker binary
+# Build API binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-w -s" \
-    -o /bin/worker ./cmd/worker
+    go build \
+      -ldflags="-w -s -X main.version=${VERSION}" \
+      -o /bin/api \
+      ./cmd/api
 
-# ─── Stage 2: API Runtime (distroless) ──────────────────────────
+# Build Worker binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build \
+      -ldflags="-w -s" \
+      -o /bin/worker \
+      ./cmd/worker
+
+# Build Migrate binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build \
+      -ldflags="-w -s" \
+      -o /bin/migrate \
+      ./cmd/migrate
+
+# ─── Stage 2: API Runtime ───────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12 AS api
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=builder /bin/api /api
+COPY --from=builder /usr/share/zoneinfo                 /usr/share/zoneinfo
+COPY --from=builder /bin/api                            /api
+COPY --from=builder /bin/migrate                        /migrate
+
+# NOTE: When building from backend/ context, migrations must be mounted
+# at /app/migrations at runtime or MIGRATIONS_DIR must point to them.
+ENV MIGRATIONS_DIR=/app/migrations
 
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/api"]
 
-# ─── Stage 3: Worker Runtime (distroless) ───────────────────────
+# ─── Stage 3: Worker Runtime ────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12 AS worker
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=builder /bin/worker /worker
+COPY --from=builder /usr/share/zoneinfo                 /usr/share/zoneinfo
+COPY --from=builder /bin/worker                         /worker
 
 USER nonroot:nonroot
 ENTRYPOINT ["/worker"]
