@@ -1,7 +1,8 @@
 "use client";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import useSWR from "swr";
 import Link from "next/link";
+import { useState, useEffect } from "react";
 import AppShell from "@/components/layout/AppShell";
 import { useStore } from "@/store/useStore";
 import api from "@/lib/api";
@@ -9,7 +10,125 @@ import { cn, formatPoints, TIER_THRESHOLDS } from "@/lib/utils";
 import {
   Zap, Wand2, Trophy, ChevronRight, Flame, Swords,
   MapPin, Gift, ArrowRight, RotateCcw, Clock, Star,
+  CreditCard, X, Smartphone, Wallet,
 } from "lucide-react";
+
+// ─── Digital Passport Banner ─────────────────────────────────────────────────
+
+function PassportBanner({ points, streak }: { points: number; streak: number }) {
+  const [dismissed, setDismissed] = useState(true); // start hidden to avoid flash
+  const [isIOS, setIsIOS]         = useState(false);
+  const [mounted, setMounted]     = useState(false);
+
+  useEffect(() => {
+    const alreadyDismissed = localStorage.getItem("passport_banner_dismissed") === "1";
+    setDismissed(alreadyDismissed);
+    setIsIOS(/iphone|ipad|ipod/i.test(navigator.userAgent));
+    setMounted(true);
+  }, []);
+
+  const handleDismiss = () => {
+    localStorage.setItem("passport_banner_dismissed", "1");
+    setDismissed(true);
+  };
+
+  if (!mounted || dismissed) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0, y: -8, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -8, scale: 0.98 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+        className="relative rounded-2xl overflow-hidden"
+        style={{
+          background: "linear-gradient(135deg, #0e1a2e 0%, #0d1120 100%)",
+          border: "1px solid rgba(99,179,237,0.25)",
+          boxShadow: "0 0 32px rgba(99,179,237,0.08), inset 0 1px 0 rgba(255,255,255,0.04)",
+        }}
+      >
+        {/* Top shimmer line */}
+        <div
+          className="absolute top-0 left-0 right-0 h-[2px]"
+          style={{ background: "linear-gradient(to right, transparent, rgba(99,179,237,0.6), transparent)" }}
+        />
+
+        {/* Pulsing glow orb */}
+        <div
+          className="absolute right-0 top-0 w-40 h-40 pointer-events-none"
+          style={{
+            background: "radial-gradient(circle, rgba(99,179,237,0.12) 0%, transparent 70%)",
+            transform: "translate(20%, -30%)",
+          }}
+        />
+
+        <div className="relative p-4">
+          <div className="flex items-start gap-3">
+            {/* Pulsating icon */}
+            <div className="relative flex-shrink-0 mt-0.5">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: "rgba(99,179,237,0.15)", border: "1px solid rgba(99,179,237,0.3)" }}
+              >
+                <CreditCard size={18} className="text-blue-300" />
+              </div>
+              {/* Pulse ring */}
+              <span
+                className="absolute inset-0 rounded-xl animate-ping"
+                style={{ background: "rgba(99,179,237,0.15)", animationDuration: "2s" }}
+              />
+            </div>
+
+            {/* Text */}
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-black text-sm leading-snug">
+                🎫 Your Digital Passport is ready
+              </p>
+              <p className="text-white/50 text-[12px] mt-0.5 leading-relaxed">
+                Track your <strong className="text-blue-300">{formatPoints(points)} pts</strong>
+                {streak > 0 && <> and <strong className="text-orange-400">Day {streak} streak</strong></>} right from your lock screen — no app needed.
+              </p>
+
+              {/* CTA buttons */}
+              <div className="flex gap-2 mt-3">
+                <Link href="/passport" className="flex-1">
+                  <button
+                    className="w-full flex items-center justify-center gap-1.5 rounded-xl h-8 px-3 text-[12px] font-black transition-all active:scale-95"
+                    style={{
+                      background: "rgba(99,179,237,0.18)",
+                      border: "1px solid rgba(99,179,237,0.35)",
+                      color: "#90cdf4",
+                    }}
+                  >
+                    {isIOS ? <Smartphone size={13} /> : <Wallet size={13} />}
+                    {isIOS ? "Add to Apple Wallet" : "Add to Google Wallet"}
+                  </button>
+                </Link>
+                <Link href="/passport">
+                  <button
+                    className="flex items-center justify-center gap-1 rounded-xl h-8 px-3 text-[12px] font-black text-white/50 hover:text-white/80 transition-colors"
+                  >
+                    Learn more <ChevronRight size={12} />
+                  </button>
+                </Link>
+              </div>
+            </div>
+
+            {/* Dismiss */}
+            <button
+              onClick={handleDismiss}
+              className="flex-shrink-0 p-1 rounded-lg text-white/25 hover:text-white/60 transition-colors"
+              aria-label="Dismiss"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
 
 const QUICK_ACTIONS = [
   { href: "/spin",   icon: RotateCcw, label: "Spin Wheel",    sub: "Use spin credits",   color: "bg-gold-500/15 text-gold-500",     border: "border-gold-500/20" },
@@ -58,6 +177,12 @@ export default function DashboardPage() {
   return (
     <AppShell>
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+
+        {/* Digital Passport Banner */}
+        <PassportBanner
+          points={(wallet as { pulse_points?: number } | undefined)?.pulse_points || 0}
+          streak={(profile as { streak_count?: number } | undefined)?.streak_count || 0}
+        />
 
         {/* Welcome header */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
