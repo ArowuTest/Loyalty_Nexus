@@ -6,8 +6,9 @@
 //
 // Environment variables:
 //
-//	DATABASE_URL   — PostgreSQL connection string (required)
-//	MIGRATIONS_DIR — path to the migrations directory (default: /app/migrations)
+//	MIGRATE_DATABASE_URL — PostgreSQL connection string for migrations (preferred; supports external hostname + SSL)
+//	DATABASE_URL         — PostgreSQL connection string fallback
+//	MIGRATIONS_DIR       — path to the migrations directory (default: /app/migrations)
 //
 // This binary is built as a separate Docker stage and called by Render's
 // preDeployCommand before the API server starts. It uses golang-migrate/v4
@@ -28,10 +29,16 @@ import (
 )
 
 func main() {
-	dbURL := os.Getenv("DATABASE_URL")
+	// Prefer MIGRATE_DATABASE_URL (external hostname + SSL) for preDeployCommand context.
+	// Fall back to DATABASE_URL for runtime entrypoint usage.
+	dbURL := os.Getenv("MIGRATE_DATABASE_URL")
 	if dbURL == "" {
-		log.Fatal("[migrate] DATABASE_URL is not set")
+		dbURL = os.Getenv("DATABASE_URL")
 	}
+	if dbURL == "" {
+		log.Fatal("[migrate] Neither MIGRATE_DATABASE_URL nor DATABASE_URL is set")
+	}
+	log.Printf("[migrate] Using database host from URL (first 40 chars): %.40s...", dbURL)
 
 	migrationsDir := os.Getenv("MIGRATIONS_DIR")
 	if migrationsDir == "" {
