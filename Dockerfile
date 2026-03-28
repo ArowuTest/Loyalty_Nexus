@@ -1,21 +1,19 @@
 # ═══════════════════════════════════════════════════════════════════════════
 #  Loyalty Nexus — Production Multi-Stage Dockerfile
-#  Build context: repo root (Render default, no rootDir set)
+#  Build context: repo root
 #
 #  Stages
 #  ──────
 #  builder   Compiles all Go binaries: api, worker, migrate
-#  api       Distroless runtime — serves HTTP on :8080
-#             Contains /migrate binary + /app/migrations/ so Render's
-#             preDeployCommand can run `/migrate up` before the API starts.
-#  worker    Distroless runtime — background job processor
+#  api       Alpine runtime — runs migrations then serves HTTP on :8080
+#  worker    Alpine runtime — background job processor
 #
 #  Migration strategy
 #  ──────────────────
 #  golang-migrate/v4 tracks applied versions in schema_migrations.
-#  Running `/migrate up` on every deploy is fully idempotent — it is a
-#  no-op when the schema is already current. If any migration fails the
-#  preDeployCommand exits non-zero and Render aborts the deploy, keeping
+#  The entrypoint script runs `/migrate up` before starting the API.
+#  This is fully idempotent — already-applied migrations are skipped.
+#  If any migration fails, the container exits non-zero and Render keeps
 #  the previous healthy version live (zero-downtime guarantee).
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -58,33 +56,41 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
       ./cmd/migrate
 
 # ─── Stage 2: API Runtime ───────────────────────────────────────────────────
-# Uses distroless/static — no shell, no package manager, minimal attack surface.
-# The /migrate binary and /app/migrations/ are included so Render's
-# preDeployCommand ("/migrate up") can run inside this same image.
-FROM gcr.io/distroless/static-debian12 AS api
+# Uses alpine (not distroless) so the entrypoint shell script can run.
+# The /migrate binary runs all pending SQL migrations before /api starts.
+FROM alpine:3.19 AS api
 
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo                 /usr/share/zoneinfo
+RUN apk add --no-cache ca-certificates tzdata
 
-# API server binary
+# API and migration binaries
 COPY --from=builder /bin/api     /api
-
-# Migration runner binary + SQL files (embedded for preDeployCommand)
 COPY --from=builder /bin/migrate /migrate
+
+# SQL migration files
 COPY database/migrations/        /app/migrations/
+
+# Entrypoint: run migrations first, then start the API
+COPY <<'EOF' /entrypoint.sh
+#!/bin/sh
+set -e
+echo "[entrypoint] Running database migrations..."
+/migrate up
+echo "[entrypoint] Migrations complete. Starting API..."
+exec /api
+EOF
+
+RUN chmod +x /entrypoint.sh
 
 ENV MIGRATIONS_DIR=/app/migrations
 
 EXPOSE 8080
-USER nonroot:nonroot
-ENTRYPOINT ["/api"]
+ENTRYPOINT ["/entrypoint.sh"]
 
 # ─── Stage 3: Worker Runtime ────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12 AS worker
+FROM alpine:3.19 AS worker
 
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo                 /usr/share/zoneinfo
-COPY --from=builder /bin/worker                         /worker
+RUN apk add --no-cache ca-certificates tzdata
 
-USER nonroot:nonroot
+COPY --from=builder /bin/worker /worker
+
 ENTRYPOINT ["/worker"]

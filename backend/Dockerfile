@@ -40,27 +40,39 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
       ./cmd/migrate
 
 # ─── Stage 2: API Runtime ───────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12 AS api
+# Uses alpine so the entrypoint shell script can run migrations before the API.
+FROM alpine:3.19 AS api
 
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo                 /usr/share/zoneinfo
-COPY --from=builder /bin/api                            /api
-COPY --from=builder /bin/migrate                        /migrate
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=builder /bin/api     /api
+COPY --from=builder /bin/migrate /migrate
 
 # NOTE: When building from backend/ context, migrations must be mounted
 # at /app/migrations at runtime or MIGRATIONS_DIR must point to them.
+# The repo-root Dockerfile copies database/migrations/ automatically.
+
+COPY <<'EOF' /entrypoint.sh
+#!/bin/sh
+set -e
+echo "[entrypoint] Running database migrations..."
+/migrate up
+echo "[entrypoint] Migrations complete. Starting API..."
+exec /api
+EOF
+
+RUN chmod +x /entrypoint.sh
+
 ENV MIGRATIONS_DIR=/app/migrations
 
 EXPOSE 8080
-USER nonroot:nonroot
-ENTRYPOINT ["/api"]
+ENTRYPOINT ["/entrypoint.sh"]
 
 # ─── Stage 3: Worker Runtime ────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12 AS worker
+FROM alpine:3.19 AS worker
 
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo                 /usr/share/zoneinfo
-COPY --from=builder /bin/worker                         /worker
+RUN apk add --no-cache ca-certificates tzdata
 
-USER nonroot:nonroot
+COPY --from=builder /bin/worker /worker
+
 ENTRYPOINT ["/worker"]
