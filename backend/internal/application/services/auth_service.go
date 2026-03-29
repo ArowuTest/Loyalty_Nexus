@@ -94,16 +94,17 @@ func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) (strin
 		return "", fmt.Errorf("failed to save OTP: %w", err)
 	}
 
-	// In non-production: log OTP (last 4 digits of phone only) and return plaintext
-	// so the handler can include it in the API response for testing.
-	// In production: ENVIRONMENT=production so devCode is always "".
+	// Log OTP to stdout so it appears in Render/server logs for testing.
+	// In production with real SMS (TERMII_API_KEY set), users get it via SMS instead.
+	// This log is the only way to retrieve the code when SMS key is empty.
+	suffix := phone
+	if len(phone) > 4 {
+		suffix = "..." + phone[len(phone)-4:]
+	}
+	log.Printf("[OTP] phone=%s purpose=%s code=%s expires=5m", suffix, purpose, code)
+
 	devCode := ""
 	if os.Getenv("ENVIRONMENT") != "production" {
-		suffix := phone
-		if len(phone) > 4 {
-			suffix = "..." + phone[len(phone)-4:]
-		}
-		log.Printf("[OTP-DEBUG] phone=%s purpose=%s code=%s", suffix, purpose, code)
 		devCode = code
 	}
 

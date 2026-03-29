@@ -65,7 +65,13 @@ func (n *NotificationService) NotifyPrizeWon(ctx context.Context, phone, prizeDe
 }
 
 // SendSMS sends via Termii, falls back to Africa's Talking on error.
+// If no SMS provider is configured (empty API key), logs to stdout and returns nil —
+// this is the correct behaviour for staging/testing where real SMS is not needed.
 func (n *NotificationService) SendSMS(ctx context.Context, phone, message string) error {
+	if n.termiiKey == "" {
+		log.Printf("[SMS-DEV] To: %s | %s", phone, message)
+		return nil
+	}
 	err := n.sendViaTermii(ctx, phone, message)
 	if err != nil {
 		log.Printf("[NOTIFY] Termii failed, trying Africa's Talking: %v", err)

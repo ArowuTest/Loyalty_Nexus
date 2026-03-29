@@ -55,13 +55,17 @@ services:
 
       # ── Security ─────────────────────────────────────────────────────────
       - key: JWT_SECRET
-        sync: false
+        value: da7bfea37ecb24b97d2ec5b24f74ef02b2b06fea5245e51e2ef0de4e10966feb
       - key: JWT_EXPIRY_HOURS
         value: "24"
       - key: ADMIN_JWT_EXPIRY_HOURS
         value: "8"
       - key: AES_256_KEY
-        sync: false
+        value: c23affd2218a5445d27c61ebdb0cf843a0bf909d99f304b467c5aded7d8f79e6
+      - key: PASSPORT_QR_SECRET
+        value: 9ceacd6d37fb4e8a3f7ded6f504d5e38
+      - key: PROVIDER_ENCRYPTION_KEY
+        value: 52385032ed4af0b1ac98aa3f86820e5ff9dbc22f3b3697f787a9f67372bc44ee
 
       # ── AI / LLM Providers ───────────────────────────────────────────────
       - key: GROQ_API_KEY
@@ -116,10 +120,16 @@ services:
         sync: false
 
       # ── SMS / Telco ──────────────────────────────────────────────────────
+      # TERMII_API_KEY intentionally left empty → SMS logs to stdout (sandbox mode)
+      # Set this to a real key when live SMS delivery is needed.
       - key: TERMII_API_KEY
-        sync: false
+        value: ""
       - key: TERMII_SENDER_ID
-        value: Nexus
+        value: N-Alert
+      - key: TERMII_CHANNEL
+        value: generic
+      - key: SMS_CHANNEL
+        value: generic
 
       # ── Payments ─────────────────────────────────────────────────────────
       - key: PAYSTACK_SECRET_KEY
@@ -133,9 +143,13 @@ services:
       - key: VTPASS_SECRET_KEY
         sync: false
       - key: VTPASS_BASE_URL
-        value: https://vtpass.com/api
+        value: https://sandbox.vtpass.com/api
       - key: VTPASS_ENV
         value: sandbox
+      - key: VTPASS_MODE
+        value: sandbox
+      - key: VTPASS_SANDBOX_MODE
+        value: "true"
       - key: MTN_MOMO_BASE_URL
         value: https://sandbox.momodeveloper.mtn.com
       - key: MTN_MOMO_SUBSCRIPTION_KEY
@@ -149,13 +163,21 @@ services:
       - key: MOMO_CALLBACK_URL
         sync: false
 
+      # ── Admin Seed ────────────────────────────────────────────────────────
+      - key: ADMIN_SEED_EMAIL
+        value: admin@loyaltynexus.ng
+      - key: ADMIN_SEED_PASSWORD
+        value: Admin@LoyaltyNexus2026!
+
       # ── CORS / Frontend URLs ─────────────────────────────────────────────
       - key: FRONTEND_URL
-        sync: false
+        value: https://loyalty-nexus-frontend.vercel.app
       - key: ADMIN_URL
-        sync: false
+        value: https://loyalty-nexus-admin.vercel.app
       - key: CORS_ORIGINS
-        sync: false
+        value: https://loyalty-nexus-frontend.vercel.app,https://loyalty-nexus-admin.vercel.app,http://localhost:3000,http://localhost:5173
+      - key: APP_BASE_URL
+        value: https://loyalty-nexus-api.onrender.com
 
       # ── Fraud Guard Thresholds ───────────────────────────────────────────
       - key: FRAUD_MAX_RECHARGE_24H
@@ -193,9 +215,9 @@ services:
           name: loyalty-nexus-redis
           property: connectionString
       - key: JWT_SECRET
-        sync: false
+        value: da7bfea37ecb24b97d2ec5b24f74ef02b2b06fea5245e51e2ef0de4e10966feb
       - key: AES_256_KEY
-        sync: false
+        value: c23affd2218a5445d27c61ebdb0cf843a0bf909d99f304b467c5aded7d8f79e6
       - key: GROQ_API_KEY
         sync: false
       - key: GEMINI_API_KEY
@@ -203,9 +225,9 @@ services:
       - key: HF_TOKEN
         sync: false
       - key: TERMII_API_KEY
-        sync: false
+        value: ""
       - key: TERMII_SENDER_ID
-        value: Nexus
+        value: N-Alert
       - key: OPERATION_MODE
         value: independent
 
