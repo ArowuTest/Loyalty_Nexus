@@ -204,7 +204,7 @@ export default function PassportPage() {
 
   return (
     <AppShell>
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 space-y-5">
 
         {/* ── Page header ─────────────────────────────────────────────────── */}
         <motion.div
@@ -681,7 +681,7 @@ function QRModal({
 function PassportSkeleton() {
   return (
     <AppShell>
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-5 animate-pulse">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 space-y-5 animate-pulse">
         <div className="h-8 bg-white/5 rounded-xl w-48" />
         <div className="h-56 bg-white/5 rounded-2xl" />
         <div className="grid grid-cols-2 gap-3">
@@ -699,7 +699,7 @@ function PassportSkeleton() {
 function PassportError({ error, onRetry }: { error: string | null; onRetry: () => void }) {
   return (
     <AppShell>
-      <div className="max-w-2xl mx-auto px-4 py-6">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">
         <div className="nexus-card p-8 text-center">
           <div className="text-4xl mb-3">⚠️</div>
           <p className="text-white font-semibold mb-1">Could not load passport</p>

@@ -54,7 +54,7 @@ export default function SettingsPage() {
     <AppShell>
       <Toaster position="top-center" toastOptions={{ style: { background: "#1c2038", color: "#fff" } }} />
 
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 space-y-5">
         <div className="flex items-center gap-3">
           <Settings className="text-nexus-400" size={24} />
           <h1 className="text-2xl font-bold font-display text-white">Settings</h1>

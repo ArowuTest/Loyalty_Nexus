@@ -226,7 +226,7 @@ export default function DrawsPage() {
         style: { background: "#1c2038", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" },
       }} />
 
-      <div className="max-w-2xl mx-auto px-4 py-6 pb-28 space-y-6">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 pb-28 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>

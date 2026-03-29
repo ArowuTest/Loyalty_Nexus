@@ -242,7 +242,7 @@ export default function NotificationsPage() {
         style: { background: "#1c2038", color: "#fff", border: "1px solid rgba(255,255,255,0.08)" },
       }} />
 
-      <div className="max-w-2xl mx-auto px-4 py-6 pb-28 space-y-4">
+      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 pb-28 space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
