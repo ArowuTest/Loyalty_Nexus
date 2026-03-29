@@ -500,10 +500,10 @@ export default function HomePage() {
           />
           <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {[
-              { n: "01", icon: "📱", color: "#00D4FF", title: "Recharge MTN",       body: "Recharge ₦1,000 or more on any MTN line. Your recharge is automatically detected — no codes, no hassle.", stat: "₦200 = 1 Pulse Point" },
-              { n: "02", icon: "⚡", color: "#F5A623", title: "Earn Pulse Points",   body: "Every naira you recharge earns Pulse Points. The more you recharge, the more you earn. Higher tiers multiply your earnings.", stat: "Up to 3× multiplier" },
+              { n: "01", icon: "📱", color: "#00D4FF", title: "Recharge MTN",       body: "Recharge ₦1,000 or more on any MTN line. Your recharge is automatically detected — no codes, no hassle.", stat: "₦250 = 1 Pulse Point" },
+              { n: "02", icon: "⚡", color: "#F5A623", title: "Earn Pulse Points",   body: "Every naira you recharge earns Pulse Points. The more you recharge, the more you earn. Higher tiers unlock better rewards.", stat: "Points on every recharge" },
               { n: "03", icon: "🎰", color: "#10B981", title: "Spin & Win",          body: "Each qualifying recharge earns a free wheel spin. Win instant cash, data bundles, airtime or bonus Pulse Points.", stat: "₦18M+ prizes distributed" },
-              { n: "04", icon: "🚀", color: "#8B5CF6", title: "Unlock AI Studio",    body: "Spend points to access 30+ AI tools — create photos, generate videos, build business plans, make music, and more.", stat: "1.2M+ generations created" },
+              { n: "04", icon: "🚀", color: "#8B5CF6", title: "Unlock AI Studio",    body: "Spend points to access 30+ AI tools — create photos, generate videos, build business plans, make music, and more. No more subscription challenges.", stat: "1.2M+ generations created" },
             ].map((step) => (
               <motion.div key={step.n} variants={fadeUp}>
                 <div className="glass rounded-2xl border border-white/[0.08] p-6 h-full flex flex-col hover:border-white/[0.15] transition-all duration-300">
@@ -529,7 +529,7 @@ export default function HomePage() {
       {/* ══════════════════════════════════════════════════════
           AI STUDIO SHOWCASE
       ══════════════════════════════════════════════════════ */}
-      <section className="py-24 relative overflow-hidden">
+      <section id="ai-studio" className="py-24 relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none"
           style={{ background: "radial-gradient(ellipse 80% 50% at 80% 50%, rgba(95,114,249,0.06) 0%, transparent 65%)" }} />
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -603,7 +603,7 @@ export default function HomePage() {
       {/* ══════════════════════════════════════════════════════
           SPIN & WIN
       ══════════════════════════════════════════════════════ */}
-      <section className="py-24 relative overflow-hidden">
+      <section id="spin-win" className="py-24 relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none"
           style={{ background: "radial-gradient(ellipse 70% 60% at 20% 50%, rgba(245,166,35,0.06) 0%, transparent 65%)" }} />
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -653,7 +653,7 @@ export default function HomePage() {
       {/* ══════════════════════════════════════════════════════
           REGIONAL WARS  (replaces Referral)
       ══════════════════════════════════════════════════════ */}
-      <section className="py-24 relative overflow-hidden">
+      <section id="regional-wars" className="py-24 relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none"
           style={{ background: "radial-gradient(ellipse 80% 60% at 50% 50%, rgba(245,166,35,0.04) 0%, rgba(0,212,255,0.03) 60%, transparent 100%)" }} />
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -763,7 +763,7 @@ export default function HomePage() {
       </section>
 
       {/* ══════════════════════════════════════════════════════
-          COMING SOON — Daily & Weekly Draws
+          BRAND AFFILIATION (replaces Coming Soon)
       ══════════════════════════════════════════════════════ */}
       <section className="py-16 relative">
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
@@ -816,42 +816,36 @@ export default function HomePage() {
       </section>
 
       {/* ══════════════════════════════════════════════════════
-          LOYALTY TIERS
+          BRAND AFFILIATION — Made for MTN Customers
       ══════════════════════════════════════════════════════ */}
       <section className="py-24 relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none"
-          style={{ background: "radial-gradient(ellipse 60% 50% at 50% 100%, rgba(245,166,35,0.06) 0%, transparent 70%)" }} />
+          style={{ background: "radial-gradient(ellipse 80% 50% at 50% 50%, rgba(245,166,35,0.04) 0%, transparent 70%)" }} />
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <SectionHeader
-            eyebrow="Loyalty Tiers"
-            title={<>The more you recharge,<br /><span className="text-gold-500">the more you earn</span></>}
-            sub="Five tiers, each unlocking higher spin multipliers, point bonuses, and exclusive AI tools."
+            eyebrow="Made for MTN Customers"
+            title={<>Built to Reward <span className="text-gold-500">You</span></>}
+            sub="Loyalty Nexus is not just another app. It's a movement to make every naira you spend on MTN work harder — giving you AI access, prizes, and recognition you deserve."
           />
-          <StaggerGrid className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {(Object.entries(TIER_CONFIG) as [string, typeof TIER_CONFIG[keyof typeof TIER_CONFIG]][]).map(([key, tier], i) => (
-              <motion.div key={key} variants={fadeUp}>
-                <div className="glass rounded-2xl border p-5 text-center h-full flex flex-col hover:scale-[1.03] transition-transform duration-200"
-                  style={{ borderColor: `${tier.color}25` }}>
-                  <div className="text-3xl mb-3">{tier.icon}</div>
-                  <div className="text-[13px] font-black mb-1" style={{ color: tier.color }}>{tier.label}</div>
-                  <div className="text-[11px] text-white/30 mb-4 font-mono">
-                    {tier.minPoints === 0 ? "Start here" : `${tier.minPoints.toLocaleString()}+ pts`}
+          <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {[
+              { emoji: "🇳🇬", color: "#F5A623", title: "Proudly Nigerian", body: "Built in Nigeria, for Nigerians. Every feature is designed around how Nigerians actually use their phones — recharging daily, sharing data, and building businesses on mobile." },
+              { emoji: "🤝", color: "#00D4FF", title: "Your Loyalty Rewarded", body: "You've been an MTN customer for years. It's time your loyalty paid back. Every recharge, every referral, every session — all of it builds into real rewards you can use." },
+              { emoji: "📱", color: "#10B981", title: "Works on Any Phone", body: "No heavy app download needed. Loyalty Nexus works in your browser on any Android or iPhone — even on a data-saver connection. Accessible to everyone in Nigeria." },
+              { emoji: "🔒", color: "#8B5CF6", title: "No Hidden Costs", body: "Sign up is completely free. There are no subscription fees, no premium tiers to unlock, and no hidden charges. Your Pulse Points are earned purely from recharges you already make." },
+              { emoji: "🎯", color: "#F472B6", title: "Instant Gratification", body: "Win prizes the moment you spin the wheel. Earn Pulse Points the second you recharge. No waiting. No processing delays. Your rewards land instantly, every single time." },
+              { emoji: "🌍", color: "#FFD700", title: "Connecting Nigeria", body: "Whether you're in Lagos, Kano, Enugu or Calabar — Loyalty Nexus brings all MTN customers into one rewarding community. One platform. 84,000+ Nigerians earning together." },
+            ].map(({ emoji, color, title, body }) => (
+              <motion.div key={title} variants={fadeUp}>
+                <div className="glass rounded-2xl p-6 h-full flex flex-col gap-4 border border-white/[0.06] hover:border-white/[0.14] transition-all duration-300">
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-xl flex-shrink-0"
+                    style={{ background: `${color}18`, border: `1px solid ${color}30` }}>
+                    {emoji}
                   </div>
-                  <ul className="space-y-1.5 text-left flex-1">
-                    {tier.perks.map(perk => (
-                      <li key={perk} className="text-[11px] text-white/50 flex items-start gap-1.5">
-                        <span className="mt-0.5 flex-shrink-0" style={{ color: tier.color }}>✓</span>
-                        {perk}
-                      </li>
-                    ))}
-                  </ul>
-                  {i === 0 && (
-                    <button onClick={openAuth}
-                      className="mt-4 text-[11px] font-black px-3 py-1.5 rounded-lg transition-all"
-                      style={{ background: `${tier.color}18`, color: tier.color, border: `1px solid ${tier.color}30` }}>
-                      Start Here →
-                    </button>
-                  )}
+                  <div>
+                    <h3 className="text-base font-black text-white mb-2 leading-tight" style={{ color }}>{title}</h3>
+                    <p className="text-sm text-white/45 leading-relaxed">{body}</p>
+                  </div>
                 </div>
               </motion.div>
             ))}

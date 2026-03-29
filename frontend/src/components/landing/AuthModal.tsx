@@ -263,13 +263,20 @@ export default function AuthModal({ open, onClose }: AuthModalProps) {
                     </button>
                   </form>
 
-                  {/* New user bonus */}
-                  <div className="mt-5 flex items-start gap-3 glass rounded-xl p-3.5 border border-gold-500/15">
-                    <Sparkles className="w-4 h-4 text-gold-500 flex-shrink-0 mt-0.5" />
-                    <p className="text-[12px] text-white/50 leading-relaxed">
-                      <strong className="text-gold-500 font-bold">New user bonus:</strong>{" "}
-                      100 Pulse Points + 1 free spin on your first sign-in!
-                    </p>
+                  {/* Value prop */}
+                  <div className="mt-5 space-y-2.5">
+                    <div className="flex items-start gap-3 glass rounded-xl p-3.5 border border-gold-500/15">
+                      <Sparkles className="w-4 h-4 text-gold-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-[12px] text-white/50 leading-relaxed">
+                        <strong className="text-gold-500 font-bold">No subscriptions needed</strong> — access 30+ AI tools completely free using Pulse Points you earn from recharges you already make.
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-3 glass rounded-xl p-3.5 border border-white/[0.07]">
+                      <Zap className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+                      <p className="text-[12px] text-white/50 leading-relaxed">
+                        <strong className="text-white font-bold">Check your free spins</strong> — every qualifying MTN recharge earns a free wheel spin. Sign in to see yours.
+                      </p>
+                    </div>
                   </div>
 
                   <div className="mt-4 flex items-center gap-2 text-[11px] text-white/25 justify-center">

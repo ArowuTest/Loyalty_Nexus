@@ -7,10 +7,10 @@ import { Zap, Sparkles, Menu, X } from "lucide-react";
 import { useStore } from "@/store/useStore";
 
 const NAV_LINKS = [
-  { label: "Home",      href: "/" },
-  { label: "AI Studio", href: "/studio" },
-  { label: "Dashboard", href: "/dashboard" },
-  { label: "Wars",      href: "/wars" },
+  { label: "Home",      href: "/",          anchor: null,           needsAuth: false },
+  { label: "AI Studio", href: "/studio",    anchor: "ai-studio",    needsAuth: false },
+  { label: "Dashboard", href: "/dashboard", anchor: null,           needsAuth: true  },
+  { label: "Wars",      href: "/wars",      anchor: "regional-wars", needsAuth: false },
 ];
 
 const TIER_COLORS: Record<string, string> = {
@@ -58,6 +58,16 @@ export default function NavBar({ onLoginClick }: NavBarProps) {
     }
   };
 
+  // Scroll to anchor on home page, or navigate with hash
+  const handleAnchorNav = (href: string, anchor: string | null) => {
+    if (!anchor) { router.push(href); return; }
+    if (pathname === "/") {
+      document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      router.push(`/#${anchor}`);
+    }
+  };
+
   return (
     <motion.header
       initial={{ y: -20, opacity: 0 }}
@@ -83,33 +93,23 @@ export default function NavBar({ onLoginClick }: NavBarProps) {
 
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-0.5">
-            {NAV_LINKS.map(({ label, href }) => {
+            {NAV_LINKS.map(({ label, href, anchor, needsAuth }) => {
               const active = pathname === href;
-              const needsAuth = href !== "/";
-              return needsAuth ? (
-                <button
-                  key={href}
-                  onClick={() => handleAuthNav(href)}
-                  className={`px-4 py-2 rounded-xl text-[13px] font-semibold transition-all duration-200 ${
-                    active
-                      ? "bg-gold-500/12 text-gold-500"
-                      : "text-white/50 hover:text-white hover:bg-white/[0.06]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ) : (
-                <Link
-                  key={href}
-                  href={href}
-                  className={`px-4 py-2 rounded-xl text-[13px] font-semibold transition-all duration-200 ${
-                    active
-                      ? "bg-gold-500/12 text-gold-500"
-                      : "text-white/50 hover:text-white hover:bg-white/[0.06]"
-                  }`}
-                >
-                  {label}
-                </Link>
+              const baseClass = `px-4 py-2 rounded-xl text-[13px] font-semibold transition-all duration-200 ${
+                active ? "bg-gold-500/12 text-gold-500" : "text-white/50 hover:text-white hover:bg-white/[0.06]"
+              }`;
+              if (needsAuth) {
+                return (
+                  <button key={href} onClick={() => handleAuthNav(href)} className={baseClass}>{label}</button>
+                );
+              }
+              if (anchor) {
+                return (
+                  <button key={href} onClick={() => handleAnchorNav(href, anchor)} className={baseClass}>{label}</button>
+                );
+              }
+              return (
+                <Link key={href} href={href} className={baseClass}>{label}</Link>
               );
             })}
           </nav>
@@ -175,24 +175,20 @@ export default function NavBar({ onLoginClick }: NavBarProps) {
             className="md:hidden glass-strong border-t border-white/[0.07]"
           >
             <div className="px-4 py-4 flex flex-col gap-1">
-              {NAV_LINKS.map(({ label, href }) => {
-                const needsAuth = href !== "/";
-                return needsAuth ? (
-                  <button
-                    key={href}
-                    onClick={() => { setMenuOpen(false); handleAuthNav(href); }}
-                    className="px-4 py-3 rounded-xl text-[14px] font-semibold text-white/50 hover:text-white hover:bg-white/[0.06] transition-all text-left"
-                  >
-                    {label}
-                  </button>
-                ) : (
-                  <Link
-                    key={href}
-                    href={href}
-                    className="px-4 py-3 rounded-xl text-[14px] font-semibold text-white/50 hover:text-white hover:bg-white/[0.06] transition-all"
-                  >
-                    {label}
-                  </Link>
+              {NAV_LINKS.map(({ label, href, anchor, needsAuth }) => {
+                const mobileClass = "px-4 py-3 rounded-xl text-[14px] font-semibold text-white/50 hover:text-white hover:bg-white/[0.06] transition-all text-left";
+                if (needsAuth) {
+                  return (
+                    <button key={href} onClick={() => { setMenuOpen(false); handleAuthNav(href); }} className={mobileClass}>{label}</button>
+                  );
+                }
+                if (anchor) {
+                  return (
+                    <button key={href} onClick={() => { setMenuOpen(false); handleAnchorNav(href, anchor); }} className={mobileClass}>{label}</button>
+                  );
+                }
+                return (
+                  <Link key={href} href={href} className={mobileClass}>{label}</Link>
                 );
               })}
               <div className="pt-3 mt-1 border-t border-white/[0.07]">
