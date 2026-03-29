@@ -28,7 +28,7 @@
 --              provider_tool columns and the uidx_studio_tools_slug unique index).
 -- =============================================================================
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- =============================================================================
 -- STEP 1 — Expand the category CHECK constraint to allow 'Vision'
@@ -186,4 +186,4 @@ ON CONFLICT (slug) DO UPDATE
 --   Vision  +2  (image-analyser, ask-my-photo)
 -- =============================================================================
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

@@ -7,7 +7,7 @@
 -- creates chat_sessions + chat_messages tables.
 -- ============================================================
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- ─── studio_tools: add new columns ───────────────────────────────────────────
 
@@ -155,4 +155,4 @@ BEGIN
 END;
 $$;
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

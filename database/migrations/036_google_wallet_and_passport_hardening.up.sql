@@ -3,7 +3,7 @@
 --  Loyalty Nexus — Phase: Digital Passport completion
 -- ═══════════════════════════════════════════════════════════════════════════
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- ─── Google Wallet Loyalty Objects ────────────────────────────────────────────
 -- Tracks the Google Wallet loyalty object ID per user so we can push updates
@@ -50,4 +50,4 @@ CREATE INDEX IF NOT EXISTS idx_passport_push_log_user    ON passport_push_log(us
 CREATE INDEX IF NOT EXISTS idx_passport_push_log_status  ON passport_push_log(status);
 CREATE INDEX IF NOT EXISTS idx_passport_push_log_pushed  ON passport_push_log(pushed_at DESC);
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

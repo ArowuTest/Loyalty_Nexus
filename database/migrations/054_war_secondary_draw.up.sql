@@ -4,7 +4,7 @@
 -- Winners are selected via CSPRNG Fisher-Yates (same engine as main draw — SEC-009).
 -- Prizes are paid via MoMo Cash by admin manually after draw execution.
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- ── war_secondary_draws ───────────────────────────────────────────────────────
 -- One row per secondary draw execution (admin can run at most once per state per war).
@@ -82,4 +82,4 @@ INSERT INTO network_configs (key, value, description) VALUES
     ('wars_secondary_draw_default_prize_kobo', '50000',   'Default prize per winner in kobo (50000 = ₦500)')
 ON CONFLICT (key) DO NOTHING;
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

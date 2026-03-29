@@ -25,7 +25,7 @@
 -- SAFE TO RE-RUN: ON CONFLICT (slug) DO UPDATE
 -- =============================================================================
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 INSERT INTO studio_tools
     (id, name, slug, description, category, point_cost, provider, provider_tool,
@@ -48,4 +48,4 @@ ON CONFLICT (slug) DO UPDATE
         sort_order    = EXCLUDED.sort_order,
         updated_at    = NOW();
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

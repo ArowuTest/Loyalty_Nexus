@@ -5,13 +5,13 @@
 CREATE OR REPLACE VIEW view_regional_audit AS
 SELECT 
     rs.region_code,
-    rs.region_name,
+    r.region_name,
     rs.total_recharge_kobo,
     rs.rank,
     r.base_multiplier,
     r.is_golden_hour,
     r.golden_hour_multiplier,
-    (SELECT count(*) FROM users WHERE state = rs.region_name) as subscriber_count
+    (SELECT count(*) FROM users WHERE state = r.region_name) as subscriber_count
 FROM regional_stats rs
 JOIN regional_settings r ON rs.region_code = r.region_code;
 

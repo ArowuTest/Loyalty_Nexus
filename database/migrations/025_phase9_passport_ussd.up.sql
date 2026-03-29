@@ -56,15 +56,18 @@ ALTER TABLE wallets ADD COLUMN IF NOT EXISTS lifetime_points BIGINT NOT NULL DEF
 
 -- ─── USSD Sessions (for stateful multi-turn USSD — Africa's Talking) ─────────
 CREATE TABLE IF NOT EXISTS ussd_sessions (
-    session_id TEXT PRIMARY KEY,
-    phone      TEXT NOT NULL,
-    state      TEXT NOT NULL DEFAULT 'root',    -- menu state machine position
-    data       JSONB DEFAULT '{}',              -- temporary session data (e.g. selected prize)
-    expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '10 minutes',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id     TEXT        NOT NULL UNIQUE,
+    phone_number   TEXT        NOT NULL,
+    menu_state     TEXT        NOT NULL DEFAULT 'root',
+    input_buffer   TEXT        NOT NULL DEFAULT '',
+    pending_spin_id UUID       REFERENCES spin_results(id) ON DELETE SET NULL,
+    expires_at     TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '10 minutes',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_ussd_phone ON ussd_sessions(phone);
+CREATE INDEX IF NOT EXISTS idx_ussd_sessions_phone      ON ussd_sessions(phone_number);
+CREATE INDEX IF NOT EXISTS idx_ussd_sessions_session_id ON ussd_sessions(session_id);
 
 -- Auto-clean expired USSD sessions (keep table small)
 CREATE OR REPLACE FUNCTION cleanup_expired_ussd_sessions() RETURNS void AS $$

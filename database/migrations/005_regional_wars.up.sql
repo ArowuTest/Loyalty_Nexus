@@ -2,15 +2,11 @@
 -- Purpose: Support for regional tournaments and multipliers.
 
 -- 1. Region Definitions & Multipliers
--- Already partially created in 001, expanding here.
-CREATE TABLE IF NOT EXISTS regional_settings (
-    region_code TEXT PRIMARY KEY, -- LAG, ABJ, KAN, PHC, etc.
-    region_name TEXT NOT NULL,
-    base_multiplier NUMERIC DEFAULT 1.0,
-    is_golden_hour BOOLEAN DEFAULT false,
-    golden_hour_multiplier NUMERIC DEFAULT 2.0,
-    updated_at TIMESTAMPTZ DEFAULT now()
-);
+-- regional_settings was partially created in migration 001.
+-- We add the missing columns here using ALTER TABLE ... ADD COLUMN IF NOT EXISTS.
+ALTER TABLE regional_settings ADD COLUMN IF NOT EXISTS region_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE regional_settings ADD COLUMN IF NOT EXISTS base_multiplier NUMERIC DEFAULT 1.0;
+ALTER TABLE regional_settings ADD COLUMN IF NOT EXISTS golden_hour_multiplier NUMERIC DEFAULT 2.0;
 
 -- 2. Regional Leaderboard (Aggregated real-time)
 CREATE TABLE IF NOT EXISTS regional_stats (

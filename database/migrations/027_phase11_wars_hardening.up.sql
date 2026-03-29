@@ -9,7 +9,7 @@
 --   5. Removes reference to the now-defunct wars_snapshots table (old Phase 5 approach)
 -- ─────────────────────────────────────────────────────────────────────────────
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- ── 1. Ensure regional_wars has all required columns ─────────────────────────
 
@@ -116,4 +116,4 @@ WHERE NOT EXISTS (
     SELECT 1 FROM regional_wars WHERE period = TO_CHAR(NOW(), 'YYYY-MM')
 );
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

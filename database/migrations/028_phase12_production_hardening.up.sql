@@ -7,7 +7,7 @@
 --    4. AI provider config keys for all new adapters
 -- ════════════════════════════════════════════════════════════════════════════
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- ─── 1. Update studio_tools with correct costs from spec key-points doc ───────
 --
@@ -229,4 +229,4 @@ VALUES
 
 ON CONFLICT (key) DO NOTHING;
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

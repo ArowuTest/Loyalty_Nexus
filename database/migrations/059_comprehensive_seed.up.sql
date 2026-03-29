@@ -15,7 +15,7 @@
 --   7. Points expiry policy (ensure default policy exists)
 -- ═══════════════════════════════════════════════════════════════════════════
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1. NETWORK CONFIGS — missing keys identified by code audit
@@ -460,4 +460,4 @@ VALUES
     ('platinum',300000, 99999999,150, 5, 'Platinum')
 ON CONFLICT (tier_name) DO NOTHING;
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

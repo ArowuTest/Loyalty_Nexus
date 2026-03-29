@@ -3,7 +3,7 @@
 --  Loyalty Nexus — Phase 6
 -- ═══════════════════════════════════════════════════════════════════
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- ── User Badges ──────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_badges (
@@ -102,4 +102,4 @@ INSERT INTO draws (id, name, status, winner_count, prize_type, prize_value_kobo)
 VALUES (gen_random_uuid(), 'Monthly Grand Draw', 'ACTIVE', 3, 'MOMO_CASH', 5000000)
 ON CONFLICT DO NOTHING;
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

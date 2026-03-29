@@ -4,7 +4,7 @@
 --   fulfillment_status = internal VTPass/MoMo dispatch state
 --   claim_status       = user-facing claim lifecycle (PENDING → CLAIMED / PENDING_ADMIN_REVIEW → APPROVED / REJECTED)
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- ── Claim lifecycle ────────────────────────────────────────────────────────
 ALTER TABLE spin_results
@@ -40,4 +40,4 @@ UPDATE spin_results
     WHERE fulfillment_status IN ('completed')
       AND claim_status = 'PENDING';
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

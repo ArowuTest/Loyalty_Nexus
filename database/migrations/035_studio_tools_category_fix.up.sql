@@ -3,7 +3,7 @@
 --               correct ui_template assignments
 -- ════════════════════════════════════════════════════════════
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- ── 1. Move chat-native tools to "Chat" category ────────────
 UPDATE studio_tools SET category = 'Chat' WHERE slug IN ('web-search-ai', 'code-helper', 'ai-chat');
@@ -62,4 +62,4 @@ UPDATE studio_tools SET updated_at = NOW()
     'translate','summarise','quiz','mindmap','slide-deck','essay','email-writer','cv-writer'
   );
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate

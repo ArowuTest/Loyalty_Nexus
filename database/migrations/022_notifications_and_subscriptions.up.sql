@@ -2,7 +2,7 @@
 -- Migration 022: Notifications, Push Tokens, Subscription Lifecycle
 -- =============================================================================
 
-BEGIN;
+-- BEGIN;  -- removed: managed by golang-migrate
 
 -- ---------------------------------------------------------------------------
 -- Push / device tokens — one row per device per user
@@ -110,4 +110,4 @@ CREATE TABLE IF NOT EXISTS fulfilment_webhooks (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-COMMIT;
+-- COMMIT;  -- removed: managed by golang-migrate
