@@ -6,7 +6,7 @@ ALTER TABLE prize_pool DROP CONSTRAINT IF EXISTS prize_pool_prize_type_check;
 ALTER TABLE prize_pool ADD CONSTRAINT prize_pool_prize_type_check 
 CHECK (prize_type IN ('airtime', 'data', 'momo_cash', 'bonus_points', 'studio_credits', 'try_again'));
 
-CREATE TABLE prize_claims (
+CREATE TABLE IF NOT EXISTS prize_claims (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
     transaction_id UUID NOT NULL REFERENCES transactions(id),
@@ -20,4 +20,4 @@ CREATE TABLE prize_claims (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_prize_claims_user ON prize_claims(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_prize_claims_user ON prize_claims(user_id, status);

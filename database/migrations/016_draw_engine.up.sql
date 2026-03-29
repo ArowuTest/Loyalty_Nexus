@@ -1,7 +1,7 @@
 -- 016_draw_engine.sql
 -- Purpose: Support for automated lottery draws and winner selection.
 
-CREATE TABLE draws (
+CREATE TABLE IF NOT EXISTS draws (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     draw_code TEXT UNIQUE NOT NULL, -- DRAW-YYYYMMDD-XXXX
     name TEXT NOT NULL,
@@ -14,7 +14,7 @@ CREATE TABLE draws (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE TABLE draw_entries (
+CREATE TABLE IF NOT EXISTS draw_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     draw_id UUID NOT NULL REFERENCES draws(id),
     user_id UUID NOT NULL REFERENCES users(id),
@@ -23,7 +23,7 @@ CREATE TABLE draw_entries (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE TABLE draw_winners (
+CREATE TABLE IF NOT EXISTS draw_winners (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     draw_id UUID NOT NULL REFERENCES draws(id),
     user_id UUID NOT NULL REFERENCES users(id),
@@ -35,5 +35,5 @@ CREATE TABLE draw_winners (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_draw_entries_draw ON draw_entries(draw_id);
-CREATE INDEX idx_draw_winners_draw ON draw_winners(draw_id);
+CREATE INDEX IF NOT EXISTS idx_draw_entries_draw ON draw_entries(draw_id);
+CREATE INDEX IF NOT EXISTS idx_draw_winners_draw ON draw_winners(draw_id);

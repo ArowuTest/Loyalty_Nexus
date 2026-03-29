@@ -2,7 +2,7 @@
 -- Purpose: Support for N20/day guaranteed draw entry subscriptions.
 
 -- 1. Subscription Plans (Configurable)
-CREATE TABLE subscription_plans (
+CREATE TABLE IF NOT EXISTS subscription_plans (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     daily_cost_kobo INTEGER NOT NULL DEFAULT 2000, -- 2000 Kobo = N20
@@ -12,7 +12,7 @@ CREATE TABLE subscription_plans (
 );
 
 -- 2. User Subscriptions
-CREATE TABLE user_subscriptions (
+CREATE TABLE IF NOT EXISTS user_subscriptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
     plan_id UUID NOT NULL REFERENCES subscription_plans(id),
@@ -23,8 +23,8 @@ CREATE TABLE user_subscriptions (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_user_subscriptions_user ON user_subscriptions(user_id);
-CREATE INDEX idx_user_subscriptions_billing ON user_subscriptions(next_billing_at);
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user ON user_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_billing ON user_subscriptions(next_billing_at);
 
 -- 3. Seed Default N20 Plan
 INSERT INTO subscription_plans (name, daily_cost_kobo, entries_per_day) VALUES

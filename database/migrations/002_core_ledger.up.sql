@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_users_msisdn ON users(msisdn);
+CREATE INDEX IF NOT EXISTS idx_users_msisdn ON users(msisdn);
 
 CREATE TABLE IF NOT EXISTS transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -31,8 +31,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_transactions_user_date ON transactions(user_id, created_at DESC);
-CREATE INDEX idx_transactions_msisdn ON transactions(msisdn);
+CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_transactions_msisdn ON transactions(msisdn);
 
 -- ATOMIC TRIGGER: Handle all balance and streak logic in the DB layer
 CREATE OR REPLACE FUNCTION trg_fn_loyalty_nexus_ledger()

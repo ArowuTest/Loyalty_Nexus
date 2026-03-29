@@ -2,7 +2,7 @@
 -- Purpose: Support for dynamic recharge tiers and milestone bonuses (REQ-5.2.3, REQ-5.2.8, REQ-5.2.9).
 
 -- 1. Recharge Amount Tiers
-CREATE TABLE recharge_tiers (
+CREATE TABLE IF NOT EXISTS recharge_tiers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL, -- Standard, Silver, Gold
     min_amount_kobo BIGINT NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE recharge_tiers (
 );
 
 -- 2. Streak & Milestone Bonuses
-CREATE TABLE program_bonuses (
+CREATE TABLE IF NOT EXISTS program_bonuses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_type TEXT CHECK (event_type IN ('first_recharge', 'streak_milestone', 'referral_completion')),
     threshold INTEGER, -- days for streak, or null

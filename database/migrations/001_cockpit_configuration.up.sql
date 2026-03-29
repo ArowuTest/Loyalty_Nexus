@@ -2,7 +2,7 @@
 -- Purpose: Total flexibility for the private firm to manage Loyalty Nexus.
 
 -- 1. Global Program Rules (The "Knobs")
-CREATE TABLE program_configs (
+CREATE TABLE IF NOT EXISTS program_configs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     config_key TEXT UNIQUE NOT NULL, -- e.g., 'min_recharge_spin', 'streak_window_hours'
     config_value JSONB NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE program_configs (
 );
 
 -- 2. Prize Inventory & Weights (The "Odds Engine")
-CREATE TABLE prize_pool (
+CREATE TABLE IF NOT EXISTS prize_pool (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     prize_type TEXT CHECK (prize_type IN ('airtime', 'data', 'momo_cash', 'studio_credits')),
@@ -23,7 +23,7 @@ CREATE TABLE prize_pool (
 );
 
 -- 3. Regional Multipliers (The "Tournament" Engine)
-CREATE TABLE regional_settings (
+CREATE TABLE IF NOT EXISTS regional_settings (
     region_code TEXT PRIMARY KEY, -- e.g., 'LAG', 'ABJ', 'KAN'
     multiplier NUMERIC DEFAULT 1.0,
     is_golden_hour BOOLEAN DEFAULT false,
@@ -31,7 +31,7 @@ CREATE TABLE regional_settings (
 );
 
 -- 4. Studio Parameters (AI Rendering Limits)
-CREATE TABLE studio_config (
+CREATE TABLE IF NOT EXISTS studio_config (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     media_type TEXT CHECK (media_type IN ('image', 'video', 'jingle')),
     point_cost INTEGER NOT NULL,

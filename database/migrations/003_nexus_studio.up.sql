@@ -2,7 +2,7 @@
 -- Purpose: Schema for the points-funded creative studio.
 
 -- 1. Studio Tools Catalogue
-CREATE TABLE studio_tools (
+CREATE TABLE IF NOT EXISTS studio_tools (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     description TEXT,
@@ -17,7 +17,7 @@ CREATE TABLE studio_tools (
 );
 
 -- 2. AI Generation History & Gallery
-CREATE TABLE ai_generations (
+CREATE TABLE IF NOT EXISTS ai_generations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
     tool_id UUID NOT NULL REFERENCES studio_tools(id),
@@ -31,8 +31,8 @@ CREATE TABLE ai_generations (
     metadata JSONB DEFAULT '{}'
 );
 
-CREATE INDEX idx_ai_generations_user ON ai_generations(user_id);
-CREATE INDEX idx_ai_generations_status ON ai_generations(status);
+CREATE INDEX IF NOT EXISTS idx_ai_generations_user ON ai_generations(user_id);
+CREATE INDEX IF NOT EXISTS idx_ai_generations_status ON ai_generations(status);
 
 -- Seed Initial Tools (Full Catalogue - Appendix B)
 INSERT INTO studio_tools (name, description, category, point_cost, provider, provider_tool_id, icon_name) VALUES

@@ -6,7 +6,7 @@ ALTER TABLE prize_pool ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE prize_pool ADD COLUMN minimum_recharge BIGINT;
 
 -- Create spin_tiers table
-CREATE TABLE spin_tiers (
+CREATE TABLE IF NOT EXISTS spin_tiers (
     id UUID PRIMARY KEY,
     tier_name TEXT NOT NULL,
     tier_display_name TEXT NOT NULL,

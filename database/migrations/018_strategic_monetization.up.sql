@@ -2,7 +2,7 @@
 -- Purpose: Tracking metrics for SaaS monetization model (Section 6).
 
 -- 1. ARPU Uplift Tracking (Monthly Snapshots per User)
-CREATE TABLE arpu_uplift_tracking (
+CREATE TABLE IF NOT EXISTS arpu_uplift_tracking (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
     msisdn TEXT NOT NULL,
@@ -14,7 +14,7 @@ CREATE TABLE arpu_uplift_tracking (
 );
 
 -- 2. Churn Bounty (At-Risk Users reactivated)
-CREATE TABLE churn_recovery_bounties (
+CREATE TABLE IF NOT EXISTS churn_recovery_bounties (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id),
     last_activity_before_reactivation TIMESTAMPTZ NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE churn_recovery_bounties (
 );
 
 -- 3. GPU Usage Tracking (Nexus Studio Monetization)
-CREATE TABLE studio_usage_metrics (
+CREATE TABLE IF NOT EXISTS studio_usage_metrics (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     generation_id UUID NOT NULL REFERENCES ai_generations(id),
     provider TEXT NOT NULL,
@@ -33,5 +33,5 @@ CREATE TABLE studio_usage_metrics (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_arpu_period ON arpu_uplift_tracking(month_period);
-CREATE INDEX idx_bounty_created ON churn_recovery_bounties(created_at);
+CREATE INDEX IF NOT EXISTS idx_arpu_period ON arpu_uplift_tracking(month_period);
+CREATE INDEX IF NOT EXISTS idx_bounty_created ON churn_recovery_bounties(created_at);

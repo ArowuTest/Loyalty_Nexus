@@ -1,7 +1,7 @@
 -- 015_fraud_guards.sql
 -- Purpose: Support for velocity-based fraud prevention and blacklisting.
 
-CREATE TABLE msisdn_blacklist (
+CREATE TABLE IF NOT EXISTS msisdn_blacklist (
     msisdn TEXT PRIMARY KEY,
     reason TEXT,
     is_active BOOLEAN DEFAULT true,

@@ -6,4 +6,4 @@ ADD COLUMN momo_number TEXT,
 ADD COLUMN momo_verified BOOLEAN DEFAULT false,
 ADD COLUMN momo_verified_at TIMESTAMPTZ;
 
-CREATE INDEX idx_users_momo ON users(momo_number) WHERE momo_number IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_momo ON users(momo_number) WHERE momo_number IS NOT NULL;

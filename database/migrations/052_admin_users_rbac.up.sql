@@ -8,7 +8,7 @@ CREATE TYPE admin_role AS ENUM (
   'content'         -- Manage studio tools, prizes, config
 );
 
-CREATE TABLE admin_users (
+CREATE TABLE IF NOT EXISTS admin_users (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email           TEXT NOT NULL UNIQUE,
   password_hash   TEXT NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE admin_users (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_admin_users_email ON admin_users(email);
+CREATE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users(email);
 
 -- Seed a default super_admin (password will be set via ADMIN_SEED_PASSWORD env var at startup,
 -- or use the admin CLI tool. Hash shown here is bcrypt of 'ChangeMe123!' — MUST be rotated.)
