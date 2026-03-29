@@ -5,7 +5,7 @@ import Link from "next/link";
 import { motion, AnimatePresence, useScroll, useTransform, useInView } from "framer-motion";
 import {
   Zap, Sparkles, ArrowRight, RotateCcw, Lock, ChevronRight,
-  Trophy, MapPin, Users, Gift, Star, Clock, Swords,
+  Trophy, MapPin, Users, Gift, Star, Clock,
   Brain, Camera, Video, Mic, BookOpen, BarChart2,
   Play, Phone, Wallet,
 } from "lucide-react";
@@ -754,7 +754,7 @@ export default function HomePage() {
           <div className="text-center mt-10">
             <button onClick={openAuth}
               className="btn-gold rounded-2xl h-12 px-8 text-[14px] font-black inline-flex items-center gap-2">
-              <Swords className="w-4 h-4" />
+              <Trophy className="w-4 h-4" />
               Join Your State&apos;s Battle
               <ArrowRight className="w-4 h-4" />
             </button>
@@ -888,7 +888,7 @@ export default function HomePage() {
               </button>
               <Link href="/wars">
                 <button className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-gold-500/30 transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
-                  <Swords className="w-4 h-4 text-gold-500" />
+                  <Trophy className="w-4 h-4 text-gold-500" />
                   View Regional Wars
                 </button>
               </Link>

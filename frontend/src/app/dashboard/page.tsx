@@ -8,7 +8,7 @@ import { useStore } from "@/store/useStore";
 import api from "@/lib/api";
 import { cn, formatPoints, TIER_THRESHOLDS } from "@/lib/utils";
 import {
-  Zap, Wand2, Trophy, ChevronRight, Flame, Swords,
+  Zap, Wand2, Trophy, ChevronRight, Flame,
   MapPin, Gift, ArrowRight, RotateCcw, Clock, Star,
   CreditCard, X, Smartphone, Wallet,
 } from "lucide-react";
@@ -168,7 +168,7 @@ function PassportBanner({ points, streak }: { points: number; streak: number }) 
 const QUICK_ACTIONS = [
   { href: "/spin",   icon: RotateCcw, label: "Spin Wheel",    sub: "Use spin credits",   color: "bg-gold-500/15 text-gold-500",     border: "border-gold-500/20" },
   { href: "/studio", icon: Wand2,     label: "AI Studio",     sub: "30+ AI tools",       color: "bg-nexus-600/15 text-nexus-400",   border: "border-nexus-500/20" },
-  { href: "/wars",   icon: Swords,    label: "Regional Wars", sub: "Your state battle",  color: "bg-green-600/15 text-green-400",   border: "border-green-500/20" },
+  { href: "/wars",   icon: Trophy,    label: "Regional Wars", sub: "Your state battle",  color: "bg-green-600/15 text-green-400",   border: "border-green-500/20" },
   { href: "/prizes", icon: Trophy,    label: "My Prizes",     sub: "Claim rewards",      color: "bg-purple-600/15 text-purple-400", border: "border-purple-500/20" },
 ];
 
@@ -351,7 +351,7 @@ export default function DashboardPage() {
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center"
                   style={{ background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.25)" }}>
-                  <Swords size={18} className="text-green-400" />
+                  <Trophy size={18} className="text-green-400" />
                 </div>
                 <div>
                   <h3 className="text-[14px] font-black text-white leading-none">Regional Wars</h3>
