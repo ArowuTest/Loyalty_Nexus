@@ -273,12 +273,6 @@ class APIClient {
     return this.request<{ id: string; claim_status: string; fulfillment_status: string }>("POST", `/spin/wins/${id}/claim`, payload);
   }
 
-  // ── Notifications ────────────────────────────────────────────────────────
-  getNotifications() {
-    return this.request<{ notifications: Array<{ id: string; type: string; title: string; body: string; is_read: boolean; created_at: string }>; unread_count: number }>("GET", "/notifications");
-  }
-  markNotificationRead(id: string) { return this.request("PATCH", `/notifications/${id}/read`); }
-  markAllNotificationsRead() { return this.request("POST", "/notifications/read-all"); }
   // ── Chat usage quota ──────────────────────────────────────────────────────
   getChatUsage() { return this.request("GET", "/studio/chat/usage"); }
 
