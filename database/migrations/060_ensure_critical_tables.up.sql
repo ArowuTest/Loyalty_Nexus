@@ -109,6 +109,43 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_60 ON users(phone_number);
 
+-- ─── Ensure ALL users columns exist (safe for existing DBs) ─────────────────
+-- The CREATE TABLE IF NOT EXISTS above is a no-op when the table already exists.
+-- Every column the Go entity references must be explicitly ensured here.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS user_code              TEXT         NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS state                  TEXT         NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tier                   TEXT         NOT NULL DEFAULT 'BRONZE';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_count           INTEGER      NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_expires_at      TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_grace_used      INTEGER      NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_grace_month     INTEGER;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS total_recharge_amount  BIGINT       NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_recharge_at       TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS momo_number            TEXT         NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS momo_verified          BOOLEAN      NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS momo_verified_at       TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_pass_id         TEXT         NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS device_type            TEXT         NOT NULL DEFAULT 'smartphone';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_tier      TEXT         NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status    TEXT         NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code          TEXT         NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by            UUID;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kyc_status             TEXT         NOT NULL DEFAULT 'unverified';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS points_expire_at       TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS total_points           BIGINT       NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stamps_count           INTEGER      NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS lifetime_points        BIGINT       NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS total_spins            INTEGER      NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS studio_use_count       INTEGER      NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS total_referrals        INTEGER      NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_wallet_object_id TEXT        NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_pass_serial      TEXT         NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS spin_credits           INTEGER      NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active              BOOLEAN      NOT NULL DEFAULT TRUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW();
+ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at             TIMESTAMPTZ  NOT NULL DEFAULT NOW();
+
 CREATE TABLE IF NOT EXISTS transactions (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id      UUID REFERENCES users(id),
@@ -600,3 +637,78 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+
+-- ─── SECTION 19: TEST USERS ──────────────────────────────────────────────────
+-- Seeded test accounts for staging/demo. All use E.164 format (234XXXXXXXXXX).
+-- Login via OTP flow — check Render logs for the code after calling /auth/otp/send.
+-- Phone numbers map to: 08020000000, 08023000000, 08025000000, 08027000000, 08029000000
+
+INSERT INTO users (
+    id, phone_number, user_code, state, tier,
+    streak_count, streak_expires_at, streak_grace_used,
+    total_recharge_amount, last_recharge_at,
+    momo_number, momo_verified,
+    referral_code, kyc_status,
+    total_points, stamps_count, lifetime_points,
+    total_spins, studio_use_count, spin_credits,
+    is_active, created_at, updated_at
+) VALUES
+    -- Gold user — active, 2500 lifetime points, recent recharges
+    (gen_random_uuid(), '+2348020000000', 'NXS-DEMO-01', 'Lagos',    'GOLD',
+     5,  NOW() + INTERVAL '3 days', 0,
+     25000000, NOW() - INTERVAL '1 day',
+     '', false,
+     'DEMO01REF', 'verified',
+     800, 3, 2500,
+     12, 4, 2,
+     true, NOW() - INTERVAL '30 days', NOW()),
+
+    -- Silver user — moderate activity
+    (gen_random_uuid(), '+2348023000000', 'NXS-DEMO-02', 'Abuja',    'SILVER',
+     3,  NOW() + INTERVAL '1 day', 0,
+     12000000, NOW() - INTERVAL '3 days',
+     '', false,
+     'DEMO02REF', 'verified',
+     350, 2, 900,
+     6, 1, 1,
+     true, NOW() - INTERVAL '20 days', NOW()),
+
+    -- Bronze user — new, small balance
+    (gen_random_uuid(), '+2348025000000', 'NXS-DEMO-03', 'Kano',     'BRONZE',
+     1,  NOW() + INTERVAL '2 days', 0,
+     5000000, NOW() - INTERVAL '5 days',
+     '', false,
+     'DEMO03REF', 'unverified',
+     50, 0, 150,
+     2, 0, 0,
+     true, NOW() - INTERVAL '7 days', NOW()),
+
+    -- Platinum user — power user, fully loaded
+    (gen_random_uuid(), '+2348027000000', 'NXS-DEMO-04', 'Rivers',   'PLATINUM',
+     7,  NOW() + INTERVAL '5 days', 0,
+     100000000, NOW() - INTERVAL '12 hours',
+     '2348027000000', true,
+     'DEMO04REF', 'verified',
+     3200, 7, 8500,
+     45, 15, 5,
+     true, NOW() - INTERVAL '90 days', NOW()),
+
+    -- Bronze user — streak expired, needs nudge
+    (gen_random_uuid(), '+2348029000000', 'NXS-DEMO-05', 'Enugu',    'BRONZE',
+     0,  NULL, 0,
+     2000000, NOW() - INTERVAL '14 days',
+     '', false,
+     'DEMO05REF', 'unverified',
+     0, 0, 60,
+     1, 0, 0,
+     true, NOW() - INTERVAL '45 days', NOW())
+
+ON CONFLICT (phone_number) DO UPDATE SET
+    tier                 = EXCLUDED.tier,
+    total_points         = EXCLUDED.total_points,
+    lifetime_points      = EXCLUDED.lifetime_points,
+    total_recharge_amount= EXCLUDED.total_recharge_amount,
+    last_recharge_at     = EXCLUDED.last_recharge_at,
+    spin_credits         = EXCLUDED.spin_credits,
+    stamps_count         = EXCLUDED.stamps_count,
+    updated_at           = NOW();
