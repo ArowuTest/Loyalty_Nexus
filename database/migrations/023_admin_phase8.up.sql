@@ -28,7 +28,8 @@ ALTER TABLE draws
   ADD COLUMN IF NOT EXISTS next_draw_at TIMESTAMPTZ;
 
 -- ── Prize slot: ensure is_active and daily_inventory_cap exist ───────────
-ALTER TABLE prizes
+-- (table is named 'prize_pool' in this schema, not 'prizes')
+ALTER TABLE prize_pool
   ADD COLUMN IF NOT EXISTS is_active            BOOLEAN NOT NULL DEFAULT TRUE,
   ADD COLUMN IF NOT EXISTS daily_inventory_cap  INTEGER NOT NULL DEFAULT -1;
 
