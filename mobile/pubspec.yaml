@@ -42,6 +42,12 @@ dependencies:
   confetti: ^0.8.0
   connectivity_plus: ^6.1.4
 
+  # QR Code generation (Digital Passport)
+  qr_flutter: ^4.1.0
+
+  # Confetti animation (Spin prize reveal)
+  confetti: ^0.7.0
+
   # Device / Platform
   local_auth: ^2.3.0
   permission_handler: ^11.3.0
