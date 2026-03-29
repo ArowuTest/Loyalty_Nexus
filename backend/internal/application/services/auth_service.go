@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"os"
 	"time"
@@ -88,6 +89,9 @@ func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) error 
 	if err := s.authRepo.CreateOTP(ctx, otp); err != nil {
 		return fmt.Errorf("failed to save OTP: %w", err)
 	}
+
+	// Always log the OTP so it's readable from Render logs even if SMS delivery fails
+	log.Printf("[OTP] phone=%s purpose=%s code=%s expires=%s", phone, purpose, code, otp.ExpiresAt.Format("15:04:05"))
 
 	// Deliver SMS via Termii
 	return s.notifySvc.SendOTP(ctx, phone, code)
