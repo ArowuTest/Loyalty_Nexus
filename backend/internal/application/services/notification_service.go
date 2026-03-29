@@ -27,7 +27,12 @@ func NewNotificationService(termiiKey string) *NotificationService {
 }
 
 // SendOTP delivers a 6-digit OTP via Termii.
+// When DEV_OTP_BYPASS=true the code is logged instead of sent via SMS — for testing only.
 func (n *NotificationService) SendOTP(ctx context.Context, phone, code string) error {
+	if os.Getenv("DEV_OTP_BYPASS") == "true" {
+		log.Printf("[DEV_OTP_BYPASS] ☎ %s → OTP: %s  (SMS skipped — DEV_OTP_BYPASS=true)", phone, code)
+		return nil
+	}
 	message := fmt.Sprintf("Your Loyalty Nexus code: %s. Valid for 5 minutes. Do not share this.", code)
 	return n.SendSMS(ctx, phone, message)
 }
