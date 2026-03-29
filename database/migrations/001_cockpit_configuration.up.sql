@@ -43,5 +43,6 @@ CREATE TABLE studio_config (
 INSERT INTO program_configs (config_key, config_value, description) VALUES
 ('min_recharge_naira', '500', 'Minimum recharge to earn a spin'),
 ('streak_target_days', '7', 'Days required for a Mega Jackpot ticket'),
-('ghost_nudge_hours', '48', 'Inactivity hours before lock-screen nudge fires');
+('ghost_nudge_hours', '48', 'Inactivity hours before lock-screen nudge fires')
+ON CONFLICT (config_key) DO NOTHING;
 

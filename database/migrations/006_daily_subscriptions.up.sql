@@ -28,4 +28,5 @@ CREATE INDEX idx_user_subscriptions_billing ON user_subscriptions(next_billing_a
 
 -- 3. Seed Default N20 Plan
 INSERT INTO subscription_plans (name, daily_cost_kobo, entries_per_day) VALUES
-('Daily Draw Pass', 2000, 1);
+('Daily Draw Pass', 2000, 1)
+ON CONFLICT (name) DO NOTHING;

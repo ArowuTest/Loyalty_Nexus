@@ -18,4 +18,5 @@ CREATE TABLE IF NOT EXISTS admin_users (
 
 -- Seed Initial Admin (Platform Admin)
 INSERT INTO admin_users (username, password_hash, role) VALUES 
-('admin_nexus', 'placeholder_hash', 'platform_admin');
+('admin_nexus', 'placeholder_hash', 'platform_admin')
+ON CONFLICT (username) DO NOTHING;

@@ -52,4 +52,5 @@ INSERT INTO studio_tools (name, description, category, point_cost, provider, pro
 ('Business Plan Summary', 'One-page professional business plan summary.', 'Build', 5, 'NOTEBOOK_LM', 'business-plan', 'FileText'),
 ('Voice to Plan', 'Record your idea to get a structured business plan.', 'Build', 6, 'ASSEMBLY_AI', 'voice-plan', 'Mic2'),
 ('Local Translation', 'Translate any text to Hausa, Yoruba, Igbo or Pidgin.', 'Build', 2, 'GOOGLE', 'translate', 'Languages'),
-('Text to Speech', 'Natural audio reading with a Nigerian accent.', 'Build', 5, 'GOOGLE', 'tts-nigeria', 'Volume2');
+('Text to Speech', 'Natural audio reading with a Nigerian accent.', 'Build', 5, 'GOOGLE', 'tts-nigeria', 'Volume2')
+ON CONFLICT (name) DO NOTHING;

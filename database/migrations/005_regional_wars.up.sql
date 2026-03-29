@@ -29,7 +29,8 @@ INSERT INTO regional_settings (region_code, region_name) VALUES
 ('KAN', 'Kano'),
 ('PHC', 'Port Harcourt'),
 ('IBD', 'Ibadan'),
-('ENU', 'Enugu');
+('ENU', 'Enugu')
+ON CONFLICT (region_code) DO NOTHING;
 
 -- 3. Region Tournament History
 CREATE TABLE IF NOT EXISTS region_tournaments (

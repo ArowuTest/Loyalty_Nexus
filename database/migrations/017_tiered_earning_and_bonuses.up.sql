@@ -25,11 +25,13 @@ CREATE TABLE program_bonuses (
 INSERT INTO recharge_tiers (name, min_amount_kobo, points_per_naira) VALUES
 ('Standard', 0, 0.004), -- 1/250
 ('Silver', 100000, 0.005), -- 1/200 (N1000+)
-('Gold', 300000, 0.00667); -- 1/150 (N3000+)
+('Gold', 300000, 0.00667)
+ON CONFLICT (name) DO NOTHING; -- 1/150 (N3000+)
 
 -- Seed Initial Bonuses
 INSERT INTO program_bonuses (event_type, threshold, bonus_points) VALUES
 ('first_recharge', NULL, 20),
 ('streak_milestone', 7, 10),
 ('streak_milestone', 14, 25),
-('streak_milestone', 30, 50);
+('streak_milestone', 30, 50)
+ON CONFLICT (event_type) DO NOTHING;
