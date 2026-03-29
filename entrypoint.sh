@@ -1,27 +1,17 @@
 #!/bin/sh
 
+echo "[entrypoint] Database migration strategy: fix-and-up"
+echo "[entrypoint] If DB is dirty (previous deploy failed mid-migration), rewinding"
+echo "[entrypoint] to prior clean version and re-running the failed migration."
 
-echo "[entrypoint] Database migration strategy: force v59 + run only migration 060"
-echo "[entrypoint] Migration 060 is a comprehensive safety net that creates all"
-echo "[entrypoint] critical tables with IF NOT EXISTS — safe under ANY DB state."
-
-# Force the migration pointer to version 59.
-# This marks migrations 1-59 as "applied" WITHOUT re-running them.
-# The DB already has a partial set of these tables from previous deploy cycles.
-# Migration 060 (the only one that runs) uses IF NOT EXISTS everywhere,
-# so it safely creates anything missing and skips what already exists.
-if /migrate force 59; then
-    echo "[entrypoint] ✓ Migration pointer set to v59"
+# fix-and-up: detects dirty state, rewinds by 1, then runs all pending migrations.
+# Safe for clean DBs too — just runs pending migrations normally.
+if /migrate fix-and-up; then
+    echo "[entrypoint] ✓ Migrations applied successfully"
 else
-    echo "[entrypoint] WARNING: force 59 failed — attempting to continue anyway"
-fi
-
-echo "[entrypoint] Running migration 060 (comprehensive safety net)..."
-if /migrate up; then
-    echo "[entrypoint] ✓ Migration 060 applied successfully"
-else
-    echo "[entrypoint] WARNING: migrate up returned non-zero — checking if 060 already applied"
+    echo "[entrypoint] WARNING: migrations returned non-zero — checking current state"
     /migrate version || true
+    echo "[entrypoint] Continuing — API will start even if some migrations failed"
 fi
 
 echo "[entrypoint] Starting API..."

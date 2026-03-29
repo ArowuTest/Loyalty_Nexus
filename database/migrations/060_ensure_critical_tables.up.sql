@@ -569,6 +569,16 @@ INSERT INTO network_configs (key, value, description) VALUES
     ('prize_pool_kobo',               '50000000', 'Daily prize budget in kobo')
 ON CONFLICT (key) DO NOTHING;
 
+-- Fix prize_type check constraint to include all types used across migrations
+-- Drop old narrow constraint (from migration 013) and replace with the full set
+ALTER TABLE prize_pool DROP CONSTRAINT IF EXISTS prize_pool_prize_type_check;
+ALTER TABLE prize_pool
+    ADD CONSTRAINT prize_pool_prize_type_check
+    CHECK (prize_type IN (
+        'try_again', 'airtime', 'data', 'data_bundle',
+        'momo_cash', 'bonus_points', 'pulse_points', 'studio_credits'
+    ));
+
 -- Seed prize pool if empty
 INSERT INTO prize_pool (name, prize_type, base_value, is_active, win_probability_weight)
 SELECT * FROM (VALUES
