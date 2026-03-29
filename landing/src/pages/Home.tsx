@@ -532,7 +532,9 @@ export default function Home() {
           />
 
           <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {steps.map(({ n, icon, color, title, body, stat }) => (
+            {steps.map((step) => {
+              const { n, icon, color, title, body, stat } = step;
+              return (
               <motion.div key={n} variants={fadeUp}>
                 <div
                   className="relative glass rounded-2xl p-6 h-full flex flex-col gap-4 border border-white/[0.06] hover:border-white/[0.14] transition-all duration-300 group overflow-hidden"
@@ -560,16 +562,22 @@ export default function Home() {
                   </div>
 
                   {/* Stat badge */}
-                  <div
-                    className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-full self-start"
-                    style={{ background: `${color}15`, color, border: `1px solid ${color}25` }}
-                  >
-                    <TrendingUp className="w-3 h-3" />
-                    {stat}
+                  <div className="flex flex-col gap-1 self-start">
+                    <div
+                      className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-full"
+                      style={{ background: `${color}15`, color, border: `1px solid ${color}25` }}
+                    >
+                      <TrendingUp className="w-3 h-3" />
+                      {stat}
+                    </div>
+                    {step.subStat && (
+                      <span className="text-[10px] text-muted-foreground/50 px-1">{step.subStat}</span>
+                    )}
                   </div>
                 </div>
               </motion.div>
-            ))}
+              );
+            })}
           </StaggerGrid>
         </div>
       </section>
@@ -577,7 +585,7 @@ export default function Home() {
       {/* ══════════════════════════════════════════════════════
           AI STUDIO SHOWCASE
       ══════════════════════════════════════════════════════ */}
-      <section className="py-24 relative overflow-hidden">
+      <section id="ai-studio" className="py-24 relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none"
           style={{ background: "radial-gradient(ellipse 80% 60% at 50% 100%, rgba(0,212,255,0.04) 0%, transparent 70%)" }} />
 
@@ -585,7 +593,7 @@ export default function Home() {
           <SectionHeader
             eyebrow="AI Studio"
             title={<><span className="text-gold">30+</span> AI Tools — One Platform</>}
-            sub="Chat is always free. Spend your Pulse Points to unlock the most powerful AI creation tools in Africa — photos, videos, music, business plans and beyond."
+            sub="Chat is always free. Spend your Pulse Points to unlock the most powerful AI creation tools in Africa — photos, videos, music, business plans and beyond. No expensive subscriptions. No monthly fees."
           />
 
           {/* Category cards */}
@@ -660,7 +668,24 @@ export default function Home() {
             ))}
           </StaggerGrid>
 
-          <div className="text-center mt-10">
+          {/* Nigeria AI access callout + Explore CTA */}
+          <div className="mt-6 mb-2 max-w-2xl mx-auto">
+            <div className="glass rounded-2xl px-6 py-4 border border-purple-500/20 flex items-start gap-4"
+              style={{ background: "rgba(139,92,246,0.06)" }}>
+              <span className="text-2xl flex-shrink-0">🇳🇬</span>
+              <div>
+                <p className="text-sm font-bold text-foreground mb-1">Say goodbye to AI subscription headaches</p>
+                <p className="text-[13px] text-muted-foreground leading-relaxed">
+                  Paying for ChatGPT, Midjourney or Canva AI from Nigeria is a real challenge — card declines, dollar charges, VPN frustrations.
+                  Loyalty Nexus gives you access to premium AI tools{" "}
+                  <strong className="text-foreground">earned from your everyday MTN recharges</strong>. 
+                  No foreign card. No VPN. No stress.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center mt-8">
             <Link to={ROUTES.STUDIO}>
               <button className="inline-flex items-center gap-2 glass border border-white/[0.12] rounded-2xl h-12 px-7 text-sm font-semibold text-foreground hover:border-white/25 transition-all duration-200">
                 Explore all 30+ tools
@@ -674,7 +699,7 @@ export default function Home() {
       {/* ══════════════════════════════════════════════════════
           SPIN & WIN — immersive split
       ══════════════════════════════════════════════════════ */}
-      <section className="py-24 relative overflow-hidden">
+      <section id="spin-win" className="py-24 relative overflow-hidden">
         <div className="absolute inset-0 pointer-events-none"
           style={{ background: "radial-gradient(ellipse 70% 60% at 20% 50%, rgba(245,166,35,0.06) 0%, transparent 65%)" }} />
 
@@ -732,49 +757,170 @@ export default function Home() {
       </section>
 
       {/* ══════════════════════════════════════════════════════
-          LOYALTY TIERS
+          MTN LOYALTY — BRAND AFFILIATION
       ══════════════════════════════════════════════════════ */}
       <section className="py-24 relative overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none"
+          style={{ background: "radial-gradient(ellipse 80% 50% at 50% 50%, rgba(245,166,35,0.05) 0%, transparent 70%)" }} />
+
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <SectionHeader
-            eyebrow="Loyalty Tiers"
-            title={<>Level Up. <span className="text-gold">Unlock More.</span></>}
-            sub="The more you recharge, the higher your tier — and the better your multipliers, spin prizes, and AI Studio benefits."
+            eyebrow="Made for MTN Customers"
+            title={<>Built to Reward <span className="text-gold">You</span></>}
+            sub="Loyalty Nexus is not just another app. It's a movement to make every naira you spend on MTN work harder for you — giving you AI access, prizes, and recognition that you deserve."
           />
 
-          <StaggerGrid className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {(Object.entries(TIER_CONFIG) as [string, typeof TIER_CONFIG[keyof typeof TIER_CONFIG]][]).map(([key, tier], i) => {
-              const perks = [
-                "1 spin/day · 5 AI tools/day",
-                "2× prizes · 10 AI tools/day",
-                "3× prizes · 20 AI tools · Priority",
-                "5× prizes · Unlimited AI · Early access",
-                "10× prizes · Everything · White-glove",
-              ];
-              const isTop = key === "diamond";
-              return (
-                <motion.div key={key} variants={fadeUp}>
+          <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {[
+              {
+                emoji: "🇳🇬",
+                color: "#F5A623",
+                title: "Proudly Nigerian",
+                body: "Built in Nigeria, for Nigerians. Every feature is designed around how Nigerians actually use their phones — recharging daily, sharing data, and building businesses on mobile.",
+              },
+              {
+                emoji: "🤝",
+                color: "#00D4FF",
+                title: "Your Loyalty Rewarded",
+                body: "You've been an MTN customer for years. It's time your loyalty paid back. Every recharge, every referral, every session — all of it builds into real rewards you can use.",
+              },
+              {
+                emoji: "📱",
+                color: "#10B981",
+                title: "Works on Any Phone",
+                body: "No heavy app download needed. Loyalty Nexus works in your browser on any Android or iPhone — even on a data-saver connection. Accessible to everyone, everywhere in Nigeria.",
+              },
+              {
+                emoji: "🔒",
+                color: "#8B5CF6",
+                title: "No Hidden Costs",
+                body: "Sign up is completely free. There are no subscription fees, no premium tiers to unlock, and no hidden charges. Your Pulse Points are earned purely from recharges you already make.",
+              },
+              {
+                emoji: "🎯",
+                color: "#F472B6",
+                title: "Instant Gratification",
+                body: "Win prizes the moment you spin the wheel. Earn Pulse Points the second you recharge. No waiting. No processing delays. Your rewards land instantly, every single time.",
+              },
+              {
+                emoji: "🌍",
+                color: "#FFD700",
+                title: "Connecting Nigeria",
+                body: "Whether you're in Lagos, Kano, Enugu or Calabar — Loyalty Nexus brings all MTN customers into one rewarding community. One platform. 84,000+ Nigerians earning together.",
+              },
+            ].map(({ emoji, color, title, body }) => (
+              <motion.div key={title} variants={fadeUp}>
+                <div
+                  className="glass rounded-2xl p-6 h-full flex flex-col gap-4 border border-white/[0.06] hover:border-white/[0.14] transition-all duration-300 group"
+                >
                   <div
-                    className={`relative glass rounded-2xl p-5 flex flex-col items-center text-center border transition-all duration-300 hover:scale-[1.03] ${
-                      isTop ? "border-gold-gradient glow-gold" : "border-white/[0.07] hover:border-white/[0.16]"
-                    }`}
+                    className="w-12 h-12 rounded-2xl flex items-center justify-center text-xl flex-shrink-0"
+                    style={{ background: `${color}18`, border: `1px solid ${color}30` }}
                   >
-                    {isTop && (
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gold rounded-full px-3 py-0.5 text-[10px] font-black text-black uppercase tracking-wider">
-                        Best
-                      </div>
-                    )}
-                    <div className="text-4xl mb-3">{tier.icon}</div>
-                    <div className="text-base font-black mb-1" style={{ color: tier.color }}>{tier.label}</div>
-                    <div className="text-[11px] font-mono text-muted-foreground mb-3">
-                      {key === "bronze" ? "0 pts — Start here" : `${formatPoints(tier.minPoints)} pts`}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">{perks[i]}</p>
+                    {emoji}
                   </div>
-                </motion.div>
-              );
-            })}
+                  <div>
+                    <h3 className="text-base font-black text-foreground mb-2 leading-tight" style={{ color }}>{title}</h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{body}</p>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
           </StaggerGrid>
+        </div>
+      </section>
+
+      {/* ══════════════════════════════════════════════════════
+          REGIONAL WARS
+      ══════════════════════════════════════════════════════ */}
+      <section id="regional-wars" className="py-24 relative overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none"
+          style={{ background: "radial-gradient(ellipse 80% 55% at 50% 50%, rgba(239,68,68,0.06) 0%, transparent 70%)" }} />
+
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <SectionHeader
+            eyebrow="Regional Wars"
+            title={<>Compete. <span className="text-gold">Dominate.</span> Win.</>}
+            sub="Your city vs the rest of Nigeria. Every recharge earns your region points in the weekly leaderboard war. The region that recharges most wins — and so do you."
+          />
+
+          <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+            {[
+              { region: "Lagos", flag: "🏙️", color: "#F5A623", score: "2,847,330", rank: 1 },
+              { region: "Abuja",  flag: "🏛️", color: "#00D4FF", score: "1,923,110", rank: 2 },
+              { region: "Kano",  flag: "🌅", color: "#10B981", score: "1,744,820", rank: 3 },
+              { region: "PH",    flag: "⚡", color: "#8B5CF6", score: "1,512,600", rank: 4 },
+            ].map(({ region, flag, color, score, rank }) => (
+              <motion.div key={region} variants={fadeUp}>
+                <div
+                  className="glass rounded-2xl p-5 border border-white/[0.08] hover:border-white/[0.18] transition-all duration-300 flex flex-col items-center text-center gap-3"
+                >
+                  <div className="flex items-center justify-between w-full">
+                    <span
+                      className="text-[11px] font-black px-2.5 py-1 rounded-full"
+                      style={{ background: `${color}20`, color }}
+                    >
+                      #{rank}
+                    </span>
+                    <span className="text-2xl">{flag}</span>
+                  </div>
+                  <div>
+                    <p className="text-lg font-black text-foreground">{region}</p>
+                    <p className="text-[12px] font-mono" style={{ color }}>{score} pts</p>
+                  </div>
+                  <div className="w-full bg-white/[0.06] rounded-full h-1.5">
+                    <div
+                      className="h-1.5 rounded-full"
+                      style={{ background: color, width: `${100 - (rank - 1) * 18}%` }}
+                    />
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </StaggerGrid>
+
+          <div className="glass rounded-3xl border border-white/[0.09] p-8 sm:p-12 flex flex-col sm:flex-row items-center gap-8">
+            <div className="flex-1">
+              <p className="text-[11px] font-black uppercase tracking-[0.22em] text-red-400 mb-3">⚔️ Weekly Battle</p>
+              <h3 className="text-2xl sm:text-3xl font-black text-foreground mb-3 leading-tight">
+                Every Recharge is a <span className="text-gold">Vote for Your City</span>
+              </h3>
+              <p className="text-sm text-muted-foreground leading-relaxed mb-5">
+                When your region wins the weekly war, every participant shares in a regional prize pool.
+                The more you recharge, the more points you contribute — and the bigger your personal share of the winnings.
+                This is MTN loyalty reimagined as a competitive team sport.
+              </p>
+              <ul className="space-y-2 mb-6">
+                {[
+                  "Weekly cash prize pool shared among regional winners",
+                  "Leaderboard resets every Monday 00:00 WAT",
+                  "Bonus Pulse Points for top contributors per region",
+                  "Special golden hour multipliers during peak battle times",
+                ].map(item => (
+                  <li key={item} className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <CheckCircle2 className="w-4 h-4 text-gold flex-shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+              <button
+                onClick={() => setAuthOpen(true)}
+                className="btn-gold rounded-2xl h-12 px-7 text-[14px] font-black glow-gold inline-flex items-center justify-center gap-2"
+              >
+                <Zap className="w-4 h-4" />
+                Join the War
+              </button>
+            </div>
+            <div
+              className="w-52 h-52 sm:w-60 sm:h-60 flex-shrink-0 rounded-3xl flex items-center justify-center text-[7rem] relative"
+              style={{ background: "radial-gradient(ellipse at center, rgba(245,166,35,0.10) 0%, transparent 70%)" }}
+            >
+              <span className="animate-float-slow">⚔️</span>
+              <div className="absolute -top-4 -right-4 w-12 h-12 bg-gold rounded-2xl flex items-center justify-center text-2xl glow-gold">
+                🏆
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 

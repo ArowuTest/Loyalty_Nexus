@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X, Zap, Sparkles } from "lucide-react";
 import { ROUTES, TIER_CONFIG, formatPoints, type Tier } from "@/lib";
@@ -14,6 +14,7 @@ export default function NavBar({ onLoginClick, isLoggedIn = false }: NavBarProps
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 24);
@@ -22,14 +23,39 @@ export default function NavBar({ onLoginClick, isLoggedIn = false }: NavBarProps
   }, []);
   useEffect(() => setMenuOpen(false), [location]);
 
-  const links = [
-    { label: "Home",      to: ROUTES.HOME },
-    { label: "AI Studio", to: ROUTES.STUDIO },
-    { label: "Dashboard", to: ROUTES.DASHBOARD },
-  ];
+  // Scroll to a section on the home page; if not on home page, navigate there first
+  const scrollToSection = (sectionId: string) => {
+    setMenuOpen(false);
+    if (location.pathname !== "/") {
+      navigate("/");
+      // Use a small delay to allow navigation before scrolling
+      setTimeout(() => {
+        document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 150);
+    } else {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  const handleDashboard = () => {
+    setMenuOpen(false);
+    if (!isLoggedIn && onLoginClick) {
+      onLoginClick();
+    } else {
+      navigate(ROUTES.DASHBOARD);
+    }
+  };
 
   const tier = MOCK_USER.tier as Tier;
   const tc   = TIER_CONFIG[tier];
+
+  // Nav items: Home, AI Studio (anchor), Wars (anchor), Dashboard (auth-guarded)
+  const navItems = [
+    { label: "Home",       type: "link",    to: ROUTES.HOME },
+    { label: "AI Studio",  type: "anchor",  section: "ai-studio" },
+    { label: "Wars",       type: "anchor",  section: "regional-wars" },
+    { label: "Dashboard",  type: "action",  action: handleDashboard },
+  ];
 
   return (
     <motion.header
@@ -56,20 +82,51 @@ export default function NavBar({ onLoginClick, isLoggedIn = false }: NavBarProps
 
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-0.5">
-            {links.map(({ label, to }) => {
-              const active = location.pathname === to;
+            {navItems.map((item) => {
+              const isActive =
+                item.type === "link" && location.pathname === item.to;
+              const isActiveAnchor =
+                item.type === "action" && location.pathname === ROUTES.DASHBOARD;
+
+              const base =
+                "px-4 py-2 rounded-xl text-[13px] font-semibold transition-all duration-200 cursor-pointer";
+              const activeClass = "bg-primary/12 text-primary";
+              const inactiveClass =
+                "text-muted-foreground hover:text-foreground hover:bg-white/[0.06]";
+
+              if (item.type === "link") {
+                return (
+                  <Link
+                    key={item.label}
+                    to={item.to!}
+                    className={`${base} ${isActive ? activeClass : inactiveClass}`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              }
+              if (item.type === "anchor") {
+                return (
+                  <button
+                    key={item.label}
+                    onClick={() => scrollToSection(item.section!)}
+                    className={`${base} ${inactiveClass}`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              }
+              // action (Dashboard)
               return (
-                <Link
-                  key={to}
-                  to={to}
-                  className={`px-4 py-2 rounded-xl text-[13px] font-semibold transition-all duration-200 ${
-                    active
-                      ? "bg-primary/12 text-primary"
-                      : "text-muted-foreground hover:text-foreground hover:bg-white/[0.06]"
+                <button
+                  key={item.label}
+                  onClick={item.action}
+                  className={`${base} ${
+                    isActiveAnchor ? activeClass : inactiveClass
                   }`}
                 >
-                  {label}
-                </Link>
+                  {item.label}
+                </button>
               );
             })}
           </nav>
@@ -132,18 +189,42 @@ export default function NavBar({ onLoginClick, isLoggedIn = false }: NavBarProps
             className="md:hidden glass-strong border-t border-white/[0.07]"
           >
             <div className="px-4 py-4 flex flex-col gap-1">
-              {links.map(({ label, to }) => (
-                <Link
-                  key={to}
-                  to={to}
-                  className="px-4 py-3 rounded-xl text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-all"
-                >
-                  {label}
-                </Link>
-              ))}
+              {navItems.map((item) => {
+                if (item.type === "link") {
+                  return (
+                    <Link
+                      key={item.label}
+                      to={item.to!}
+                      className="px-4 py-3 rounded-xl text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-all"
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                }
+                if (item.type === "anchor") {
+                  return (
+                    <button
+                      key={item.label}
+                      onClick={() => scrollToSection(item.section!)}
+                      className="px-4 py-3 rounded-xl text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-all text-left"
+                    >
+                      {item.label}
+                    </button>
+                  );
+                }
+                return (
+                  <button
+                    key={item.label}
+                    onClick={item.action}
+                    className="px-4 py-3 rounded-xl text-[14px] font-semibold text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-all text-left"
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
               <div className="pt-3 mt-1 border-t border-white/[0.07]">
                 <button
-                  onClick={onLoginClick}
+                  onClick={isLoggedIn ? () => navigate(ROUTES.DASHBOARD) : onLoginClick}
                   className="btn-gold rounded-xl h-12 w-full text-[15px] font-black glow-gold inline-flex items-center justify-center gap-2"
                 >
                   <Zap className="w-5 h-5" />

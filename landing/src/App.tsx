@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { MotionConfig } from "framer-motion";
 import { ROUTES } from "@/lib";
+import { AboutPage, BlogPage, CareersPage, PrivacyPage, TermsPage } from "@/pages/SimplePages";
 
 const Home      = lazy(() => import("@/pages/Home"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
@@ -33,6 +34,11 @@ export default function App() {
             <Route path={ROUTES.DASHBOARD} element={<Dashboard />} />
             <Route path={ROUTES.STUDIO}    element={<Studio />} />
             <Route path={ROUTES.ADMIN}     element={<Admin />} />
+            <Route path={ROUTES.ABOUT}     element={<AboutPage />} />
+            <Route path={ROUTES.BLOG}      element={<BlogPage />} />
+            <Route path={ROUTES.CAREERS}   element={<CareersPage />} />
+            <Route path={ROUTES.PRIVACY}   element={<PrivacyPage />} />
+            <Route path={ROUTES.TERMS}     element={<TermsPage />} />
             <Route path="*"                element={<Navigate to={ROUTES.HOME} replace />} />
           </Routes>
         </Suspense>
@@ -40,3 +46,4 @@ export default function App() {
     </MotionConfig>
   );
 }
+

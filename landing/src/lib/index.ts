@@ -6,6 +6,11 @@ export const ROUTES = {
   ADMIN:     "/admin",
   SPIN:      "/dashboard#spin",
   REFERRAL:  "/dashboard#referral",
+  ABOUT:     "/about",
+  BLOG:      "/blog",
+  CAREERS:   "/careers",
+  PRIVACY:   "/privacy",
+  TERMS:     "/terms",
 } as const;
 
 // ─── Tier config ──────────────────────────────────────────────

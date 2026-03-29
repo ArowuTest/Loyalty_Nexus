@@ -143,13 +143,24 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
                       )}
                     </button>
                   </form>
-                  {/* Bonus */}
-                  <div className="mt-5 flex items-start gap-3 glass rounded-xl p-3.5 border border-primary/20">
-                    <Sparkles className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
-                    <p className="text-[12px] text-muted-foreground leading-relaxed">
-                      <strong className="text-primary font-bold">New user bonus:</strong>{" "}
-                      100 Pulse Points + 1 free spin on your first sign-in!
-                    </p>
+                  {/* Value prop */}
+                  <div className="mt-5 space-y-2.5">
+                    <div className="flex items-start gap-3 glass rounded-xl p-3.5 border border-primary/20">
+                      <Sparkles className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+                      <p className="text-[12px] text-muted-foreground leading-relaxed">
+                        <strong className="text-primary font-bold">Stay logged in</strong>{" "}
+                        and use a growing suite of AI tools — chat, image generation, business plans and more —{" "}
+                        <strong className="text-foreground">without paying for any AI subscription</strong>.
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-3 glass rounded-xl p-3.5 border border-white/[0.07]">
+                      <span className="text-base flex-shrink-0 mt-0.5">🎡</span>
+                      <p className="text-[12px] text-muted-foreground leading-relaxed">
+                        See exactly how many{" "}
+                        <strong className="text-foreground">free spins you have</strong>{" "}
+                        from your MTN recharges — and claim your prizes instantly.
+                      </p>
+                    </div>
                   </div>
                   <div className="mt-4 flex items-center gap-2 text-[11px] text-muted-foreground/40 justify-center">
                     <Shield className="w-3 h-3" />
