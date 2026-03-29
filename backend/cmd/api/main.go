@@ -27,6 +27,38 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+
+	// ─── Fast-start HTTP server ────────────────────────────────────────────
+	// Register /health IMMEDIATELY and start the server in a goroutine.
+	// This guarantees Render's health-check passes within seconds even if the
+	// DB or Redis take time to become available.  All other routes are registered
+	// below, after every service has been initialised; Go's ServeMux is safe
+	// for concurrent Handle() calls after ListenAndServe has started.
+	port := "8080"
+	if p := os.Getenv("PORT"); p != "" {
+		port = p
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "1.0.0"}); err != nil {
+			log.Printf("[health] encode error: %v", err)
+		}
+	})
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      middleware.CORS(middleware.RequestLogger(mux)),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	go func() {
+		log.Printf("[API] Loyalty Nexus API listening on :%s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[API] Server failed: %v", err)
+		}
+	}()
+
 	// ─── Database ─────────────────────────────────────────────
 	// Retry DB connection up to 10 times with 3s backoff.
 	// On Render, the internal DB hostname is always reachable but may take
@@ -168,16 +200,8 @@ func main() {
 	passportH := handlers.NewPassportHandler(passportSvc).WithConfig(cfg)
 	fraudH    := handlers.NewFraudHandler(fraudSvc)
 
-	// ─── Router ───────────────────────────────────────────────
-	mux := http.NewServeMux()
-
-	// Health
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "1.0.0"}); err != nil {
-			log.Printf("[health] encode error: %v", err)
-		}
-	})
+	// ─── Routes (registered on the already-running mux) ─────────────────────
+	// /health is already registered above; register all other endpoints here.
 
 	// ─── Auth (public) ────────────────────────────────────────
 	mux.HandleFunc("POST /api/v1/auth/otp/send", authH.SendOTP)
@@ -391,21 +415,7 @@ func main() {
 	mux.Handle("GET    /api/v1/admin/health",                 adminAuth(http.HandlerFunc(adminH.GetHealth)))
 	mux.Handle("GET    /api/v1/admin/ai-health",              adminAuth(http.HandlerFunc(adminH.GetAIHealth)))
 
-	// ─── HTTP Server ──────────────────────────────────────────
-	port := cfg.GetString("port", "8080")
-	if p := os.Getenv("PORT"); p != "" {
-		port = p
-	}
-
-	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      middleware.CORS(middleware.RequestLogger(mux)),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-
-	log.Printf("[API] Loyalty Nexus API starting on :%s (mode: %s)", port, cfg.GetString("operation_mode", "independent"))
+	log.Printf("[API] All routes registered. Mode: %s", cfg.GetString("operation_mode", "independent"))
 
 	// ─── Recharge-event → leaderboard broadcast ───────────────
 	// Subscribe to the recharge stream; on every successful recharge re-fetch
@@ -421,12 +431,6 @@ func main() {
 		leaderboardHub.BroadcastLeaderboard(entries, currentWarPeriodStr(), "update")
 		return nil
 	})
-
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("[API] Server failed: %v", err)
-		}
-	}()
 
 	<-ctx.Done()
 	log.Println("[API] Shutting down gracefully...")
