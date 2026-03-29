@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import useSWR from "swr";
 import AppShell from "@/components/layout/AppShell";
@@ -24,6 +24,7 @@ import type { GeneratePayload } from "../../components/studio/templates";
 import type { UITemplate, UIConfig } from "../../types/studio";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Tool {
@@ -1505,6 +1506,14 @@ function ToolDrawer({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function StudioPage() {
+  return (
+    <Suspense>
+      <StudioPageInner />
+    </Suspense>
+  );
+}
+
+function StudioPageInner() {
   const { data: toolsData, isLoading: toolsLoading } = useSWR("/studio/tools",   fetchTools);
   const { data: galleryData, mutate: mutateGallery }  = useSWR("/studio/gallery", fetchGallery, {
     refreshInterval: 15000,
@@ -1544,6 +1553,7 @@ export default function StudioPage() {
     try { localStorage.setItem('nexus_chat_session', fresh); } catch { /* ignore */ }
     return fresh;
   });
+  const searchParams    = useSearchParams();
   const [selectedTool,   setSelectedTool]   = useState<Tool | null>(null);
   const [searchQuery,    setSearchQuery]    = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -1568,6 +1578,19 @@ export default function StudioPage() {
       }
     }).catch(() => { /* silent */ });
   }, []);
+
+  // Deep-link: open a specific tool when ?tool=<slug> is in the URL
+  useEffect(() => {
+    const slugParam = searchParams?.get("tool");
+    if (!slugParam || tools.length === 0) return;
+    const match = tools.find((t: Tool) => t.slug === slugParam);
+    if (match) {
+      setSelectedTool(match);
+      setActiveTab("tools");
+    }
+    // Only run once when tools load and slug is present
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tools, searchParams]);
 
   const handleDismissIntro = useCallback(() => {
     setIntroDismissed(true);

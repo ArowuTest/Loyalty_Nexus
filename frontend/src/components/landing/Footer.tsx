@@ -1,8 +1,26 @@
 "use client";
 import React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Zap, Twitter, Instagram, Facebook, Youtube, Mail, Phone } from "lucide-react";
+
+// Map of AI tool display names to their slugs
+const AI_TOOLS = [
+  { label: "Ask Nexus (Free)",    slug: "ai-chat" },
+  { label: "AI Photo Creator",    slug: "ai-photo" },
+  { label: "Video Generator",     slug: "animate-photo" },
+  { label: "Business Plan AI",    slug: "bizplan" },
+  { label: "Voice to Plan",       slug: "voice-to-plan" },
+  { label: "Marketing Jingle",    slug: "jingle" },
+];
+
+function useAuthStatus(): boolean | null {
+  const [isAuth, setIsAuth] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    setIsAuth(!!localStorage.getItem("nexus_token"));
+  }, []);
+  return isAuth;
+}
 
 function scrollToSection(sectionId: string, pathname: string) {
   if (pathname !== "/") {
@@ -14,13 +32,29 @@ function scrollToSection(sectionId: string, pathname: string) {
 
 export default function Footer() {
   const pathname = usePathname();
+  const router   = useRouter();
+  const isAuth   = useAuthStatus();
+
+  /** Dashboard — go to /register if not authed, /dashboard if authed */
+  function handleDashboard(e: React.MouseEvent) {
+    e.preventDefault();
+    if (isAuth) router.push("/dashboard");
+    else        router.push("/register");
+  }
+
+  /** AI Tool — go to /register if not authed, or deep-link into the tool */
+  function handleTool(e: React.MouseEvent, slug: string) {
+    e.preventDefault();
+    if (isAuth) router.push(`/studio?tool=${slug}`);
+    else        router.push("/register");
+  }
 
   return (
     <footer className="border-t border-white/[0.07]" style={{ background: "#0a0b0e" }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14">
         <div className="grid grid-cols-2 md:grid-cols-5 gap-10 mb-12">
 
-          {/* Brand col */}
+          {/* ── Brand ── */}
           <div className="col-span-2 md:col-span-2">
             <Link href="/" className="flex items-center gap-2 mb-5 group w-fit">
               <div className="w-8 h-8 rounded-lg bg-gold-500 flex items-center justify-center">
@@ -58,9 +92,9 @@ export default function Footer() {
             <div className="flex items-center gap-2">
               {[
                 { Icon: Twitter,   href: "https://twitter.com/loyaltynexusng",   label: "X / Twitter" },
-                { Icon: Instagram, href: "https://instagram.com/loyaltynexusng",  label: "Instagram" },
-                { Icon: Facebook,  href: "https://facebook.com/loyaltynexusng",   label: "Facebook" },
-                { Icon: Youtube,   href: "https://youtube.com/@loyaltynexusng",   label: "YouTube" },
+                { Icon: Instagram, href: "https://instagram.com/loyaltynexusng", label: "Instagram" },
+                { Icon: Facebook,  href: "https://facebook.com/loyaltynexusng",  label: "Facebook" },
+                { Icon: Youtube,   href: "https://youtube.com/@loyaltynexusng",  label: "YouTube" },
               ].map(({ Icon, href, label }) => (
                 <a
                   key={label}
@@ -76,7 +110,7 @@ export default function Footer() {
             </div>
           </div>
 
-          {/* Product */}
+          {/* ── Product ── */}
           <div>
             <h4 className="text-[11px] font-black uppercase tracking-[0.18em] text-white/30 mb-4">Product</h4>
             <ul className="space-y-2.5">
@@ -105,43 +139,37 @@ export default function Footer() {
                 </button>
               </li>
               <li>
-                <Link href="/dashboard" className="text-[13px] text-white/40 hover:text-white transition-colors">
+                {/* Dashboard — auth-aware */}
+                <a
+                  href="#"
+                  onClick={handleDashboard}
+                  className="text-[13px] text-white/40 hover:text-white transition-colors"
+                >
                   Dashboard
-                </Link>
-              </li>
-              <li>
-                <Link href="/dashboard" className="text-[13px] text-white/40 hover:text-white transition-colors">
-                  Refer &amp; Earn
-                </Link>
+                </a>
               </li>
             </ul>
           </div>
 
-          {/* AI Tools */}
+          {/* ── AI Tools ── */}
           <div>
             <h4 className="text-[11px] font-black uppercase tracking-[0.18em] text-white/30 mb-4">AI Tools</h4>
             <ul className="space-y-2.5">
-              {[
-                "Ask Nexus (Free)",
-                "AI Photo Creator",
-                "Video Generator",
-                "Business Plan AI",
-                "Voice to Plan",
-                "Marketing Jingle",
-              ].map(t => (
-                <li key={t}>
-                  <Link
-                    href="/studio"
+              {AI_TOOLS.map(({ label, slug }) => (
+                <li key={slug}>
+                  <a
+                    href="#"
+                    onClick={(e) => handleTool(e, slug)}
                     className="text-[13px] text-white/40 hover:text-white transition-colors"
                   >
-                    {t}
-                  </Link>
+                    {label}
+                  </a>
                 </li>
               ))}
             </ul>
           </div>
 
-          {/* Company */}
+          {/* ── Company ── */}
           <div>
             <h4 className="text-[11px] font-black uppercase tracking-[0.18em] text-white/30 mb-4">Company</h4>
             <ul className="space-y-2.5">
@@ -151,29 +179,25 @@ export default function Footer() {
                 { label: "Careers",          href: "/careers" },
                 { label: "Privacy Policy",   href: "/privacy" },
                 { label: "Terms of Service", href: "/terms" },
+                { label: "Contact Us",       href: "mailto:hello@loyaltynexus.ng" },
               ].map(({ label, href }) => (
                 <li key={label}>
-                  <Link
-                    href={href}
-                    className="text-[13px] text-white/40 hover:text-white transition-colors"
-                  >
-                    {label}
-                  </Link>
+                  {href.startsWith("mailto:") ? (
+                    <a href={href} className="text-[13px] text-white/40 hover:text-white transition-colors">
+                      {label}
+                    </a>
+                  ) : (
+                    <Link href={href} className="text-[13px] text-white/40 hover:text-white transition-colors">
+                      {label}
+                    </Link>
+                  )}
                 </li>
               ))}
-              <li>
-                <a
-                  href="mailto:hello@loyaltynexus.ng"
-                  className="text-[13px] text-white/40 hover:text-white transition-colors"
-                >
-                  Contact Us
-                </a>
-              </li>
             </ul>
           </div>
         </div>
 
-        {/* Bottom bar */}
+        {/* ── Bottom bar ── */}
         <div className="border-t border-white/[0.06] pt-7 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-[12px] text-white/25">
             © 2026 Loyalty Nexus · All rights reserved · Made with ❤️ in Nigeria 🇳🇬
@@ -181,11 +205,9 @@ export default function Footer() {
           <div className="flex flex-wrap items-center justify-center gap-4">
             <Link href="/privacy" className="text-[11px] text-white/25 hover:text-white/50 transition-colors">Privacy Policy</Link>
             <span className="text-white/15 text-[11px]">·</span>
-            <Link href="/terms" className="text-[11px] text-white/25 hover:text-white/50 transition-colors">Terms of Service</Link>
+            <Link href="/terms"   className="text-[11px] text-white/25 hover:text-white/50 transition-colors">Terms of Service</Link>
             <span className="text-white/15 text-[11px]">·</span>
-            <p className="text-[11px] text-white/20">
-              Powered by Groq · Google Gemini · ElevenLabs · AssemblyAI
-            </p>
+            <p className="text-[11px] text-white/20">Powered by Groq · Google Gemini · ElevenLabs · AssemblyAI</p>
           </div>
         </div>
       </div>

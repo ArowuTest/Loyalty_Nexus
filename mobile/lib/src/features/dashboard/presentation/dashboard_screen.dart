@@ -888,7 +888,7 @@ class _RechargeCTA extends StatelessWidget {
           const Text('Recharge to earn more ⚡',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
           const SizedBox(height: 3),
-          const Text('₦200 = 1 Pulse Point · ₦1,000+ = free spin',
+          const Text('₦250 = 1 Pulse Point · ₦1,000+ = free spin',
             style: TextStyle(color: Color(0xFF9ca3af), fontSize: 11)),
         ])),
         const SizedBox(width: 12),
