@@ -55,26 +55,8 @@ EXCEPTION WHEN duplicate_table THEN NULL;
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- ─── 3. SEED SUPER ADMIN ──────────────────────────────────────────────────────
--- Password: Admin@LoyaltyNexus2026!  (bcrypt cost=10)
--- Change via admin panel after first login.
-INSERT INTO admin_users (id, email, password_hash, full_name, role, is_active, created_at, updated_at)
-VALUES (
-    gen_random_uuid(),
-    'admin@loyaltynexus.ng',
-    '$2b$10$8//qgubr/wos5AbYuMmeNeEEbPUg1GxyfkduWx.OZFRzdyodbPzR2',
-    'Platform Admin',
-    'super_admin',
-    TRUE,
-    NOW(),
-    NOW()
-)
-ON CONFLICT (email) DO UPDATE SET
-    is_active  = TRUE,
-    role       = 'super_admin',
-    updated_at = NOW();
-
--- ─── 4. SEED 5 TEST USERS ─────────────────────────────────────────────────────
+-- ─── 3. SEED 5 TEST USERS ─────────────────────────────────────────────────────
+-- Admin is seeded at startup via ADMIN_SEED_EMAIL / ADMIN_SEED_PASSWORD env vars.
 INSERT INTO users (
     id, phone_number, user_code, state, tier,
     streak_count, streak_expires_at, streak_grace_used,
