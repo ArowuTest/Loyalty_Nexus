@@ -36,11 +36,17 @@ func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
 	if req.Purpose == "" {
 		req.Purpose = "login"
 	}
-	if err := h.authSvc.SendOTP(r.Context(), req.PhoneNumber, req.Purpose); err != nil {
+	devCode, err := h.authSvc.SendOTP(r.Context(), req.PhoneNumber, req.Purpose)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send OTP"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "OTP sent"})
+	resp := map[string]interface{}{"message": "OTP sent"}
+	// Non-production only: include plaintext OTP in response so tests don't need log access
+	if devCode != "" {
+		resp["dev_otp"] = devCode
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
@@ -67,22 +73,3 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// DevPeekOTP returns the plaintext OTP without consuming it — DEV_OTP_BYPASS=true only.
-// GET /api/v1/auth/otp/dev-peek?phone=08099000001&purpose=login
-func (h *AuthHandler) DevPeekOTP(w http.ResponseWriter, r *http.Request) {
-	phone   := r.URL.Query().Get("phone")
-	purpose := r.URL.Query().Get("purpose")
-	if phone == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "phone is required"})
-		return
-	}
-	if purpose == "" {
-		purpose = "login"
-	}
-	code, err := h.authSvc.DevPeekOTP(r.Context(), phone, purpose)
-	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"otp": code, "phone": phone})
-}

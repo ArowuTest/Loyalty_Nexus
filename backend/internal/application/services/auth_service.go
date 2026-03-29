@@ -61,19 +61,22 @@ func NewAuthService(
 	}
 }
 
-// SendOTP generates a 6-digit OTP, encrypts it with AES-256-GCM, and delivers via Termii.
-func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) error {
+// SendOTP generates a 6-digit OTP, saves it, and delivers via Termii.
+// Returns (devCode, error): devCode is the plaintext OTP in non-production environments
+// so the API response can surface it for testing — empty string in production.
+// SMS failure is logged but does NOT fail the request; the OTP is already saved in the DB.
+func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) (string, error) {
 	// Generate 6-digit code using CSPRNG
 	n, err := rand.Int(rand.Reader, big.NewInt(900000))
 	if err != nil {
-		return fmt.Errorf("failed to generate OTP: %w", err)
+		return "", fmt.Errorf("failed to generate OTP: %w", err)
 	}
 	code := fmt.Sprintf("%06d", n.Int64()+100000)
 
 	// Encrypt for storage (AES-256-GCM)
 	encrypted, err := s.encrypt(code)
 	if err != nil {
-		return fmt.Errorf("failed to encrypt OTP: %w", err)
+		return "", fmt.Errorf("failed to encrypt OTP: %w", err)
 	}
 
 	otp := &entities.AuthOTP{
@@ -87,14 +90,28 @@ func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) error 
 	}
 
 	if err := s.authRepo.CreateOTP(ctx, otp); err != nil {
-		return fmt.Errorf("failed to save OTP: %w", err)
+		return "", fmt.Errorf("failed to save OTP: %w", err)
 	}
 
-	// Always log the OTP so it's readable from Render logs even if SMS delivery fails
-	log.Printf("[OTP] phone=%s purpose=%s code=%s expires=%s", phone, purpose, code, otp.ExpiresAt.Format("15:04:05"))
+	// In non-production: log OTP (last 4 digits of phone only) and return plaintext
+	// so the handler can include it in the API response for testing.
+	// In production: ENVIRONMENT=production so devCode is always "".
+	devCode := ""
+	if os.Getenv("ENVIRONMENT") != "production" {
+		suffix := phone
+		if len(phone) > 4 {
+			suffix = "..." + phone[len(phone)-4:]
+		}
+		log.Printf("[OTP-DEBUG] phone=%s purpose=%s code=%s", suffix, purpose, code)
+		devCode = code
+	}
 
-	// Deliver SMS via Termii
-	return s.notifySvc.SendOTP(ctx, phone, code)
+	// Deliver SMS — failure is non-fatal; OTP is already in the DB
+	if err := s.notifySvc.SendOTP(ctx, phone, code); err != nil {
+		log.Printf("[OTP] SMS delivery failed for %s: %v (OTP still valid in DB)", phone, err)
+	}
+
+	return devCode, nil
 }
 
 // VerifyOTP checks the OTP and returns a JWT on success.
@@ -268,21 +285,4 @@ func mustEnv(key string) string {
 		panic("required environment variable not set: " + key)
 	}
 	return v
-}
-
-// DevPeekOTP returns the plaintext OTP for a phone number — ONLY when DEV_OTP_BYPASS=true.
-// Used for E2E testing when Termii SMS is not configured. Never call in production.
-func (s *AuthService) DevPeekOTP(ctx context.Context, phone, purpose string) (string, error) {
-	if os.Getenv("DEV_OTP_BYPASS") != "true" {
-		return "", errors.New("dev peek not available in this environment")
-	}
-	otp, err := s.authRepo.FindLatestPendingOTP(ctx, phone, purpose)
-	if err != nil {
-		return "", fmt.Errorf("no pending OTP found: %w", err)
-	}
-	plain, err := s.decrypt(otp.Code)
-	if err != nil {
-		return "", fmt.Errorf("decrypt failed: %w", err)
-	}
-	return plain, nil
 }
