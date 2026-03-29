@@ -59,14 +59,43 @@ export default function NavBar({ onLoginClick }: NavBarProps) {
   };
 
   // Scroll to anchor on home page, or navigate with hash
-  const handleAnchorNav = (href: string, anchor: string | null) => {
+  const scrollToAnchor = (anchor: string, delay = 0) => {
+    const doScroll = () => {
+      const el = document.getElementById(anchor);
+      if (el) {
+        // account for fixed navbar height (64px)
+        const top = el.getBoundingClientRect().top + window.scrollY - 72;
+        window.scrollTo({ top, behavior: "smooth" });
+      }
+    };
+    if (delay > 0) {
+      setTimeout(doScroll, delay);
+    } else {
+      doScroll();
+    }
+  };
+
+  const handleAnchorNav = (href: string, anchor: string | null, closeMenuFirst = false) => {
     if (!anchor) { router.push(href); return; }
     if (pathname === "/") {
-      document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      // Wait for mobile menu close animation (220ms) before scrolling
+      scrollToAnchor(anchor, closeMenuFirst ? 260 : 0);
     } else {
       router.push(`/#${anchor}`);
     }
   };
+
+  // Handle hash on mount / route change (e.g. navigated to /#ai-studio from another page)
+  useEffect(() => {
+    if (pathname === "/" && window.location.hash) {
+      const anchor = window.location.hash.slice(1);
+      // Small delay to let the page render fully before scrolling
+      scrollToAnchor(anchor, 300);
+      // Clean the hash from the URL silently
+      window.history.replaceState(null, "", "/");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   return (
     <motion.header
@@ -184,11 +213,11 @@ export default function NavBar({ onLoginClick }: NavBarProps) {
                 }
                 if (anchor) {
                   return (
-                    <button key={href} onClick={() => { setMenuOpen(false); handleAnchorNav(href, anchor); }} className={mobileClass}>{label}</button>
+                    <button key={href} onClick={() => { setMenuOpen(false); handleAnchorNav(href, anchor, true); }} className={mobileClass}>{label}</button>
                   );
                 }
                 return (
-                  <Link key={href} href={href} className={mobileClass}>{label}</Link>
+                  <Link key={href} href={href} className={mobileClass} onClick={() => setMenuOpen(false)}>{label}</Link>
                 );
               })}
               <div className="pt-3 mt-1 border-t border-white/[0.07]">
