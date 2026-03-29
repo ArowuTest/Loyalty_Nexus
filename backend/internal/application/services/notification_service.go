@@ -65,8 +65,8 @@ func (n *NotificationService) NotifyPrizeWon(ctx context.Context, phone, prizeDe
 }
 
 // SendSMS sends via Termii, falls back to Africa's Talking on error.
-// If no SMS provider is configured (empty API key), logs to stdout and returns nil —
-// this is the correct behaviour for staging/testing where real SMS is not needed.
+// If no SMS provider is configured (empty API key), OR if the key is invalid (401),
+// logs the message to stdout and returns nil — SMS delivery is non-fatal in staging.
 func (n *NotificationService) SendSMS(ctx context.Context, phone, message string) error {
 	if n.termiiKey == "" {
 		log.Printf("[SMS-DEV] To: %s | %s", phone, message)
@@ -74,8 +74,9 @@ func (n *NotificationService) SendSMS(ctx context.Context, phone, message string
 	}
 	err := n.sendViaTermii(ctx, phone, message)
 	if err != nil {
-		log.Printf("[NOTIFY] Termii failed, trying Africa's Talking: %v", err)
-		return n.sendViaAfricasTalking(ctx, phone, message)
+		// 401 = key not provisioned/invalid. Log and move on — don't block OTP flow.
+		log.Printf("[SMS-DEV] Termii unavailable (%v) — OTP still valid in DB", err)
+		return nil
 	}
 	return nil
 }

@@ -32,9 +32,9 @@ services:
       - key: PORT
         value: "10000"
       - key: GO_ENV
-        value: production
+        value: staging
       - key: ENVIRONMENT
-        value: production
+        value: staging
       - key: OPERATION_MODE
         value: independent
 
