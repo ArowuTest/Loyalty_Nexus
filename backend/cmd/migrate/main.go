@@ -1,3 +1,4 @@
+// Build: 2026-03-29T01:58:11Z
 // cmd/migrate/main.go — Production database migration runner for Loyalty Nexus.
 //
 // Usage:
@@ -80,6 +81,40 @@ func main() {
 		}
 		version, dirty, _ := m.Version()
 		log.Printf("[migrate] Successfully migrated to version %d (dirty=%v)", version, dirty)
+
+	case "fix-and-up":
+		// Auto-detect and fix dirty migration state, then run all pending migrations.
+		// This is safe for both fresh DBs and DBs with a dirty migration flag.
+		version, dirty, vErr := m.Version()
+		if vErr != nil && !errors.Is(vErr, migrate.ErrNilVersion) {
+			log.Fatalf("[migrate] fix-and-up: version check failed: %v", vErr)
+		}
+		if dirty {
+			// Rewind to the version BEFORE the dirty one so it gets re-run cleanly.
+			prevVersion := int(version) - 1
+			if prevVersion < 0 {
+				prevVersion = 0
+			}
+			log.Printf("[migrate] fix-and-up: dirty version %d detected — rewinding to v%d", version, prevVersion)
+			if err := m.Force(prevVersion); err != nil {
+				log.Fatalf("[migrate] fix-and-up: force v%d failed: %v", prevVersion, err)
+			}
+			log.Printf("[migrate] fix-and-up: dirty flag cleared, will re-run v%d", version)
+		} else if errors.Is(vErr, migrate.ErrNilVersion) {
+			log.Println("[migrate] fix-and-up: fresh database (no migrations applied yet)")
+		} else {
+			log.Printf("[migrate] fix-and-up: clean state at v%d — no fix needed", version)
+		}
+		// Now run all pending migrations
+		if err := m.Up(); err != nil {
+			if errors.Is(err, migrate.ErrNoChange) {
+				log.Println("[migrate] fix-and-up: no new migrations to apply — schema up to date.")
+				os.Exit(0)
+			}
+			log.Fatalf("[migrate] fix-and-up: up failed: %v", err)
+		}
+		finalVersion, finalDirty, _ := m.Version()
+		log.Printf("[migrate] fix-and-up: completed — now at version %d (dirty=%v)", finalVersion, finalDirty)
 
 	case "down":
 		if err := m.Steps(-1); err != nil {
