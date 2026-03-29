@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS regional_settings (
 );
 
 -- 2. Regional Leaderboard (Aggregated real-time)
-CREATE TABLE regional_stats (
+CREATE TABLE IF NOT EXISTS regional_stats (
     region_code TEXT PRIMARY KEY REFERENCES regional_settings(region_code),
     total_recharge_kobo BIGINT DEFAULT 0,
     active_subscribers INTEGER DEFAULT 0,
@@ -32,7 +32,7 @@ INSERT INTO regional_settings (region_code, region_name) VALUES
 ('ENU', 'Enugu');
 
 -- 3. Region Tournament History
-CREATE TABLE region_tournaments (
+CREATE TABLE IF NOT EXISTS region_tournaments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     start_time TIMESTAMPTZ NOT NULL,
     end_time TIMESTAMPTZ NOT NULL,
