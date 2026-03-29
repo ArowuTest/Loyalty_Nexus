@@ -11,17 +11,15 @@ import (
 	"time"
 )
 
-// NotificationService sends SMS via Termii (primary) and Africa's Talking (fallback).
+// NotificationService sends SMS via Termii with stdout fallback for staging.
 type NotificationService struct {
-	termiiKey string
-	atKey     string
+	termiiKey  string
 	httpClient *http.Client
 }
 
 func NewNotificationService(termiiKey string) *NotificationService {
 	return &NotificationService{
-		termiiKey: termiiKey,
-		atKey:     os.Getenv("AFRICAS_TALKING_API_KEY"),
+		termiiKey:  termiiKey,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -102,33 +100,6 @@ func (n *NotificationService) sendViaTermii(ctx context.Context, phone, message 
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("Termii HTTP %d", resp.StatusCode)
-	}
-	return nil
-}
-
-func (n *NotificationService) sendViaAfricasTalking(ctx context.Context, phone, message string) error {
-	if n.atKey == "" {
-		return fmt.Errorf("Africa's Talking key not configured")
-	}
-	payload := map[string]string{
-		"username": "loyalty_nexus",
-		"to":       phone,
-		"message":  message,
-		"apiKey":   n.atKey,
-	}
-	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.africastalking.com/version1/messaging", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("apiKey", n.atKey)
-
-	resp, err := n.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("Africa's Talking HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
