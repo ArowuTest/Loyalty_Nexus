@@ -70,6 +70,43 @@ CREATE TABLE IF NOT EXISTS users (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Ensure users table has phone_number column (migration 002 uses 'msisdn').
+-- Migration 020 was supposed to rename it, but may not have run.
+DO $$ BEGIN
+    -- If msisdn exists but phone_number doesn't: rename
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name='users' AND column_name='msisdn')
+    AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name='users' AND column_name='phone_number') THEN
+        ALTER TABLE users RENAME COLUMN msisdn TO phone_number;
+    END IF;
+    -- If phone_number still doesn't exist: add it
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name='users' AND column_name='phone_number') THEN
+        ALTER TABLE users ADD COLUMN phone_number TEXT NOT NULL DEFAULT '';
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+-- Similarly fix transactions table
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name='transactions' AND column_name='msisdn')
+    AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name='transactions' AND column_name='phone_number') THEN
+        ALTER TABLE transactions RENAME COLUMN msisdn TO phone_number;
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+-- Fix auth_otps table
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name='auth_otps' AND column_name='msisdn')
+    AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_name='auth_otps' AND column_name='phone_number') THEN
+        ALTER TABLE auth_otps RENAME COLUMN msisdn TO phone_number;
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_60 ON users(phone_number);
 
 CREATE TABLE IF NOT EXISTS transactions (
