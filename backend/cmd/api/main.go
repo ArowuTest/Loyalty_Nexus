@@ -280,6 +280,8 @@ func main() {
 		// ─── Auth (public) ────────────────────────────────────────
 		mux.HandleFunc("POST /api/v1/auth/otp/send", authH.SendOTP)
 		mux.HandleFunc("POST /api/v1/auth/otp/verify", authH.VerifyOTP)
+		// DEV ONLY — returns plaintext OTP from DB; active only when DEV_OTP_BYPASS=true
+		mux.HandleFunc("GET /api/v1/auth/otp/dev-peek", authH.DevPeekOTP)
 
 		// ─── Passport banner config (public — no auth required) ──
 		mux.HandleFunc("GET /api/v1/passport/banner-config", passportH.GetBannerConfig)

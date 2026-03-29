@@ -269,3 +269,20 @@ func mustEnv(key string) string {
 	}
 	return v
 }
+
+// DevPeekOTP returns the plaintext OTP for a phone number — ONLY when DEV_OTP_BYPASS=true.
+// Used for E2E testing when Termii SMS is not configured. Never call in production.
+func (s *AuthService) DevPeekOTP(ctx context.Context, phone, purpose string) (string, error) {
+	if os.Getenv("DEV_OTP_BYPASS") != "true" {
+		return "", errors.New("dev peek not available in this environment")
+	}
+	otp, err := s.authRepo.FindLatestPendingOTP(ctx, phone, purpose)
+	if err != nil {
+		return "", fmt.Errorf("no pending OTP found: %w", err)
+	}
+	plain, err := s.decrypt(otp.Code)
+	if err != nil {
+		return "", fmt.Errorf("decrypt failed: %w", err)
+	}
+	return plain, nil
+}
