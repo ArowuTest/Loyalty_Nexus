@@ -25,6 +25,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -85,13 +86,39 @@ func (h *USSDHandler) SetKnowledgeService(ks *services.USSDKnowledgeService) {
 }
 
 // Handle is the HTTP entry-point for Africa's Talking USSD gateway POST requests.
+// Accepts both:
+//   - application/x-www-form-urlencoded (Africa's Talking production gateway)
+//   - application/json (API testing and dev tooling)
 func (h *USSDHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	if parseErr := r.ParseForm(); parseErr != nil {
-		log.Printf("[USSD] ParseForm error: %v", parseErr)
+	var sessionID, phone, text, serviceCode string
+
+	ct := r.Header.Get("Content-Type")
+	if strings.Contains(ct, "application/json") {
+		// JSON body (dev/testing)
+		var payload struct {
+			SessionID   string `json:"sessionId"`
+			PhoneNumber string `json:"phoneNumber"`
+			Text        string `json:"text"`
+			ServiceCode string `json:"serviceCode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			log.Printf("[USSD] JSON decode error: %v", err)
+		}
+		sessionID   = payload.SessionID
+		phone       = payload.PhoneNumber
+		text        = payload.Text
+		serviceCode = payload.ServiceCode
+	} else {
+		// Form-urlencoded (Africa's Talking gateway — production)
+		if parseErr := r.ParseForm(); parseErr != nil {
+			log.Printf("[USSD] ParseForm error: %v", parseErr)
+		}
+		sessionID   = r.FormValue("sessionId")
+		phone       = r.FormValue("phoneNumber")
+		text        = r.FormValue("text")
+		serviceCode = r.FormValue("serviceCode")
 	}
-	sessionID := r.FormValue("sessionId")
-	phone     := r.FormValue("phoneNumber")
-	text      := r.FormValue("text")
+	_ = serviceCode // used for routing config in future
 
 	// REQ-6.5: Rollback any expired sessions with pending spins before processing.
 	// Use context.Background() so the goroutine is not cancelled when the HTTP
