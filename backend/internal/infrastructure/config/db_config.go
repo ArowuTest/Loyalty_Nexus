@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"encoding/json"
 	"log"
 	"os"
@@ -58,6 +59,9 @@ func (c *ConfigManager) autoRefresh() {
 }
 
 func (c *ConfigManager) Refresh(ctx context.Context) error {
+	if c.db == nil {
+		return nil // DB not yet connected, skip refresh
+	}
 	type row struct {
 		Key   string `gorm:"column:key"`
 		Value string `gorm:"column:value"`
@@ -149,6 +153,9 @@ func (c *ConfigManager) GetBool(key string, defaultVal bool) bool {
 // Set writes a key-value pair to network_configs and refreshes the in-memory cache.
 // This is used by admin endpoints to update business rules at runtime.
 func (c *ConfigManager) Set(ctx context.Context, key, value string) error {
+	if c.db == nil {
+		return fmt.Errorf("database not connected")
+	}
 	err := c.db.WithContext(ctx).Exec(
 		`INSERT INTO network_configs (key, value, updated_at)
 		 VALUES (?, ?, NOW())
