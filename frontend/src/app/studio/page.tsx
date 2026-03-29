@@ -777,94 +777,113 @@ function ChatBubble({ msg }: { msg: Message }) {
 const CHAT_REDIRECT_SLUGS = new Set(["web-search-ai", "code-helper"]);
 
 function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () => void; userPoints?: number }) {
-  const cfg          = catCfg(tool.category);
-  const isFree       = tool.is_free || tool.point_cost === 0;
-  const isNew        = NEW_TOOL_SLUGS.has(tool.slug);
-  const meta         = TOOL_META[tool.slug];
-  const outType      = getOutputType(tool.slug);
-  const entryLocked  = !tool.is_free && tool.entry_point_cost > 0 && userPoints < tool.entry_point_cost;
-  const isChatTool   = CHAT_REDIRECT_SLUGS.has(tool.slug);
+  const cfg         = catCfg(tool.category);
+  const isFree      = tool.is_free || tool.point_cost === 0;
+  const isNew       = NEW_TOOL_SLUGS.has(tool.slug);
+  const meta        = TOOL_META[tool.slug];
+  const outType     = getOutputType(tool.slug);
+  const entryLocked = !tool.is_free && tool.entry_point_cost > 0 && userPoints < tool.entry_point_cost;
+  const isChatTool  = CHAT_REDIRECT_SLUGS.has(tool.slug);
+
+  const outputColour =
+    VIDEO_SLUGS.has(tool.slug) ? "bg-red-500/15 text-red-300 border-red-500/25"
+    : AUDIO_SLUGS.has(tool.slug) ? "bg-green-500/15 text-green-300 border-green-500/25"
+    : IMAGE_SLUGS.has(tool.slug) ? "bg-pink-500/15 text-pink-300 border-pink-500/25"
+    : CODE_SLUGS.has(tool.slug)  ? "bg-lime-500/15 text-lime-300 border-lime-500/25"
+    : WEB_SLUGS.has(tool.slug)   ? "bg-cyan-500/15 text-cyan-300 border-cyan-500/25"
+    : "bg-white/8 text-white/40 border-white/10";
 
   return (
     <motion.button
-      whileHover={{ scale: 1.012 }} whileTap={{ scale: 0.98 }}
+      whileHover={{ y: -2, scale: 1.01 }}
+      whileTap={{ scale: 0.98 }}
       onClick={onClick}
-      className="w-full glass border border-white/[0.08] p-4 text-left group hover:border-white/20 transition-all relative overflow-hidden"
+      className="w-full text-left group relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04] hover:border-white/20 hover:bg-white/[0.07] transition-all duration-200 flex flex-col"
     >
-      {/* Entry-locked overlay */}
+      {/* Locked overlay */}
       {entryLocked && (
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] rounded-[inherit] flex items-center justify-end pr-3 z-10">
-          <div className="flex items-center gap-1 text-amber-300/80 text-[10px] font-semibold bg-amber-500/15 border border-amber-500/20 rounded-lg px-2 py-1">
-            <Lock size={9} /> {tool.entry_point_cost} pts to unlock
-          </div>
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-[3px] rounded-2xl flex flex-col items-center justify-center z-20 gap-1.5">
+          <Lock size={18} className="text-amber-300/70" />
+          <p className="text-amber-300/80 text-xs font-semibold">{tool.entry_point_cost} pts to unlock</p>
         </div>
       )}
-      {/* Chat-mode redirect hint */}
-      {isChatTool && (
-        <div className="absolute top-2 right-2 z-10">
-          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-            💬 Chat
-          </span>
-        </div>
-      )}
-      <div className="flex items-start gap-3.5">
-        <div className={cn(
-          "p-2.5 rounded-xl bg-gradient-to-br flex-shrink-0 transition-transform group-hover:scale-110 mt-0.5",
-          cfg.color
-        )}>
-          {cfg.icon}
-        </div>
 
-        <div className="flex-1 min-w-0">
-          {/* Name + badges row */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="text-white font-semibold text-sm">{tool.name}</p>
-            {isNew && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/25 text-purple-300 border border-purple-500/30 leading-none">
-                NEW
-              </span>
-            )}
-            {isFree && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30 leading-none">
-                FREE
-              </span>
-            )}
+      {/* Coloured header strip with icon */}
+      <div className={cn(
+        "w-full px-4 pt-4 pb-3 bg-gradient-to-br flex items-center justify-between",
+        cfg.color
+      )}>
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-white/10 border border-white/10 flex-shrink-0">
+            {cfg.icon}
           </div>
+          <div className="flex flex-col gap-0.5">
+            <p className="text-white font-bold text-sm leading-tight">{tool.name}</p>
+            <div className="flex items-center gap-1">
+              {isNew && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/30 text-purple-200 border border-purple-400/30 leading-none">
+                  NEW
+                </span>
+              )}
+              {isFree && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/25 text-green-200 border border-green-400/30 leading-none">
+                  FREE
+                </span>
+              )}
+              {isChatTool && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-cyan-500/25 text-cyan-200 border border-cyan-400/30 leading-none">
+                  💬 Chat
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        {/* Output type badge top-right */}
+        <span className={cn("text-[9px] font-bold px-2 py-1 rounded-full border leading-none flex-shrink-0", outputColour)}>
+          {outType.emoji} {outType.label}
+        </span>
+      </div>
 
-          {/* Description */}
-          <p className="text-white/45 text-xs mt-0.5 line-clamp-1 leading-relaxed">{tool.description}</p>
+      {/* Body */}
+      <div className="px-4 py-3 flex flex-col gap-2.5 flex-1">
+        {/* Description — full 2 lines, readable */}
+        <p className="text-white/65 text-xs leading-relaxed line-clamp-2">{tool.description}</p>
 
-          {/* Meta badges */}
-          <div className="flex items-center gap-2 mt-2 flex-wrap">
+        {/* What you get row */}
+        {meta && (
+          <div className="flex items-start gap-1.5 bg-white/[0.04] border border-white/[0.06] rounded-xl px-3 py-2">
+            <Sparkles size={10} className="text-gold-400 mt-0.5 flex-shrink-0" />
+            <p className="text-white/40 text-[10px] leading-relaxed">
+              <span className="text-white/60 font-semibold">You get:</span> {meta.output}
+            </p>
+          </div>
+        )}
+
+        {/* Pro tip */}
+        {meta?.tip && (
+          <div className="flex items-start gap-1.5">
+            <Info size={9} className="text-white/25 mt-0.5 flex-shrink-0" />
+            <p className="text-white/30 text-[10px] leading-relaxed italic">{meta.tip}</p>
+          </div>
+        )}
+
+        {/* Footer: cost + time + CTA */}
+        <div className="flex items-center justify-between mt-auto pt-1">
+          <div className="flex items-center gap-2">
             <PointsBadge pointCost={tool.point_cost} size="xs" />
-            <span className={cn(
-              "text-[9px] px-1.5 py-0.5 rounded-full border leading-none",
-              VIDEO_SLUGS.has(tool.slug) ? "bg-red-500/15 text-red-300 border-red-500/20"
-              : AUDIO_SLUGS.has(tool.slug) ? "bg-green-500/15 text-green-300 border-green-500/20"
-              : IMAGE_SLUGS.has(tool.slug) ? "bg-pink-500/15 text-pink-300 border-pink-500/20"
-              : CODE_SLUGS.has(tool.slug)  ? "bg-lime-500/15 text-lime-300 border-lime-500/20"
-              : WEB_SLUGS.has(tool.slug)   ? "bg-cyan-500/15 text-cyan-300 border-cyan-500/20"
-              : "bg-white/8 text-white/40 border-white/10"
-            )}>
-              {outType.emoji} {outType.label}
-            </span>
             {meta && (
               <span className="text-[9px] text-white/30 flex items-center gap-0.5 font-medium">
                 <Clock size={9} /> {meta.time}
               </span>
             )}
           </div>
-        </div>
-
-        {/* CTA */}
-        <div className="flex-shrink-0 flex flex-col items-end gap-2 self-center">
           <div className={cn(
-            "flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-xl transition-all",
+            "flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 rounded-xl border transition-all",
             isChatTool
-              ? "bg-cyan-600/20 text-cyan-300 border border-cyan-500/30 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-500"
-              : "bg-gold-500/10 text-gold-400 border border-gold-500/25 group-hover:bg-gold-500/20 group-hover:text-white group-hover:border-gold-500"
+              ? "bg-cyan-600/20 text-cyan-300 border-cyan-500/30 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-500"
+              : "bg-gold-500/10 text-gold-400 border-gold-500/25 group-hover:bg-gold-500/25 group-hover:text-white group-hover:border-gold-500"
           )}>
-            {isChatTool ? "Chat" : "Use Tool"} <ChevronRight size={11} />
+            {isChatTool ? "Open Chat" : "Generate"} <ChevronRight size={11} />
           </div>
         </div>
       </div>
@@ -1534,7 +1553,7 @@ function StudioPageInner() {
     return () => clearInterval(iv);
   }, [gallery, mutateGallery]);
 
-  const [activeTab,      setActiveTab]      = useState<"chat" | "tools" | "gallery">("chat");
+  const [activeTab,      setActiveTab]      = useState<"chat" | "tools" | "gallery">("tools");
   const [chatMode,        setChatMode]        = useState<ChatMode>('general');
   const [messages,       setMessages]       = useState<Message[]>([{
     role: "assistant",
@@ -1955,7 +1974,39 @@ function StudioPageInner() {
                   </button>
                 </div>
               ) : (
-                Object.entries(groupedTools).map(([cat, catTools]) => {
+                <>
+                {/* ── Popular Tools spotlight ── */}
+                {!searchQuery && !activeCategory && (() => {
+                  const POPULAR_SLUGS = ["ai-photo","ai-photo-pro","web-search-ai","narrate-pro","song-creator","code-helper","video-veo","business-plan"];
+                  const spotlightTools = tools.filter(t => POPULAR_SLUGS.includes(t.slug)).slice(0, 6);
+                  if (spotlightTools.length === 0) return null;
+                  return (
+                    <div className="mb-2">
+                      <div className="flex items-center gap-2 mb-3 px-1">
+                        <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-gold-500/15 text-gold-400 border border-gold-500/25">
+                          <Sparkles size={11} /> Popular Tools
+                        </span>
+                        <span className="text-white/20 text-[10px]">Quick access to the most-used tools</span>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {spotlightTools.map((tool) => (
+                          <ToolCard
+                            key={tool.id}
+                            tool={tool}
+                            userPoints={userPoints}
+                            onClick={() => {
+                              if (tool.slug === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); }
+                              else if (tool.slug === "code-helper") { setChatMode("code"); setActiveTab("chat"); }
+                              else { setSelectedTool(tool); }
+                            }}
+                          />
+                        ))}
+                      </div>
+                      <div className="mt-3 border-b border-white/[0.06]" />
+                    </div>
+                  );
+                })()}
+                {Object.entries(groupedTools).map(([cat, catTools]) => {
                   const cfg = catCfg(cat);
                   return (
                     <div key={cat}>
@@ -1965,7 +2016,7 @@ function StudioPageInner() {
                         </span>
                         <span className="text-white/20 text-[10px]">{catTools.length} tool{catTools.length !== 1 ? "s" : ""}</span>
                       </div>
-                      <div className="space-y-1.5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         {catTools.map((tool) => (
                           <ToolCard
                             key={tool.id}
@@ -1988,7 +2039,8 @@ function StudioPageInner() {
                       </div>
                     </div>
                   );
-                })
+                })}
+                </>
               )}
             </motion.div>
           )}
