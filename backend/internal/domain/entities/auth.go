@@ -20,14 +20,16 @@ const (
 )
 
 type AuthOTP struct {
-	ID          uuid.UUID  `db:"id" json:"id"`
-	PhoneNumber string     `db:"phone_number" json:"-"`
-	Code        string     `db:"code" json:"-"`     // AES-256 encrypted at rest
-	Purpose     OTPPurpose `db:"purpose" json:"purpose"`
-	Status      OTPStatus  `db:"status" json:"status"`
-	ExpiresAt   time.Time  `db:"expires_at" json:"expires_at"`
-	CreatedAt   time.Time  `db:"created_at" json:"created_at"`
+	ID          uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"       db:"id"          json:"id"`
+	PhoneNumber string     `gorm:"column:phone_number;not null"          db:"phone_number" json:"-"`
+	Code        string     `gorm:"column:code;not null"                  db:"code"        json:"-"`     // AES-256 encrypted at rest
+	Purpose     OTPPurpose `gorm:"column:purpose;default:login"          db:"purpose"     json:"purpose"`
+	Status      OTPStatus  `gorm:"column:status;default:pending"         db:"status"      json:"status"`
+	ExpiresAt   time.Time  `gorm:"column:expires_at;not null"            db:"expires_at"  json:"expires_at"`
+	CreatedAt   time.Time  `gorm:"column:created_at;autoCreateTime"      db:"created_at"  json:"created_at"`
 }
+
+func (AuthOTP) TableName() string { return "auth_otps" }
 
 // AdminRole defines the RBAC roles for admin users.
 type AdminRole string

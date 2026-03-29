@@ -90,6 +90,7 @@ func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) (strin
 	}
 
 	if err := s.authRepo.CreateOTP(ctx, otp); err != nil {
+		log.Printf("[OTP] DB insert failed for phone=%s: %v", phone, err)
 		return "", fmt.Errorf("failed to save OTP: %w", err)
 	}
 
