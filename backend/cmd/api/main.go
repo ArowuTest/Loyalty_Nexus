@@ -86,6 +86,67 @@ func main() {
 		log.Println("[DB] connected successfully")
 	}
 
+	// ─── Critical-Table Bootstrap ──────────────────────────────────────────────
+	// Belt-and-suspenders: ensure the 3 most critical tables exist regardless of
+	// whether the external migrate binary succeeded. Safe under ALL DB states.
+	if db != nil {
+		bootstrapDDLs := []struct{ name, ddl string }{
+			{"ussd_sessions", `CREATE TABLE IF NOT EXISTS ussd_sessions (
+				id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+				session_id      TEXT        NOT NULL UNIQUE,
+				phone_number    TEXT        NOT NULL,
+				menu_state      TEXT        NOT NULL DEFAULT 'root',
+				input_buffer    TEXT        NOT NULL DEFAULT '',
+				pending_spin_id UUID,
+				expires_at      TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '10 minutes',
+				created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+				updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			)`},
+			{"network_configs", `CREATE TABLE IF NOT EXISTS network_configs (
+				id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+				key         TEXT        NOT NULL UNIQUE,
+				value       TEXT        NOT NULL DEFAULT '',
+				description TEXT,
+				is_public   BOOLEAN     NOT NULL DEFAULT FALSE,
+				updated_by  TEXT        NOT NULL DEFAULT 'system',
+				updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			)`},
+			{"admin_users", `CREATE TABLE IF NOT EXISTS admin_users (
+				id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+				username      TEXT        NOT NULL UNIQUE,
+				password_hash TEXT        NOT NULL,
+				role          TEXT        NOT NULL DEFAULT 'admin',
+				is_active     BOOLEAN     NOT NULL DEFAULT TRUE,
+				created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+				updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+			)`},
+			{"chat_sessions", `CREATE TABLE IF NOT EXISTS chat_sessions (
+				id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+				user_id          UUID,
+				status           TEXT        DEFAULT 'active',
+				last_activity_at TIMESTAMPTZ DEFAULT now(),
+				created_at       TIMESTAMPTZ DEFAULT now()
+			)`},
+		}
+		for _, bt := range bootstrapDDLs {
+			if execErr := db.Exec(bt.ddl).Error; execErr != nil {
+				log.Printf("[BOOTSTRAP] ⚠ ensure %s: %v", bt.name, execErr)
+			} else {
+				log.Printf("[BOOTSTRAP] ✓ %s ready", bt.name)
+			}
+		}
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_ussd_sessions_session_id ON ussd_sessions(session_id)`)
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_ussd_sessions_phone      ON ussd_sessions(phone_number)`)
+		db.Exec(`CREATE INDEX IF NOT EXISTS idx_network_configs_key      ON network_configs(key)`)
+		db.Exec(`INSERT INTO network_configs (key, value, description) VALUES
+			('ussd_session_timeout_seconds', '120',  'USSD session TTL seconds'),
+			('min_recharge_naira',           '500',  'Min recharge for a spin'),
+			('spin_trigger_naira',           '1000', 'Naira per spin credit'),
+			('ai_chat_enabled',             'true',  'Enable AI chat feature')
+		ON CONFLICT (key) DO NOTHING`)
+		log.Println("[BOOTSTRAP] ✓ all critical tables ensured")
+	}
+
 	if db != nil {
 		// ─── Redis ────────────────────────────────────────────────
 		// redis.ParseURL handles redis://, rediss://, and plain host:port formats.
