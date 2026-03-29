@@ -120,6 +120,9 @@ services:
         sync: false
       - key: TERMII_SENDER_ID
         value: Nexus
+      # DEV ONLY: set to "true" to skip Termii SMS and expose /api/v1/auth/otp/dev-peek
+      - key: DEV_OTP_BYPASS
+        value: "true"
 
       # ── Payments ─────────────────────────────────────────────────────────
       - key: PAYSTACK_SECRET_KEY
