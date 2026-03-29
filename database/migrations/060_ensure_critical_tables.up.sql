@@ -444,13 +444,23 @@ CREATE INDEX IF NOT EXISTS idx_ussd_sessions_session_id_60 ON ussd_sessions(sess
 
 CREATE TABLE IF NOT EXISTS admin_users (
     id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    username      TEXT        NOT NULL UNIQUE,
+    username      TEXT        UNIQUE,
+    email         TEXT        UNIQUE,
     password_hash TEXT        NOT NULL,
-    role          TEXT        NOT NULL DEFAULT 'admin',
+    full_name     TEXT        NOT NULL DEFAULT '',
+    role          TEXT        NOT NULL DEFAULT 'super_admin',
     is_active     BOOLEAN     NOT NULL DEFAULT TRUE,
+    last_login_at TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Ensure the email column exists on existing admin_users tables (pre-052 DBs had 'username' only)
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email         TEXT UNIQUE;
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS full_name     TEXT NOT NULL DEFAULT '';
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+-- Ensure role column accepts the full set (it may be an ENUM or TEXT)
+ALTER TABLE admin_users ALTER COLUMN role TYPE TEXT;
+CREATE INDEX IF NOT EXISTS idx_admin_users_email_60 ON admin_users(email);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- SECTION 13: NETWORK CONFIGS — THE CRITICAL TABLE
@@ -712,3 +722,21 @@ ON CONFLICT (phone_number) DO UPDATE SET
     spin_credits         = EXCLUDED.spin_credits,
     stamps_count         = EXCLUDED.stamps_count,
     updated_at           = NOW();
+
+-- ─── SECTION 20: SEED SUPER ADMIN ───────────────────────────────────────────
+-- Password: Admin@LoyaltyNexus2026!
+-- Hash generated with bcrypt cost=10. Change password via admin UI after first login.
+INSERT INTO admin_users (id, email, password_hash, full_name, role, is_active, created_at, updated_at)
+VALUES (
+    gen_random_uuid(),
+    'admin@loyaltynexus.ng',
+    '$2b$10$8//qgubr/wos5AbYuMmeNeEEbPUg1GxyfkduWx.OZFRzdyodbPzR2',
+    'Platform Admin',
+    'super_admin',
+    true,
+    NOW(),
+    NOW()
+)
+ON CONFLICT (email) DO UPDATE SET
+    is_active  = true,
+    updated_at = NOW();

@@ -42,7 +42,9 @@ func (r *postgresAuthRepository) ExpireOldOTPs(ctx context.Context) (int64, erro
 
 func (r *postgresAuthRepository) FindAdminByUsername(ctx context.Context, username string) (*entities.AdminUser, error) {
 	var admin entities.AdminUser
-	err := r.db.WithContext(ctx).Where("username = ?", username).First(&admin).Error
+	// Column is 'email' in the production schema (migration 052 renamed username → email).
+	// The interface still uses "username" as the parameter name for backwards compatibility.
+	err := r.db.WithContext(ctx).Where("email = ?", username).First(&admin).Error
 	return &admin, err
 }
 
