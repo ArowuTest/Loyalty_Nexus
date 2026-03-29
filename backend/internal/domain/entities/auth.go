@@ -42,16 +42,18 @@ const (
 
 // AdminUser represents a platform admin with email/password credentials and RBAC role.
 type AdminUser struct {
-	ID           uuid.UUID `db:"id" json:"id"`
-	Email        string    `db:"email" json:"email"`
-	PasswordHash string    `db:"password_hash" json:"-"`
-	FullName     string    `db:"full_name" json:"full_name"`
-	Role         AdminRole `db:"role" json:"role"`
-	IsActive     bool      `db:"is_active" json:"is_active"`
-	LastLoginAt  *time.Time `db:"last_login_at" json:"last_login_at,omitempty"`
-	CreatedAt    time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
+	ID           uuid.UUID  `gorm:"column:id;primaryKey;type:uuid"          db:"id"            json:"id"`
+	Email        string     `gorm:"column:email;uniqueIndex"                db:"email"         json:"email"`
+	PasswordHash string     `gorm:"column:password_hash"                    db:"password_hash" json:"-"`
+	FullName     string     `gorm:"column:full_name"                        db:"full_name"     json:"full_name"`
+	Role         AdminRole  `gorm:"column:role"                             db:"role"            json:"role"`
+	IsActive     bool       `gorm:"column:is_active"                        db:"is_active"        json:"is_active"`
+	LastLoginAt  *time.Time `gorm:"column:last_login_at"                    db:"last_login_at" json:"last_login_at,omitempty"`
+	CreatedAt    time.Time  `gorm:"column:created_at;autoCreateTime"        db:"created_at"    json:"created_at"`
+	UpdatedAt    time.Time  `gorm:"column:updated_at;autoUpdateTime"        db:"updated_at"    json:"updated_at"`
 }
+
+func (AdminUser) TableName() string { return "admin_users" }
 
 // JWTClaims used for both user and admin tokens.
 type JWTClaims struct {

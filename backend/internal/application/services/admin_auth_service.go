@@ -40,12 +40,15 @@ func (s *AdminAuthService) Login(ctx context.Context, email, password string) (s
 		Where("email = ? AND is_active = true", email).
 		First(&admin).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("[AdminAuth] Login failed: no active admin with email=%s", email)
 			return "", nil, errors.New("invalid credentials")
 		}
+		log.Printf("[AdminAuth] Login DB error for email=%s: %v", email, err)
 		return "", nil, fmt.Errorf("db error: %w", err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)); err != nil {
+		log.Printf("[AdminAuth] Login failed: password mismatch for email=%s", email)
 		return "", nil, errors.New("invalid credentials")
 	}
 
