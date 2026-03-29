@@ -308,6 +308,13 @@ export default function HomePage() {
 
   const openAuth = useCallback(() => setAuthOpen(true), []);
 
+  // Listen for the global "nexus:open-auth" event dispatched by Footer / NavBar
+  useEffect(() => {
+    const handler = () => setAuthOpen(true);
+    window.addEventListener("nexus:open-auth", handler);
+    return () => window.removeEventListener("nexus:open-auth", handler);
+  }, []);
+
   if (_hasHydrated && isAuthenticated) return null;
 
   return (
@@ -369,7 +376,7 @@ export default function HomePage() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-nexus-500 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-nexus-500" />
             </span>
-            <span className="text-[13px] font-bold text-nexus-400">84,231 Nigerians earning right now</span>
+            <span className="text-[13px] font-bold text-nexus-400">Thousands of Nigerians earning right now</span>
             <span className="hidden sm:inline text-white/20 mx-1">·</span>
             <span className="hidden sm:inline text-[12px] font-semibold text-white/40">🇳🇬 Made for Africa</span>
           </motion.div>
@@ -409,12 +416,11 @@ export default function HomePage() {
               <Zap className="w-5 h-5" />
               Start Earning — It&apos;s Free
             </button>
-            <Link href="/studio">
-              <button className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center justify-center gap-2 min-w-[200px] w-full">
+            <button onClick={openAuth}
+              className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center justify-center gap-2 min-w-[200px] w-full">
                 <Play className="w-4 h-4 fill-current" />
                 Try AI Studio Free
               </button>
-            </Link>
           </motion.div>
 
           {/* Social proof row */}
@@ -542,9 +548,9 @@ export default function HomePage() {
           <StaggerGrid className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
             {TOOL_CATEGORIES.map((cat) => (
               <motion.div key={cat.key} variants={fadeUp}>
-                <Link href="/studio">
-                  <div className="glass rounded-2xl p-4 hover:border-white/[0.18] transition-all duration-250 cursor-pointer group h-full border"
-                    style={{ borderColor: cat.border }}>
+                <div className="glass rounded-2xl p-4 hover:border-white/[0.18] transition-all duration-250 cursor-pointer group h-full border"
+                    style={{ borderColor: cat.border }}
+                    onClick={openAuth}>
                     <div className="flex items-center justify-between mb-3">
                       <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl"
                         style={{ background: cat.bg, border: `1px solid ${cat.border}` }}>
@@ -562,7 +568,6 @@ export default function HomePage() {
                       ))}
                     </ul>
                   </div>
-                </Link>
               </motion.div>
             ))}
           </StaggerGrid>
@@ -590,12 +595,11 @@ export default function HomePage() {
             ))}
           </StaggerGrid>
           <div className="text-center mt-10">
-            <Link href="/studio">
-              <button className="inline-flex items-center gap-2 glass border border-white/[0.12] rounded-2xl h-12 px-7 text-sm font-semibold text-white hover:border-white/25 transition-all duration-200">
+            <button onClick={openAuth}
+              className="inline-flex items-center gap-2 glass border border-white/[0.12] rounded-2xl h-12 px-7 text-sm font-semibold text-white hover:border-white/25 transition-all duration-200">
                 Explore all 30+ tools
                 <ArrowRight className="w-4 h-4" />
               </button>
-            </Link>
           </div>
         </div>
       </section>
@@ -834,7 +838,7 @@ export default function HomePage() {
               { emoji: "📱", color: "#10B981", title: "Works on Any Phone", body: "No heavy app download needed. Loyalty Nexus works in your browser on any Android or iPhone — even on a data-saver connection. Accessible to everyone in Nigeria." },
               { emoji: "🔒", color: "#8B5CF6", title: "No Hidden Costs", body: "Sign up is completely free. There are no subscription fees, no premium tiers to unlock, and no hidden charges. Your Pulse Points are earned purely from recharges you already make." },
               { emoji: "🎯", color: "#F472B6", title: "Instant Gratification", body: "Win prizes the moment you spin the wheel. Earn Pulse Points the second you recharge. No waiting. No processing delays. Your rewards land instantly, every single time." },
-              { emoji: "🌍", color: "#FFD700", title: "Connecting Nigeria", body: "Whether you're in Lagos, Kano, Enugu or Calabar — Loyalty Nexus brings all MTN customers into one rewarding community. One platform. 84,000+ Nigerians earning together." },
+              { emoji: "🌍", color: "#FFD700", title: "Connecting Nigeria", body: "Whether you're in Lagos, Kano, Enugu or Calabar — Loyalty Nexus brings all MTN customers into one rewarding community. One platform. Thousands of Nigerians earning together." },
             ].map(({ emoji, color, title, body }) => (
               <motion.div key={title} variants={fadeUp}>
                 <div className="glass rounded-2xl p-6 h-full flex flex-col gap-4 border border-white/[0.06] hover:border-white/[0.14] transition-all duration-300">
@@ -870,7 +874,7 @@ export default function HomePage() {
               <span className="shimmer-text">just got smarter</span>
             </h2>
             <p className="text-lg text-white/45 mb-10 leading-relaxed max-w-xl mx-auto">
-              Join 84,000+ Nigerians already earning cash, data, and AI credits from their everyday recharges.
+              Join thousands of Nigerians already earning cash, data, and AI credits from their everyday recharges.
               No subscription. No hidden fees. Just rewards.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">

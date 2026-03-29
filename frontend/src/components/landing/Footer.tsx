@@ -35,18 +35,23 @@ export default function Footer() {
   const router   = useRouter();
   const isAuth   = useAuthStatus();
 
-  /** Dashboard — go to /register if not authed, /dashboard if authed */
+  /** Open the auth modal by dispatching a global event picked up by the landing page */
+  function openAuthModal() {
+    window.dispatchEvent(new CustomEvent("nexus:open-auth"));
+  }
+
+  /** Dashboard — open auth modal if not authed, /dashboard if authed */
   function handleDashboard(e: React.MouseEvent) {
     e.preventDefault();
     if (isAuth) router.push("/dashboard");
-    else        router.push("/register");
+    else        openAuthModal();
   }
 
-  /** AI Tool — go to /register if not authed, or deep-link into the tool */
+  /** AI Tool — open auth modal if not authed, or deep-link into the tool */
   function handleTool(e: React.MouseEvent, slug: string) {
     e.preventDefault();
     if (isAuth) router.push(`/studio?tool=${slug}`);
-    else        router.push("/register");
+    else        openAuthModal();
   }
 
   return (
