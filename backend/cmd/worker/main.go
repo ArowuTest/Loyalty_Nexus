@@ -28,16 +28,16 @@ func main() {
 		db  *gorm.DB
 		err error
 	)
-	for attempt := 1; attempt <= 10; attempt++ {
+	for attempt := 1; attempt <= 30; attempt++ {
 		db, err = gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
 		if err == nil {
 			break
 		}
-		log.Printf("[WORKER] DB connect attempt %d/10 failed: %v — retrying in 3s...", attempt, err)
+		log.Printf("[WORKER] DB connect attempt %d/30 failed: %v — retrying in 3s...", attempt, err)
 		time.Sleep(3 * time.Second)
 	}
 	if err != nil {
-		log.Fatalf("[WORKER] DB connect failed after 10 attempts: %v", err)
+		log.Fatalf("[WORKER] DB connect failed after 30 attempts: %v", err)
 	}
 	log.Println("[WORKER] DB connected")
 

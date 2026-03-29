@@ -67,18 +67,23 @@ func main() {
 		db  *gorm.DB
 		err error
 	)
-	for attempt := 1; attempt <= 10; attempt++ {
+	for attempt := 1; attempt <= 30; attempt++ {
 		db, err = gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
 		if err == nil {
 			break
 		}
-		log.Printf("[DB] connect attempt %d/10 failed: %v — retrying in 3s...", attempt, err)
+		log.Printf("[DB] connect attempt %d/30 failed: %v — retrying in 3s...", attempt, err)
 		time.Sleep(3 * time.Second)
 	}
 	if err != nil {
-		log.Fatalf("[DB] could not connect after 10 attempts: %v", err)
+		// Do NOT exit — keep the server alive so /health keeps responding.
+		// DB-dependent endpoints will return 503 until the DB becomes reachable.
+		// This prevents Render from cycling restarts which makes things worse.
+		log.Printf("[DB] WARN: could not connect after 30 attempts (%v). API running in degraded mode.", err)
+		db = nil
+	} else {
+		log.Println("[DB] connected successfully")
 	}
-	log.Println("[DB] connected successfully")
 
 	// ─── Redis ────────────────────────────────────────────────
 	// redis.ParseURL handles redis://, rediss://, and plain host:port formats.
@@ -138,9 +143,11 @@ func main() {
 	claimSvc      := services.NewClaimService(prizeRepo, userRepo, momoSvc, fulfillSvc)
 	adminClaimSvc := services.NewAdminClaimService(prizeRepo, momoSvc)
 
-	// Bootstrap current month's war if none exists
-	if err := warssSvc.EnsureActiveWar(context.Background(), 50_000_000); err != nil {
-		log.Printf("[main] EnsureActiveWar: %v", err)
+	// Bootstrap current month's war if none exists (only when DB is available)
+	if db != nil {
+		if err := warssSvc.EnsureActiveWar(context.Background(), 50_000_000); err != nil {
+			log.Printf("[main] EnsureActiveWar: %v", err)
+		}
 	}
 
 	// ─── LLM Orchestrator (Groq → Gemini → DeepSeek) ─────────
