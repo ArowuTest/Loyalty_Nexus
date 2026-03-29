@@ -148,7 +148,7 @@ func TestAuth_SendOTP_CreatesRecord(t *testing.T) {
 	svc := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
 	// SMS will fail in unit tests (no key configured). 
 	// Service saves OTP first, THEN sends SMS — so OTP is persisted even on SMS error.
-	_ = svc.SendOTP(context.Background(), "08011223344", "login")
+	_, _ = svc.SendOTP(context.Background(), "08011223344", "login")
 	if len(authRepo.otps) == 0 {
 		t.Fatal("OTP record not stored in repo")
 	}
@@ -163,7 +163,7 @@ func TestAuth_SendOTP_PhoneNormalization(t *testing.T) {
 	svc := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
 	// Both forms should succeed without error
 	for _, phone := range []string{"08012345678", "+2348012345678", "2348012345678"} {
-		if err := svc.SendOTP(context.Background(), phone, "login"); err != nil {
+		if _, err := svc.SendOTP(context.Background(), phone, "login"); err != nil {
 			t.Logf("SendOTP(%s): %v — acceptable", phone, err)
 		}
 	}
@@ -177,7 +177,7 @@ func TestAuth_VerifyOTP_WrongCode_Fails(t *testing.T) {
 
 	svc := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
 	phone := "07055667788"
-	_ = svc.SendOTP(context.Background(), phone, "login")
+	_, _ = svc.SendOTP(context.Background(), phone, "login")
 
 	_, _, err := svc.VerifyOTP(context.Background(), phone, "000000", "login")
 	if err == nil {
@@ -218,7 +218,7 @@ func TestAuth_NewUser_AutoCreated_On_Verify(t *testing.T) {
 
 	svc := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
 	phone := "09011335577"
-	_ = svc.SendOTP(context.Background(), phone, "login")
+	_, _ = svc.SendOTP(context.Background(), phone, "login")
 
 	// User must NOT exist before successful verify
 	if _, err := userRepo.FindByPhoneNumber(context.Background(), phone); err == nil {
