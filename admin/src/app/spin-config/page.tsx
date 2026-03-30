@@ -73,7 +73,7 @@ export default function SpinConfigPage() {
     try {
       const [r, cfg, tr] = await Promise.all([adminAPI.getPrizePool(), adminAPI.getConfig(), adminAPI.getSpinTiers()]);
       setPrizes(r.prizes as LocalPrize[]);
-      setTiers(tr.tiers ?? []);
+      setTiers(Array.isArray(tr) ? tr : []);
       const m: Record<string, string> = {};
       cfg.configs.forEach(c => { m[c.key] = String(c.value); });
       setSpinMax(m["spin_max_per_day"] ?? "5");
