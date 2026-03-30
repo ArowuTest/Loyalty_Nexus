@@ -644,7 +644,7 @@ func (h *AdminHandler) GetStudioTools(w http.ResponseWriter, r *http.Request) {
 		Raw(`SELECT t.id, t.slug, t.name, t.category, t.provider, t.point_cost, t.is_active, t.description,
 		     COUNT(g.id) AS usage_count
 		     FROM studio_tools t
-		     LEFT JOIN studio_generations g ON g.tool_id = t.id
+		     LEFT JOIN ai_generations g ON g.tool_id = t.id
 		     GROUP BY t.id
 		     ORDER BY t.category, t.name`).
 		Scan(&rows)
