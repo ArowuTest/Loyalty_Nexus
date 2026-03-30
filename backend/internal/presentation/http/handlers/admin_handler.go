@@ -991,7 +991,10 @@ func (h *AdminHandler) GetBroadcastHistory(w http.ResponseWriter, r *http.Reques
 	var rows []map[string]interface{}
 	h.db.WithContext(r.Context()).Table("notification_broadcasts").
 		Order("created_at DESC").Limit(50).Find(&rows)
-	jsonOK(w, rows)
+	if rows == nil {
+		rows = []map[string]interface{}{}
+	}
+	jsonOK(w, map[string]interface{}{"broadcasts": rows, "total": len(rows)})
 }
 
 // ─── Fraud ────────────────────────────────────────────────────────────────

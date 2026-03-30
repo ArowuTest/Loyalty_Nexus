@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"loyalty-nexus/internal/application/services"
 	"loyalty-nexus/internal/domain/entities"
+	"loyalty-nexus/internal/presentation/http/middleware"
 )
 
 // AdminAuthHandler handles admin login, admin user management, and password changes.
@@ -155,10 +156,9 @@ func (h *AdminAuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 // claimsFromCtx extracts JWTClaims stored in context by AdminAuthMiddleware.
-// The key "admin_claims" must match ContextAdminClaims in middleware/auth.go.
+// Uses middleware.ContextAdminClaims key — must match what AdminAuthMiddleware stores.
 func claimsFromCtx(r *http.Request) *entities.JWTClaims {
-	type contextKey string
-	if c, ok := r.Context().Value(contextKey("admin_claims")).(*entities.JWTClaims); ok {
+	if c, ok := r.Context().Value(middleware.ContextAdminClaims).(*entities.JWTClaims); ok {
 		return c
 	}
 	return &entities.JWTClaims{}

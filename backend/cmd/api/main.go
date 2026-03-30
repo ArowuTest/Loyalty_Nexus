@@ -405,9 +405,10 @@ func main() {
 		mux.Handle("POST /api/v1/admin/wars/{war_id}/secondary-draw",      adminAuth(http.HandlerFunc(warsH.RunSecondaryDraw)))
 		mux.Handle("GET  /api/v1/admin/wars/{war_id}/secondary-draws",     adminAuth(http.HandlerFunc(warsH.GetSecondaryDraws)))
 		mux.Handle("POST /api/v1/admin/wars/secondary-draw/winners/{winner_id}/pay", adminAuth(http.HandlerFunc(warsH.MarkSecondaryWinnerPaid)))
-		mux.Handle("GET    /api/v1/admin/fraud-events",        adminAuth(http.HandlerFunc(fraudH.ListEvents)))
-		mux.Handle("PUT    /api/v1/admin/fraud-events/{id}/resolve", adminAuth(http.HandlerFunc(fraudH.ResolveEvent)))
-		// SuspendUser handled by adminH above — fraudH route removed to avoid mux panic
+			mux.Handle("GET    /api/v1/admin/fraud-events",        adminAuth(http.HandlerFunc(fraudH.ListEvents)))
+			mux.Handle("GET    /api/v1/admin/fraud",               adminAuth(http.HandlerFunc(adminH.GetFraudEvents))) // alias for admin panel
+			mux.Handle("PUT    /api/v1/admin/fraud-events/{id}/resolve", adminAuth(http.HandlerFunc(fraudH.ResolveEvent)))
+			// SuspendUser handled by adminH above — fraudH route removed to avoid mux panic
 		// Draws admin — full CRUD + execute + CSV export + schedules
 		mux.Handle("GET    /api/v1/admin/draws",                       adminAuth(http.HandlerFunc(adminH.GetDraws)))
 		mux.Handle("POST   /api/v1/admin/draws",                       adminAuth(http.HandlerFunc(adminH.CreateDraw)))
