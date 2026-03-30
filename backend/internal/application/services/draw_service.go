@@ -28,26 +28,26 @@ import (
 
 // DrawRecord mirrors the draws table.
 type DrawRecord struct {
-	ID              uuid.UUID  `gorm:"column:id;primaryKey"`
-	Name            string     `gorm:"column:name"`
-	Description     *string    `gorm:"column:description"`
-	DrawCode        string     `gorm:"column:draw_code;uniqueIndex"`
-	DrawType        string     `gorm:"column:draw_type"` // DAILY | WEEKLY | MONTHLY | SPECIAL
-	Status          string     `gorm:"column:status"`   // SCHEDULED | ACTIVE | COMPLETED | CANCELLED
-	PrizePool       float64    `gorm:"column:prize_pool"`
-	WinnerCount     int        `gorm:"column:winner_count"`
-	RunnerUpsCount  int        `gorm:"column:runner_ups_count"`
-	TotalEntries    int        `gorm:"column:total_entries"`
-	TotalWinners    int        `gorm:"column:total_winners"`
-	Recurrence      string     `gorm:"column:recurrence"` // none | daily | weekly | monthly
-	NextDrawAt      *time.Time `gorm:"column:next_draw_at"`
-	StartTime       time.Time  `gorm:"column:start_time"`
-	EndTime         time.Time  `gorm:"column:end_time"`
-	DrawTime        *time.Time `gorm:"column:draw_time"`
-	ExecutedAt      *time.Time `gorm:"column:executed_at"`
-	CompletedAt     *time.Time `gorm:"column:completed_at"`
-	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+	ID              uuid.UUID  `gorm:"column:id;primaryKey" json:"id"`
+	Name            string     `gorm:"column:name" json:"name"`
+	Description     *string    `gorm:"column:description" json:"description,omitempty"`
+	DrawCode        string     `gorm:"column:draw_code;uniqueIndex" json:"draw_code"`
+	DrawType        string     `gorm:"column:draw_type" json:"draw_type"` // DAILY | WEEKLY | MONTHLY | SPECIAL
+	Status          string     `gorm:"column:status" json:"status"`   // SCHEDULED | ACTIVE | COMPLETED | CANCELLED
+	PrizePool       float64    `gorm:"column:prize_pool" json:"prize_pool_kobo"`
+	WinnerCount     int        `gorm:"column:winner_count" json:"winner_count"`
+	RunnerUpsCount  int        `gorm:"column:runner_ups_count" json:"runner_ups_count"`
+	TotalEntries    int        `gorm:"column:total_entries" json:"entry_count"`
+	TotalWinners    int        `gorm:"column:total_winners" json:"total_winners"`
+	Recurrence      string     `gorm:"column:recurrence" json:"recurrence"` // none | daily | weekly | monthly
+	NextDrawAt      *time.Time `gorm:"column:next_draw_at" json:"next_draw_at,omitempty"`
+	StartTime       time.Time  `gorm:"column:start_time" json:"start_time"`
+	EndTime         time.Time  `gorm:"column:end_time" json:"end_time"`
+	DrawTime        *time.Time `gorm:"column:draw_time" json:"draw_date,omitempty"`
+	ExecutedAt      *time.Time `gorm:"column:executed_at" json:"executed_at,omitempty"`
+	CompletedAt     *time.Time `gorm:"column:completed_at" json:"completed_at,omitempty"`
+	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (DrawRecord) TableName() string { return "draws" }
