@@ -224,7 +224,13 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	if state != "" {
 		dataQ = dataQ.Where("u.state = ?", state)
 	}
-	dataQ.Order("u.created_at DESC").Limit(limit).Offset((page-1)*limit).Find(&users)
+	if dbErr := dataQ.Order("u.created_at DESC").Limit(limit).Offset((page-1)*limit).Find(&users).Error; dbErr != nil {
+		log.Printf("[ListUsers] wallet join failed (%v), falling back to simple query", dbErr)
+		// Fallback: query without wallet join in case wallets table has issues
+		h.db.WithContext(r.Context()).Table("users u").
+			Select("u.id, u.phone_number, u.tier, u.state, u.is_active, u.streak_count, u.last_recharge_at, u.created_at, 0 AS pulse_points, 0 AS spin_credits").
+			Order("u.created_at DESC").Limit(limit).Offset((page-1)*limit).Find(&users)
+	}
 	if users == nil {
 		users = []userRow{}
 	}

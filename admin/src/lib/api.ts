@@ -62,7 +62,7 @@ class AdminAPI {
   updatePrize(id: string, payload: Partial<Prize>) { return this.req("PUT", `/admin/prizes/${id}`, payload); }
   createPrize(payload: Omit<Prize,"id">) { return this.req("POST", "/admin/prizes", payload); }
   deletePrize(id: string) { return this.req("DELETE", `/admin/prizes/${id}`); }
-  getUsers(page = 0, q = "") { return this.req<{ users: User[]; total: number }>("GET", `/admin/users?offset=${page * 50}${q ? `&q=${encodeURIComponent(q)}` : ""}`); }
+  getUsers(page = 1, q = "") { return this.req<{ users: User[]; total: number }>("GET", `/admin/users?page=${page}&limit=50${q ? `&search=${encodeURIComponent(q)}` : ""}`); }
   getUser(id: string) { return this.req<User>("GET", `/admin/users/${id}`); }
   getFraud()       { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud-events"); }
   getFraudEvents() { return this.getFraud(); }
