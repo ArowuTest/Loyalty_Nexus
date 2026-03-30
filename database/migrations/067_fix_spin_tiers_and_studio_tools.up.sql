@@ -53,7 +53,28 @@ CREATE TABLE IF NOT EXISTS notification_broadcasts (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 3. Re-seed studio_tools using the correct column names from the entity:
+-- 3. Ensure all required columns exist on studio_tools (some migrations may not have run)
+ALTER TABLE studio_tools
+    ADD COLUMN IF NOT EXISTS slug             TEXT        NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS sort_order       INT         NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS provider_tool    TEXT        NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS is_free          BOOLEAN     NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS icon             TEXT        NOT NULL DEFAULT '🤖',
+    ADD COLUMN IF NOT EXISTS entry_point_cost BIGINT      NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS refund_window_mins INT        NOT NULL DEFAULT 5,
+    ADD COLUMN IF NOT EXISTS refund_pct        INT        NOT NULL DEFAULT 100,
+    ADD COLUMN IF NOT EXISTS ui_template       TEXT        NOT NULL DEFAULT 'KnowledgeDoc',
+    ADD COLUMN IF NOT EXISTS ui_config         JSONB       NOT NULL DEFAULT '{}';
+
+-- Ensure unique index on slug
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_studio_tools_slug ON studio_tools (slug);
+
+-- Back-fill slugs for any existing rows
+UPDATE studio_tools
+SET slug = LOWER(REGEXP_REPLACE(TRIM(name), '[\s_]+', '-', 'g'))
+WHERE slug = '';
+
+-- 4. Re-seed studio_tools using the correct column names from the entity:
 --    id, name, slug, description, category, point_cost, provider,
 --    provider_tool, is_active, is_free, icon, sort_order,
 --    entry_point_cost, ui_template, created_at, updated_at
