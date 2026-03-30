@@ -65,7 +65,11 @@ CREATE TABLE IF NOT EXISTS notification_broadcasts (
 );
 
 -- ─── 3. studio_tools: ensure all required columns exist ──────────────────────
+-- First, give the legacy provider_tool_id column a default so new INSERTs
+-- (which don't specify it) don't violate the NOT NULL constraint.
+-- The original migration 003 created it as NOT NULL with no default.
 ALTER TABLE studio_tools
+    ALTER COLUMN provider_tool_id SET DEFAULT '',
     ADD COLUMN IF NOT EXISTS slug             TEXT        NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS sort_order       INT         NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS provider_tool    TEXT        NOT NULL DEFAULT '',
