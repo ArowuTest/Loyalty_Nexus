@@ -1,7 +1,7 @@
 "use client";
 import AdminShell from "@/components/layout/AdminShell";
 import { useEffect, useState, useCallback } from "react";
-import adminAPI, { Prize } from "@/lib/api";
+import adminAPI, { Prize, SpinTier } from "@/lib/api";
 
 const PRIZE_TYPES = ["try_again","pulse_points","bonus_points","airtime","data_bundle","momo_cash","studio_credits"] as const;
 type PrizeType = typeof PRIZE_TYPES[number];
@@ -12,7 +12,7 @@ const TYPE_ICONS: Record<PrizeType, string> = {
   bonus_points:   "⭐",
   airtime:        "📱",
   data_bundle:    "📶",
-  momo_cash:      "💵",
+  momo_cash:      "💰",
   studio_credits: "🎨",
 };
 
@@ -22,7 +22,7 @@ const TYPE_LABELS: Record<PrizeType, string> = {
   bonus_points:   "Bonus Points",
   airtime:        "Airtime",
   data_bundle:    "Data Bundle",
-  momo_cash:      "MoMo Cash",
+  momo_cash:      "Cash Prize",
   studio_credits: "Studio Credits",
 };
 
@@ -39,6 +39,7 @@ const DEFAULT_COLORS: Record<PrizeType, string> = {
 type LocalPrize = Prize & { _dirty?: boolean; _isNew?: boolean };
 
 function totalWeight(prizes: LocalPrize[]): number {
+  // weights are NUMERIC(5,2) — each weight IS the percentage (e.g. 25.00 = 25%)
   return prizes.filter(p => p.is_active).reduce((s, p) => s + (p.win_probability_weight || 0), 0);
 }
 
@@ -63,10 +64,17 @@ export default function SpinConfigPage() {
   const [savingCfg, setSavingCfg] = useState(false);
   const [savedCfg, setSavedCfg]   = useState(false);
 
+  // Spin tiers
+  const [tiers, setTiers]         = useState<SpinTier[]>([]);
+  const [tierModal, setTierModal] = useState<{ type: "create" } | { type: "edit"; tier: SpinTier } | null>(null);
+  const [tierForm, setTierForm]   = useState<Omit<SpinTier, "id">>({ name: "", min_daily_amount: 0, max_daily_amount: 0, spins_per_day: 1, badge_color: "#5f72f9", sort_order: 0 });
+  const [tierSaving, setTierSaving] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [r, cfg] = await Promise.all([adminAPI.getPrizePool(), adminAPI.getConfig()]);
+      const [r, cfg, tr] = await Promise.all([adminAPI.getPrizePool(), adminAPI.getConfig(), adminAPI.getSpinTiers()]);
       setPrizes(r.prizes as LocalPrize[]);
+      setTiers(tr.tiers ?? []);
       const m: Record<string, string> = {};
       cfg.configs.forEach(c => { m[c.key] = String(c.value); });
       setSpinMax(m["spin_max_per_user_per_day"] ?? "3");
@@ -107,8 +115,8 @@ export default function SpinConfigPage() {
     setError(null);
     const active = prizes.filter(p => p.is_active);
     const total = active.reduce((s, p) => s + (p.win_probability_weight || 0), 0);
-    if (total > 10000) {
-      setError(`Total probability weight is ${total}/10000 (${(total/100).toFixed(2)}%). Must be ≤ 10000 (100.00%).`);
+    if (total > 100.00 + 0.001) { // allow tiny floating-point tolerance
+      setError(`Total probability is ${total.toFixed(2)}% — must be ≤ 100.00%. Reduce some weights before saving.`);
       return;
     }
     setSaving(true);
@@ -160,9 +168,48 @@ export default function SpinConfigPage() {
     }
   };
 
+  const handleSaveTier = async () => {
+    if (!tierForm.name.trim()) { setError("Tier name is required"); return; }
+    if (tierForm.spins_per_day < 1) { setError("Spins per day must be ≥ 1"); return; }
+    setTierSaving(true);
+    try {
+      if (tierModal?.type === "create") {
+        await adminAPI.createSpinTier(tierForm);
+      } else if (tierModal?.type === "edit") {
+        await adminAPI.updateSpinTier((tierModal as { type: "edit"; tier: SpinTier }).tier.id, tierForm);
+      }
+      setTierModal(null);
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Save tier failed");
+    } finally {
+      setTierSaving(false);
+    }
+  };
+
+  const handleDeleteTier = async (t: SpinTier) => {
+    if (!confirm(`Delete tier "${t.name}"?`)) return;
+    try {
+      await adminAPI.deleteSpinTier(t.id);
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Delete tier failed");
+    }
+  };
+
+  const openCreateTier = () => {
+    setTierForm({ name: "", min_daily_amount: 0, max_daily_amount: 0, spins_per_day: 1, badge_color: "#5f72f9", sort_order: 0 });
+    setTierModal({ type: "create" });
+  };
+
+  const openEditTier = (t: SpinTier) => {
+    setTierForm({ name: t.name, min_daily_amount: t.min_daily_amount, max_daily_amount: t.max_daily_amount, spins_per_day: t.spins_per_day, badge_color: t.badge_color ?? "#5f72f9", sort_order: t.sort_order ?? 0 });
+    setTierModal({ type: "edit", tier: t });
+  };
+
   const total = totalWeight(prizes);
-  const pct = (total / 100).toFixed(2);
-  const barColor = total > 10000 ? "#ef4444" : total === 10000 ? "#10b981" : "#5f72f9";
+  const pct = total.toFixed(2); // weight IS the percentage — no conversion needed
+  const barColor = total > 100 ? "#ef4444" : Math.abs(total - 100) < 0.01 ? "#10b981" : "#5f72f9";
 
   return (
     <AdminShell>
@@ -173,7 +220,7 @@ export default function SpinConfigPage() {
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: "#e2e8ff" }}>🎰 Spin Wheel Config</h1>
             <p style={{ color: "#828cb4", fontSize: 13, marginTop: 4 }}>
-              Manage prize slots, probabilities, and payout limits. Weights must sum to ≤ 10,000 (= 100%).
+              Manage prize slots, probabilities, and payout limits. Probabilities must sum to exactly 100%.
             </p>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
@@ -222,16 +269,16 @@ export default function SpinConfigPage() {
         <div className="card" style={{ padding: 20 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <span style={{ fontSize: 13, color: "#828cb4" }}>Total Probability Weight</span>
-            <span style={{ fontSize: 15, fontWeight: 700, color: barColor }}>{total} / 10,000 ({pct}%)</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: barColor }}>{pct}% / 100%</span>
           </div>
           <div style={{ height: 8, borderRadius: 4, background: "rgba(255,255,255,0.05)", overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${Math.min(100, total / 100)}%`, background: barColor, borderRadius: 4, transition: "width 0.3s" }} />
+            <div style={{ height: "100%", width: `${Math.min(100, total)}%`, background: barColor, borderRadius: 4, transition: "width 0.3s" }} />
           </div>
-          {total < 10000 && (
-            <p style={{ marginTop: 8, fontSize: 11, color: "#828cb4" }}>⚠️ {10000 - total} weight remaining unallocated — add to "Try Again" or another slot.</p>
+          {total < 99.99 && (
+            <p style={{ marginTop: 8, fontSize: 11, color: "#828cb4" }}>⚠️ {(100 - total).toFixed(2)}% unallocated — add to "Better Luck Next Time" or another slot.</p>
           )}
-          {total > 10000 && (
-            <p style={{ marginTop: 8, fontSize: 11, color: "#fca5a5" }}>❌ Over budget by {total - 10000} — reduce some weights before saving.</p>
+          {total > 100.001 && (
+            <p style={{ marginTop: 8, fontSize: 11, color: "#fca5a5" }}>❌ Over 100% by {(total - 100).toFixed(2)}% — reduce some weights before saving.</p>
           )}
         </div>
 
@@ -303,13 +350,13 @@ export default function SpinConfigPage() {
                   {/* Probability weight */}
                   <div style={{ flex: "1 1 100px" }}>
                     <label style={{ fontSize: 11, color: "#828cb4", display: "block", marginBottom: 4 }}>
-                      Weight (of 10,000)
+                      Probability (%)
                     </label>
-                    <input type="number" min={0} max={10000} value={p.win_probability_weight}
-                      onChange={e => update(i, "win_probability_weight", Number(e.target.value))}
+                    <input type="number" min={0} max={100} step={0.01} value={p.win_probability_weight}
+                      onChange={e => update(i, "win_probability_weight", parseFloat(e.target.value) || 0)}
                       style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 7, padding: "7px 10px", color: "#e2e8ff", fontSize: 13 }} />
                     <p style={{ fontSize: 10, color: "#5f72f9", marginTop: 3 }}>
-                      {((p.win_probability_weight / 100)).toFixed(2)}% chance
+                      {(p.win_probability_weight || 0).toFixed(2)}% chance
                     </p>
                   </div>
 
@@ -350,6 +397,126 @@ export default function SpinConfigPage() {
           </>
         )}
       </div>
+
+        {/* Spin Tiers Section */}
+        <div className="card" style={{ padding: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <div>
+              <h2 style={{ fontSize: 15, fontWeight: 600, color: "#e2e8ff" }}>🏆 Spin Tiers</h2>
+              <p style={{ fontSize: 12, color: "#828cb4", marginTop: 3 }}>Configure daily recharge thresholds that determine how many spins a user earns.</p>
+            </div>
+            <button onClick={openCreateTier}
+              style={{ padding: "7px 16px", border: "1px solid rgba(95,114,249,0.4)", borderRadius: 8, color: "#5f72f9", background: "transparent", fontSize: 13, cursor: "pointer" }}>
+              + Add Tier
+            </button>
+          </div>
+
+          {tiers.length === 0 ? (
+            <p style={{ color: "#828cb4", fontSize: 13, textAlign: "center", padding: "20px 0" }}>No tiers configured</p>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid rgba(95,114,249,0.15)" }}>
+                  {["Tier", "Min Daily Recharge", "Max Daily Recharge", "Spins/Day", "Actions"].map(h => (
+                    <th key={h} style={{ padding: "8px 12px", textAlign: "left", color: "#828cb4", fontWeight: 600 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tiers.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)).map(t => (
+                  <tr key={t.id} style={{ borderBottom: "1px solid rgba(95,114,249,0.07)" }}>
+                    <td style={{ padding: "8px 12px" }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: t.badge_color ?? "#5f72f9", display: "inline-block" }} />
+                        <span style={{ color: t.badge_color ?? "#e2e8ff", fontWeight: 600 }}>{t.name}</span>
+                      </span>
+                    </td>
+                    <td style={{ padding: "8px 12px", color: "#e2e8ff" }}>₦{(t.min_daily_amount / 100).toLocaleString()}</td>
+                    <td style={{ padding: "8px 12px", color: "#e2e8ff" }}>{t.max_daily_amount === 0 ? "Unlimited" : `₦${(t.max_daily_amount / 100).toLocaleString()}`}</td>
+                    <td style={{ padding: "8px 12px", color: "#10b981", fontWeight: 700 }}>{t.spins_per_day}</td>
+                    <td style={{ padding: "8px 12px" }}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => openEditTier(t)}
+                          style={{ padding: "3px 9px", borderRadius: 6, border: "1px solid rgba(95,114,249,0.3)", color: "#5f72f9", background: "transparent", fontSize: 11, cursor: "pointer" }}>
+                          Edit
+                        </button>
+                        <button onClick={() => handleDeleteTier(t)}
+                          style={{ padding: "3px 9px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.3)", color: "#fca5a5", background: "transparent", fontSize: 11, cursor: "pointer" }}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* Tier Create/Edit Modal */}
+      {tierModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+          <div className="card" style={{ width: "min(480px, 95vw)", padding: 28 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: "#e2e8ff", marginBottom: 20 }}>
+              {tierModal.type === "create" ? "➕ Add Spin Tier" : "✏️ Edit Spin Tier"}
+            </h2>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={{ fontSize: 12, color: "#828cb4", display: "block", marginBottom: 5 }}>Tier Name *</label>
+                <input value={tierForm.name} onChange={e => setTierForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. Bronze"
+                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 13, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: "#828cb4", display: "block", marginBottom: 5 }}>Min Daily Recharge (₦) *</label>
+                <input type="number" min="0" value={tierForm.min_daily_amount / 100}
+                  onChange={e => setTierForm(f => ({ ...f, min_daily_amount: Math.round(parseFloat(e.target.value) * 100) || 0 }))}
+                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 13, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: "#828cb4", display: "block", marginBottom: 5 }}>Max Daily Recharge (₦) — 0 = unlimited</label>
+                <input type="number" min="0" value={tierForm.max_daily_amount / 100}
+                  onChange={e => setTierForm(f => ({ ...f, max_daily_amount: Math.round(parseFloat(e.target.value) * 100) || 0 }))}
+                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 13, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: "#828cb4", display: "block", marginBottom: 5 }}>Spins Per Day *</label>
+                <input type="number" min="1" max="20" value={tierForm.spins_per_day}
+                  onChange={e => setTierForm(f => ({ ...f, spins_per_day: parseInt(e.target.value) || 1 }))}
+                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 13, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: "#828cb4", display: "block", marginBottom: 5 }}>Badge Color</label>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input type="color" value={tierForm.badge_color ?? "#5f72f9"}
+                    onChange={e => setTierForm(f => ({ ...f, badge_color: e.target.value }))}
+                    style={{ width: 40, height: 36, borderRadius: 6, border: "none", cursor: "pointer", padding: 0 }} />
+                  <input value={tierForm.badge_color ?? "#5f72f9"}
+                    onChange={e => setTierForm(f => ({ ...f, badge_color: e.target.value }))}
+                    style={{ flex: 1, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 13 }} />
+                </div>
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: "#828cb4", display: "block", marginBottom: 5 }}>Sort Order</label>
+                <input type="number" min="0" value={tierForm.sort_order ?? 0}
+                  onChange={e => setTierForm(f => ({ ...f, sort_order: parseInt(e.target.value) || 0 }))}
+                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 13, boxSizing: "border-box" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setTierModal(null)}
+                style={{ flex: 1, padding: "10px", borderRadius: 8, background: "transparent", border: "1px solid rgba(95,114,249,0.2)", color: "#828cb4", cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button onClick={handleSaveTier} disabled={tierSaving}
+                style={{ flex: 1, padding: "10px", borderRadius: 8, background: "#5f72f9", border: "none", color: "#fff", fontWeight: 600, cursor: "pointer", opacity: tierSaving ? 0.6 : 1 }}>
+                {tierSaving ? "Saving…" : tierModal.type === "create" ? "Create Tier" : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }

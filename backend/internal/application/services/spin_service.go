@@ -319,19 +319,20 @@ func (s *SpinService) selectPrize(ctx context.Context, forceLowValue bool, today
 		eligible = prizes // Fallback: no inventory caps remain, use all
 	}
 
-	// Weighted CSPRNG selection
-	totalWeight := int64(0)
+	// Weighted CSPRNG selection — weights are NUMERIC(5,2) summing to 100.00
+	// Scale to integer precision (multiply by 100 → range 0–10000) for rand.Int
+	totalWeightF := 0.0
 	for _, p := range eligible {
-		totalWeight += int64(p.ProbWeight)
+		totalWeightF += p.ProbWeight
 	}
-	if totalWeight == 0 {
+	if totalWeightF == 0 {
 		return nil, 0, fmt.Errorf("all prizes have zero weight")
 	}
-
-	roll, _ := rand.Int(rand.Reader, big.NewInt(totalWeight))
+	totalWeightInt := int64(totalWeightF * 100)
+	roll, _ := rand.Int(rand.Reader, big.NewInt(totalWeightInt))
 	cursor := int64(0)
 	for i, p := range eligible {
-		cursor += int64(p.ProbWeight)
+		cursor += int64(p.ProbWeight * 100)
 		if roll.Int64() < cursor {
 			return &eligible[i], i, nil
 		}
@@ -382,10 +383,10 @@ func (s *SpinService) GetAllPrizes(ctx context.Context, includeInactive ...bool)
 
 // PrizeProbabilitySummary is returned by GetPrizeProbabilitySummary.
 type PrizeProbabilitySummary struct {
-	TotalWeight    int                    `json:"total_weight"`     // sum of all active weights (max 10000)
-	RemainingBudget int                   `json:"remaining_budget"` // 10000 - TotalWeight
-	PercentUsed    float64                `json:"percent_used"`     // TotalWeight / 100.0
-	Prizes         []PrizeProbabilityItem `json:"prizes"`
+	TotalWeight     float64                `json:"total_weight"`      // sum of all active weights (max 100.00)
+	RemainingBudget float64                `json:"remaining_budget"` // 100.00 - TotalWeight
+	PercentUsed     float64                `json:"percent_used"`     // same as TotalWeight (already a percentage)
+	Prizes          []PrizeProbabilityItem `json:"prizes"`
 }
 
 // PrizeProbabilityItem is one row in the probability summary.
@@ -393,8 +394,8 @@ type PrizeProbabilityItem struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	PrizeType   string  `json:"prize_type"`
-	Weight      int     `json:"weight"`
-	Percent     float64 `json:"percent"`     // weight / 100.0
+	Weight      float64 `json:"weight"`   // NUMERIC(5,2) — directly the percentage (e.g. 25.00 = 25%)
+	Percent     float64 `json:"percent"` // same as Weight for backward compat
 	IsActive    bool    `json:"is_active"`
 	IsNoWin     bool    `json:"is_no_win"`
 	ColorScheme string  `json:"color_scheme"`
@@ -407,7 +408,7 @@ func (s *SpinService) GetPrizeProbabilitySummary(ctx context.Context) (*PrizePro
 	if err != nil {
 		return nil, err
 	}
-	totalWeight := 0
+	totalWeight := 0.0
 	items := make([]PrizeProbabilityItem, 0, len(prizes))
 	for _, p := range prizes {
 		if p.IsActive {
@@ -418,7 +419,7 @@ func (s *SpinService) GetPrizeProbabilitySummary(ctx context.Context) (*PrizePro
 			Name:        p.Name,
 			PrizeType:   string(p.PrizeType),
 			Weight:      p.ProbWeight,
-			Percent:     float64(p.ProbWeight) / 100.0,
+			Percent:     p.ProbWeight, // weight IS the percent (e.g. 25.00 = 25%)
 			IsActive:    p.IsActive,
 			IsNoWin:     p.IsNoWin,
 			ColorScheme: p.ColorScheme,
@@ -427,8 +428,8 @@ func (s *SpinService) GetPrizeProbabilitySummary(ctx context.Context) (*PrizePro
 	}
 	return &PrizeProbabilitySummary{
 		TotalWeight:     totalWeight,
-		RemainingBudget: 10000 - totalWeight,
-		PercentUsed:     float64(totalWeight) / 100.0,
+		RemainingBudget: 100.00 - totalWeight,
+		PercentUsed:     totalWeight, // already a percentage
 		Prizes:          items,
 	}, nil
 }
@@ -456,7 +457,7 @@ func (s *SpinService) GetPrize(ctx context.Context, prizeID uuid.UUID) (*entitie
 }
 
 // CreatePrize creates a new prize slot (admin).
-// Validates that total ProbWeight of all active prizes ≤ 10,000 (representing 100.00%).
+// Validates that total ProbWeight of all active prizes ≤ 100.00 (representing 100%).
 func (s *SpinService) CreatePrize(ctx context.Context, data map[string]interface{}) (*entities.PrizePoolEntry, error) {
 	name, _ := data["name"].(string)
 	if name == "" {
@@ -467,24 +468,24 @@ func (s *SpinService) CreatePrize(ctx context.Context, data map[string]interface
 		return nil, fmt.Errorf("prize_type is required")
 	}
 	baseValue, _ := data["base_value"].(float64)
-	probWeight := 0
+	probWeight := 0.0
 	if pw, ok := data["win_probability_weight"].(float64); ok {
-		probWeight = int(pw)
+		probWeight = pw
 	}
 	isActive := true
 	if ia, ok := data["is_active"].(bool); ok {
 		isActive = ia
 	}
 
-	// Validate total weight doesn't exceed 10000
+	// Validate total weight doesn't exceed 100.00 (= 100%)
 	if s.db != nil {
-		var currentTotal int64
+		var currentTotal float64
 		s.db.WithContext(ctx).Table("prize_pool").
 			Where("is_active = true").
 			Select("COALESCE(SUM(win_probability_weight), 0)").
 			Scan(&currentTotal)
-		if currentTotal+int64(probWeight) > 10000 {
-			return nil, fmt.Errorf("adding this prize (%d weight) would exceed 100%% total (current: %d/10000)", probWeight, currentTotal)
+		if currentTotal+probWeight > 100.00 {
+			return nil, fmt.Errorf("adding this prize (%.2f%%) would exceed 100%% total (current: %.2f%%/100%%)", probWeight, currentTotal)
 		}
 	}
 
@@ -555,16 +556,16 @@ func (s *SpinService) UpdatePrize(ctx context.Context, prizeID uuid.UUID, data m
 		prize.BaseValue = v
 	}
 	if v, ok := data["win_probability_weight"].(float64); ok {
-		newWeight := int(v)
+		newWeight := v
 		// Validate weight cap (exclude current prize from count)
 		if s.db != nil {
-			var otherTotal int64
+			var otherTotal float64
 			s.db.WithContext(ctx).Table("prize_pool").
 				Where("is_active = true AND id != ?", prizeID).
 				Select("COALESCE(SUM(win_probability_weight), 0)").
 				Scan(&otherTotal)
-			if otherTotal+int64(newWeight) > 10000 {
-				return nil, fmt.Errorf("updating to %d weight would exceed 100%% (others: %d/10000)", newWeight, otherTotal)
+			if otherTotal+newWeight > 100.00 {
+				return nil, fmt.Errorf("updating to %.2f%% would exceed 100%% (others: %.2f%%/100%%)", newWeight, otherTotal)
 			}
 		}
 		updates["win_probability_weight"] = newWeight

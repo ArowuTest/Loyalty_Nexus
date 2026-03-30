@@ -59,9 +59,10 @@ class AdminAPI {
   getConfig()      { return this.req<{ configs: ConfigEntry[] }>("GET", "/admin/config"); }
   updateConfig(key: string, value: string) { return this.req("PUT", `/admin/config/${encodeURIComponent(key)}`, { value }); }
   getPrizePool()   { return this.req<{ prizes: Prize[] }>("GET", "/admin/prize-pool"); }
-  updatePrize(id: string, payload: Partial<Prize>) { return this.req("PUT", `/admin/prizes/${id}`, payload); }
-  createPrize(payload: Omit<Prize,"id">) { return this.req("POST", "/admin/prizes", payload); }
-  deletePrize(id: string) { return this.req("DELETE", `/admin/prizes/${id}`); }
+  getPrizeSummary() { return this.req<PrizeSummary>("GET", "/admin/prizes/summary"); }
+  updatePrize(id: string, payload: Partial<Prize>) { return this.req<Prize>("PUT", `/admin/prizes/${id}`, payload); }
+  createPrize(payload: Omit<Prize,"id">) { return this.req<Prize>("POST", "/admin/prizes", payload); }
+  deletePrize(id: string) { return this.req<void>("DELETE", `/admin/prizes/${id}`); }
   getUsers(page = 1, q = "") { return this.req<{ users: User[]; total: number }>("GET", `/admin/users?page=${page}&limit=50${q ? `&search=${encodeURIComponent(q)}` : ""}`); }
   getUser(id: string) { return this.req<User>("GET", `/admin/users/${id}`); }
   getFraud()       { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud-events"); }
@@ -175,8 +176,93 @@ class AdminAPI {
   updateRechargeConfig(payload: Partial<RechargeConfigPayload>) {
     return this.req<RechargeConfig>("PUT", "/admin/recharge/config", payload);
   }
+
+  // ─── Spin Claims ─────────────────────────────────────────────────────────
+  listClaims(status = "", page = 1, limit = 50) {
+    const offset = (page - 1) * limit;
+    return this.req<{ data: SpinClaim[]; total: number }>("GET", `/admin/spin/claims?status=${status}&limit=${limit}&offset=${offset}`);
+  }
+  getPendingClaims() {
+    return this.req<{ data: SpinClaim[]; total: number }>("GET", "/admin/spin/claims/pending");
+  }
+  getClaimDetails(id: string) {
+    return this.req<SpinClaim>("GET", `/admin/spin/claims/${id}`);
+  }
+  approveClaim(id: string, adminNotes: string, paymentReference = "") {
+    return this.req<SpinClaim>("POST", `/admin/spin/claims/${id}/approve`, { admin_notes: adminNotes, payment_reference: paymentReference });
+  }
+  rejectClaim(id: string, rejectionReason: string, adminNotes = "") {
+    return this.req<SpinClaim>("POST", `/admin/spin/claims/${id}/reject`, { rejection_reason: rejectionReason, admin_notes: adminNotes });
+  }
+  getClaimStatistics() {
+    return this.req<ClaimStatistics>("GET", "/admin/spin/claims/statistics");
+  }
+  exportClaims(status = "") {
+    return this.req<string>("GET", `/admin/spin/claims/export?status=${status}`);
+  }
+
+  // ─── Spin Tiers ──────────────────────────────────────────────────────────
+  getSpinTiers() {
+    return this.req<{ tiers: SpinTier[] }>("GET", "/admin/spin/tiers");
+  }
+  createSpinTier(data: Omit<SpinTier, "id">) {
+    return this.req<SpinTier>("POST", "/admin/spin/tiers", data);
+  }
+  updateSpinTier(id: string, data: Partial<SpinTier>) {
+    return this.req<SpinTier>("PUT", `/admin/spin/tiers/${id}`, data);
+  }
+  deleteSpinTier(id: string) {
+    return this.req<void>("DELETE", `/admin/spin/tiers/${id}`);
+  }
+
+  // ─── User management extras ───────────────────────────────────────────────
+  unsuspendUser(id: string) {
+    return this.req<void>("POST", `/admin/users/${id}/unsuspend`);
+  }
+  adjustPoints(id: string, delta: number, reason: string) {
+    return this.req<void>("POST", `/admin/users/${id}/adjust-points`, { delta, reason });
+  }
+
+  // ─── Fraud ────────────────────────────────────────────────────────────────
+  resolveFraudEvent(id: string, notes = "") {
+    return this.req<void>("POST", `/admin/fraud/${id}/resolve`, { notes });
+  }
+
+  // ─── Draws extras ───────────────────────────────────────────────────────
+  updateDraw(id: string, data: Partial<CreateDrawPayload>) {
+    return this.req<Draw>("PUT", `/admin/draws/${id}`, data);
+  }
+  exportDrawEntries(id: string) {
+    return this.req<string>("GET", `/admin/draws/${id}/export`);
+  }
+
+  // ─── Draw Schedule (window rules) ───────────────────────────────────────
+  getDrawSchedules() {
+    return this.req<{ schedules: DrawSchedule[] }>("GET", "/admin/draw/schedule");
+  }
+  createDrawSchedule(data: CreateDrawSchedulePayload) {
+    return this.req<DrawSchedule>("POST", "/admin/draw/schedule", data);
+  }
+  updateDrawSchedule(id: string, data: Partial<CreateDrawSchedulePayload>) {
+    return this.req<DrawSchedule>("PUT", `/admin/draw/schedule/${id}`, data);
+  }
+  deleteDrawSchedule(id: string) {
+    return this.req<void>("DELETE", `/admin/draw/schedule/${id}`);
+  }
+  previewDrawWindow() {
+    return this.req<{ qualifying_draws: { draw_id: string; draw_type: string; draw_name: string }[] }>("GET", "/admin/draw/schedule/preview");
+  }
 }
-export interface DashboardStats { total_users: number; active_today: number; total_recharge_kobo: number; spins_today: number; studio_generations_today: number; }
+export interface DashboardStats {
+  total_users: number;
+  active_today: number;
+  total_recharge_kobo: number;
+  spins_today: number;
+  studio_generations_today: number;
+  pending_claims?: number;
+  draws_active?: number;
+  mtn_pushes_today?: number;
+}
 export interface ConfigEntry { key: string; value: unknown; description: string; updated_at: string; }
 export interface Prize {
   id: string;
@@ -204,7 +290,76 @@ export interface StudioTool {
   is_free: boolean;            // true = bypass all point checks (e.g. chat)
 }
 export interface User { id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean; created_at: string; }
-export interface FraudEvent { id: string; user_id: string; event_type: string; severity: string; resolved: boolean; created_at: string; }
+export interface FraudEvent {
+  id: string;
+  user_id: string;
+  msisdn?: string;
+  event_type: string;
+  severity: string;
+  resolved: boolean;
+  notes?: string;
+  created_at: string;
+}
+
+export interface SpinClaim {
+  id: string;
+  user_id: string;
+  prize_type: string;
+  prize_value: number;       // in kobo
+  claim_status: string;      // PENDING | PENDING_ADMIN_REVIEW | APPROVED | REJECTED | CLAIMED | EXPIRED
+  fulfillment_status: string;
+  momo_number?: string;
+  momo_claim_number?: string;
+  bank_account_number?: string;
+  bank_account_name?: string;
+  bank_name?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  rejection_reason?: string;
+  admin_notes?: string;
+  payment_reference?: string;
+  expires_at: string;
+  created_at: string;
+  claimed_at?: string;
+  fulfilled_at?: string;
+}
+
+export interface ClaimStatistics {
+  total_claims: number;
+  pending_claims: number;
+  approved_claims: number;
+  rejected_claims: number;
+  claimed_claims: number;
+  expired_claims: number;
+  total_value_ngn: number;
+  approved_value_ngn: number;
+  pending_value_ngn: number;
+}
+
+export interface PrizeSummaryItem {
+  prize_id: string;
+  name: string;
+  prize_type: string;
+  weight: number;
+  percent: number;
+}
+export interface PrizeSummary {
+  items: PrizeSummaryItem[];
+  total_weight: number;
+  remaining_budget: number;
+  percent_used: number;
+  is_valid: boolean;
+}
+
+export interface SpinTier {
+  id: string;
+  name: string;
+  min_daily_amount: number;  // in kobo
+  max_daily_amount: number;  // in kobo (0 = unlimited)
+  spins_per_day: number;
+  badge_color?: string;
+  sort_order?: number;
+}
 export interface RegionalStat { state: string; total_points: number; active_members: number; rank: number; }
 
 export interface WarSecondaryDrawWinner {
@@ -261,6 +416,33 @@ export interface CreateDrawPayload {
 export interface DrawWinner {
   id: string; user_id: string; phone_number: string;
   prize_label: string; rank: number; created_at: string;
+}
+export interface DrawSchedule {
+  id: string;
+  draw_name: string;
+  draw_type: string;          // DAILY | WEEKLY
+  draw_day_of_week: number;   // 0=Sun … 6=Sat
+  draw_time_wat: string;      // "HH:MM:SS"
+  window_open_dow: number;
+  window_open_time: string;
+  window_close_dow: number;
+  window_close_time: string;
+  cutoff_hour_utc: number;
+  is_active: boolean;
+  sort_order: number;
+}
+export interface CreateDrawSchedulePayload {
+  draw_name: string;
+  draw_type: string;
+  draw_day_of_week: number;
+  draw_time_wat: string;
+  window_open_dow: number;
+  window_open_time: string;
+  window_close_dow: number;
+  window_close_time: string;
+  cutoff_hour_utc: number;
+  sort_order: number;
+  is_active: boolean;
 }
 
 // REQ-5.8.3 — System health endpoint

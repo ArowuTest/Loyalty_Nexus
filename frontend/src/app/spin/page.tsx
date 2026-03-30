@@ -86,23 +86,27 @@ export default function SpinPage() {
   const history: SpinHistoryItem[] = (historyData as any)?.history ?? [];
 
   // Load real wheel config from backend
+  // Backend returns: { slots: [{ index, prize_type, label, color, icon_name, is_no_win, no_win_message }], required_credits }
   useEffect(() => {
     api.getWheelConfig()
       .then((res: any) => {
-        const raw: any[] = res?.prizes ?? res?.segments ?? [];
+        // Support both response shapes: { slots: [...] } and legacy { prizes: [...] }
+        const raw: any[] = res?.slots ?? res?.prizes ?? res?.segments ?? [];
         const mapped = raw
-          .filter((p: any) => p.is_active !== false)
           .map((p: any): Segment => ({
-            label:       p.name ?? p.label ?? p.prize_name ?? "Prize",
+            label:       p.label ?? p.name ?? p.prize_name ?? "Prize",
             prize_type:  (p.prize_type ?? p.type ?? "try_again").toLowerCase(),
             base_value:  Number(p.base_value ?? p.prize_value ?? p.value ?? 0),
-            probability: Number(p.probability ?? 0),
-            color:       p.prize_type === "try_again" ? "#374151" : (p.color_hex ?? p.color ?? "#5f72f9"),
+            probability: Number(p.probability ?? p.win_probability_weight ?? 0),
+            // Backend sends 'color' field; try_again slots get a dark grey
+            color:       (p.prize_type === "try_again" || p.is_no_win)
+                           ? (p.color ?? "#374151")
+                           : (p.color ?? p.color_hex ?? "#5f72f9"),
             is_active:   true,
           }));
         if (mapped.length >= 2) setSegments(mapped);
       })
-      .catch(() => {/* use fallback */})
+      .catch(() => {/* use fallback segments */})
       .finally(() => setLoadingSegments(false));
   }, []);
 

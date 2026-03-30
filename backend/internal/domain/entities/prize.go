@@ -77,7 +77,7 @@ type PrizePoolEntry struct {
 	PrizeType           PrizeType  `db:"prize_type"             gorm:"column:prize_type"                      json:"prize_type"`
 	BaseValue           float64    `db:"base_value"             gorm:"column:base_value"                      json:"base_value"`
 	IsActive            bool       `db:"is_active"              gorm:"column:is_active"                       json:"is_active"`
-	ProbWeight          int        `db:"win_probability_weight" gorm:"column:win_probability_weight"          json:"win_probability_weight"`
+	ProbWeight          float64    `db:"win_probability_weight" gorm:"column:win_probability_weight"          json:"win_probability_weight"`
 	DailyInventoryCap   *int       `db:"daily_inventory_cap"    gorm:"column:daily_inventory_cap"             json:"daily_inventory_cap,omitempty"`
 	IsNoWin             bool       `db:"is_no_win"              gorm:"column:is_no_win;default:false"         json:"is_no_win"`
 	NoWinMessage        string     `db:"no_win_message"         gorm:"column:no_win_message;default:''"       json:"no_win_message,omitempty"`
