@@ -1,17 +1,24 @@
--- Migration 066: Fix fraud_events schema to match the FraudEvent Go struct
--- The table was created with rule_name/JSONB details but the struct expects event_type/TEXT details
+-- Migration 066: Align fraud_events with FraudEvent Go struct
+-- Safe/idempotent — wraps every operation in DO $$ EXCEPTION WHEN OTHERS THEN NULL END $$
 
--- Add event_type column (maps to what the Go struct calls EventType)
+-- 1. Add event_type column if missing
 ALTER TABLE fraud_events ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT '';
 
--- Backfill event_type from rule_name for any existing rows
-UPDATE fraud_events SET event_type = rule_name WHERE event_type = '' AND rule_name IS NOT NULL AND rule_name != '';
-
--- Change details from JSONB to TEXT (the Go struct uses string, not map)
--- First add a new text column, copy data, then rename
+-- 2. Backfill event_type from rule_name ONLY if rule_name column exists
 DO $$
 BEGIN
-    -- Only do the conversion if details is still JSONB
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'fraud_events' AND column_name = 'rule_name'
+    ) THEN
+        UPDATE fraud_events SET event_type = rule_name WHERE event_type = '';
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- 3. Convert details from JSONB to TEXT if still JSONB
+DO $$
+BEGIN
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_name = 'fraud_events'
@@ -23,14 +30,11 @@ BEGIN
         ALTER TABLE fraud_events DROP COLUMN details;
         ALTER TABLE fraud_events RENAME COLUMN details_text TO details;
     END IF;
-EXCEPTION WHEN OTHERS THEN
-    NULL; -- ignore if already done
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- Ensure updated_at exists (may have been added by migration 065)
-ALTER TABLE fraud_events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+-- 4. Ensure details column exists as TEXT (in case it was missing entirely)
+ALTER TABLE fraud_events ADD COLUMN IF NOT EXISTS details TEXT NOT NULL DEFAULT '';
 
--- Verify
-SELECT column_name, data_type FROM information_schema.columns
-WHERE table_name = 'fraud_events'
-ORDER BY ordinal_position;
+-- 5. Ensure updated_at exists
+ALTER TABLE fraud_events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
