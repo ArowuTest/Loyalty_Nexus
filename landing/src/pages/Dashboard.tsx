@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
-  Zap, Sparkles, Trophy, Users, TrendingUp, RotateCcw,
-  Copy, Share2, CheckCircle2, Clock, ArrowRight, Crown,
+  Zap, Sparkles, Trophy, TrendingUp, RotateCcw,
+  Share2, CheckCircle2, Clock, ArrowRight, Crown,
   Wallet, Phone, Star, Gift, ChevronRight
 } from "lucide-react";
 import NavBar from "@/components/NavBar";
@@ -169,7 +169,6 @@ function SpinSection() {
 const TRANSACTIONS = [
   { type:"earn",  label:"MTN Recharge — ₦1,000",   pts:"+1,000", time:"2h ago",   icon:"📱" },
   { type:"earn",  label:"Daily Spin — Won ₦500",   pts:"+250",   time:"2h ago",   icon:"🎯" },
-  { type:"earn",  label:"Referral — Emeka joined", pts:"+500",   time:"1d ago",   icon:"👥" },
   { type:"spend", label:"AI Photo x2",             pts:"-20",    time:"1d ago",   icon:"📸" },
   { type:"earn",  label:"MTN Recharge — ₦500",    pts:"+500",   time:"3d ago",   icon:"📱" },
   { type:"spend", label:"Business Plan AI",        pts:"-30",    time:"4d ago",   icon:"💼" },
@@ -180,7 +179,6 @@ const TRANSACTIONS = [
 ══════════════════════════════════════════════════════════ */
 export default function Dashboard() {
   const [authOpen]   = useState(false);
-  const [copied, setCopied] = useState(false);
   const user  = MOCK_USER;
   const tier  = user.tier as Tier;
   const tc    = TIER_CONFIG[tier];
@@ -191,12 +189,6 @@ export default function Dashboard() {
   const progressPct = nextTier
     ? Math.min(100, Math.round((user.pulse_points / nextTier[1].minPoints) * 100))
     : 100;
-
-  const copyRef = () => {
-    navigator.clipboard.writeText(user.referral_code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   return (
     <div className="min-h-screen bg-surface-0 dark">
@@ -271,7 +263,6 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard label="This Month"    value="₦1,450"  icon={Wallet}     color="#F5A623"   sub="Cash prizes won" />
           <StatCard label="AI Creations"  value="24"      icon={Sparkles}   color="#00D4FF"   sub="This month" />
-          <StatCard label="Referrals"     value="7"       icon={Users}      color="#10B981"   sub="+3,500 bonus pts" />
           <StatCard label="Total Recharge" value="₦12,400" icon={Phone}     color="#8B5CF6"  sub="Since joined" />
         </div>
 
@@ -352,51 +343,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ── Referral + Transactions ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Referral */}
-          <div className="glass rounded-2xl border border-white/[0.07] overflow-hidden">
-            <div
-              className="p-6 relative"
-              style={{ background: "radial-gradient(ellipse 80% 80% at 0% 0%, rgba(16,185,129,0.08) 0%, transparent 70%)" }}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <Users className="w-5 h-5 text-chart-3" />
-                <h3 className="font-black text-sm text-foreground">Refer & Earn</h3>
-              </div>
-              <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-                Earn <span className="text-chart-3 font-bold">500 Pulse Points</span> for every friend you refer.
-                They get 100 bonus points when they sign up.
-              </p>
-              <div className="flex items-center gap-2 mb-5">
-                <div className="flex-1 glass rounded-xl px-4 py-2.5 border border-white/[0.09] font-mono text-[13px] font-bold text-primary">
-                  {user.referral_code}
-                </div>
-                <button
-                  onClick={copyRef}
-                  className={`h-10 px-4 rounded-xl text-[12px] font-bold transition-all duration-200 flex items-center gap-1.5 ${
-                    copied ? "bg-chart-3 text-black" : "btn-gold text-black"
-                  }`}
-                >
-                  {copied ? <><CheckCircle2 className="w-3.5 h-3.5" /> Copied!</> : <><Copy className="w-3.5 h-3.5" /> Copy</>}
-                </button>
-              </div>
-              <div className="grid grid-cols-3 gap-3 text-center">
-                {[
-                  { label:"Friends Referred", val:"7",      color:"#F5A623" },
-                  { label:"Points Earned",    val:"3,500",  color:"#10B981" },
-                  { label:"Friends Earning",  val:"5",      color:"#00D4FF" },
-                ].map(({ label, val, color }) => (
-                  <div key={label} className="glass rounded-xl p-3 border border-white/[0.07]">
-                    <p className="text-xl font-black" style={{ color }}>{val}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Transactions */}
+        {/* ── Transactions ── */}
+        <div>
           <div className="glass rounded-2xl border border-white/[0.07]">
             <div className="p-5 border-b border-white/[0.07]">
               <h3 className="font-black text-sm text-foreground">Recent Activity</h3>

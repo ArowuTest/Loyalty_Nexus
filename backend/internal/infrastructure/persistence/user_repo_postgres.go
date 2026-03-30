@@ -34,14 +34,6 @@ func (r *postgresUserRepository) FindByPhoneNumber(ctx context.Context, phone st
 	return &user, nil
 }
 
-func (r *postgresUserRepository) FindByReferralCode(ctx context.Context, code string) (*entities.User, error) {
-	var user entities.User
-	if err := r.db.WithContext(ctx).Where("referral_code = ?", code).First(&user).Error; err != nil {
-		return nil, err
-	}
-	return &user, nil
-}
-
 func (r *postgresUserRepository) ExistsByPhoneNumber(ctx context.Context, phone string) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Table("users").Where("phone_number = ?", phone).Count(&count).Error

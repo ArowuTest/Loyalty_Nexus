@@ -60,7 +60,7 @@ export const TESTIMONIALS = [
     avatar:  "B",
     location:"Ibadan, Oyo State",
     tier:    "silver",
-    quote:   "I referred 12 friends this month. That's 6,000 bonus points just from referrals, plus my normal daily earnings. The compound growth is unbelievable.",
+    quote:   "The AI tools are incredible — I use the study guide every week for my exams. The spin wheel is just a bonus on top of my normal recharges.",
   },
   {
     name:    "Emeka Nwachukwu",
@@ -112,5 +112,4 @@ export const MOCK_USER = {
   spins_today:  1,
   spins_used:   0,
   total_earned: 12400,
-  referral_code:"NEXUS-CHIOMA",
 };

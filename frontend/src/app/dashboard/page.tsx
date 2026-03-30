@@ -706,7 +706,7 @@ export default function DashboardPage() {
   const { data: wallet }    = useSWR("/user/wallet",      fetcher, { onSuccess: (d: unknown) => setWallet(d as Parameters<typeof setWallet>[0]) });
   const { data: bonusData } = useSWR("/user/bonus-pulse", fetcher);
 
-  const p = profile as { phone_number?: string; tier?: string; streak_count?: number; total_spins?: number; studio_use_count?: number; total_referrals?: number } | undefined;
+  const p = profile as { phone_number?: string; tier?: string; streak_count?: number; total_spins?: number; studio_use_count?: number } | undefined;
   const w = wallet  as { pulse_points?: number; spin_credits?: number; lifetime_points?: number } | undefined;
   const b = bonusData as { total_bonus?: number } | undefined;
 
@@ -719,7 +719,6 @@ export default function DashboardPage() {
   const streak      = p?.streak_count  ?? 0;
   const totalSpins  = p?.total_spins   ?? 0;
   const studioUses  = p?.studio_use_count ?? 0;
-  const totalRefs   = p?.total_referrals  ?? 0;
   const totalBonus  = b?.total_bonus   ?? 0;
 
   const tierData = TIER_THRESHOLDS.find(t => t.tier === tier) || TIER_THRESHOLDS[0];
@@ -736,7 +735,6 @@ export default function DashboardPage() {
   const STATS = [
     { icon: RotateCcw, label: "Total Spins",  value: totalSpins.toLocaleString(),  color: "#5f72f9", sub: "All time" },
     { icon: Wand2,     label: "Studio Uses",  value: studioUses.toLocaleString(),  color: "#8B5CF6", sub: "All time" },
-    { icon: Users,     label: "Referrals",    value: totalRefs.toLocaleString(),   color: "#10b981", sub: "Friends joined" },
     { icon: Award,     label: "Bonus Awards", value: formatPoints(totalBonus),     color: "#F5A623", sub: "Total earned" },
   ];
 

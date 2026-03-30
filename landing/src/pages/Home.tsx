@@ -782,7 +782,7 @@ export default function Home() {
                 emoji: "🤝",
                 color: "#00D4FF",
                 title: "Your Loyalty Rewarded",
-                body: "You've been an MTN customer for years. It's time your loyalty paid back. Every recharge, every referral, every session — all of it builds into real rewards you can use.",
+                body: "You've been an MTN customer for years. It's time your loyalty paid back. Every recharge, every spin, every AI session — all of it builds into real rewards you can use.",
               },
               {
                 emoji: "📱",

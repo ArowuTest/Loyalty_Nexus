@@ -57,7 +57,6 @@ var badgeCatalogue = []BadgeDefinition{
 	{"silver_tier",      "Silver Member",      "Reached SILVER tier",                         "🥈"},
 	{"gold_tier",        "Gold Member",        "Reached GOLD tier",                           "🥇"},
 	{"platinum_tier",    "Platinum Elite",     "Reached PLATINUM tier",                       "💎"},
-	{"referral_5",       "Connector",          "Referred 5 users",                            "🤝"},
 	{"big_winner",       "Big Winner",         "Won a prize worth ₦5,000+",                   "🎁"},
 }
 
@@ -166,13 +165,12 @@ func (svc *PassportService) EvaluateBadges(ctx context.Context, userID uuid.UUID
 		StreakCount      int   `gorm:"column:streak_count"`
 		TotalSpins       int   `gorm:"column:total_spins"`
 		StudioUseCount   int   `gorm:"column:studio_use_count"`
-		TotalReferrals   int   `gorm:"column:total_referrals"`
 		LifetimePoints   int64 `gorm:"column:lifetime_points"`
 		Tier             string `gorm:"column:tier"`
 	}
 	var u userRow
 	if err := svc.db.WithContext(ctx).Table("users").
-		Select("streak_count, total_spins, studio_use_count, total_referrals, lifetime_points, tier").
+		Select("streak_count, total_spins, studio_use_count, lifetime_points, tier").
 		Where("id = ?", userID).First(&u).Error; err != nil {
 		return err
 	}
@@ -196,8 +194,6 @@ func (svc *PassportService) EvaluateBadges(ctx context.Context, userID uuid.UUID
 		if v, ok := meta["prize_value_kobo"]; ok && v >= 500_000 {
 			candidates = append(candidates, "big_winner")
 		}
-	case "referral":
-		if u.TotalReferrals >= 5 { candidates = append(candidates, "referral_5") }
 	}
 
 	// Tier badges

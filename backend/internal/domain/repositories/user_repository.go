@@ -10,7 +10,6 @@ type UserRepository interface {
 	// Read
 	FindByID(ctx context.Context, id uuid.UUID) (*entities.User, error)
 	FindByPhoneNumber(ctx context.Context, phone string) (*entities.User, error)
-	FindByReferralCode(ctx context.Context, code string) (*entities.User, error)
 	ExistsByPhoneNumber(ctx context.Context, phone string) (bool, error)
 
 	// Write

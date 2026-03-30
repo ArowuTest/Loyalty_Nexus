@@ -467,19 +467,17 @@ func (s *MTNPushService) resolveOrCreateUser(ctx context.Context, phone string) 
 		return user, nil
 	}
 	// Auto-create a minimal account.
-	// Both user_code and referral_code have UNIQUE constraints — use UUID-derived
-	// values to guarantee uniqueness even under concurrent auto-creates.
+	// user_code has a UNIQUE constraint — use UUID-derived value to guarantee
+	// uniqueness even under concurrent auto-creates.
 	uid := uuid.New()
-	userCode    := "MTN" + strings.ToUpper(uid.String()[:8])
-	referralCode := "REF" + strings.ToUpper(uuid.New().String()[:6])
+	userCode := "MTN" + strings.ToUpper(uid.String()[:8])
 	newUser := &entities.User{
-		ID:           uid,
-		PhoneNumber:  phone,
-		UserCode:     userCode,
-		ReferralCode: referralCode,
-		Tier:         "BRONZE",
-		IsActive:     true,
-		CreatedAt:    time.Now(),
+		ID:          uid,
+		PhoneNumber: phone,
+		UserCode:    userCode,
+		Tier:        "BRONZE",
+		IsActive:    true,
+		CreatedAt:   time.Now(),
 	}
 	if err := s.userRepo.Create(ctx, newUser); err != nil {
 		return nil, fmt.Errorf("auto-create user failed: %w", err)

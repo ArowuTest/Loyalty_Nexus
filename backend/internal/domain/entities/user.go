@@ -33,8 +33,6 @@ type User struct {
 	SubscriptionTier      string     `db:"subscription_tier"       gorm:"column:subscription_tier"        json:"-"`
 	SubscriptionStatus    string     `db:"subscription_status"     gorm:"column:subscription_status"      json:"-"`
 	SubscriptionExpiresAt *time.Time `db:"subscription_expires_at" gorm:"column:subscription_expires_at" json:"-"`
-	ReferralCode          string     `db:"referral_code"           gorm:"column:referral_code"            json:"referral_code"`
-	ReferredBy            *uuid.UUID `db:"referred_by"             gorm:"column:referred_by"              json:"referred_by,omitempty"`
 	KYCStatus             string     `db:"kyc_status"              gorm:"column:kyc_status"               json:"kyc_status"`
 	PointsExpireAt        *time.Time `db:"points_expire_at"        gorm:"column:points_expire_at"         json:"points_expire_at,omitempty"`
 	TotalPoints           int64      `db:"total_points"            gorm:"column:total_points"             json:"total_points"`
@@ -42,7 +40,6 @@ type User struct {
 	LifetimePoints        int64      `db:"lifetime_points"         gorm:"column:lifetime_points"          json:"lifetime_points"`
 	TotalSpins            int        `db:"total_spins"             gorm:"column:total_spins"              json:"total_spins"`
 	StudioUseCount        int        `db:"studio_use_count"        gorm:"column:studio_use_count"         json:"studio_use_count"`
-	TotalReferrals        int        `db:"total_referrals"         gorm:"column:total_referrals"          json:"total_referrals"`
 	GoogleWalletObjectID  string     `db:"google_wallet_object_id" gorm:"column:google_wallet_object_id" json:"google_wallet_object_id,omitempty"`
 	ApplePassSerial       string     `db:"apple_pass_serial"       gorm:"column:apple_pass_serial"        json:"apple_pass_serial,omitempty"`
 	SpinCredits           int        `db:"spin_credits"            gorm:"column:spin_credits"             json:"spin_credits"`

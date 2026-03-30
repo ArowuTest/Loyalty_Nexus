@@ -17,7 +17,6 @@ const KEYS = {
   STREAK_WINDOW:     "streak_expiry_hours",
   STREAK_FREEZE:     "streak_freeze_days_per_month",
   FIRST_RECHARGE:    "first_recharge_bonus_points",
-  REFERRAL_BONUS:    "referral_bonus_points",
   TIERS:             "recharge_tiers_json",
   STREAK_MILESTONES: "streak_milestones_json",
   EXPIRY_DAYS:       "points_expiry_days",
@@ -210,8 +209,6 @@ export default function PointsConfigPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <NumberField label="First Recharge Bonus" desc="Flat points awarded on a subscriber's very first recharge."
             configKey={KEYS.FIRST_RECHARGE} configs={configs} saving={saving} saved={saved} onSave={save} suffix="pts"/>
-          <NumberField label="Referral Bonus" desc="Points awarded to both referrer and new user on first recharge."
-            configKey={KEYS.REFERRAL_BONUS} configs={configs} saving={saving} saved={saved} onSave={save} suffix="pts"/>
         </div>
       </section>
 

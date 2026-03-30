@@ -80,7 +80,6 @@ const BADGE_RARITY: Record<string, "common" | "rare" | "epic" | "legendary"> = {
   silver_tier:    "common",
   gold_tier:      "rare",
   platinum_tier:  "legendary",
-  referral_5:     "rare",
   big_winner:     "epic",
 };
 

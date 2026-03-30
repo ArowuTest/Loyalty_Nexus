@@ -5,7 +5,6 @@ export const ROUTES = {
   STUDIO:    "/studio",
   ADMIN:     "/admin",
   SPIN:      "/dashboard#spin",
-  REFERRAL:  "/dashboard#referral",
   ABOUT:     "/about",
   BLOG:      "/blog",
   CAREERS:   "/careers",

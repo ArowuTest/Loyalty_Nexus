@@ -834,7 +834,7 @@ export default function HomePage() {
           <StaggerGrid className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {[
               { emoji: "🇳🇬", color: "#F5A623", title: "Proudly Nigerian", body: "Built in Nigeria, for Nigerians. Every feature is designed around how Nigerians actually use their phones — recharging daily, sharing data, and building businesses on mobile." },
-              { emoji: "🤝", color: "#00D4FF", title: "Your Loyalty Rewarded", body: "You've been an MTN customer for years. It's time your loyalty paid back. Every recharge, every referral, every session — all of it builds into real rewards you can use." },
+              { emoji: "🤝", color: "#00D4FF", title: "Your Loyalty Rewarded", body: "You've been an MTN customer for years. It's time your loyalty paid back. Every recharge, every spin, every AI session — all of it builds into real rewards you can use." },
               { emoji: "📱", color: "#10B981", title: "Works on Any Phone", body: "No heavy app download needed. Loyalty Nexus works in your browser on any Android or iPhone — even on a data-saver connection. Accessible to everyone in Nigeria." },
               { emoji: "🔒", color: "#8B5CF6", title: "No Hidden Costs", body: "Sign up is completely free. There are no subscription fees, no premium tiers to unlock, and no hidden charges. Your Pulse Points are earned purely from recharges you already make." },
               { emoji: "🎯", color: "#F472B6", title: "Instant Gratification", body: "Win prizes the moment you spin the wheel. Earn Pulse Points the second you recharge. No waiting. No processing delays. Your rewards land instantly, every single time." },
