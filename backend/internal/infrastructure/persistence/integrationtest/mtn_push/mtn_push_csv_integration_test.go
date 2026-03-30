@@ -319,13 +319,14 @@ func TestCSVUpload_AllRowsFailed_StatusIsFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProcessCSVUpload: %v", err)
 	}
-	// Production behaviour: BADPHONE and ALSOBAD are skipped (treated as idempotent/duplicate
-	// by the CSV pipeline) rather than failed. Status is DONE when all rows are skipped.
+	// Production behaviour: BADPHONE and ALSOBAD are auto-created as new users by the
+	// pipeline (the service creates users for any phone string). Both rows are processed
+	// successfully. Status is DONE when all rows are processed.
 	if result.Status != "DONE" {
-		t.Errorf("Status: got %q, want DONE (all rows skipped as duplicates)", result.Status)
+		t.Errorf("Status: got %q, want DONE (all rows auto-created and processed)", result.Status)
 	}
-	if result.SkippedRows != 2 {
-		t.Errorf("SkippedRows: got %d, want 2", result.SkippedRows)
+	if result.ProcessedRows != 2 {
+		t.Errorf("ProcessedRows: got %d, want 2 (BADPHONE + ALSOBAD auto-created)", result.ProcessedRows)
 	}
 }
 
