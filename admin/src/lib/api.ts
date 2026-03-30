@@ -98,7 +98,7 @@ class AdminAPI {
   getNotificationHistory() { return this.getBroadcasts(); }
   broadcastNotification(payload: BroadcastPayload) { return this.createBroadcast(payload); }
   // Users
-  suspendUser(id: string) { return this.req("POST", `/admin/users/${id}/suspend`, {}); }
+  suspendUser(id: string)   { return this.req("PUT", `/admin/users/${id}/suspend`, { suspended: true }); }
   // Regional Wars
   getRegionalWars() { return this.req<{ leaderboard: RegionalStat[] }>("GET", "/admin/regional-wars"); }
   resolveWar(period: string) { return this.req("POST", "/admin/wars/resolve", { period }); }
@@ -217,10 +217,10 @@ class AdminAPI {
 
   // ─── User management extras ───────────────────────────────────────────────
   unsuspendUser(id: string) {
-    return this.req<void>("POST", `/admin/users/${id}/unsuspend`);
+    return this.req<void>("PUT", `/admin/users/${id}/suspend`, { suspended: false });
   }
-  adjustPoints(id: string, delta: number, reason: string) {
-    return this.req<void>("POST", `/admin/users/${id}/adjust-points`, { delta, reason });
+  adjustPoints(userId: string, delta: number, reason: string) {
+    return this.req<void>("POST", "/admin/points/adjust", { user_id: userId, delta, reason });
   }
 
   // ─── Fraud ────────────────────────────────────────────────────────────────
@@ -289,7 +289,18 @@ export interface StudioTool {
   refund_pct: number;          // % of pts returned on approved dispute (0-100)
   is_free: boolean;            // true = bypass all point checks (e.g. chat)
 }
-export interface User { id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean; created_at: string; }
+export interface User {
+  id: string;
+  phone_number: string;
+  tier: string;
+  state?: string;
+  streak_count: number;
+  is_active: boolean;
+  created_at: string;
+  last_recharge_at?: string | null;
+  pulse_points?: number;
+  spin_credits?: number;
+}
 export interface FraudEvent {
   id: string;
   user_id: string;
@@ -658,12 +669,16 @@ export interface CSVRowDetail {
 
 // ─── Recharge Reward Config types ──────────────────────────────────────────────
 export interface RechargeConfig {
-  spin_draw_naira_per_credit: number;
-  pulse_naira_per_point: number;
-  min_amount_naira: number;
+  spin_naira_per_credit: number;   // ₦ minimum daily recharge for Bronze spin tier
+  draw_naira_per_entry: number;    // ₦ per Draw Entry (flat per-transaction)
+  pulse_naira_per_point: number;   // ₦ per Pulse Point
+  spin_max_per_day: number;        // max spin credits per calendar day
+  min_amount_naira: number;        // minimum qualifying recharge amount
 }
 export interface RechargeConfigPayload {
-  spin_draw_naira_per_credit: number;
-  pulse_naira_per_point: number;
-  min_amount_naira: number;
+  spin_naira_per_credit?: number;
+  draw_naira_per_entry?: number;
+  pulse_naira_per_point?: number;
+  spin_max_per_day?: number;
+  min_amount_naira?: number;
 }

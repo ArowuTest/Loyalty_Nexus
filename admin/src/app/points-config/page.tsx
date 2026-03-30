@@ -3,273 +3,316 @@ import AdminShell from "@/components/layout/AdminShell";
 import { useEffect, useState, useCallback } from "react";
 import adminAPI, { ConfigEntry } from "@/lib/api";
 
-interface Tier { min_recharge: number; points_per_naira_denom: number; label: string; }
-interface StreakMilestone { days: number; bonus_points: number; }
-
-// Config keys we manage
+// ─── Config keys — must match backend service reads exactly ───────────────────
+// mtn_push_service.go reads:
+//   "pulse_naira_per_point"       → Pulse Points threshold (default 250)
+//   "draw_naira_per_entry"        → Draw Entry threshold (default 200)
+//   "spin_max_per_day"            → Global daily spin cap (default 5)
+//   "mtn_push_min_amount_naira"   → Min qualifying recharge (default 50)
+//   "first_recharge_bonus_points" → First recharge bonus (default 0)
 const KEYS = {
-  BASE_RATE:         "points_naira_per_point",
-  SPIN_THRESHOLD:    "spin_credit_threshold_kobo",
-  MULTIPLIER:        "points_multiplier",
-  MULTIPLIER_START:  "points_multiplier_start",
-  MULTIPLIER_END:    "points_multiplier_end",
-  MIN_RECHARGE:      "min_qualifying_recharge_kobo",
-  STREAK_WINDOW:     "streak_expiry_hours",
-  STREAK_FREEZE:     "streak_freeze_days_per_month",
-  FIRST_RECHARGE:    "first_recharge_bonus_points",
-  TIERS:             "recharge_tiers_json",
-  STREAK_MILESTONES: "streak_milestones_json",
-  EXPIRY_DAYS:       "points_expiry_days",
-  EXPIRY_WARN_DAYS:  "points_expiry_warn_days",
+  PULSE_NAIRA:  "pulse_naira_per_point",
+  DRAW_NAIRA:   "draw_naira_per_entry",
+  SPIN_MAX:     "spin_max_per_day",
+  MIN_RECHARGE: "mtn_push_min_amount_naira",
+  FIRST_BONUS:  "first_recharge_bonus_points",
 };
 
 function useConfig() {
   const [configs, setConfigs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const r = await adminAPI.getConfig();
-    const m: Record<string, string> = {};
-    r.configs.forEach((c: ConfigEntry) => { m[c.key] = String(c.value); });
-    setConfigs(m);
+    try {
+      const r = await adminAPI.getConfig();
+      const m: Record<string, string> = {};
+      r.configs.forEach((c: ConfigEntry) => { m[c.key] = String(c.value); });
+      setConfigs(m);
+    } catch {
+      setError("Failed to load configuration");
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
   const save = async (key: string, value: string) => {
     setSaving(key);
+    setError(null);
     try {
       await adminAPI.updateConfig(key, value);
       setConfigs(prev => ({ ...prev, [key]: value }));
       setSaved(key);
-      setTimeout(() => setSaved(null), 2000);
-    } finally { setSaving(null); }
+      setTimeout(() => setSaved(null), 2500);
+    } catch {
+      setError(`Failed to save ${key}`);
+    } finally {
+      setSaving(null);
+    }
   };
 
-  return { configs, saving, saved, save, reload: load };
+  return { configs, saving, saved, error, save };
 }
 
-function NumberField({ label, desc, configKey, configs, saving, saved, onSave, divisor = 1, suffix = "" }:
-  { label: string; desc: string; configKey: string; configs: Record<string,string>;
-    saving: string|null; saved: string|null; onSave: (k:string,v:string)=>void;
-    divisor?: number; suffix?: string }) {
-  const raw = configs[configKey] ?? "0";
-  const [val, setVal] = useState("");
-  useEffect(() => { setVal(String(Number(raw) / divisor)); }, [raw, divisor]);
+// ─── Config Card ──────────────────────────────────────────────────────────────
+function ConfigCard({
+  icon, title, description, configKey, configs, saving, saved, onSave,
+  suffix = "", prefix = "", min = 0, step = 1, note,
+}: {
+  icon: string; title: string; description: string; configKey: string;
+  configs: Record<string, string>; saving: string | null; saved: string | null;
+  onSave: (k: string, v: string) => void;
+  suffix?: string; prefix?: string; min?: number; step?: number; note?: string;
+}) {
+  const raw = configs[configKey] ?? "";
+  const [val, setVal] = useState(raw || "0");
+  useEffect(() => { if (raw !== "") setVal(raw); }, [raw]);
+
+  const isDirty = val !== (raw || "0");
+  const isSaving = saving === configKey;
+  const isSaved = saved === configKey;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4">
-      <label className="block text-sm font-semibold text-gray-800 mb-1">{label}</label>
-      <p className="text-xs text-gray-500 mb-3">{desc}</p>
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <input type="number" value={val} onChange={e => setVal(e.target.value)}
-            className="w-full border rounded-lg px-3 py-2 text-sm pr-10 focus:ring-2 focus:ring-indigo-500 outline-none"/>
-          {suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">{suffix}</span>}
+    <div style={{
+      background: "#1c2038",
+      border: `1px solid ${isSaved ? "rgba(34,197,94,0.4)" : "rgba(95,114,249,0.15)"}`,
+      borderRadius: 12, padding: "20px", transition: "border-color 0.3s",
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: 10,
+          background: "rgba(95,114,249,0.15)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 18, flexShrink: 0,
+        }}>{icon}</div>
+        <div style={{ flex: 1 }}>
+          <p style={{ color: "#e2e8f0", fontWeight: 600, fontSize: 14, margin: 0 }}>{title}</p>
+          <p style={{ color: "#94a3b8", fontSize: 12, margin: "4px 0 0", lineHeight: 1.5 }}>{description}</p>
         </div>
-        <button disabled={saving === configKey}
-          onClick={() => onSave(configKey, String(Math.round(Number(val) * divisor)))}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-            saved === configKey ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"
-          } disabled:opacity-50`}>
-          {saving === configKey ? "…" : saved === configKey ? "✓" : "Save"}
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {prefix && (
+          <span style={{
+            background: "rgba(95,114,249,0.1)", color: "#818cf8",
+            padding: "8px 12px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+            border: "1px solid rgba(95,114,249,0.2)",
+          }}>{prefix}</span>
+        )}
+        <div style={{ flex: 1, position: "relative" }}>
+          <input
+            type="number" value={val} min={min} step={step}
+            onChange={e => setVal(e.target.value)}
+            style={{
+              width: "100%", background: "#0f1629",
+              border: `1px solid ${isDirty ? "rgba(95,114,249,0.5)" : "rgba(255,255,255,0.08)"}`,
+              borderRadius: 8, padding: suffix ? "9px 48px 9px 12px" : "9px 12px",
+              color: "#e2e8f0", fontSize: 15, fontWeight: 600,
+              outline: "none", boxSizing: "border-box", transition: "border-color 0.2s",
+            }}
+          />
+          {suffix && (
+            <span style={{
+              position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
+              color: "#64748b", fontSize: 12, pointerEvents: "none",
+            }}>{suffix}</span>
+          )}
+        </div>
+        <button
+          disabled={isSaving}
+          onClick={() => onSave(configKey, val)}
+          style={{
+            padding: "9px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+            border: "none", cursor: isSaving ? "not-allowed" : "pointer",
+            background: isSaved ? "rgba(34,197,94,0.2)" : isDirty ? "#5f72f9" : "rgba(95,114,249,0.15)",
+            color: isSaved ? "#4ade80" : isDirty ? "#fff" : "#818cf8",
+            transition: "all 0.2s", whiteSpace: "nowrap", opacity: isSaving ? 0.6 : 1,
+          }}
+        >
+          {isSaving ? "Saving…" : isSaved ? "✓ Saved" : "Save"}
         </button>
+      </div>
+      {note && (
+        <p style={{ color: "#64748b", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+          {note}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── Live Preview ─────────────────────────────────────────────────────────────
+function LivePreview({ configs }: { configs: Record<string, string> }) {
+  const pulseNaira  = Number(configs[KEYS.PULSE_NAIRA]  || 250);
+  const drawNaira   = Number(configs[KEYS.DRAW_NAIRA]   || 200);
+  const spinMax     = Number(configs[KEYS.SPIN_MAX]     || 5);
+  const minRecharge = Number(configs[KEYS.MIN_RECHARGE] || 50);
+  const firstBonus  = Number(configs[KEYS.FIRST_BONUS]  || 0);
+
+  const example = 450;
+  const pulseEarned    = Math.floor(example / pulseNaira);
+  const pulseRemainder = example % pulseNaira;
+  const drawEarned     = Math.floor(example / drawNaira);
+  const drawRemainder  = example % drawNaira;
+
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, rgba(95,114,249,0.08) 0%, rgba(139,92,246,0.08) 100%)",
+      border: "1px solid rgba(95,114,249,0.2)", borderRadius: 12, padding: "20px",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+        <span style={{ fontSize: 16 }}>🧮</span>
+        <p style={{ color: "#818cf8", fontWeight: 700, fontSize: 13, margin: 0, letterSpacing: "0.05em" }}>
+          LIVE PREVIEW — Example: ₦{example} Recharge
+        </p>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+        {[
+          { label: "Pulse Points", value: `+${pulseEarned} pt${pulseEarned !== 1 ? "s" : ""}`, sub: `₦${pulseRemainder} carries forward`, color: "#818cf8" },
+          { label: "Draw Entries", value: `+${drawEarned} entr${drawEarned !== 1 ? "ies" : "y"}`, sub: `₦${drawRemainder} carries forward`, color: "#34d399" },
+          { label: "Daily Spin Cap", value: `${spinMax} spins/day`, sub: "Tier-based eligibility", color: "#f59e0b" },
+          { label: "Min Recharge", value: `₦${minRecharge}`, sub: firstBonus > 0 ? `1st recharge: +${firstBonus} pts` : "No 1st-recharge bonus", color: "#94a3b8" },
+        ].map(s => (
+          <div key={s.label} style={{
+            background: "rgba(15,22,41,0.6)", borderRadius: 8, padding: "12px 14px",
+            border: "1px solid rgba(255,255,255,0.05)",
+          }}>
+            <p style={{ color: "#64748b", fontSize: 11, margin: "0 0 4px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{s.label}</p>
+            <p style={{ color: s.color, fontSize: 17, fontWeight: 700, margin: "0 0 2px" }}>{s.value}</p>
+            <p style={{ color: "#475569", fontSize: 11, margin: 0 }}>{s.sub}</p>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
+// ─── Section Header ───────────────────────────────────────────────────────────
+function SectionHeader({ number, title, subtitle, color }: {
+  number: string; title: string; subtitle: string; color: string;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+      <div style={{
+        width: 28, height: 28, borderRadius: "50%",
+        background: `${color}22`, border: `1px solid ${color}44`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color, fontSize: 12, fontWeight: 700, flexShrink: 0,
+      }}>{number}</div>
+      <div>
+        <p style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 15, margin: 0 }}>{title}</p>
+        <p style={{ color: "#64748b", fontSize: 12, margin: "2px 0 0" }}>{subtitle}</p>
+      </div>
+      <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.05)", marginLeft: 8 }} />
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function PointsConfigPage() {
-  const { configs, saving, saved, save } = useConfig();
-
-  // Tiers JSON
-  const [tiers, setTiersState] = useState<Tier[]>([]);
-  const [milestones, setMilestonesState] = useState<StreakMilestone[]>([]);
-
-  useEffect(() => {
-    try { setTiersState(JSON.parse(configs[KEYS.TIERS] || "[]")); } catch { setTiersState([]); }
-    try { setMilestonesState(JSON.parse(configs[KEYS.STREAK_MILESTONES] || "[]")); } catch { setMilestonesState([]); }
-  }, [configs]);
-
-  const saveTiers = () => save(KEYS.TIERS, JSON.stringify(tiers));
-  const saveMilestones = () => save(KEYS.STREAK_MILESTONES, JSON.stringify(milestones));
-
-  const addTier = () => setTiersState(prev => [...prev,
-    { min_recharge: 0, points_per_naira_denom: 250, label: "" }]);
-  const removeTier = (i: number) => setTiersState(prev => prev.filter((_, j) => j !== i));
-  const updateTier = (i: number, field: keyof Tier, value: string|number) =>
-    setTiersState(prev => prev.map((t, j) => j === i ? { ...t, [field]: value } : t));
-
-  const addMilestone = () => setMilestonesState(prev => [...prev, { days: 7, bonus_points: 10 }]);
-  const removeMilestone = (i: number) => setMilestonesState(prev => prev.filter((_, j) => j !== i));
-  const updateMilestone = (i: number, field: keyof StreakMilestone, val: number) =>
-    setMilestonesState(prev => prev.map((m, j) => j === i ? { ...m, [field]: val } : m));
+  const { configs, saving, saved, error, save } = useConfig();
 
   return (
-    <div className="space-y-8 max-w-4xl">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Points Engine Configuration</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          All parameters update in real-time — no deployment needed. (REQ-5.2.x Zero Hardcoding)
-        </p>
-      </div>
+    <AdminShell>
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "32px 24px" }}>
 
-      {/* ── Base Earning Rate ── */}
-      <section>
-        <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-          <span className="w-7 h-7 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-sm font-bold">1</span>
-          Base Earning Rate
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <NumberField label="₦ per 1 Pulse Point" desc="Default earning rate. Lower = more generous. (e.g. 250 means ₦250 = 1 pt)"
-            configKey={KEYS.BASE_RATE} configs={configs} saving={saving} saved={saved} onSave={save} suffix="₦/pt"/>
-          <NumberField label="Spin Credit Threshold" desc="Cumulative recharge amount that awards 1 Spin Credit."
-            configKey={KEYS.SPIN_THRESHOLD} configs={configs} saving={saving} saved={saved} onSave={save}
-            divisor={100} suffix="₦"/>
-          <NumberField label="Minimum Qualifying Recharge" desc="Recharges below this amount earn no points."
+        {/* Page Header */}
+        <div style={{ marginBottom: 32 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: 12,
+              background: "linear-gradient(135deg, #5f72f9, #8b5cf6)",
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
+            }}>💎</div>
+            <div>
+              <h1 style={{ color: "#e2e8f0", fontSize: 22, fontWeight: 700, margin: 0 }}>Points Engine</h1>
+              <p style={{ color: "#64748b", fontSize: 13, margin: "2px 0 0" }}>
+                Configure how subscribers earn Pulse Points, Draw Entries, and Spin Credits
+              </p>
+            </div>
+          </div>
+          {error && (
+            <div style={{
+              background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+              borderRadius: 8, padding: "10px 14px", marginTop: 12, color: "#f87171", fontSize: 13,
+            }}>⚠ {error}</div>
+          )}
+        </div>
+
+        {/* Live Preview */}
+        <div style={{ marginBottom: 32 }}>
+          <LivePreview configs={configs} />
+        </div>
+
+        {/* Section 1: Pulse Points */}
+        <SectionHeader number="1" title="Pulse Points" subtitle="AI Studio currency — earned on every recharge via accumulator" color="#818cf8" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 32 }}>
+          <ConfigCard
+            icon="⚡" title="Pulse Point Threshold"
+            description="Naira required to earn 1 Pulse Point. Remainder carries forward across recharges."
+            configKey={KEYS.PULSE_NAIRA} configs={configs} saving={saving} saved={saved} onSave={save}
+            prefix="₦" suffix="= 1 pt" min={1}
+            note="e.g. ₦250 threshold: recharge ₦200 → 0 pts (₦200 carried), recharge ₦100 → 1 pt (₦50 carried)"
+          />
+          <ConfigCard
+            icon="🎁" title="First Recharge Bonus"
+            description="Flat Pulse Points awarded on a subscriber's very first qualifying recharge. Set to 0 to disable."
+            configKey={KEYS.FIRST_BONUS} configs={configs} saving={saving} saved={saved} onSave={save}
+            suffix="pts" min={0}
+          />
+        </div>
+
+        {/* Section 2: Draw Entries */}
+        <SectionHeader number="2" title="Draw Entries (Lottery Points)" subtitle="Daily lottery currency — earned per recharge, resets after each draw" color="#34d399" />
+        <div style={{ marginBottom: 32 }}>
+          <ConfigCard
+            icon="🎟" title="Draw Entry Threshold"
+            description="Naira required to earn 1 Draw Entry. Remainder carries forward within the day. Resets after each draw."
+            configKey={KEYS.DRAW_NAIRA} configs={configs} saving={saving} saved={saved} onSave={save}
+            prefix="₦" suffix="= 1 entry" min={1}
+            note="e.g. ₦200 threshold: recharge ₦350 → 1 entry (₦150 carried), recharge ₦100 → 1 more entry (₦50 carried)"
+          />
+        </div>
+
+        {/* Section 3: Spin Credits */}
+        <SectionHeader number="3" title="Spin Credits" subtitle="Wheel spin tokens — tier-based on cumulative daily recharge (configure tiers in Spin Wheel page)" color="#f59e0b" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 32 }}>
+          <ConfigCard
+            icon="🎡" title="Global Daily Spin Cap"
+            description="Maximum spins any user can earn in a single day, regardless of tier."
+            configKey={KEYS.SPIN_MAX} configs={configs} saving={saving} saved={saved} onSave={save}
+            suffix="spins/day" min={1}
+            note="Spin tiers (Bronze/Silver/Gold/Platinum) and their per-tier caps are configured on the Spin Wheel page."
+          />
+          <ConfigCard
+            icon="🔒" title="Minimum Qualifying Recharge"
+            description="Minimum recharge amount to qualify for any rewards (Pulse Points, Draw Entries, Spin Credits)."
             configKey={KEYS.MIN_RECHARGE} configs={configs} saving={saving} saved={saved} onSave={save}
-            divisor={100} suffix="₦"/>
+            prefix="₦" suffix="min" min={0}
+          />
         </div>
-      </section>
 
-      {/* ── Tiered Earning Rules ── */}
-      <section>
-        <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-          <span className="w-7 h-7 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-sm font-bold">2</span>
-          Tiered Earning Rules (REQ-5.2.3)
-        </h2>
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 mb-4">Higher recharges earn at better rates. Label each tier clearly.</p>
-          <div className="space-y-2">
-            {tiers.map((tier, i) => (
-              <div key={i} className="flex gap-2 items-center">
-                <input placeholder="Label (e.g. Gold)" value={tier.label}
-                  onChange={e => updateTier(i, "label", e.target.value)}
-                  className="w-28 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
-                <span className="text-xs text-gray-400">Min ₦</span>
-                <input type="number" placeholder="1000" value={tier.min_recharge}
-                  onChange={e => updateTier(i, "min_recharge", Number(e.target.value))}
-                  className="w-24 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
-                <span className="text-xs text-gray-400">₦ per pt</span>
-                <input type="number" placeholder="200" value={tier.points_per_naira_denom}
-                  onChange={e => updateTier(i, "points_per_naira_denom", Number(e.target.value))}
-                  className="w-20 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
-                <button onClick={() => removeTier(i)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
-              </div>
-            ))}
-          </div>
-          <div className="flex gap-3 mt-4">
-            <button onClick={addTier}
-              className="px-3 py-1.5 border border-indigo-300 text-indigo-600 rounded-lg text-sm hover:bg-indigo-50">
-              + Add Tier
-            </button>
-            <button onClick={saveTiers}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium ${
-                saved === KEYS.TIERS ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"
-              }`}>
-              {saving === KEYS.TIERS ? "Saving…" : saved === KEYS.TIERS ? "✓ Saved" : "Save Tiers"}
-            </button>
+        {/* Info Banner */}
+        <div style={{
+          background: "rgba(95,114,249,0.06)", border: "1px solid rgba(95,114,249,0.15)",
+          borderRadius: 12, padding: "16px 20px", display: "flex", gap: 12, alignItems: "flex-start",
+        }}>
+          <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>ℹ️</span>
+          <div>
+            <p style={{ color: "#818cf8", fontWeight: 600, fontSize: 13, margin: "0 0 6px" }}>
+              How the Accumulator Works
+            </p>
+            <p style={{ color: "#64748b", fontSize: 12, margin: 0, lineHeight: 1.7 }}>
+              Each user has a persistent counter per currency. When a recharge arrives, the amount is added to their counter.
+              Every time the counter reaches the threshold, one unit is awarded and the threshold is subtracted from the counter.
+              The remainder stays in the counter for the next recharge — no naira is ever wasted.
+              Spin credits use a different model: the user&apos;s cumulative daily recharge total determines their tier,
+              and the tier&apos;s daily cap is what they can earn that day.
+            </p>
           </div>
         </div>
-      </section>
 
-      {/* ── Global Multiplier ── */}
-      <section>
-        <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-          <span className="w-7 h-7 bg-yellow-100 text-yellow-700 rounded-full flex items-center justify-center text-sm font-bold">3</span>
-          Global & Scheduled Multiplier (REQ-5.2.5/5.2.6)
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <NumberField label="Points Multiplier" desc='1.0 = normal. 2.0 = "Double Points Weekend". Updates immediately.'
-            configKey={KEYS.MULTIPLIER} configs={configs} saving={saving} saved={saved} onSave={save} suffix="×"/>
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <label className="block text-sm font-semibold text-gray-800 mb-1">Scheduled Start</label>
-            <p className="text-xs text-gray-500 mb-3">Auto-activate multiplier at this time</p>
-            <input type="datetime-local" value={configs[KEYS.MULTIPLIER_START] ?? ""}
-              onChange={e => save(KEYS.MULTIPLIER_START, e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <label className="block text-sm font-semibold text-gray-800 mb-1">Scheduled End</label>
-            <p className="text-xs text-gray-500 mb-3">Auto-deactivate at this time</p>
-            <input type="datetime-local" value={configs[KEYS.MULTIPLIER_END] ?? ""}
-              onChange={e => save(KEYS.MULTIPLIER_END, e.target.value)}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Bonus Events ── */}
-      <section>
-        <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-          <span className="w-7 h-7 bg-green-100 text-green-700 rounded-full flex items-center justify-center text-sm font-bold">4</span>
-          Bonus Point Events (REQ-5.2.8–5.2.10)
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <NumberField label="First Recharge Bonus" desc="Flat points awarded on a subscriber's very first recharge."
-            configKey={KEYS.FIRST_RECHARGE} configs={configs} saving={saving} saved={saved} onSave={save} suffix="pts"/>
-        </div>
-      </section>
-
-      {/* ── Streak Milestones ── */}
-      <section>
-        <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-          <span className="w-7 h-7 bg-orange-100 text-orange-700 rounded-full flex items-center justify-center text-sm font-bold">5</span>
-          Streak Configuration (REQ-5.2.9/5.2.12/5.2.13)
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <NumberField label="Streak Expiry Window" desc="Hours a user has to recharge before streak resets."
-            configKey={KEYS.STREAK_WINDOW} configs={configs} saving={saving} saved={saved} onSave={save} suffix="hrs"/>
-          <NumberField label="Streak Freeze Days" desc="Grace days per month where a missed recharge won't reset streak."
-            configKey={KEYS.STREAK_FREEZE} configs={configs} saving={saving} saved={saved} onSave={save} suffix="days/mo"/>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-sm font-semibold text-gray-800 mb-1">Streak Milestone Bonuses</p>
-          <p className="text-xs text-gray-500 mb-4">One-time bonus awarded when user reaches these streak lengths.</p>
-          <div className="space-y-2">
-            {milestones.map((m, i) => (
-              <div key={i} className="flex gap-2 items-center">
-                <span className="text-xs text-gray-400">At</span>
-                <input type="number" placeholder="7" value={m.days}
-                  onChange={e => updateMilestone(i, "days", Number(e.target.value))}
-                  className="w-20 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
-                <span className="text-xs text-gray-400">days → +</span>
-                <input type="number" placeholder="10" value={m.bonus_points}
-                  onChange={e => updateMilestone(i, "bonus_points", Number(e.target.value))}
-                  className="w-20 border rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
-                <span className="text-xs text-gray-400">pts</span>
-                <button onClick={() => removeMilestone(i)} className="text-red-400 hover:text-red-600 text-lg">×</button>
-              </div>
-            ))}
-          </div>
-          <div className="flex gap-3 mt-4">
-            <button onClick={addMilestone} className="px-3 py-1.5 border border-indigo-300 text-indigo-600 rounded-lg text-sm hover:bg-indigo-50">
-              + Add Milestone
-            </button>
-            <button onClick={saveMilestones}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium ${
-                saved === KEYS.STREAK_MILESTONES ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"
-              }`}>
-              {saving === KEYS.STREAK_MILESTONES ? "Saving…" : saved === KEYS.STREAK_MILESTONES ? "✓ Saved" : "Save Milestones"}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Points Expiry ── */}
-      <section>
-        <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-          <span className="w-7 h-7 bg-red-100 text-red-700 rounded-full flex items-center justify-center text-sm font-bold">6</span>
-          Points Expiry Policy (REQ-5.2.14/5.2.15)
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <NumberField label="Points Expiry Duration" desc='Days of inactivity before points expire. Set to 0 to disable expiry.'
-            configKey={KEYS.EXPIRY_DAYS} configs={configs} saving={saving} saved={saved} onSave={save} suffix="days"/>
-          <NumberField label="Expiry Warning Lead Time" desc="Days before expiry to send SMS warning to user."
-            configKey={KEYS.EXPIRY_WARN_DAYS} configs={configs} saving={saving} saved={saved} onSave={save} suffix="days"/>
-        </div>
-      </section>
-    </div>
+      </div>
+    </AdminShell>
   );
 }

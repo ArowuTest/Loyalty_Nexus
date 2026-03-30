@@ -17,15 +17,25 @@ interface FieldDef {
 
 const FIELDS: FieldDef[] = [
   {
-    key: "spin_draw_naira_per_credit",
+    key: "spin_naira_per_credit",
     label: "Spin Credit Threshold (₦)",
-    description: "How many naira a user must recharge in a single transaction to earn 1 Spin Credit.",
+    description: "Minimum cumulative daily recharge (naira) to qualify for the Bronze spin tier and earn 1 Spin Credit.",
     note:
       "This is the primary lever for controlling how quickly users accumulate spin credits. " +
       "Lowering this value makes spin credits easier to earn and will increase spin volume. " +
-      "Raising it reduces spin frequency and protects prize liability. Default: ₦200.",
+      "Raising it reduces spin frequency and protects prize liability. Default: ₦1,000.",
     min: 1,
     suffix: "₦ per credit",
+  },
+  {
+    key: "draw_naira_per_entry",
+    label: "Draw Entry Threshold (₦)",
+    description: "How many naira a user must recharge (per transaction) to earn 1 Draw Entry.",
+    note:
+      "Draw entries use a flat per-transaction accumulator — every ₦X recharged in a single push " +
+      "awards one draw entry. This is separate from the spin credit tier system. Default: ₦200.",
+    min: 1,
+    suffix: "₦ per entry",
   },
   {
     key: "pulse_naira_per_point",
@@ -37,6 +47,17 @@ const FIELDS: FieldDef[] = [
       "A higher value reduces point inflation and extends the lifetime value of the points economy. Default: ₦250.",
     min: 1,
     suffix: "₦ per point",
+  },
+  {
+    key: "spin_max_per_day",
+    label: "Daily Spin Cap (Platinum Tier)",
+    description: "Maximum spin credits a user can earn per calendar day (applies as the Platinum tier cap).",
+    note:
+      "This is a hard daily ceiling on spin credits regardless of how much a user recharges. " +
+      "It protects against prize liability from very high-volume rechargers. " +
+      "Individual tier caps in the Spin Config page may be lower than this value. Default: 5.",
+    min: 1,
+    suffix: "spins/day max",
   },
   {
     key: "min_amount_naira",
@@ -184,8 +205,8 @@ export default function RechargeConfigPage() {
         </h1>
         <p style={{ fontSize: 14, color: "#6b7280", marginTop: 6, maxWidth: 680 }}>
           These settings control how recharge transactions are translated into rewards — Spin Credits,
-          Bonus Pulse points, and the minimum qualifying amount for MTN Push processing. Changes take
-          effect immediately for all new transactions; existing credited rewards are not affected.
+          Draw Entries, Bonus Pulse points, and the minimum qualifying amount for MTN Push processing.
+          Changes take effect immediately for all new transactions; existing credited rewards are not affected.
         </p>
 
         {/* Prominent context banner */}

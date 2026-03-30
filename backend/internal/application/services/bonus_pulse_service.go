@@ -258,6 +258,7 @@ func (s *BonusPulseService) GetUserAwards(
 // If the canonical version is ever moved to a shared package, remove this.
 
 func normaliseBonusPhone(raw string) string {
+	// Strip all non-digit characters to get the raw digit string
 	var digits strings.Builder
 	for _, r := range raw {
 		if unicode.IsDigit(r) {
@@ -265,14 +266,16 @@ func normaliseBonusPhone(raw string) string {
 		}
 	}
 	d := digits.String()
+	// Always return in +234XXXXXXXXXX format to match DB storage
 	switch {
 	case strings.HasPrefix(d, "234") && len(d) == 13:
-		return "0" + d[3:]
+		return "+" + d // 2348012345678 -> +2348012345678
 	case strings.HasPrefix(d, "0") && len(d) == 11:
-		return d
+		return "+234" + d[1:] // 08012345678 -> +2348012345678
 	case len(d) == 10:
-		return "0" + d
+		return "+234" + d // 8012345678 -> +2348012345678
 	default:
-		return d
+		// Already in +234... format or unrecognised — return as-is
+		return raw
 	}
 }

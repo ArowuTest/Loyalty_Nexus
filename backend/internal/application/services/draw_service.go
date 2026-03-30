@@ -30,7 +30,6 @@ import (
 type DrawRecord struct {
 	ID              uuid.UUID  `gorm:"column:id;primaryKey" json:"id"`
 	Name            string     `gorm:"column:name" json:"name"`
-	Description     *string    `gorm:"column:description" json:"description,omitempty"`
 	DrawCode        string     `gorm:"column:draw_code;uniqueIndex" json:"draw_code"`
 	DrawType        string     `gorm:"column:draw_type" json:"draw_type"` // DAILY | WEEKLY | MONTHLY | SPECIAL
 	Status          string     `gorm:"column:status" json:"status"`   // SCHEDULED | ACTIVE | COMPLETED | CANCELLED
@@ -47,7 +46,6 @@ type DrawRecord struct {
 	ExecutedAt      *time.Time `gorm:"column:executed_at" json:"executed_at,omitempty"`
 	CompletedAt     *time.Time `gorm:"column:completed_at" json:"completed_at,omitempty"`
 	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (DrawRecord) TableName() string { return "draws" }
@@ -76,14 +74,13 @@ type DrawWinner struct {
 	ID          uuid.UUID  `gorm:"column:id;primaryKey"`
 	DrawID      uuid.UUID  `gorm:"column:draw_id;index"`
 	UserID      uuid.UUID  `gorm:"column:user_id;index"`
-	PhoneNumber string     `gorm:"column:phone_number"`
+	MSISDN      string     `gorm:"column:msisdn"`
+	PhoneNumber string     `gorm:"-"` // alias for msisdn — excluded from GORM ops
 	Position    int        `gorm:"column:position"`
-	PrizeType   string     `gorm:"column:prize_type"`
-	PrizeValue  int64      `gorm:"column:prize_value_kobo"`
-	IsRunnerUp  bool       `gorm:"column:is_runner_up;default:false"`
-	Status      string     `gorm:"column:status"` // PENDING_FULFILLMENT | FULFILLED | EXPIRED
+	PrizeName   string     `gorm:"column:prize_name"`
+	PrizeValue  int64      `gorm:"column:prize_value"`
+	ClaimStatus string     `gorm:"column:claim_status"`
 	CreatedAt   time.Time  `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt   time.Time  `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (DrawWinner) TableName() string { return "draw_winners" }
@@ -161,12 +158,10 @@ func (svc *DrawService) CreateDraw(
 		recurrence = "none"
 	}
 
-	desc := description
 	draw := &DrawRecord{
 		ID:             uuid.New(),
 		DrawCode:       generateDrawCode(),
 		Name:           name,
-		Description:    &desc,
 		DrawType:       drawType,
 		Status:         "SCHEDULED",
 		PrizePool:      prizePool,
@@ -238,9 +233,6 @@ func (svc *DrawService) UpdateDraw(ctx context.Context, drawID uuid.UUID, update
 		safe["name"] = v
 		draw.Name = v
 	}
-	if v, ok := updates["description"].(string); ok {
-		safe["description"] = v
-	}
 	if v, ok := updates["status"].(string); ok {
 		allowed := map[string]bool{"SCHEDULED": true, "ACTIVE": true, "COMPLETED": true, "CANCELLED": true}
 		if allowed[v] {
@@ -274,7 +266,6 @@ func (svc *DrawService) UpdateDraw(ctx context.Context, drawID uuid.UUID, update
 	if len(safe) == 0 {
 		return draw, nil
 	}
-	safe["updated_at"] = time.Now()
 	if err := svc.db.WithContext(ctx).Model(draw).Updates(safe).Error; err != nil {
 		return nil, fmt.Errorf("update draw: %w", err)
 	}
@@ -364,14 +355,12 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 				ID:          uuid.New(),
 				DrawID:      drawID,
 				UserID:      w.UserID,
-				PhoneNumber: w.PhoneNumber,
+				MSISDN:      w.MSISDN,
 				Position:    position,
-				PrizeType:   "CASH",
+				PrizeName:   "Cash Prize",
 				PrizeValue:  int64(draw.PrizePool * 100), // convert to kobo
-				IsRunnerUp:  false,
-				Status:      "PENDING_FULFILLMENT",
+				ClaimStatus: "PENDING",
 				CreatedAt:   now,
-				UpdatedAt:   now,
 			}
 			if err := tx.Create(&row).Error; err != nil {
 				return fmt.Errorf("insert winner position %d: %w", position, err)
@@ -383,14 +372,12 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 				ID:          uuid.New(),
 				DrawID:      drawID,
 				UserID:      w.UserID,
-				PhoneNumber: w.PhoneNumber,
+				MSISDN:      w.MSISDN,
 				Position:    position,
-				PrizeType:   "CASH",
-				PrizeValue:  0, // runner-ups get notional prize
-				IsRunnerUp:  true,
-				Status:      "PENDING_FULFILLMENT",
+				PrizeName:   "Runner-Up",
+				PrizeValue:  0,
+				ClaimStatus: "PENDING",
 				CreatedAt:   now,
-				UpdatedAt:   now,
 			}
 			if err := tx.Create(&row).Error; err != nil {
 				return fmt.Errorf("insert runner-up position %d: %w", position, err)
@@ -415,23 +402,21 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 			next := nextDrawTime(baseTime, draw.Recurrence)
 			updates["next_draw_at"] = next
 			// Spawn a new draw for the next cycle
-			nextDraw := DrawRecord{
-				ID:             uuid.New(),
-				DrawCode:       generateDrawCode(),
-				Name:           draw.Name,
-				Description:    draw.Description,
-				DrawType:       draw.DrawType,
-				Status:         "SCHEDULED",
-				PrizePool:      draw.PrizePool,
-				WinnerCount:    draw.WinnerCount,
-				RunnerUpsCount: draw.RunnerUpsCount,
-				Recurrence:     draw.Recurrence,
-				StartTime:      next.Add(-24 * time.Hour),
-				EndTime:        next,
-				DrawTime:       timePtr(next),
-				CreatedAt:      now,
-				UpdatedAt:      now,
-			}
+				nextDraw := DrawRecord{
+					ID:             uuid.New(),
+					DrawCode:       generateDrawCode(),
+					Name:           draw.Name,
+					DrawType:       draw.DrawType,
+					Status:         "SCHEDULED",
+					PrizePool:      draw.PrizePool,
+					WinnerCount:    draw.WinnerCount,
+					RunnerUpsCount: draw.RunnerUpsCount,
+					Recurrence:     draw.Recurrence,
+					StartTime:      next.Add(-24 * time.Hour),
+					EndTime:        next,
+					DrawTime:       timePtr(next),
+					CreatedAt:      now,
+				}
 			_ = tx.Create(&nextDraw).Error // non-fatal if this fails
 		}
 		return tx.Table("draws").Where("id = ?", drawID).Updates(updates).Error
@@ -501,12 +486,12 @@ func (svc *DrawService) GetDrawWinners(ctx context.Context, drawID uuid.UUID) ([
 			ID:          w.ID,
 			DrawID:      w.DrawID,
 			UserID:      w.UserID,
-			PhoneNumber: w.PhoneNumber,
+			PhoneNumber: w.MSISDN, // MSISDN is the actual phone column
 			Position:    w.Position,
-			PrizeType:   w.PrizeType,
+			PrizeType:   w.PrizeName,
 			PrizeValue:  float64(w.PrizeValue) / 100, // convert kobo → naira
-			IsRunnerUp:  w.IsRunnerUp,
-			Status:      w.Status,
+			IsRunnerUp:  false,
+			Status:      w.ClaimStatus,
 			WonAt:       w.CreatedAt,
 		}
 	}
@@ -662,7 +647,7 @@ func (svc *DrawService) GetStats(ctx context.Context) (map[string]interface{}, e
 	svc.db.Model(&DrawRecord{}).Count(&totalDraws)
 	svc.db.Model(&DrawRecord{}).Where("status = 'COMPLETED'").Count(&completedDraws)
 	svc.db.Model(&DrawRecord{}).Where("status = 'SCHEDULED'").Count(&scheduledDraws)
-	svc.db.Model(&DrawWinner{}).Where("is_runner_up = false").Count(&totalWinners)
+	svc.db.Model(&DrawWinner{}).Count(&totalWinners)
 	return map[string]interface{}{
 		"total_draws":     totalDraws,
 		"completed_draws": completedDraws,

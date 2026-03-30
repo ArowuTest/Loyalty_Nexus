@@ -59,8 +59,7 @@ export default function SpinConfigPage() {
   const [error, setError]       = useState<string | null>(null);
 
   // Spin limit config
-  const [spinMax, setSpinMax]     = useState("3");
-  const [liabCap, setLiabCap]     = useState("500000");
+  const [spinMax, setSpinMax]     = useState("5");
   const [savingCfg, setSavingCfg] = useState(false);
   const [savedCfg, setSavedCfg]   = useState(false);
 
@@ -77,8 +76,7 @@ export default function SpinConfigPage() {
       setTiers(tr.tiers ?? []);
       const m: Record<string, string> = {};
       cfg.configs.forEach(c => { m[c.key] = String(c.value); });
-      setSpinMax(m["spin_max_per_user_per_day"] ?? "3");
-      setLiabCap(String(Number(m["daily_prize_liability_cap_kobo"] ?? "50000000") / 100));
+      setSpinMax(m["spin_max_per_day"] ?? "5");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -155,10 +153,7 @@ export default function SpinConfigPage() {
   const saveSpinConfig = async () => {
     setSavingCfg(true);
     try {
-      await Promise.all([
-        adminAPI.updateConfig("spin_max_per_user_per_day", spinMax),
-        adminAPI.updateConfig("daily_prize_liability_cap_kobo", String(Number(liabCap) * 100)),
-      ]);
+      await adminAPI.updateConfig("spin_max_per_day", spinMax);
       setSavedCfg(true);
       setTimeout(() => setSavedCfg(false), 2500);
     } catch (e: unknown) {
@@ -245,17 +240,12 @@ export default function SpinConfigPage() {
         {/* Spin Limits */}
         <div className="card" style={{ padding: 20 }}>
           <h2 style={{ fontSize: 15, fontWeight: 600, color: "#e2e8ff", marginBottom: 16 }}>⚙️ Spin Limits</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 20 }}>
             <div>
-              <label style={{ display: "block", fontSize: 12, color: "#828cb4", marginBottom: 6 }}>Max Spins / User / Day</label>
+              <label style={{ display: "block", fontSize: 12, color: "#828cb4", marginBottom: 6 }}>Global Max Spins / User / Day</label>
+              <p style={{ fontSize: 11, color: "#475569", marginBottom: 8, margin: "0 0 8px" }}>Hard cap — no user can exceed this regardless of their tier. Per-tier caps are set in Spin Tiers below.</p>
               <input type="number" min={1} max={20} value={spinMax}
                 onChange={e => setSpinMax(e.target.value)}
-                style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 14 }} />
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#828cb4", marginBottom: 6 }}>Daily Prize Liability Cap (₦)</label>
-              <input type="number" value={liabCap}
-                onChange={e => setLiabCap(e.target.value)}
                 style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 14 }} />
             </div>
           </div>
@@ -396,8 +386,6 @@ export default function SpinConfigPage() {
             ))}
           </>
         )}
-      </div>
-
         {/* Spin Tiers Section */}
         <div className="card" style={{ padding: 20 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
@@ -451,7 +439,7 @@ export default function SpinConfigPage() {
               </tbody>
             </table>
           )}
-        </div>
+         </div>
       </div>
 
       {/* Tier Create/Edit Modal */}

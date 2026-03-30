@@ -366,7 +366,7 @@ func (w *WinnerService) FulfillDrawWinner(ctx context.Context, winnerID uuid.UUI
 	if err := w.db.WithContext(ctx).Table("draw_winners").Where("id = ?", winnerID).First(&winner).Error; err != nil {
 		return fmt.Errorf("draw winner not found: %w", err)
 	}
-	if winner.Status == "FULFILLED" {
+	if winner.ClaimStatus == "FULFILLED" {
 		return fmt.Errorf("already fulfilled")
 	}
 
@@ -377,14 +377,11 @@ func (w *WinnerService) FulfillDrawWinner(ctx context.Context, winnerID uuid.UUI
 
 	amountNaira := float64(winner.PrizeValue) / 100 // kobo → naira
 	if err := w.DisburseToMoMo(ctx, winner.ID, amountNaira, user.MoMoNumber); err != nil {
-		_ = w.db.Table("draw_winners").Where("id = ?", winnerID).Update("status", "FAILED")
+		_ = w.db.Table("draw_winners").Where("id = ?", winnerID).Update("claim_status", "FAILED")
 		return err
 	}
 
-	_ = w.db.Table("draw_winners").Where("id = ?", winnerID).Updates(map[string]interface{}{
-		"status":     "FULFILLED",
-		"updated_at": time.Now(),
-	})
+	_ = w.db.Table("draw_winners").Where("id = ?", winnerID).Update("claim_status", "FULFILLED")
 
 	_ = w.notifySvc.SendSMS(ctx, user.PhoneNumber, fmt.Sprintf(
 		"Congratulations! ₦%.0f draw prize sent to your MoMo wallet. Thank you for using Loyalty Nexus!",

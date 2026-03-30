@@ -245,16 +245,16 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var user map[string]interface{}
+	var users []map[string]interface{}
 	if err := h.db.WithContext(r.Context()).Table("users u").
 		Select("u.*, COALESCE(w.pulse_points,0) AS pulse_points, COALESCE(w.spin_credits,0) AS spin_credits, COALESCE(w.lifetime_points,0) AS lifetime_points").
 		Joins("LEFT JOIN wallets w ON w.user_id = u.id").
 		Where("u.id = ?", id).
-		First(&user).Error; err != nil {
+		Limit(1).Find(&users).Error; err != nil || len(users) == 0 {
 		jsonError(w, "user not found", http.StatusNotFound)
 		return
 	}
-	jsonOK(w, user)
+	jsonOK(w, users[0])
 }
 
 func (h *AdminHandler) SuspendUser(w http.ResponseWriter, r *http.Request) {
@@ -283,15 +283,21 @@ func (h *AdminHandler) AdjustPoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
+	// Look up user's phone number — transactions.phone_number is NOT NULL
+	var phoneNumber string
+	h.db.WithContext(r.Context()).Table("users").Where("id = ?", body.UserID).Pluck("phone_number", &phoneNumber)
+	if phoneNumber == "" {
+		phoneNumber = "unknown"
+	}
 	err := h.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("UPDATE wallets SET pulse_points = pulse_points + ?, updated_at = ? WHERE user_id = ?",
 			body.Delta, now, body.UserID).Error; err != nil {
 			return err
 		}
 		metaJSON, _ := json.Marshal(map[string]string{"admin_reason": body.Reason})
-		return tx.Exec(`INSERT INTO transactions (id, user_id, type, points_delta, reference, metadata, created_at)
-			VALUES (?, ?, 'admin_adjust', ?, ?, ?, ?)`,
-			uuid.New(), body.UserID, body.Delta, "admin_adjust_"+uuid.New().String()[:8], string(metaJSON), now).Error
+		return tx.Exec(`INSERT INTO transactions (id, user_id, phone_number, type, points_delta, reference, metadata, created_at)
+			VALUES (?, ?, ?, 'admin_adjust', ?, ?, ?, ?)`,
+			uuid.New(), body.UserID, phoneNumber, body.Delta, "admin_adjust_"+uuid.New().String()[:8], string(metaJSON), now).Error
 	})
 	if err != nil {
 		jsonError(w, "adjustment failed: "+err.Error(), http.StatusInternalServerError)
