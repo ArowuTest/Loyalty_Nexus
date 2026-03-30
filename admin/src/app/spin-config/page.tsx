@@ -66,7 +66,7 @@ export default function SpinConfigPage() {
   // Spin tiers
   const [tiers, setTiers]         = useState<SpinTier[]>([]);
   const [tierModal, setTierModal] = useState<{ type: "create" } | { type: "edit"; tier: SpinTier } | null>(null);
-  const [tierForm, setTierForm]   = useState<Omit<SpinTier, "id">>({ name: "", min_daily_amount: 0, max_daily_amount: 0, spins_per_day: 1, badge_color: "#5f72f9", sort_order: 0 });
+  const [tierForm, setTierForm]   = useState<Omit<SpinTier, "id">>({ tier_name: "", min_daily_amount: 0, max_daily_amount: 0, spins_per_day: 1, tier_color: "#5f72f9", sort_order: 0 });
   const [tierSaving, setTierSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -164,7 +164,7 @@ export default function SpinConfigPage() {
   };
 
   const handleSaveTier = async () => {
-    if (!tierForm.name.trim()) { setError("Tier name is required"); return; }
+    if (!tierForm.tier_name.trim()) { setError("Tier name is required"); return; }
     if (tierForm.spins_per_day < 1) { setError("Spins per day must be ≥ 1"); return; }
     setTierSaving(true);
     try {
@@ -183,7 +183,7 @@ export default function SpinConfigPage() {
   };
 
   const handleDeleteTier = async (t: SpinTier) => {
-    if (!confirm(`Delete tier "${t.name}"?`)) return;
+    if (!confirm(`Delete tier "${t.tier_name}"?`)) return;
     try {
       await adminAPI.deleteSpinTier(t.id);
       await load();
@@ -193,12 +193,12 @@ export default function SpinConfigPage() {
   };
 
   const openCreateTier = () => {
-    setTierForm({ name: "", min_daily_amount: 0, max_daily_amount: 0, spins_per_day: 1, badge_color: "#5f72f9", sort_order: 0 });
+    setTierForm({ tier_name: "", min_daily_amount: 0, max_daily_amount: 0, spins_per_day: 1, tier_color: "#5f72f9", sort_order: 0 });
     setTierModal({ type: "create" });
   };
 
   const openEditTier = (t: SpinTier) => {
-    setTierForm({ name: t.name, min_daily_amount: t.min_daily_amount, max_daily_amount: t.max_daily_amount, spins_per_day: t.spins_per_day, badge_color: t.badge_color ?? "#5f72f9", sort_order: t.sort_order ?? 0 });
+    setTierForm({ tier_name: t.tier_name, min_daily_amount: t.min_daily_amount, max_daily_amount: t.max_daily_amount, spins_per_day: t.spins_per_day, tier_color: t.tier_color ?? "#5f72f9", sort_order: t.sort_order ?? 0 });
     setTierModal({ type: "edit", tier: t });
   };
 
@@ -415,8 +415,8 @@ export default function SpinConfigPage() {
                   <tr key={t.id} style={{ borderBottom: "1px solid rgba(95,114,249,0.07)" }}>
                     <td style={{ padding: "8px 12px" }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: t.badge_color ?? "#5f72f9", display: "inline-block" }} />
-                        <span style={{ color: t.badge_color ?? "#e2e8ff", fontWeight: 600 }}>{t.name}</span>
+                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: t.tier_color ?? "#5f72f9", display: "inline-block" }} />
+                        <span style={{ color: t.tier_color ?? "#e2e8ff", fontWeight: 600 }}>{t.tier_name}</span>
                       </span>
                     </td>
                     <td style={{ padding: "8px 12px", color: "#e2e8ff" }}>₦{(t.min_daily_amount / 100).toLocaleString()}</td>
@@ -452,7 +452,7 @@ export default function SpinConfigPage() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
               <div style={{ gridColumn: "1 / -1" }}>
                 <label style={{ fontSize: 12, color: "#828cb4", display: "block", marginBottom: 5 }}>Tier Name *</label>
-                <input value={tierForm.name} onChange={e => setTierForm(f => ({ ...f, name: e.target.value }))}
+                <input value={tierForm.tier_name} onChange={e => setTierForm(f => ({ ...f, tier_name: e.target.value }))}
                   placeholder="e.g. Bronze"
                   style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 13, boxSizing: "border-box" }} />
               </div>
@@ -477,11 +477,11 @@ export default function SpinConfigPage() {
               <div>
                 <label style={{ fontSize: 12, color: "#828cb4", display: "block", marginBottom: 5 }}>Badge Color</label>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input type="color" value={tierForm.badge_color ?? "#5f72f9"}
-                    onChange={e => setTierForm(f => ({ ...f, badge_color: e.target.value }))}
+                  <input type="color" value={tierForm.tier_color ?? "#5f72f9"}
+                    onChange={e => setTierForm(f => ({ ...f, tier_color: e.target.value }))}
                     style={{ width: 40, height: 36, borderRadius: 6, border: "none", cursor: "pointer", padding: 0 }} />
-                  <input value={tierForm.badge_color ?? "#5f72f9"}
-                    onChange={e => setTierForm(f => ({ ...f, badge_color: e.target.value }))}
+                  <input value={tierForm.tier_color ?? "#5f72f9"}
+                    onChange={e => setTierForm(f => ({ ...f, tier_color: e.target.value }))}
                     style={{ flex: 1, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(95,114,249,0.2)", borderRadius: 8, padding: "8px 12px", color: "#e2e8ff", fontSize: 13 }} />
                 </div>
               </div>

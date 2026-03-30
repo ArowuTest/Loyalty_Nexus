@@ -203,7 +203,7 @@ class AdminAPI {
 
   // ─── Spin Tiers ──────────────────────────────────────────────────────────
   getSpinTiers() {
-    return this.req<{ tiers: SpinTier[] }>("GET", "/admin/spin/tiers");
+    return this.req<SpinTier[]>("GET", "/admin/spin/tiers");
   }
   createSpinTier(data: Omit<SpinTier, "id">) {
     return this.req<SpinTier>("POST", "/admin/spin/tiers", data);
@@ -364,11 +364,12 @@ export interface PrizeSummary {
 
 export interface SpinTier {
   id: string;
-  name: string;
+  tier_name: string;
+  tier_display_name?: string;
   min_daily_amount: number;  // in kobo
   max_daily_amount: number;  // in kobo (0 = unlimited)
   spins_per_day: number;
-  badge_color?: string;
+  tier_color?: string;
   sort_order?: number;
 }
 export interface RegionalStat { state: string; total_points: number; active_members: number; rank: number; }
