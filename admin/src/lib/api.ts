@@ -65,7 +65,7 @@ class AdminAPI {
   deletePrize(id: string) { return this.req<void>("DELETE", `/admin/prizes/${id}`); }
   getUsers(page = 1, q = "") { return this.req<{ users: User[]; total: number }>("GET", `/admin/users?page=${page}&limit=50${q ? `&search=${encodeURIComponent(q)}` : ""}`); }
   getUser(id: string) { return this.req<User>("GET", `/admin/users/${id}`); }
-  getFraud()       { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud-events"); }
+  getFraud()       { return this.req<{ events: FraudEvent[] }>("GET", "/admin/fraud"); }
   getFraudEvents() { return this.getFraud(); }
   resolveFraud(id: string) { return this.req("POST", `/admin/fraud/${id}/resolve`, {}); }
   getRegionalStats() { return this.req<{ stats: RegionalStat[] }>("GET", "/admin/regional-stats"); }
