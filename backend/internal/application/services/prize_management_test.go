@@ -5,9 +5,9 @@ package services_test
 // Covers:
 //   1. GetAllPrizes — active-only vs include-inactive
 //   2. CreatePrize — happy path with all fields
-//   3. CreatePrize — probability budget guard (total > 10000 rejected)
+//   3. CreatePrize — probability budget guard (total > 100.00% rejected)
 //   4. UpdatePrize — partial field update
-//   5. UpdatePrize — probability budget guard (update would exceed 10000)
+//   5. UpdatePrize — probability budget guard (update would exceed 100.00%)
 //   6. DeletePrize — soft-delete (is_active = false)
 //   7. GetPrizeProbabilitySummary — totals, remaining budget, per-prize percent
 //   8. ReorderPrizes — sort_order updated in bulk
@@ -155,7 +155,7 @@ func TestCreatePrize_AllFields(t *testing.T) {
 		"name":                   "MoMo Cash ₦500",
 		"prize_type":             "momo_cash",
 		"base_value":             float64(500),
-		"win_probability_weight": float64(300),
+		"win_probability_weight": float64(30),
 		"is_active":              true,
 		"is_no_win":              false,
 		"color_scheme":           "#FFD700",
@@ -175,8 +175,8 @@ func TestCreatePrize_AllFields(t *testing.T) {
 	if prize.Name != "MoMo Cash ₦500" {
 		t.Errorf("expected name 'MoMo Cash ₦500', got %q", prize.Name)
 	}
-	if prize.ProbWeight != 300 {
-		t.Errorf("expected weight 300, got %v", prize.ProbWeight)
+	if prize.ProbWeight != 30 {
+		t.Errorf("expected weight 30.0, got %v", prize.ProbWeight)
 	}
 	if prize.ColorScheme != "#FFD700" {
 		t.Errorf("expected color '#FFD700', got %q", prize.ColorScheme)
@@ -198,19 +198,19 @@ func TestCreatePrize_AllFields(t *testing.T) {
 	}
 }
 
-// 3. CreatePrize — probability budget guard: total > 10000 must be rejected
+// 3. CreatePrize — probability budget guard: total > 100.00% must be rejected
 func TestCreatePrize_ExceedsBudget_Rejected(t *testing.T) {
 	db := setupPrizeDB(t)
 	svc := newPrizeSpinSvc(db)
 
-	// Seed 9800 weight already used
-	seedPrize(db, "Big Prize", "momo_cash", 9800, true)
+	// Seed 98.00% weight already used
+	seedPrize(db, "Big Prize", "momo_cash", 98, true)
 
-	// Attempt to add 300 more (9800 + 300 = 10100 > 10000)
+	// Attempt to add 3.00% more (98.00 + 3.00 = 101.00 > 100.00)
 	_, err := svc.CreatePrize(context.Background(), map[string]interface{}{
 		"name":                   "Overflow Prize",
 		"prize_type":             "airtime",
-		"win_probability_weight": float64(300),
+		"win_probability_weight": float64(3),
 	})
 	if err == nil {
 		t.Fatal("expected budget-exceeded error, got nil")
@@ -222,7 +222,7 @@ func TestUpdatePrize_PartialFields(t *testing.T) {
 	db := setupPrizeDB(t)
 	svc := newPrizeSpinSvc(db)
 
-	id := seedPrize(db, "Old Name", "try_again", 500, true)
+	id := seedPrize(db, "Old Name", "try_again", 5, true)
 
 	updated, err := svc.UpdatePrize(context.Background(), id, map[string]interface{}{
 		"name":         "New Name",
@@ -238,8 +238,8 @@ func TestUpdatePrize_PartialFields(t *testing.T) {
 		t.Errorf("expected color '#123456', got %q", updated.ColorScheme)
 	}
 	// Weight should be unchanged
-	if updated.ProbWeight != 500 {
-		t.Errorf("expected weight 500 unchanged, got %v", updated.ProbWeight)
+	if updated.ProbWeight != 5.0 {
+		t.Errorf("expected weight 5.0 unchanged, got %v", updated.ProbWeight)
 	}
 }
 
@@ -248,13 +248,13 @@ func TestUpdatePrize_ExceedsBudget_Rejected(t *testing.T) {
 	db := setupPrizeDB(t)
 	svc := newPrizeSpinSvc(db)
 
-	// Prize A: 9000 weight
-	seedPrize(db, "Prize A", "momo_cash", 9000, true)
-	// Prize B: 500 weight (we will try to update it to 1500, making total 10500)
-	idB := seedPrize(db, "Prize B", "airtime", 500, true)
+	// Prize A: 90.00% weight
+	seedPrize(db, "Prize A", "momo_cash", 90, true)
+	// Prize B: 5.00% weight (we will try to update it to 15.00%, making total 105.00% > 100.00%)
+	idB := seedPrize(db, "Prize B", "airtime", 5, true)
 
 	_, err := svc.UpdatePrize(context.Background(), idB, map[string]interface{}{
-		"win_probability_weight": float64(1500), // 9000 + 1500 = 10500 > 10000
+		"win_probability_weight": float64(15), // 90.00 + 15.00 = 105.00 > 100.00
 	})
 	if err == nil {
 		t.Fatal("expected budget-exceeded error on update, got nil")
@@ -301,21 +301,21 @@ func TestGetPrizeProbabilitySummary(t *testing.T) {
 	db := setupPrizeDB(t)
 	svc := newPrizeSpinSvc(db)
 
-	seedPrize(db, "Prize A", "momo_cash", 4000, true)
-	seedPrize(db, "Prize B", "airtime", 3000, true)
-	seedPrize(db, "Prize C (inactive)", "data", 1000, false)
+	seedPrize(db, "Prize A", "momo_cash", 40, true)
+	seedPrize(db, "Prize B", "airtime", 30, true)
+	seedPrize(db, "Prize C (inactive)", "data", 10, false)
 
 	summary, err := svc.GetPrizeProbabilitySummary(context.Background())
 	if err != nil {
 		t.Fatalf("GetPrizeProbabilitySummary: %v", err)
 	}
 
-	// Only active prizes count toward total
-	if summary.TotalWeight != 7000 {
-		t.Errorf("expected TotalWeight=7000, got %v", summary.TotalWeight)
+	// Only active prizes count toward total (40.00 + 30.00 = 70.00%)
+	if summary.TotalWeight != 70.0 {
+		t.Errorf("expected TotalWeight=70.0, got %v", summary.TotalWeight)
 	}
-	if summary.RemainingBudget != 3000 {
-		t.Errorf("expected RemainingBudget=3000, got %v", summary.RemainingBudget)
+	if summary.RemainingBudget != 30.0 {
+		t.Errorf("expected RemainingBudget=30.0, got %v", summary.RemainingBudget)
 	}
 	if summary.PercentUsed != 70.0 {
 		t.Errorf("expected PercentUsed=70.0, got %.2f", summary.PercentUsed)
@@ -324,7 +324,7 @@ func TestGetPrizeProbabilitySummary(t *testing.T) {
 	if len(summary.Prizes) != 3 {
 		t.Errorf("expected 3 prize items in summary, got %d", len(summary.Prizes))
 	}
-	// Verify Prize A percent
+	// Verify Prize A percent — weight 40.00 on 0–100 scale = 40.00%
 	for _, item := range summary.Prizes {
 		if item.Name == "Prize A" {
 			if item.Percent != 40.0 {

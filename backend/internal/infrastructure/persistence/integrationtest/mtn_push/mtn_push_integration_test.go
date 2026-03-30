@@ -63,11 +63,12 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// uniquePhone returns a unique 11-digit Nigerian phone number per test run.
+// uniquePhone returns a unique Nigerian phone number in E.164 format (+234XXXXXXXXXX).
+// E.164 is the canonical storage format used across the production database.
 // Using UUID-derived digits prevents row-lock contention when tests run in parallel.
 func uniquePhone() string {
 	s := strings.ReplaceAll(uuid.New().String(), "-", "")
-	// Take 8 digits from the UUID hex string and prefix with "080"
+	// Take 8 digits from the UUID hex string
 	digits := ""
 	for _, c := range s {
 		if c >= '0' && c <= '9' {
@@ -81,7 +82,8 @@ func uniquePhone() string {
 	for len(digits) < 8 {
 		digits += "0"
 	}
-	return "080" + digits
+	// Return in E.164 format: +234 + 8-digit suffix = +23480XXXXXXXX
+	return "+23480" + digits
 }
 
 // uniqueRef returns a unique transaction reference per test run.
@@ -133,9 +135,32 @@ func txDB(t *testing.T, db *gorm.DB) *gorm.DB {
 
 // ─── Seed helpers ─────────────────────────────────────────────────────────────
 
+// toE164 converts any Nigerian phone format to E.164 (+234XXXXXXXXXX).
+// This matches the canonical storage format used in the production database.
+func toE164(phone string) string {
+	var digits strings.Builder
+	for _, r := range phone {
+		if r >= '0' && r <= '9' {
+			digits.WriteRune(r)
+		}
+	}
+	d := digits.String()
+	switch {
+	case strings.HasPrefix(d, "234") && len(d) == 13:
+		return "+" + d
+	case strings.HasPrefix(d, "0") && len(d) == 11:
+		return "+234" + d[1:]
+	case len(d) == 10:
+		return "+234" + d
+	default:
+		return phone
+	}
+}
+
 func seedUser(t *testing.T, db *gorm.DB, phone string) *entities.User {
 	t.Helper()
 	userID := uuid.New()
+	// phone is expected to be in E.164 format (+234XXXXXXXXXX) — the canonical production DB format.
 	userCode := "U" + phone[len(phone)-6:]
 	// Use raw SQL to avoid GORM auto-deriving wrong column names from Go field names
 	// (e.g. MoMoNumber → mo_mo_number instead of momo_number).
@@ -310,7 +335,12 @@ func TestMTNPush_SpinCreditAccumulator(t *testing.T) {
 	db := openTestDB(t)
 	phone := uniquePhone()
 	seedUser(t, db, phone)
+	// Seed an active draw so draw entries are actually written to draw_entries table.
+	// Without an active draw, drawEntriesCreated stays 0 even though entries are calculated.
+	drawID := seedActiveDraw(t, db)
 	t.Cleanup(func() {
+		db.Exec("DELETE FROM draw_entries WHERE draw_id = ?", drawID)
+		db.Exec("DELETE FROM draws WHERE id = ?", drawID)
 		db.Exec("DELETE FROM mtn_push_events WHERE msisdn = ?", phone)
 		db.Exec("DELETE FROM transactions WHERE phone_number = ?", phone)
 		db.Exec("DELETE FROM wallets WHERE user_id IN (SELECT id FROM users WHERE phone_number = ?)", phone)
@@ -357,17 +387,25 @@ func TestMTNPush_SpinCreditAccumulator(t *testing.T) {
 	if spinCredits != 1 {
 		t.Errorf("wallet.SpinCredits: got %d, want 1 (Bronze tier, 1 spin/day cap)", spinCredits)
 	}
-	// draw_counter should reflect both pushes: floor(500/200) + floor(500/200) = 2 + 2 = 4 draw entries
-	// (draw entries use a separate flat ₦200 accumulator, independent of spin tiers)
-	var drawCounter int64
+	// Draw entry creation runs in a background goroutine (fire-and-forget).
+	// Wait briefly for the goroutine to complete before asserting the DB state.
+	// Two ₦500 pushes at ₦200/entry:
+	//   Push 1: 50,000 kobo → 2 entries
+	//   Push 2: 60,000 kobo (10,000 carry + 50,000) → 3 entries
+	//   Total = 5 draw entries in draw_entries table
+	// AddEntry creates one row per call with entries_count = tickets.
+	// Push 1: 1 row with entries_count=2. Push 2: 1 row with entries_count=3.
+	// Total entries_count = 5. Wait for the async goroutines to complete.
+	time.Sleep(300 * time.Millisecond)
+	var totalEntries int64
 	if err := db.Raw(
-		"SELECT draw_counter FROM wallets WHERE user_id = (SELECT id FROM users WHERE phone_number = ?) LIMIT 1",
-		phone,
-	).Row().Scan(&drawCounter); err != nil {
-		t.Fatalf("read wallet draw_counter: %v", err)
+		"SELECT COALESCE(SUM(entries_count), 0) FROM draw_entries WHERE draw_id = ? AND user_id = (SELECT id FROM users WHERE phone_number = ?)",
+		drawID, phone,
+	).Row().Scan(&totalEntries); err != nil {
+		t.Fatalf("read draw_entries sum: %v", err)
 	}
-	if drawCounter < 2 {
-		t.Errorf("wallet.DrawCounter: got %d, want at least 2 (two ₦500 pushes at ₦200/entry)", drawCounter)
+	if totalEntries < 5 {
+		t.Errorf("draw_entries total: got %d, want at least 5 (push1=2 entries + push2=3 entries)", totalEntries)
 	}
 }
 
@@ -666,26 +704,27 @@ func TestMTNPush_AuditLogWritten(t *testing.T) {
 func TestMTNPush_PhoneNormalisation(t *testing.T) {
 	db := openTestDB(t)
 	txdb := txDB(t, db)
-	// Seed with normalised form — use unique phone to avoid lock contention
-	normPhone := uniquePhone() // e.g. "08012345678"
-	seedUser(t, txdb, normPhone)
+	// uniquePhone returns E.164 format (+23480XXXXXXXX) — the canonical production storage format.
+	e164Phone := uniquePhone()
+	seedUser(t, txdb, e164Phone)
 	svc := buildMTNPushServiceWithPool(t, txdb, db)
 
-	// Build the +234 format from the normalised phone
-	plus234 := "+234" + normPhone[1:] // "0801..." → "+2348801..."
+	// Derive the local 080... format from the E.164 phone to test normalisation.
+	// E.164: +23480XXXXXXXX → local: 080XXXXXXXX
+	localPhone := "0" + e164Phone[4:] // strip "+234", prepend "0"
 
-	// Push with +234 format — should normalise and find the user
+	// Push with local 080... format — service should normalise to E.164 and find the user.
 	result, err := svc.ProcessMTNPush(context.Background(), services.MTNPushPayload{
 		TransactionRef: uniqueRef("MTN-NORM"),
-		MSISDN:         plus234,
+		MSISDN:         localPhone,
 		RechargeType:   "AIRTIME",
 		Amount:         500.00,
 	})
 	if err != nil {
-		t.Fatalf("ProcessMTNPush with +234 format: %v", err)
+		t.Fatalf("ProcessMTNPush with local 080 format: %v", err)
 	}
-	if result.MSISDN != normPhone {
-		t.Errorf("normalised MSISDN: got %q, want %q", result.MSISDN, normPhone)
+	if result.MSISDN != e164Phone {
+		t.Errorf("normalised MSISDN: got %q, want %q", result.MSISDN, e164Phone)
 	}
 }
 

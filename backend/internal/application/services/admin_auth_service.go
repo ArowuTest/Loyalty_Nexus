@@ -162,9 +162,9 @@ func (s *AdminAuthService) mintAdminJWT(admin *entities.AdminUser) (string, erro
 // seedDefaultAdmin creates a super_admin from env vars if no admin exists.
 // ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD must be set.
 
-// MintTestAdminToken issues a short-lived admin JWT for integration tests.
-// It does NOT require a real admin row in the database.
-func (s *AdminAuthService) MintTestAdminToken(adminID uuid.UUID) (string, error) {
+// MintIntegrationTestToken issues a short-lived admin JWT for integration tests only.
+// It does NOT require a real admin row in the database and must never be called in production.
+func (s *AdminAuthService) MintIntegrationTestToken(adminID uuid.UUID) (string, error) {
 	admin := &entities.AdminUser{
 		ID:    adminID,
 		Email: "test-admin@localhost",

@@ -648,8 +648,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- ─── SECTION 19: TEST USERS ──────────────────────────────────────────────────
--- Seeded test accounts for staging/demo. All use E.164 format (234XXXXXXXXXX).
+-- ─── SECTION 19: DEMO ACCOUNTS ──────────────────────────────────────────────
+-- Seeded demo accounts for staging/QA. Will be removed before go-live. All use E.164 format (234XXXXXXXXXX).
 -- Login via OTP flow — check Render logs for the code after calling /auth/otp/send.
 -- Phone numbers map to: 08020000000, 08023000000, 08025000000, 08027000000, 08029000000
 

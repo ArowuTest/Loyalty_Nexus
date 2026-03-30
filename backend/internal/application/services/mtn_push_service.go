@@ -596,12 +596,13 @@ func (s *MTNPushService) markEventFailed(ctx context.Context, event *mtnPushEven
 	})
 }
 
-// normalisePhone converts any Nigerian phone format to 0XXXXXXXXXX.
+// normalisePhone converts any Nigerian phone format to E.164 (+234XXXXXXXXXX).
+// This is the canonical storage format used across the production database.
 // Supported inputs: 2348012345678, +2348012345678, 08012345678,
 //
 //	8012345678, 234-801-234-5678.
 func normalisePhone(raw string) string {
-	// Strip non-digit characters.
+	// Strip non-digit characters (preserves leading + via digit-only extraction).
 	var digits strings.Builder
 	for _, r := range raw {
 		if unicode.IsDigit(r) {
@@ -611,13 +612,16 @@ func normalisePhone(raw string) string {
 	d := digits.String()
 	switch {
 	case strings.HasPrefix(d, "234") && len(d) == 13:
-		return "0" + d[3:]
+		// Already in 234XXXXXXXXXX form — prepend +
+		return "+" + d
 	case strings.HasPrefix(d, "0") && len(d) == 11:
-		return d
+		// Local 0XXXXXXXXXX form — convert to +234XXXXXXXXXX
+		return "+234" + d[1:]
 	case len(d) == 10:
-		return "0" + d
+		// 10-digit without leading 0 — treat as 0XXXXXXXXXX
+		return "+234" + d
 	default:
-		return d
+		return raw
 	}
 }
 

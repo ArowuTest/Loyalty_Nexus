@@ -122,9 +122,9 @@ func newAdminAuthSvc(db *gorm.DB) *services.AdminAuthService {
 // adminToken mints a valid admin JWT for use in HTTP test requests.
 func adminToken(t *testing.T, authSvc *services.AdminAuthService) string {
 	t.Helper()
-	tok, err := authSvc.MintTestAdminToken(uuid.New())
+	tok, err := authSvc.MintIntegrationTestToken(uuid.New())
 	if err != nil {
-		t.Fatalf("MintTestAdminToken: %v", err)
+		t.Fatalf("MintIntegrationTestToken: %v", err)
 	}
 	return tok
 }
@@ -315,7 +315,7 @@ func TestPrizeRepo_SortOrder_Postgres(t *testing.T) {
 }
 
 // TestPrizeRepo_ProbabilityBudget_Postgres verifies that the probability budget
-// guard (total active weight > 10000) is enforced by the service layer against
+// guard (total active weight > 100.00%) is enforced by the service layer against
 // the real Postgres prize_pool table.
 func TestPrizeRepo_ProbabilityBudget_Postgres(t *testing.T) {
 	db := openTestDB(t)
@@ -325,26 +325,26 @@ func TestPrizeRepo_ProbabilityBudget_Postgres(t *testing.T) {
 		svc := newSvc(tx)
 		ctx := context.Background()
 
-		// Seed 9800 weight
+		// Seed 98.00% weight
 		_, err := svc.CreatePrize(ctx, map[string]interface{}{
 			"name":                   "Big Prize",
 			"prize_type":             "try_again",
-			"win_probability_weight": float64(9800),
+			"win_probability_weight": float64(98),
 		})
 		if err != nil {
 			t.Fatalf("seed CreatePrize: %v", err)
 		}
 
-		// Attempt to add 300 more (9800 + 300 = 10100 > 10000) — must fail
+		// Attempt to add 3% more (98 + 3 = 101 > 100) — must fail
 		_, err = svc.CreatePrize(ctx, map[string]interface{}{
 			"name":                   "Overflow Prize",
 			"prize_type":             "airtime",
-			"win_probability_weight": float64(300),
+			"win_probability_weight": float64(3),
 		})
 		if err == nil {
 			t.Fatal("expected probability budget error, got nil")
 		}
-		if !strings.Contains(err.Error(), "probability") && !strings.Contains(err.Error(), "budget") && !strings.Contains(err.Error(), "10000") {
+		if !strings.Contains(err.Error(), "probability") && !strings.Contains(err.Error(), "budget") && !strings.Contains(err.Error(), "100") {
 			t.Errorf("unexpected error message: %v", err)
 		}
 	})
@@ -505,23 +505,23 @@ func TestPrizeRepo_ProbabilitySummary_Postgres(t *testing.T) {
 		svc := newSvc(tx)
 		ctx := context.Background()
 
-		// Active: 4000 + 3000 = 7000
-		for _, w := range []int{4000, 3000} {
+		// Active: 40.00 + 30.00 = 70.00%
+		for _, w := range []float64{40.0, 30.0} {
 			_, err := svc.CreatePrize(ctx, map[string]interface{}{
-				"name":                   fmt.Sprintf("Prize %d", w),
+				"name":                   fmt.Sprintf("Prize %.0f", w),
 				"prize_type":             "try_again",
-				"win_probability_weight": float64(w),
+				"win_probability_weight": w,
 				"is_active":              true,
 			})
 			if err != nil {
 				t.Fatalf("CreatePrize: %v", err)
 			}
 		}
-		// Inactive: 1000 (should NOT count toward total)
+		// Inactive: 10.00% (should NOT count toward total)
 		p, _ := svc.CreatePrize(ctx, map[string]interface{}{
 			"name":                   "Inactive",
 			"prize_type":             "try_again",
-			"win_probability_weight": float64(1000),
+			"win_probability_weight": float64(10),
 			"is_active":              true,
 		})
 		tx.Exec("UPDATE prize_pool SET is_active = false WHERE id = ?", p.ID)
@@ -530,11 +530,11 @@ func TestPrizeRepo_ProbabilitySummary_Postgres(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetPrizeProbabilitySummary: %v", err)
 		}
-		if summary.TotalWeight != 7000 {
-			t.Errorf("TotalWeight: got %v, want 7000", summary.TotalWeight)
+		if summary.TotalWeight != 70.0 {
+			t.Errorf("TotalWeight: got %v, want 70.0", summary.TotalWeight)
 		}
-		if summary.RemainingBudget != 3000 {
-			t.Errorf("RemainingBudget: got %v, want 3000", summary.RemainingBudget)
+		if summary.RemainingBudget != 30.0 {
+			t.Errorf("RemainingBudget: got %v, want 30.0", summary.RemainingBudget)
 		}
 		if summary.PercentUsed != 70.0 {
 			t.Errorf("PercentUsed: got %.2f, want 70.00", summary.PercentUsed)
@@ -544,7 +544,8 @@ func TestPrizeRepo_ProbabilitySummary_Postgres(t *testing.T) {
 
 // ─── HTTP integration tests (real Postgres + real HTTP handler) ───────────────
 
-// TestHTTP_GetPrizePool_ReturnsJSON tests GET /admin/prizes returns a JSON array.
+// TestHTTP_GetPrizePool_ReturnsJSON tests GET /admin/prizes returns a JSON object
+// with a "prizes" array (the production handler wraps the array in an envelope).
 func TestHTTP_GetPrizePool_ReturnsJSON(t *testing.T) {
 	db := openTestDB(t)
 	authSvc := newAdminAuthSvc(db)
@@ -556,10 +557,11 @@ func TestHTTP_GetPrizePool_ReturnsJSON(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var body []interface{}
+	var body map[string]interface{}
 	decodeJSON(t, resp, &body)
-	// The seeded DB has prizes — we just verify the response is a valid JSON array
-	// (length >= 0 is always true; the key check is that it decodes without error)
+	if body["prizes"] == nil {
+		t.Fatal("expected 'prizes' key in GET /admin/prizes response")
+	}
 }
 
 // TestHTTP_CreatePrize_Postgres tests POST /admin/prizes creates a real prize row.
@@ -648,14 +650,14 @@ func TestHTTP_CreatePrize_MissingName_Returns400(t *testing.T) {
 	})
 }
 
-// TestHTTP_CreatePrize_ExceedsBudget_Returns400 tests that exceeding the 10000
+// TestHTTP_CreatePrize_ExceedsBudget_Returns400 tests that exceeding the 100%
 // probability budget returns a 400 error from the real Postgres check.
 func TestHTTP_CreatePrize_ExceedsBudget_Returns400(t *testing.T) {
 	db := openTestDB(t)
 	withTx(t, db, func(tx *gorm.DB) {
-		// Seed 9900 weight directly in the real table
+		// Seed 99.00% weight directly in the real table
 		tx.Exec(`INSERT INTO prize_pool (name, prize_type, win_probability_weight, base_value, is_active)
-			VALUES ('Seed', 'try_again', 9900, 0, true)`)
+			VALUES ('Seed', 'try_again', 99.00, 0, true)`)
 
 		authSvc := newAdminAuthSvc(tx)
 		tok := adminToken(t, authSvc)
@@ -665,7 +667,7 @@ func TestHTTP_CreatePrize_ExceedsBudget_Returns400(t *testing.T) {
 		resp := do(t, srv, "POST", "/api/v1/admin/prizes", tok, map[string]interface{}{
 			"name":                   "Overflow",
 			"prize_type":             "airtime",
-			"win_probability_weight": float64(200),
+			"win_probability_weight": float64(2),
 		})
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
@@ -831,11 +833,12 @@ func TestHTTP_GetPrizeSummary_Postgres(t *testing.T) {
 		svc := newSvc(tx)
 		ctx := context.Background()
 
-		for _, w := range []int{3000, 2000} {
+		// 30% + 20% = 50% used
+		for _, w := range []float64{30.0, 20.0} {
 			_, err := svc.CreatePrize(ctx, map[string]interface{}{
-				"name":                   fmt.Sprintf("P%d", w),
+				"name":                   fmt.Sprintf("P%.0f", w),
 				"prize_type":             "try_again",
-				"win_probability_weight": float64(w),
+				"win_probability_weight": w,
 			})
 			if err != nil {
 				t.Fatalf("CreatePrize: %v", err)
@@ -855,12 +858,12 @@ func TestHTTP_GetPrizeSummary_Postgres(t *testing.T) {
 		decodeJSON(t, resp, &body)
 
 		totalWeight, _ := body["total_weight"].(float64)
-		if int(totalWeight) != 5000 {
-			t.Errorf("total_weight: got %.0f, want 5000", totalWeight)
+		if totalWeight != 50.0 {
+			t.Errorf("total_weight: got %.2f, want 50.00", totalWeight)
 		}
 		remaining, _ := body["remaining_budget"].(float64)
-		if int(remaining) != 5000 {
-			t.Errorf("remaining_budget: got %.0f, want 5000", remaining)
+		if remaining != 50.0 {
+			t.Errorf("remaining_budget: got %.2f, want 50.00", remaining)
 		}
 		pct, _ := body["percent_used"].(float64)
 		if pct != 50.0 {
@@ -1097,6 +1100,7 @@ func TestHTTP_ExportClaims_Postgres(t *testing.T) {
 
 // TestHTTP_GetPrizePool_IncludesInactive_Postgres tests that GET /admin/prizes
 // returns inactive prizes (admin view) while ?active_only=true filters them out.
+// The handler returns {"prizes": [...]} — tests unwrap the envelope.
 func TestHTTP_GetPrizePool_IncludesInactive_Postgres(t *testing.T) {
 	db := openTestDB(t)
 	withTx(t, db, func(tx *gorm.DB) {
@@ -1105,20 +1109,27 @@ func TestHTTP_GetPrizePool_IncludesInactive_Postgres(t *testing.T) {
 		svc := newSvc(tx)
 		ctx := context.Background()
 
-		_, _ = svc.CreatePrize(ctx, map[string]interface{}{
+		// Active prize: 60%
+		_, err := svc.CreatePrize(ctx, map[string]interface{}{
 			"name":                   "Active",
 			"prize_type":             "try_again",
-			"win_probability_weight": float64(100),
+			"win_probability_weight": float64(60),
 			"is_active":              true,
 		})
+		if err != nil {
+			t.Fatalf("CreatePrize (active): %v", err)
+		}
 
-		inactive, _ := svc.CreatePrize(ctx, map[string]interface{}{
+		// Create a second prize at 30%, then soft-delete it
+		inactive, err := svc.CreatePrize(ctx, map[string]interface{}{
 			"name":                   "Inactive",
 			"prize_type":             "try_again",
-			"win_probability_weight": float64(50),
+			"win_probability_weight": float64(30),
 			"is_active":              true,
 		})
-		// Soft-delete it
+		if err != nil {
+			t.Fatalf("CreatePrize (to-be-inactive): %v", err)
+		}
 		tx.Exec("UPDATE prize_pool SET is_active = false WHERE id = ?", inactive.ID)
 
 		authSvc := newAdminAuthSvc(tx)
@@ -1126,24 +1137,26 @@ func TestHTTP_GetPrizePool_IncludesInactive_Postgres(t *testing.T) {
 		srv := httptest.NewServer(buildRouter(tx, authSvc))
 		defer srv.Close()
 
-		// Default: admin sees all (active + inactive)
+		// Default admin view: should include both active and inactive
 		resp := do(t, srv, "GET", "/api/v1/admin/prizes", tok, nil)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200, got %d", resp.StatusCode)
 		}
-		var all []interface{}
-		decodeJSON(t, resp, &all)
+		var allEnvelope map[string]interface{}
+		decodeJSON(t, resp, &allEnvelope)
+		all, _ := allEnvelope["prizes"].([]interface{})
 		if len(all) != 2 {
 			t.Errorf("default admin view: expected 2 prizes, got %d", len(all))
 		}
 
-		// ?active_only=true: only active
+		// ?active_only=true: only active prize
 		resp2 := do(t, srv, "GET", "/api/v1/admin/prizes?active_only=true", tok, nil)
 		if resp2.StatusCode != http.StatusOK {
 			t.Fatalf("active_only: expected 200, got %d", resp2.StatusCode)
 		}
-		var activeOnly []interface{}
-		decodeJSON(t, resp2, &activeOnly)
+		var activeEnvelope map[string]interface{}
+		decodeJSON(t, resp2, &activeEnvelope)
+		activeOnly, _ := activeEnvelope["prizes"].([]interface{})
 		if len(activeOnly) != 1 {
 			t.Errorf("active_only view: expected 1 prize, got %d", len(activeOnly))
 		}
