@@ -3,31 +3,37 @@ import AdminShell from "@/components/layout/AdminShell";
 import { useEffect, useState, useCallback } from "react";
 import adminAPI, { Prize } from "@/lib/api";
 
-const PRIZE_TYPES = ["try_again","pulse_points","airtime","data_bundle","momo_cash"] as const;
+const PRIZE_TYPES = ["try_again","pulse_points","bonus_points","airtime","data_bundle","momo_cash","studio_credits"] as const;
 type PrizeType = typeof PRIZE_TYPES[number];
 
 const TYPE_ICONS: Record<PrizeType, string> = {
-  try_again:    "🔄",
-  pulse_points: "💎",
-  airtime:      "📱",
-  data_bundle:  "📶",
-  momo_cash:    "💵",
+  try_again:      "🔄",
+  pulse_points:   "💎",
+  bonus_points:   "⭐",
+  airtime:        "📱",
+  data_bundle:    "📶",
+  momo_cash:      "💵",
+  studio_credits: "🎨",
 };
 
 const TYPE_LABELS: Record<PrizeType, string> = {
-  try_again:    "Try Again (no prize)",
-  pulse_points: "Pulse Points",
-  airtime:      "Airtime",
-  data_bundle:  "Data Bundle",
-  momo_cash:    "MoMo Cash",
+  try_again:      "Try Again (no prize)",
+  pulse_points:   "Pulse Points",
+  bonus_points:   "Bonus Points",
+  airtime:        "Airtime",
+  data_bundle:    "Data Bundle",
+  momo_cash:      "MoMo Cash",
+  studio_credits: "Studio Credits",
 };
 
 const DEFAULT_COLORS: Record<PrizeType, string> = {
-  try_again:    "#6b7280",
-  pulse_points: "#5f72f9",
-  airtime:      "#2196F3",
-  data_bundle:  "#9C27B0",
-  momo_cash:    "#10b981",
+  try_again:      "#6b7280",
+  pulse_points:   "#5f72f9",
+  bonus_points:   "#f59e0b",
+  airtime:        "#2196F3",
+  data_bundle:    "#9C27B0",
+  momo_cash:      "#10b981",
+  studio_credits: "#8B5CF6",
 };
 
 type LocalPrize = Prize & { _dirty?: boolean; _isNew?: boolean };
@@ -39,7 +45,7 @@ function totalWeight(prizes: LocalPrize[]): number {
 function fmt(val: number, type: PrizeType): string {
   if (type === "try_again") return "—";
   if (type === "pulse_points") return `${val} pts`;
-  if (type === "airtime" || type === "momo_cash") return `₦${(val / 100).toLocaleString()}`;
+  if (type === "airtime" || type === "momo_cash") return `₦${val.toLocaleString()}`;
   if (type === "data_bundle") return val >= 100000 ? `${val / 100000}GB` : `${val / 100}MB`;
   return String(val);
 }
