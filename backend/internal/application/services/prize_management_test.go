@@ -176,7 +176,7 @@ func TestCreatePrize_AllFields(t *testing.T) {
 		t.Errorf("expected name 'MoMo Cash ₦500', got %q", prize.Name)
 	}
 	if prize.ProbWeight != 300 {
-		t.Errorf("expected weight 300, got %d", prize.ProbWeight)
+		t.Errorf("expected weight 300, got %v", prize.ProbWeight)
 	}
 	if prize.ColorScheme != "#FFD700" {
 		t.Errorf("expected color '#FFD700', got %q", prize.ColorScheme)
@@ -239,7 +239,7 @@ func TestUpdatePrize_PartialFields(t *testing.T) {
 	}
 	// Weight should be unchanged
 	if updated.ProbWeight != 500 {
-		t.Errorf("expected weight 500 unchanged, got %d", updated.ProbWeight)
+		t.Errorf("expected weight 500 unchanged, got %v", updated.ProbWeight)
 	}
 }
 
@@ -312,10 +312,10 @@ func TestGetPrizeProbabilitySummary(t *testing.T) {
 
 	// Only active prizes count toward total
 	if summary.TotalWeight != 7000 {
-		t.Errorf("expected TotalWeight=7000, got %d", summary.TotalWeight)
+		t.Errorf("expected TotalWeight=7000, got %v", summary.TotalWeight)
 	}
 	if summary.RemainingBudget != 3000 {
-		t.Errorf("expected RemainingBudget=3000, got %d", summary.RemainingBudget)
+		t.Errorf("expected RemainingBudget=3000, got %v", summary.RemainingBudget)
 	}
 	if summary.PercentUsed != 70.0 {
 		t.Errorf("expected PercentUsed=70.0, got %.2f", summary.PercentUsed)

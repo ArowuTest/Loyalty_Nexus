@@ -531,10 +531,10 @@ func TestPrizeRepo_ProbabilitySummary_Postgres(t *testing.T) {
 			t.Fatalf("GetPrizeProbabilitySummary: %v", err)
 		}
 		if summary.TotalWeight != 7000 {
-			t.Errorf("TotalWeight: got %d, want 7000", summary.TotalWeight)
+			t.Errorf("TotalWeight: got %v, want 7000", summary.TotalWeight)
 		}
 		if summary.RemainingBudget != 3000 {
-			t.Errorf("RemainingBudget: got %d, want 3000", summary.RemainingBudget)
+			t.Errorf("RemainingBudget: got %v, want 3000", summary.RemainingBudget)
 		}
 		if summary.PercentUsed != 70.0 {
 			t.Errorf("PercentUsed: got %.2f, want 70.00", summary.PercentUsed)
