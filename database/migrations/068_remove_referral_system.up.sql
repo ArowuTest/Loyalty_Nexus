@@ -9,8 +9,9 @@ ALTER TABLE users
   DROP COLUMN IF EXISTS total_referrals;
 
 -- Remove referral config keys from program_configs
+-- Note: the column is config_key, not key
 DELETE FROM program_configs
-WHERE key IN ('referral_bonus_points', 'referral_bonus_referee_pts', 'REFERRAL_BONUS');
+WHERE config_key IN ('referral_bonus_points', 'referral_bonus_referee_pts', 'REFERRAL_BONUS');
 
 -- Drop any index on referral_code if it exists
 DROP INDEX IF EXISTS idx_users_referral_code;
