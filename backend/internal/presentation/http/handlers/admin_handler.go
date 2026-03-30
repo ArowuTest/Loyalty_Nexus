@@ -135,7 +135,7 @@ func (h *AdminHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "failed to load config", http.StatusInternalServerError)
 		return
 	}
-	jsonOK(w, rows)
+	jsonOK(w, map[string]interface{}{"configs": rows})
 }
 
 func (h *AdminHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -287,7 +287,7 @@ func (h *AdminHandler) GetPrizePool(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "failed to get prizes: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	jsonOK(w, prizes)
+	jsonOK(w, map[string]interface{}{"prizes": prizes})
 }
 
 func (h *AdminHandler) GetPrize(w http.ResponseWriter, r *http.Request) {
@@ -991,7 +991,7 @@ func (h *AdminHandler) GetFraudEvents(w http.ResponseWriter, r *http.Request) {
 		query = query.Where("fe.resolved = ?", status == "resolved")
 	}
 	query.Order("fe.created_at DESC").Limit(100).Find(&rows)
-	jsonOK(w, rows)
+	jsonOK(w, map[string]interface{}{"events": rows})
 }
 
 func (h *AdminHandler) ResolveFraudEvent(w http.ResponseWriter, r *http.Request) {
