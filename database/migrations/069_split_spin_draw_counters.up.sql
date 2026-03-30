@@ -28,13 +28,15 @@
 --   3. Add daily_recharge_kobo BIGINT — cumulative recharge today (resets at midnight WAT)
 --   4. Add daily_recharge_date DATE   — the date daily_recharge_kobo was last reset
 --   5. Add daily_spins_awarded INT    — spins already awarded today (prevents double-awarding on tier upgrade)
---   6. Migrate existing spin_draw_counter → draw_counter
---   7. Zero out spin_draw_counter (deprecated)
+--   6. Migrate existing spin_draw_counter → draw_counter (only if spin_draw_counter exists)
+--   7. Zero out spin_draw_counter if it exists (deprecated)
 --   8. Update network_configs with correct separated thresholds
 --
--- The old spin_draw_counter column is kept (set to 0) for backwards compatibility
--- with any existing queries; it will be dropped in a future migration once all
--- code references are removed.
+-- NOTE: Steps 6 and 7 are wrapped in a DO $$ block that checks whether
+-- spin_draw_counter exists before referencing it. This makes the migration
+-- safe on databases that were provisioned without migration 048 (e.g. a fresh
+-- Render deploy where the wallets table was created by migration 060 which
+-- does not include spin_draw_counter).
 
 -- Step 1: Add the new counter and daily tracking columns
 ALTER TABLE wallets
@@ -55,18 +57,27 @@ COMMENT ON COLUMN wallets.daily_recharge_date IS
 COMMENT ON COLUMN wallets.daily_spins_awarded IS
     'Number of spin credits already awarded today. Used to calculate incremental spin awards when tier upgrades.';
 
--- Step 2: Migrate existing spin_draw_counter data to draw_counter
--- (The old counter tracked ₦200 remainder — this is the draw entry threshold,
---  so the remainder is valid to carry over to draw_counter.)
-UPDATE wallets
-SET draw_counter = spin_draw_counter
-WHERE spin_draw_counter > 0;
+-- Steps 2 & 3: Migrate spin_draw_counter → draw_counter, then zero it out.
+-- Wrapped in a DO block so this is a no-op on DBs that never had spin_draw_counter
+-- (e.g. fresh deploys where wallets was created by migration 060 without that column).
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'wallets' AND column_name = 'spin_draw_counter'
+    ) THEN
+        -- Step 2: Carry over any existing remainder to the new draw_counter
+        UPDATE wallets
+        SET draw_counter = spin_draw_counter
+        WHERE spin_draw_counter > 0;
 
--- Step 3: Zero out the deprecated spin_draw_counter
-UPDATE wallets SET spin_draw_counter = 0;
+        -- Step 3: Zero out the deprecated column
+        UPDATE wallets SET spin_draw_counter = 0;
+    END IF;
+END $$;
 
 -- Step 4: Update network_configs — replace the old shared key with two separate keys
--- Remove the old shared key
+-- Remove the old shared key (safe even if it does not exist)
 DELETE FROM network_configs WHERE key = 'spin_draw_naira_per_credit';
 
 -- Insert the two new separate threshold keys
