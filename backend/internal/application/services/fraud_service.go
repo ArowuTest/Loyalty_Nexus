@@ -20,14 +20,16 @@ func NewFraudService(db *gorm.DB) *FraudService {
 }
 
 type FraudEvent struct {
-	ID        uuid.UUID  `gorm:"column:id;primaryKey"   json:"id"`
-	UserID    uuid.UUID  `gorm:"column:user_id"         json:"user_id"`
-	EventType string     `gorm:"column:event_type"      json:"event_type"`
-	Severity  string     `gorm:"column:severity"        json:"severity"` // LOW|MEDIUM|HIGH|CRITICAL
-	Details   string     `gorm:"column:details"         json:"details"`
-	Resolved  bool       `gorm:"column:resolved"        json:"resolved"`
-	CreatedAt time.Time  `gorm:"column:created_at"      json:"created_at"`
-	UpdatedAt time.Time  `gorm:"column:updated_at"      json:"updated_at"`
+	ID          uuid.UUID  `gorm:"column:id;primaryKey"   json:"id"`
+	UserID      uuid.UUID  `gorm:"column:user_id"         json:"user_id"`
+	PhoneNumber string     `gorm:"column:phone_number"    json:"msisdn"`
+	RuleName    string     `gorm:"column:rule_name"       json:"event_type"`
+	Severity    string     `gorm:"column:severity"        json:"severity"` // LOW|MEDIUM|HIGH|CRITICAL
+	Details     string     `gorm:"column:details"         json:"details"`
+	Resolved    bool       `gorm:"column:resolved"        json:"resolved"`
+	ResolvedBy  *uuid.UUID `gorm:"column:resolved_by"     json:"resolved_by"`
+	ResolvedAt  *time.Time `gorm:"column:resolved_at"     json:"resolved_at"`
+	CreatedAt   time.Time  `gorm:"column:created_at"      json:"created_at"`
 }
 
 func (FraudEvent) TableName() string { return "fraud_events" }
@@ -102,11 +104,12 @@ func (svc *FraudService) ListOpenEvents(ctx context.Context, limit int) ([]Fraud
 
 // ResolveEvent marks a fraud event as resolved.
 func (svc *FraudService) ResolveEvent(ctx context.Context, eventID uuid.UUID) error {
+	now := time.Now()
 	return svc.db.WithContext(ctx).Model(&FraudEvent{}).
 		Where("id = ?", eventID).
 		Updates(map[string]interface{}{
-			"resolved":   true,
-			"updated_at": time.Now(),
+			"resolved":    true,
+			"resolved_at": now,
 		}).Error
 }
 
@@ -121,17 +124,23 @@ func (svc *FraudService) SuspendUser(ctx context.Context, userID uuid.UUID, reas
 	return nil
 }
 
-func (svc *FraudService) record(ctx context.Context, userID uuid.UUID, eventType, severity, details string) {
+func (svc *FraudService) record(ctx context.Context, userID uuid.UUID, ruleName, severity, details string) {
 	now := time.Now()
+	var phone string
+	svc.db.WithContext(ctx).Table("users").Where("id = ?", userID).Pluck("phone_number", &phone)
+	
+	// details is JSONB in DB, so we wrap it in a JSON object
+	detailsJSON := fmt.Sprintf(`{"reason": "%s"}`, details)
+	
 	ev := FraudEvent{
-		ID:        uuid.New(),
-		UserID:    userID,
-		EventType: eventType,
-		Severity:  severity,
-		Details:   details,
-		Resolved:  false,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          uuid.New(),
+		UserID:      userID,
+		PhoneNumber: phone,
+		RuleName:    ruleName,
+		Severity:    severity,
+		Details:     detailsJSON,
+		Resolved:    false,
+		CreatedAt:   now,
 	}
 	svc.db.WithContext(ctx).Create(&ev)
 }
