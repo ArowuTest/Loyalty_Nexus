@@ -10,12 +10,15 @@ package mtnpush_test
 //
 // What is tested:
 //   - Full pipeline: MTN push → points awarded → wallet updated → ledger entries written
-//   - Spin credit accumulator: two ₦500 pushes correctly award 1 spin on the second push
+//   - Spin credit accumulator (tier-based): two ₦500 pushes → 0 spins on first (below Bronze),
+//     1 spin on second (cumulative ₦1,000 enters Bronze tier, cap = 1 spin/day)
+//   - Single large recharge: ₦3,000 → Bronze tier → 1 spin (not 15 — tier cap, not flat accumulator)
+//   - Draw entries: separate flat ₦200 accumulator, independent of spin tiers
 //   - Draw entry creation when an active draw exists
 //   - Idempotency: duplicate transaction_ref returns cached result without double-awarding
 //   - Minimum amount guard: push below threshold returns error
 //   - Auto-create user: push for unknown MSISDN creates user + wallet
-//   - Tiered points rate: platinum user earns 1.5× points
+//   - Pulse Points: flat ₦250-per-point accumulator, no tier multiplier (same for all tiers)
 //   - HTTP endpoint: POST /api/v1/recharge/mtn-push returns correct JSON
 //   - HTTP endpoint: missing transaction_ref returns 400
 //   - HTTP endpoint: invalid HMAC signature returns 401
@@ -134,28 +137,29 @@ func seedUser(t *testing.T, db *gorm.DB, phone string) *entities.User {
 	t.Helper()
 	userID := uuid.New()
 	userCode := "U" + phone[len(phone)-6:]
-	referralCode := "REF" + phone[len(phone)-4:]
 	// Use raw SQL to avoid GORM auto-deriving wrong column names from Go field names
 	// (e.g. MoMoNumber → mo_mo_number instead of momo_number).
+	// NOTE: referral_code column was removed in migration 068.
 	if err := db.Exec(`
-		INSERT INTO users (id, phone_number, user_code, referral_code, tier, is_active, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 'BRONZE', true, NOW(), NOW())
-	`, userID, phone, userCode, referralCode).Error; err != nil {
+			INSERT INTO users (id, phone_number, user_code, tier, is_active, created_at, updated_at)
+			VALUES (?, ?, ?, 'BRONZE', true, NOW(), NOW())
+		`, userID, phone, userCode).Error; err != nil {
 		t.Fatalf("seedUser: %v", err)
 	}
-	// Create wallet
+	// Create wallet — include the new counter columns added in migration 069.
 	walletID := uuid.New()
 	if err := db.Exec(`
-		INSERT INTO wallets (id, user_id, pulse_points, spin_credits, lifetime_points, recharge_counter)
-		VALUES (?, ?, 0, 0, 0, 0)
-	`, walletID, userID).Error; err != nil {
+			INSERT INTO wallets (id, user_id, pulse_points, spin_credits, lifetime_points,
+			                     recharge_counter, draw_counter, pulse_counter,
+			                     daily_recharge_kobo, daily_spins_awarded)
+			VALUES (?, ?, 0, 0, 0, 0, 0, 0, 0, 0)
+		`, walletID, userID).Error; err != nil {
 		t.Fatalf("seedWallet: %v", err)
 	}
 	return &entities.User{
 		ID:          userID,
 		PhoneNumber: phone,
 		UserCode:    userCode,
-		ReferralCode: referralCode,
 		Tier:        "BRONZE",
 		IsActive:    true,
 	}
@@ -293,11 +297,12 @@ func TestMTNPush_FullPipeline_PointsAndWallet(t *testing.T) {
 }
 
 func TestMTNPush_SpinCreditAccumulator(t *testing.T) {
-	// Rule: every ₦200 recharge = 1 spin credit (flat accumulator, no tier multiplier).
-	// ₦500 = floor(500/200) = 2 spins on the first push.
-	// A second ₦500 push adds floor((500 + leftover_100) / 200) more.
-	// Leftover from first push: 500 - 2*200 = 100 kobo carried forward.
-	// Second push: 500 + 100 = 600; floor(600/200) = 3 spins; leftover = 0.
+	// Tier-based spin logic (mirrors RechargeMax):
+	//   - Spins are awarded based on cumulative daily recharge vs the spin_tiers table.
+	//   - Bronze tier: ₦1,000–₦4,999 cumulative → 1 spin/day cap.
+	//   - First push ₦500: cumulative = ₦500 — below Bronze (₦1,000) → 0 spins awarded.
+	//   - Second push ₦500: cumulative = ₦1,000 — enters Bronze tier → 1 spin awarded.
+	//   - Total wallet spin_credits = 1.
 	//
 	// NOTE: Uses real db (not txdb) because ProcessMTNPush opens a nested
 	// transaction internally, which pgx rejects on an already-in-transaction
@@ -313,7 +318,7 @@ func TestMTNPush_SpinCreditAccumulator(t *testing.T) {
 	})
 	svc := buildMTNPushService(t, db)
 
-	// First push: ₦500 → floor(500/200) = 2 spins, leftover = 100
+	// First push: ₦500 → cumulative ₦500 — below Bronze threshold (₦1,000) → 0 spins
 	r1, err := svc.ProcessMTNPush(context.Background(), services.MTNPushPayload{
 		TransactionRef: uniqueRef("MTN-SPIN-1"),
 		MSISDN:         phone,
@@ -323,11 +328,11 @@ func TestMTNPush_SpinCreditAccumulator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first push: %v", err)
 	}
-	if r1.SpinCredits != 2 {
-		t.Errorf("first push: expected 2 spins (floor(500/200)), got %d", r1.SpinCredits)
+	if r1.SpinCredits != 0 {
+		t.Errorf("first push: expected 0 spins (below Bronze ₦1,000 threshold), got %d", r1.SpinCredits)
 	}
 
-	// Second push: ₦500 + 100 leftover = 600; floor(600/200) = 3 spins, leftover = 0
+	// Second push: ₦500 → cumulative ₦1,000 — enters Bronze tier → 1 spin awarded (tier cap = 1)
 	r2, err := svc.ProcessMTNPush(context.Background(), services.MTNPushPayload{
 		TransactionRef: uniqueRef("MTN-SPIN-2"),
 		MSISDN:         phone,
@@ -337,11 +342,11 @@ func TestMTNPush_SpinCreditAccumulator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second push: %v", err)
 	}
-	if r2.SpinCredits != 3 {
-		t.Errorf("second push: expected 3 spins (floor(600/200)), got %d", r2.SpinCredits)
+	if r2.SpinCredits != 1 {
+		t.Errorf("second push: expected 1 spin (Bronze tier, cumulative ₦1,000), got %d", r2.SpinCredits)
 	}
 
-	// Verify wallet spin_credits = 5 total (2 + 3) using raw SQL
+	// Verify wallet spin_credits = 1 total (only the Bronze-tier award)
 	var spinCredits int
 	if err := db.Raw(
 		"SELECT spin_credits FROM wallets WHERE user_id = (SELECT id FROM users WHERE phone_number = ?) LIMIT 1",
@@ -349,24 +354,27 @@ func TestMTNPush_SpinCreditAccumulator(t *testing.T) {
 	).Row().Scan(&spinCredits); err != nil {
 		t.Fatalf("read wallet spin_credits: %v", err)
 	}
-	if spinCredits != 5 {
-		t.Errorf("wallet.SpinCredits: got %d, want 5", spinCredits)
+	if spinCredits != 1 {
+		t.Errorf("wallet.SpinCredits: got %d, want 1 (Bronze tier, 1 spin/day cap)", spinCredits)
 	}
-	// SpinDrawCounter should be 0 (1000 naira used exactly: 2×200 + 3×200 = 1000)
-	var spinDrawCounter int64
+	// draw_counter should reflect both pushes: floor(500/200) + floor(500/200) = 2 + 2 = 4 draw entries
+	// (draw entries use a separate flat ₦200 accumulator, independent of spin tiers)
+	var drawCounter int64
 	if err := db.Raw(
-		"SELECT spin_draw_counter FROM wallets WHERE user_id = (SELECT id FROM users WHERE phone_number = ?) LIMIT 1",
+		"SELECT draw_counter FROM wallets WHERE user_id = (SELECT id FROM users WHERE phone_number = ?) LIMIT 1",
 		phone,
-	).Row().Scan(&spinDrawCounter); err != nil {
-		t.Fatalf("read wallet spin_draw_counter: %v", err)
+	).Row().Scan(&drawCounter); err != nil {
+		t.Fatalf("read wallet draw_counter: %v", err)
 	}
-	if spinDrawCounter != 0 {
-		t.Errorf("wallet.SpinDrawCounter: got %d, want 0", spinDrawCounter)
+	if drawCounter < 2 {
+		t.Errorf("wallet.DrawCounter: got %d, want at least 2 (two ₦500 pushes at ₦200/entry)", drawCounter)
 	}
 }
 
 func TestMTNPush_SingleLargeRecharge_MultipleSpins(t *testing.T) {
-	// Rule: ₦200 per spin credit. ₦3,000 → floor(3000/200) = 15 spins.
+	// Tier-based spin logic: a single ₦3,000 recharge puts the user in the Bronze tier
+	// (₦1,000–₦4,999 cumulative daily). Bronze tier cap = 1 spin/day.
+	// The service awards (tier.SpinsPerDay - daily_spins_already_awarded) = 1 - 0 = 1 spin.
 	db := openTestDB(t)
 	txdb := txDB(t, db)
 	phone := uniquePhone()
@@ -382,8 +390,9 @@ func TestMTNPush_SingleLargeRecharge_MultipleSpins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProcessMTNPush: %v", err)
 	}
-	if result.SpinCredits != 15 {
-		t.Errorf("expected 15 spins for ₦3000 (floor(3000/200)), got %d", result.SpinCredits)
+	// ₦3,000 → Bronze tier (cap = 1 spin/day) → 1 spin awarded
+	if result.SpinCredits != 1 {
+		t.Errorf("expected 1 spin for ₦3,000 (Bronze tier, 1 spin/day cap), got %d", result.SpinCredits)
 	}
 }
 
@@ -537,7 +546,7 @@ func TestMTNPush_LedgerEntriesWritten(t *testing.T) {
 		TransactionRef: ref,
 		MSISDN:         phone,
 		RechargeType:   "AIRTIME",
-		Amount:         1000.00, // ₦1000 → 5 spins + 4 pulse pts
+		Amount:         1000.00, // ₦1,000 → Bronze tier (cap=1 spin) + 4 pulse pts + 5 draw entries
 	})
 	if err != nil {
 		t.Fatalf("ProcessMTNPush: %v", err)
@@ -553,7 +562,7 @@ func TestMTNPush_LedgerEntriesWritten(t *testing.T) {
 		t.Errorf("expected at least 2 ledger entries, got %d", count)
 	}
 
-	// Verify recharge entry amount (₦1000 = 100000 kobo)
+	// Verify recharge entry amount (₦1,000 = 100,000 kobo)
 	var rechargeAmount int64
 	if err := db.Raw(
 		"SELECT amount FROM transactions WHERE phone_number = ? AND type = ? AND reference = ? LIMIT 1",
@@ -565,7 +574,7 @@ func TestMTNPush_LedgerEntriesWritten(t *testing.T) {
 		t.Errorf("recharge tx amount: got %d, want 100000", rechargeAmount)
 	}
 
-	// Verify spin credit entry: ₦1000 → floor(1000/200) = 5 spins
+	// Verify spin credit entry: ₦1,000 cumulative → Bronze tier (cap = 1 spin/day) → spin_delta = 1
 	var spinDelta int
 	if err := db.Raw(
 		"SELECT spin_delta FROM transactions WHERE phone_number = ? AND type = ? LIMIT 1",
@@ -573,8 +582,8 @@ func TestMTNPush_LedgerEntriesWritten(t *testing.T) {
 	).Row().Scan(&spinDelta); err != nil {
 		t.Fatalf("read spin_credit_award spin_delta: %v", err)
 	}
-	if spinDelta != 5 {
-		t.Errorf("spin_credit_award SpinDelta: got %d, want 5 (floor(1000/200))", spinDelta)
+	if spinDelta != 1 {
+		t.Errorf("spin_credit_award SpinDelta: got %d, want 1 (Bronze tier, 1 spin/day cap)", spinDelta)
 	}
 }
 
@@ -858,10 +867,10 @@ func TestHTTP_MTNPush_ResponseContainsAllFields(t *testing.T) {
 		}
 	}
 
-	// Spin credits: floor(1000 / 200) = 5 (₦200 per spin credit, default threshold)
+	// Spin credits: ₦1,000 cumulative → Bronze tier (cap = 1 spin/day) → 1 spin awarded
 	spinCredits, _ := resp["spin_credits_awarded"].(float64)
-	if int(spinCredits) != 5 {
-		t.Errorf("spin_credits_awarded: got %v, want 5 (floor(1000/200))", spinCredits)
+	if int(spinCredits) != 1 {
+		t.Errorf("spin_credits_awarded: got %v, want 1 (Bronze tier, 1 spin/day cap)", spinCredits)
 	}
 
 	// Pulse Points: floor(1000 / 250) = 4

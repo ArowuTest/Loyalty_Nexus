@@ -1520,20 +1520,30 @@ func (h *AdminHandler) ExportClaims(w http.ResponseWriter, r *http.Request) {
 // ─── Recharge Points Config ───────────────────────────────────────────────────
 
 // rechargeConfigResponse is the shape returned by GET /api/v1/admin/recharge/config.
+// All reward currencies are independently configurable (no shared counter):
+//   - spin_naira_per_credit : minimum daily recharge (naira) to qualify for Bronze spin tier
+//   - draw_naira_per_entry  : naira per Draw Entry (flat per-transaction accumulator)
+//   - pulse_naira_per_point : naira per Pulse Point (flat accumulator, no tier multiplier)
+//   - spin_max_per_day      : maximum spin credits per calendar day (Platinum tier cap)
+//   - min_amount_naira      : minimum qualifying recharge amount
 type rechargeConfigResponse struct {
-	SpinDrawNairaPerCredit int64 `json:"spin_draw_naira_per_credit"` // ₦ per spin credit + draw entry
-	PulseNairaPerPoint     int64 `json:"pulse_naira_per_point"`      // ₦ per Pulse Point (AI Studio)
-	MinAmountNaira         int64 `json:"min_amount_naira"`           // minimum qualifying recharge
+	SpinNairaPerCredit int64 `json:"spin_naira_per_credit"` // ₦ minimum daily recharge for Bronze spin tier
+	DrawNairaPerEntry  int64 `json:"draw_naira_per_entry"`  // ₦ per Draw Entry (flat per-transaction)
+	PulseNairaPerPoint int64 `json:"pulse_naira_per_point"` // ₦ per Pulse Point (no tier multiplier)
+	SpinMaxPerDay      int64 `json:"spin_max_per_day"`      // max spin credits per calendar day
+	MinAmountNaira     int64 `json:"min_amount_naira"`      // minimum qualifying recharge amount
 }
 
-// GetRechargeConfig returns the three admin-configurable recharge reward thresholds.
+// GetRechargeConfig returns the admin-configurable recharge reward thresholds.
 //
 // GET /api/v1/admin/recharge/config
 func (h *AdminHandler) GetRechargeConfig(w http.ResponseWriter, r *http.Request) {
 	resp := rechargeConfigResponse{
-		SpinDrawNairaPerCredit: h.cfg.GetInt64("spin_draw_naira_per_credit", 200),
-		PulseNairaPerPoint:     h.cfg.GetInt64("pulse_naira_per_point", 250),
-		MinAmountNaira:         h.cfg.GetInt64("mtn_push_min_amount_naira", 50),
+		SpinNairaPerCredit: h.cfg.GetInt64("spin_naira_per_credit", 1000),
+		DrawNairaPerEntry:  h.cfg.GetInt64("draw_naira_per_entry", 200),
+		PulseNairaPerPoint: h.cfg.GetInt64("pulse_naira_per_point", 250),
+		SpinMaxPerDay:      h.cfg.GetInt64("spin_max_per_day", 5),
+		MinAmountNaira:     h.cfg.GetInt64("mtn_push_min_amount_naira", 50),
 	}
 	jsonOK(w, resp)
 }
@@ -1544,15 +1554,19 @@ func (h *AdminHandler) GetRechargeConfig(w http.ResponseWriter, r *http.Request)
 // Body (all fields optional — only provided fields are updated):
 //
 //	{
-//	  "spin_draw_naira_per_credit": 200,
-//	  "pulse_naira_per_point":      250,
-//	  "min_amount_naira":           50
+//	  "spin_naira_per_credit": 1000,
+//	  "draw_naira_per_entry":  200,
+//	  "pulse_naira_per_point": 250,
+//	  "spin_max_per_day":      5,
+//	  "min_amount_naira":      50
 //	}
 func (h *AdminHandler) UpdateRechargeConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SpinDrawNairaPerCredit *int64 `json:"spin_draw_naira_per_credit"`
-		PulseNairaPerPoint     *int64 `json:"pulse_naira_per_point"`
-		MinAmountNaira         *int64 `json:"min_amount_naira"`
+		SpinNairaPerCredit *int64 `json:"spin_naira_per_credit"`
+		DrawNairaPerEntry  *int64 `json:"draw_naira_per_entry"`
+		PulseNairaPerPoint *int64 `json:"pulse_naira_per_point"`
+		SpinMaxPerDay      *int64 `json:"spin_max_per_day"`
+		MinAmountNaira     *int64 `json:"min_amount_naira"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
@@ -1565,12 +1579,19 @@ func (h *AdminHandler) UpdateRechargeConfig(w http.ResponseWriter, r *http.Reque
 	}
 	var updates []kv
 
-	if req.SpinDrawNairaPerCredit != nil {
-		if *req.SpinDrawNairaPerCredit < 1 {
-			jsonError(w, "spin_draw_naira_per_credit must be at least 1", http.StatusBadRequest)
+	if req.SpinNairaPerCredit != nil {
+		if *req.SpinNairaPerCredit < 1 {
+			jsonError(w, "spin_naira_per_credit must be at least 1", http.StatusBadRequest)
 			return
 		}
-		updates = append(updates, kv{"spin_draw_naira_per_credit", *req.SpinDrawNairaPerCredit})
+		updates = append(updates, kv{"spin_naira_per_credit", *req.SpinNairaPerCredit})
+	}
+	if req.DrawNairaPerEntry != nil {
+		if *req.DrawNairaPerEntry < 1 {
+			jsonError(w, "draw_naira_per_entry must be at least 1", http.StatusBadRequest)
+			return
+		}
+		updates = append(updates, kv{"draw_naira_per_entry", *req.DrawNairaPerEntry})
 	}
 	if req.PulseNairaPerPoint != nil {
 		if *req.PulseNairaPerPoint < 1 {
@@ -1578,6 +1599,13 @@ func (h *AdminHandler) UpdateRechargeConfig(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		updates = append(updates, kv{"pulse_naira_per_point", *req.PulseNairaPerPoint})
+	}
+	if req.SpinMaxPerDay != nil {
+		if *req.SpinMaxPerDay < 1 || *req.SpinMaxPerDay > 100 {
+			jsonError(w, "spin_max_per_day must be between 1 and 100", http.StatusBadRequest)
+			return
+		}
+		updates = append(updates, kv{"spin_max_per_day", *req.SpinMaxPerDay})
 	}
 	if req.MinAmountNaira != nil {
 		if *req.MinAmountNaira < 0 {
@@ -1601,9 +1629,11 @@ func (h *AdminHandler) UpdateRechargeConfig(w http.ResponseWriter, r *http.Reque
 
 	// Return the new effective config.
 	resp := rechargeConfigResponse{
-		SpinDrawNairaPerCredit: h.cfg.GetInt64("spin_draw_naira_per_credit", 200),
-		PulseNairaPerPoint:     h.cfg.GetInt64("pulse_naira_per_point", 250),
-		MinAmountNaira:         h.cfg.GetInt64("mtn_push_min_amount_naira", 50),
+		SpinNairaPerCredit: h.cfg.GetInt64("spin_naira_per_credit", 1000),
+		DrawNairaPerEntry:  h.cfg.GetInt64("draw_naira_per_entry", 200),
+		PulseNairaPerPoint: h.cfg.GetInt64("pulse_naira_per_point", 250),
+		SpinMaxPerDay:      h.cfg.GetInt64("spin_max_per_day", 5),
+		MinAmountNaira:     h.cfg.GetInt64("mtn_push_min_amount_naira", 50),
 	}
 	jsonOK(w, resp)
 }

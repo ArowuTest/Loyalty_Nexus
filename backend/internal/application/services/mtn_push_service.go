@@ -11,17 +11,22 @@ package services
 //
 // ─── Reward Rules ────────────────────────────────────────────────────────────
 //
-//  Every ₦200 recharge  → 1 Spin Credit  + 1 Draw Entry
-//  Every ₦250 recharge  → 1 Pulse Point  (AI Studio currency)
+//  Spin Credits  — TIER-BASED on CUMULATIVE DAILY recharge (resets midnight WAT):
+//    ₦1,000–₦4,999/day  → 1 spin  (Bronze)
+//    ₦5,000–₦9,999/day  → 2 spins (Silver)
+//    ₦10,000–₦19,999/day → 3 spins (Gold)
+//    ₦20,000+/day        → 5 spins (Platinum)
+//    The tier's spins_per_day is the DAILY CAP, not additive per transaction.
+//    Each recharge that pushes the cumulative daily total into a higher tier
+//    awards the DIFFERENCE (new_cap - already_awarded_today).
 //
-//  Both thresholds are admin-configurable via network_configs:
-//    spin_draw_naira_per_credit  (default 200)
-//    pulse_naira_per_point       (default 250)
+//  Draw Entries  — SIMPLE ACCUMULATOR per transaction:
+//    Every ₦200 recharge = 1 Draw Entry (draw_counter tracks kobo remainder).
+//    Admin-configurable via network_configs: draw_naira_per_entry (default 200).
 //
-//  Accumulator model (same as RechargeMax ÷200 pattern):
-//    SpinDrawCounter accumulates kobo until it crosses spin_draw_naira_per_credit×100.
-//    PulseCounter    accumulates kobo until it crosses pulse_naira_per_point×100.
-//    This ensures two ₦100 recharges correctly award 1 spin at ₦200 threshold.
+//  Pulse Points  — SIMPLE ACCUMULATOR:
+//    Every ₦250 recharge = 1 Pulse Point (AI Studio currency).
+//    Admin-configurable via network_configs: pulse_naira_per_point (default 250).
 //
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
 //
@@ -31,14 +36,17 @@ package services
 //  4. Resolve or auto-create user account
 //  5. ATOMIC DB TRANSACTION:
 //     a. Row-lock wallet (SELECT FOR UPDATE)
-//     b. Calculate Spin Credits + Draw Entries  (₦200 accumulator)
-//     c. Calculate Pulse Points                 (₦250 accumulator)
-//     d. Update wallet (spin_credits, pulse_points, lifetime_points,
-//                       spin_draw_counter, pulse_counter)
-//     e. Write immutable ledger entries (recharge, spin_credit_award, pulse_points_award)
-//     f. Update user streak + stats
+//     b. Reset daily counters if date has changed (midnight WAT rollover)
+//     c. Calculate Spin Credits (tier-based: cumulative daily recharge → spin_tiers)
+//     d. Calculate Draw Entries (₦200 accumulator, draw_counter)
+//     e. Calculate Pulse Points (₦250 accumulator, pulse_counter)
+//     f. Update wallet (spin_credits, pulse_points, lifetime_points,
+//                       draw_counter, pulse_counter, daily_recharge_kobo,
+//                       daily_recharge_date, daily_spins_awarded)
+//     g. Write immutable ledger entries (recharge, spin_credit_award, draw_entry_award, pulse_points_award)
+//     h. Update user streak + stats
 //  6. POST-COMMIT (non-fatal, never rolls back the payment):
-//     a. Create draw_entries rows for the active draw (1 per spin credit earned)
+//     a. Create draw_entries rows for the active draw (1 per draw entry earned)
 //     b. Send SMS notification
 //     c. Update mtn_push_events row to status=PROCESSED
 
@@ -56,6 +64,7 @@ import (
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/pkg/safe"
+	"loyalty-nexus/internal/utils"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -82,12 +91,13 @@ type MTNPushPayload struct {
 
 // MTNPushResult is returned to the caller after processing.
 type MTNPushResult struct {
-	EventID       uuid.UUID `json:"event_id"`
-	MSISDN        string    `json:"msisdn"`
-	PulsePoints   int64     `json:"pulse_points_awarded"`
-	DrawEntries   int       `json:"draw_entries_created"`
-	SpinCredits   int       `json:"spin_credits_awarded"`
-	IsDuplicate   bool      `json:"is_duplicate"`
+	EventID     uuid.UUID `json:"event_id"`
+	MSISDN      string    `json:"msisdn"`
+	PulsePoints int64     `json:"pulse_points_awarded"`
+	DrawEntries int       `json:"draw_entries_created"`
+	SpinCredits int       `json:"spin_credits_awarded"`
+	SpinTier    string    `json:"spin_tier,omitempty"`
+	IsDuplicate bool      `json:"is_duplicate"`
 }
 
 // ─── mtn_push_events DB model ─────────────────────────────────────────────────
@@ -123,6 +133,7 @@ type MTNPushService struct {
 	drawWindows drawWindowResolver
 	notifySvc   *NotificationService
 	cfg         *config.ConfigManager
+	tierCalc    *utils.SpinTierCalculatorDB
 }
 
 // drawService is the subset of DrawService used here.
@@ -155,6 +166,7 @@ func NewMTNPushService(
 		drawWindows: drawWindows,
 		notifySvc:   notifySvc,
 		cfg:         cfg,
+		tierCalc:    utils.NewSpinTierCalculatorDB(db),
 	}
 }
 
@@ -225,7 +237,9 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 
 	// ── 6. Atomic DB transaction ──────────────────────────────────────────────
 	var spinCreditsEarned int
+	var drawEntriesEarned int
 	var pulsePointsEarned int64
+	var spinTierName string
 
 	txErr := s.db.WithContext(ctx).Transaction(func(dbTx *gorm.DB) error {
 		// Row-level lock on wallet — prevents concurrent double-award.
@@ -237,17 +251,62 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 			return fmt.Errorf("wallet lock failed: %w", err)
 		}
 
-		// ── Spin Credit + Draw Entry calculation (₦200 accumulator) ──────────
-		// Every ₦200 recharge = 1 spin credit + 1 draw entry.
-		// spinDrawNairaPerCredit is admin-configurable (default 200).
-		spinDrawKoboPerCredit := s.cfg.GetInt64("spin_draw_naira_per_credit", 200) * 100
-		newSpinDrawCounter := wallet.SpinDrawCounter + amountKobo
-		spinCreditsEarned = int(newSpinDrawCounter / spinDrawKoboPerCredit)
-		newSpinDrawCounter = newSpinDrawCounter % spinDrawKoboPerCredit
+		// ── Daily counter reset (midnight WAT rollover) ───────────────────────
+		// WAT = UTC+1. We compare the calendar date of the event against the
+		// date stored in daily_recharge_date. If they differ, reset the daily
+		// counters so each day starts fresh.
+		watLocation := time.FixedZone("WAT", 1*60*60)
+		eventDateWAT := eventTime.In(watLocation).Truncate(24 * time.Hour)
+
+		if wallet.DailyRechargeDate == nil || wallet.DailyRechargeDate.In(watLocation).Truncate(24*time.Hour).Before(eventDateWAT) {
+			// New day — reset daily tracking
+			wallet.DailyRechargeKobo = 0
+			wallet.DailySpinsAwarded = 0
+			wallet.DailyRechargeDate = &eventDateWAT
+		}
+
+		// ── Spin Credit calculation (tier-based, cumulative daily) ────────────
+		//
+		// Algorithm:
+		//   1. Add this recharge to today's cumulative total.
+		//   2. Look up the spin_tiers table to find the tier for the new total.
+		//   3. The tier's spins_per_day is the DAILY CAP for this user today.
+		//   4. Award = max(0, tier.spins_per_day - wallet.DailySpinsAwarded).
+		//   5. Cap the total at spin_max_per_day (admin-configurable, default 5).
+		//
+		// This means:
+		//   - First recharge of ₦1,000 → Bronze tier → 1 spin cap → award 1 spin
+		//   - Second recharge of ₦4,000 (total ₦5,000) → Silver tier → 2 spin cap → award 1 more
+		//   - Third recharge of ₦5,000 (total ₦10,000) → Gold tier → 3 spin cap → award 1 more
+		//   - Recharges below ₦1,000 cumulative → no tier → 0 spins
+		newDailyTotal := wallet.DailyRechargeKobo + amountKobo
+		spinMaxPerDay := s.cfg.GetInt("spin_max_per_day", 5)
+
+		tier, tierErr := s.tierCalc.GetSpinTierFromDB(newDailyTotal)
+		if tierErr == nil && tier != nil {
+			// User qualifies for a tier — calculate incremental spin award
+			tierCap := tier.SpinsPerDay
+			if tierCap > spinMaxPerDay {
+				tierCap = spinMaxPerDay
+			}
+			spinCreditsEarned = tierCap - wallet.DailySpinsAwarded
+			if spinCreditsEarned < 0 {
+				spinCreditsEarned = 0
+			}
+			spinTierName = tier.TierDisplayName
+		}
+		// If tierErr != nil (e.g., below ₦1,000 threshold), spinCreditsEarned stays 0
+
+		// ── Draw Entry calculation (₦200 simple accumulator) ─────────────────
+		// Every ₦200 of the CURRENT TRANSACTION = 1 draw entry.
+		// draw_counter carries the kobo remainder across transactions.
+		drawKoboPerEntry := s.cfg.GetInt64("draw_naira_per_entry", 200) * 100
+		newDrawCounter := wallet.DrawCounter + amountKobo
+		drawEntriesEarned = int(newDrawCounter / drawKoboPerEntry)
+		newDrawCounter = newDrawCounter % drawKoboPerEntry
 
 		// ── Pulse Point calculation (₦250 accumulator) ───────────────────────
 		// Every ₦250 recharge = 1 Pulse Point (AI Studio currency).
-		// pulseNairaPerPoint is admin-configurable (default 250).
 		pulseKoboPerPoint := s.cfg.GetInt64("pulse_naira_per_point", 250) * 100
 		newPulseCounter := wallet.PulseCounter + amountKobo
 		pulsePointsEarned = newPulseCounter / pulseKoboPerPoint
@@ -255,14 +314,17 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 
 		// ── Update wallet atomically ──────────────────────────────────────────
 		updates := map[string]interface{}{
-			"spin_draw_counter": newSpinDrawCounter,
-			"pulse_counter":     newPulseCounter,
+			"draw_counter":          newDrawCounter,
+			"pulse_counter":         newPulseCounter,
+			"daily_recharge_kobo":   newDailyTotal,
+			"daily_recharge_date":   wallet.DailyRechargeDate,
+			"daily_spins_awarded":   wallet.DailySpinsAwarded + spinCreditsEarned,
 		}
 		if spinCreditsEarned > 0 {
 			updates["spin_credits"] = gorm.Expr("spin_credits + ?", spinCreditsEarned)
 		}
 		if pulsePointsEarned > 0 {
-			updates["pulse_points"]    = gorm.Expr("pulse_points + ?", pulsePointsEarned)
+			updates["pulse_points"] = gorm.Expr("pulse_points + ?", pulsePointsEarned)
 			updates["lifetime_points"] = gorm.Expr("lifetime_points + ?", pulsePointsEarned)
 		}
 		if err := dbTx.Table("wallets").
@@ -273,8 +335,10 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 		wallet.SpinCredits += spinCreditsEarned
 		wallet.PulsePoints += pulsePointsEarned
 		wallet.LifetimePoints += pulsePointsEarned
-		wallet.SpinDrawCounter = newSpinDrawCounter
+		wallet.DrawCounter = newDrawCounter
 		wallet.PulseCounter = newPulseCounter
+		wallet.DailyRechargeKobo = newDailyTotal
+		wallet.DailySpinsAwarded += spinCreditsEarned
 
 		// ── Immutable ledger entries ──────────────────────────────────────────
 		ref := "MTN-" + payload.TransactionRef
@@ -297,10 +361,12 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 		// 2. Spin credit award record.
 		if spinCreditsEarned > 0 {
 			meta, _ := json.Marshal(map[string]interface{}{
-				"amount_kobo":   amountKobo,
-				"recharge_type": rechargeType,
-				"threshold":     s.cfg.GetInt64("spin_draw_naira_per_credit", 200),
-				"source":        "mtn_push",
+				"amount_kobo":         amountKobo,
+				"recharge_type":       rechargeType,
+				"daily_total_kobo":    newDailyTotal,
+				"spin_tier":           spinTierName,
+				"daily_spins_cap":     wallet.DailySpinsAwarded,
+				"source":              "mtn_push",
 			})
 			spinTx := &entities.Transaction{
 				ID:          uuid.New(),
@@ -317,7 +383,30 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 			}
 		}
 
-		// 3. Pulse Point award record.
+		// 3. Draw entry award record.
+		if drawEntriesEarned > 0 {
+			meta, _ := json.Marshal(map[string]interface{}{
+				"amount_kobo":   amountKobo,
+				"recharge_type": rechargeType,
+				"threshold":     s.cfg.GetInt64("draw_naira_per_entry", 200),
+				"source":        "mtn_push",
+			})
+			drawTx := &entities.Transaction{
+				ID:          uuid.New(),
+				UserID:      user.ID,
+				PhoneNumber: phone,
+				Type:        entities.TxTypeDrawEntryAward,
+				SpinDelta:   drawEntriesEarned, // reuse SpinDelta field for entry count
+				Reference:   ref + "_draw",
+				Metadata:    meta,
+				CreatedAt:   time.Now(),
+			}
+			if err := s.txRepo.SaveTx(ctx, dbTx, drawTx); err != nil {
+				return err
+			}
+		}
+
+		// 4. Pulse Point award record.
 		if pulsePointsEarned > 0 {
 			meta, _ := json.Marshal(map[string]interface{}{
 				"amount_kobo":   amountKobo,
@@ -376,15 +465,15 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 	safe.Go(func() {
 		bgCtx := context.Background()
 
-		// 7a. Draw entries — 1 entry per spin credit earned, inserted into EACH
-		// qualifying draw window (typically: 1 daily draw + 1 Saturday weekly mega).
+		// 7a. Draw entries — inserted into EACH qualifying draw window.
+		//
+		// Draw entries are based on the ₦200 accumulator (drawEntriesEarned),
+		// NOT on spin credits. These are separate currencies.
 		//
 		// Window rules (from draw_schedules table, admin-configurable):
 		//   Recharges from 17:00:01 WAT yesterday → 17:00:00 WAT today qualify
 		//   for TOMORROW's daily draw AND for the Saturday weekly mega draw.
-		//
-		// Spin credits are SEPARATE and IMMEDIATE — they are not affected here.
-		if spinCreditsEarned > 0 && s.drawWindows != nil {
+		if drawEntriesEarned > 0 && s.drawWindows != nil {
 			qualifyingDraws, wErr := s.drawWindows.ResolveQualifyingDraws(bgCtx, eventTime)
 			if wErr != nil {
 				log.Printf("[MTN-PUSH] draw window resolution failed (non-fatal): %v", wErr)
@@ -397,13 +486,13 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 						phone,
 						"recharge",
 						amountKobo,
-						spinCreditsEarned, // 1 draw entry per spin credit, per qualifying draw
+						drawEntriesEarned, // 1 draw entry per ₦200, per qualifying draw
 					)
 					if addErr != nil {
 						log.Printf("[MTN-PUSH] draw entry creation failed for draw %s (%s) (non-fatal): %v",
 							qd.DrawID, qd.DrawName, addErr)
 					} else {
-						drawEntriesCreated += spinCreditsEarned
+						drawEntriesCreated += drawEntriesEarned
 					}
 				}
 			}
@@ -418,14 +507,17 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 			amountNaira := int64(payload.Amount)
 			var parts []string
 			if spinCreditsEarned > 0 {
-				parts = append(parts, fmt.Sprintf("%d Spin Credit(s)", spinCreditsEarned))
+				parts = append(parts, fmt.Sprintf("%d Spin Credit(s) [%s tier]", spinCreditsEarned, spinTierName))
+			}
+			if drawEntriesEarned > 0 {
+				parts = append(parts, fmt.Sprintf("%d Draw Entr%s", drawEntriesEarned, map[bool]string{true: "y", false: "ies"}[drawEntriesEarned == 1]))
 			}
 			if pulsePointsEarned > 0 {
 				parts = append(parts, fmt.Sprintf("%d Pulse Point(s)", pulsePointsEarned))
 			}
 			msg := fmt.Sprintf("Your MTN recharge of ₦%d has been processed.", amountNaira)
 			if len(parts) > 0 {
-				msg += " You earned " + strings.Join(parts, " and ") + "."
+				msg += " You earned " + strings.Join(parts, ", ") + "."
 			}
 			msg += " Keep recharging to win big!"
 			if smsErr := s.notifySvc.SendSMS(bgCtx, phone, msg); smsErr != nil {
@@ -444,8 +536,8 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 		})
 	})
 
-	log.Printf("[MTN-PUSH] Processed %s: ₦%.2f %s -> +%d spin credits, +%d pulse pts, +%d draw entries",
-		phone, payload.Amount, rechargeType, spinCreditsEarned, pulsePointsEarned, drawEntriesCreated)
+	log.Printf("[MTN-PUSH] Processed %s: ₦%.2f %s -> +%d spin credits (%s tier), +%d draw entries, +%d pulse pts",
+		phone, payload.Amount, rechargeType, spinCreditsEarned, spinTierName, drawEntriesEarned, pulsePointsEarned)
 
 	return &MTNPushResult{
 		EventID:     event.ID,
@@ -453,6 +545,7 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 		PulsePoints: pulsePointsEarned,
 		DrawEntries: drawEntriesCreated,
 		SpinCredits: spinCreditsEarned,
+		SpinTier:    spinTierName,
 	}, nil
 }
 
@@ -505,7 +598,8 @@ func (s *MTNPushService) markEventFailed(ctx context.Context, event *mtnPushEven
 
 // normalisePhone converts any Nigerian phone format to 0XXXXXXXXXX.
 // Supported inputs: 2348012345678, +2348012345678, 08012345678,
-//                   8012345678, 234-801-234-5678.
+//
+//	8012345678, 234-801-234-5678.
 func normalisePhone(raw string) string {
 	// Strip non-digit characters.
 	var digits strings.Builder

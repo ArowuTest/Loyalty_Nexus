@@ -29,8 +29,9 @@ type TransactionType string
 const (
 	TxTypeRecharge       TransactionType = "recharge"       // User recharged airtime/data
 	TxTypePointsAward    TransactionType = "points_award"   // Points earned from recharge
-	TxTypeSpinCreditAward TransactionType = "spin_credit_award" // Spin credit earned
-	TxTypeSpinPlay       TransactionType = "spin_play"      // Spin credit consumed
+	TxTypeSpinCreditAward TransactionType = "spin_credit_award" // Spin credit earned (tier-based, daily cap)
+	TxTypeDrawEntryAward  TransactionType = "draw_entry_award"  // Draw entry earned (₦200 accumulator)
+	TxTypeSpinPlay        TransactionType = "spin_play"         // Spin credit consumed
 	TxTypePrizeAward     TransactionType = "prize_award"    // Prize value awarded (Kobo)
 	TxTypeStudioSpend    TransactionType = "studio_spend"   // Points spent on AI Studio
 	TxTypeStudioRefund   TransactionType = "studio_refund"  // Points refunded on failure

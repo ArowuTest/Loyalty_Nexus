@@ -98,11 +98,10 @@ function ClaimModal({ win, onClose, onSuccess }: {
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const needsMomo = win.prize_type === "momo_cash";
   const [momoNumber, setMomoNumber] = useState("");
   const [claiming, setClaiming]     = useState(false);
   const [claimErr, setClaimErr]     = useState<string | null>(null);
-
-  const needsMomo = win.prize_type === "momo_cash";
 
   const handleClaim = async () => {
     setClaiming(true);
@@ -132,13 +131,13 @@ function ClaimModal({ win, onClose, onSuccess }: {
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/5 text-2xl">
             {win.prize_type === "airtime" ? "📱" :
-             win.prize_type === "data_bundle" ? "📶" :
+             win.prize_type === "data_bundle" ? "📦" :
              win.prize_type === "momo_cash" ? "💵" : "🎁"}
           </div>
           <div>
             <h3 className="text-white font-bold">{win.prize_label}</h3>
             <p className="text-[rgb(130_140_180)] text-xs">
-              {win.prize_type === "momo_cash" ? "Cash prize — needs your MoMo number" :
+              {win.prize_type === "momo_cash" ? `Cash prize — ₦${(win.prize_value / 100).toLocaleString()}` :
                win.prize_type === "airtime" ? "Airtime credited to your number" :
                "Data bundle provisioned to your number"}
             </p>
@@ -148,7 +147,7 @@ function ClaimModal({ win, onClose, onSuccess }: {
           </button>
         </div>
 
-        {/* MoMo input for cash prizes */}
+        {/* MTN MoMo number for cash prizes (MoMo is the only disbursement channel — MTN-exclusive platform) */}
         {needsMomo && (
           <div>
             <label className="text-xs font-medium text-[rgb(130_140_180)] block mb-2">

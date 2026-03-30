@@ -637,6 +637,9 @@ func (s *SpinService) DeletePrize(ctx context.Context, prizeID uuid.UUID) error 
 // ─── Eligibility ─────────────────────────────────────────────────────────
 
 // SpinEligibility communicates whether a user can spin and why/why not.
+// It also carries tier progress data so the frontend DailySpinProgress
+// component can render the current tier, today's recharge total, and
+// a progress bar toward the next tier — all from a single endpoint.
 type SpinEligibility struct {
 	Eligible       bool   `json:"eligible"`
 	AvailableSpins int    `json:"available_spins"`
@@ -644,6 +647,10 @@ type SpinEligibility struct {
 	MaxSpinsToday  int    `json:"max_spins_today"`
 	SpinCredits    int    `json:"spin_credits"`
 	Message        string `json:"message"`
+	// Tier progress fields — used by DailySpinProgress component
+	CurrentTierName  string  `json:"current_tier_name"`
+	TodayAmountNaira float64 `json:"today_amount_naira"`
+	ProgressPercent  float64 `json:"progress_percent"`
 	// Nudge: shown when ineligible due to no credits or daily cap reached
 	TriggerNaira      int64  `json:"trigger_naira,omitempty"`
 	NextTierName      string `json:"next_tier_name,omitempty"`
@@ -653,6 +660,9 @@ type SpinEligibility struct {
 }
 
 // CheckEligibility checks whether a user is eligible to spin.
+// It also returns tier progress data (current tier name, today's recharge total,
+// progress percent) so the frontend DailySpinProgress component can render
+// without a separate API call.
 func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*SpinEligibility, error) {
 	wallet, err := s.userRepo.GetWallet(ctx, userID)
 	if err != nil {
@@ -665,12 +675,48 @@ func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate daily recharge: %w", err)
 	}
+	todayAmountNaira := float64(todayAmountKobo) / 100.0
 
-	// 2. Determine daily spin cap from cumulative tier
+	// 2. Determine daily spin cap and current tier from cumulative amount
 	tierCalc := utils.NewSpinTierCalculatorDB(s.db)
 	dailyCap := 0
-	if tier, err := tierCalc.GetSpinTierFromDB(todayAmountKobo); err == nil && tier.SpinsPerDay > 0 {
-		dailyCap = tier.SpinsPerDay
+	currentTierName := ""
+	progressPercent := 0.0
+
+	allTiers, _ := tierCalc.GetAllTiersFromDB()
+	var currentTierIdx int = -1
+	if currentTier, err := tierCalc.GetSpinTierFromDB(todayAmountKobo); err == nil && currentTier.SpinsPerDay > 0 {
+		dailyCap = currentTier.SpinsPerDay
+		currentTierName = currentTier.TierDisplayName
+		// Find index of current tier in allTiers for progress calculation
+		for i, t := range allTiers {
+			if t.TierDisplayName == currentTier.TierDisplayName {
+				currentTierIdx = i
+				break
+			}
+		}
+	}
+
+	// Calculate progress percent toward next tier
+	if currentTierIdx >= 0 && currentTierIdx+1 < len(allTiers) {
+		nxt := allTiers[currentTierIdx+1]
+		cur := allTiers[currentTierIdx]
+		tierRange := float64(nxt.MinDailyAmount - cur.MinDailyAmount)
+		if tierRange > 0 {
+			progressPercent = float64(todayAmountKobo-cur.MinDailyAmount) / tierRange * 100
+			if progressPercent > 100 {
+				progressPercent = 100
+			}
+		}
+	} else if currentTierIdx < 0 && len(allTiers) > 0 {
+		// Below minimum tier — progress toward Bronze
+		nxt := allTiers[0]
+		if nxt.MinDailyAmount > 0 {
+			progressPercent = float64(todayAmountKobo) / float64(nxt.MinDailyAmount) * 100
+			if progressPercent > 100 {
+				progressPercent = 100
+			}
+		}
 	}
 
 	// 3. Count all spins played today
@@ -682,26 +728,42 @@ func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*
 	// If user has no spin credits, they can't spin regardless of tier
 	if wallet.SpinCredits < 1 {
 		trigger := s.cfg.GetInt64("spin_trigger_naira", 1000)
-		return &SpinEligibility{
-			Eligible:      false,
-			SpinCredits:   wallet.SpinCredits,
-			Message:       fmt.Sprintf("No spin credits. Recharge ₦%d to earn one!", trigger),
-			TriggerNaira:  trigger,
-		}, nil
+		resp := &SpinEligibility{
+			Eligible:         false,
+			SpinCredits:      wallet.SpinCredits,
+			Message:          fmt.Sprintf("No spin credits. Recharge ₦%d to earn one!", trigger),
+			TriggerNaira:     trigger,
+			CurrentTierName:  currentTierName,
+			TodayAmountNaira: todayAmountNaira,
+			ProgressPercent:  progressPercent,
+		}
+		// Nudge toward next tier
+		for _, t := range allTiers {
+			if t.MinDailyAmount > todayAmountKobo {
+				resp.NextTierName = t.TierDisplayName
+				resp.NextTierMinAmount = t.MinDailyAmount
+				resp.AmountToNextTier = t.MinDailyAmount - todayAmountKobo
+				resp.NextTierSpins = t.SpinsPerDay
+				break
+			}
+		}
+		return resp, nil
 	}
 
 	// If user has reached their daily cap based on their tier
 	if used >= dailyCap {
 		resp := &SpinEligibility{
-			Eligible:       false,
-			SpinsUsedToday: used,
-			MaxSpinsToday:  dailyCap,
-			SpinCredits:    wallet.SpinCredits,
-			Message:        fmt.Sprintf("Daily spin limit reached (%d/%d). Recharge more today to unlock additional spins!", used, dailyCap),
+			Eligible:         false,
+			SpinsUsedToday:   used,
+			MaxSpinsToday:    dailyCap,
+			SpinCredits:      wallet.SpinCredits,
+			Message:          fmt.Sprintf("Daily spin limit reached (%d/%d). Recharge more today to unlock additional spins!", used, dailyCap),
+			CurrentTierName:  currentTierName,
+			TodayAmountNaira: todayAmountNaira,
+			ProgressPercent:  progressPercent,
 		}
 
 		// Build upgrade nudge
-		allTiers, _ := tierCalc.GetAllTiersFromDB()
 		for _, t := range allTiers {
 			if t.MinDailyAmount > todayAmountKobo {
 				resp.NextTierName = t.TierDisplayName
@@ -721,12 +783,15 @@ func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*
 	}
 
 	return &SpinEligibility{
-		Eligible:       true,
-		AvailableSpins: available,
-		SpinsUsedToday: used,
-		MaxSpinsToday:  dailyCap,
-		SpinCredits:    wallet.SpinCredits,
-		Message:        fmt.Sprintf("You have %d spin(s) available today!", available),
+		Eligible:         true,
+		AvailableSpins:   available,
+		SpinsUsedToday:   used,
+		MaxSpinsToday:    dailyCap,
+		SpinCredits:      wallet.SpinCredits,
+		Message:          fmt.Sprintf("You have %d spin(s) available today!", available),
+		CurrentTierName:  currentTierName,
+		TodayAmountNaira: todayAmountNaira,
+		ProgressPercent:  progressPercent,
 	}, nil
 }
 

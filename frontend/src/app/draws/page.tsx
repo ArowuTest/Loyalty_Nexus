@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import AppShell from "@/components/layout/AppShell";
 import api from "@/lib/api";
 import { Ticket, Trophy, Clock, RefreshCw, Gift, Zap, ChevronDown, ChevronUp, Users } from "lucide-react";
+import useSWR from "swr";
 import { cn } from "@/lib/utils";
 import toast, { Toaster } from "react-hot-toast";
 
@@ -187,13 +188,20 @@ function DrawCard({ draw }: { draw: Draw }) {
     </motion.div>
   );
 }
-
-// ── Main Page ───────────────────────────────────────────────────────────────
+// ── Main Page ──────────────────────────────────────────────────────────────────
 export default function DrawsPage() {
   const [draws, setDraws] = useState<Draw[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState(Date.now());
+
+  // Fetch wallet to show user's personal draw entry count
+  const { data: walletData } = useSWR(
+    "/user/wallet",
+    () => api.getWallet() as Promise<{ draw_counter: number; spin_credits: number; pulse_points: number }>,
+    { refreshInterval: 30000 }
+  );
+  const myDrawEntries = walletData?.draw_counter ?? 0;
 
   const fetchDraws = useCallback(async () => {
     setLoading(true);
@@ -241,6 +249,29 @@ export default function DrawsPage() {
           >
             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
           </button>
+        </div>
+
+        {/* My draw entries banner */}
+        <div className={cn(
+          "nexus-card px-4 py-3 flex items-center justify-between",
+          myDrawEntries > 0 ? "border-nexus-500/30" : "border-white/5"
+        )}>
+          <div className="flex items-center gap-2">
+            <Ticket className={myDrawEntries > 0 ? "text-nexus-400" : "text-white/20"} size={18} />
+            <div>
+              <p className="text-white/60 text-sm">My Draw Entries</p>
+              <p className="text-white/30 text-[10px]">Every ₦200 recharge = 1 entry</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className={cn(
+              "text-2xl font-bold font-display",
+              myDrawEntries > 0 ? "text-nexus-300" : "text-white/30"
+            )}>{walletData ? myDrawEntries.toLocaleString() : "—"}</p>
+            {myDrawEntries === 0 && (
+              <p className="text-[10px] text-white/30">Recharge to earn entries</p>
+            )}
+          </div>
         </div>
 
         {/* How it works */}

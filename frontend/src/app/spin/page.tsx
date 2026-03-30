@@ -9,6 +9,7 @@ import toast, { Toaster } from "react-hot-toast";
 import Link from "next/link";
 import { Zap, Trophy, RotateCcw, Gift, X, Sparkles, Loader2, History, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
+import DailySpinProgress from "@/components/spin/DailySpinProgress";
 
 // ── Fallback segments used only if API is unavailable ──────────────────────
 const FALLBACK_SEGMENTS = [
@@ -194,6 +195,9 @@ export default function SpinPage() {
             )}
           </div>
         </div>
+
+        {/* Tier progress — mirrors RechargeMax DailySpinProgress */}
+        <DailySpinProgress refreshKey={history.length} />
 
         {/* Wheel */}
         <div className="nexus-card p-6">

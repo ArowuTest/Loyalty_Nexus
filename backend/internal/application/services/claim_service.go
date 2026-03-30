@@ -104,11 +104,18 @@ func (s *ClaimService) ClaimPrize(ctx context.Context, userID, claimID uuid.UUID
 		}
 		result.ClaimStatus = entities.ClaimClaimed
 		
-		// Trigger fulfillment asynchronously
-		// The fulfillment service will pick it up if it's pending fulfillment
-		// We just need to ensure it's marked as ready for fulfillment
+		// Mark ready for fulfillment and immediately dispatch in a goroutine so the
+		// user receives their airtime/data without waiting for the next lifecycle
+		// worker tick. The lifecycle worker serves as the retry safety net.
 		if result.FulfillmentStatus == entities.FulfillPendingClaim {
-			_ = s.prizeRepo.UpdateSpinFulfillment(ctx, claimID, entities.FulfillPending, "", "")
+			if err2 := s.prizeRepo.UpdateSpinFulfillment(ctx, claimID, entities.FulfillPending, "", ""); err2 == nil {
+				result.FulfillmentStatus = entities.FulfillPending
+				go func(spinResult *entities.SpinResult) {
+					// Use a fresh background context so the goroutine is not cancelled
+					// when the HTTP request context is done.
+					_ = s.fulfillSvc.Fulfill(context.Background(), spinResult)
+				}(result)
+			}
 		}
 
 	case entities.PrizePulsePoints:

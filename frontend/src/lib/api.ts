@@ -154,6 +154,27 @@ class APIClient {
   getWheelConfig() { return this.request("GET", "/spin/wheel"); }
   playSpin() { return this.request("POST", "/spin/play", {}); }
   getSpinHistory() { return this.request("GET", "/spin/history"); }
+  /** Returns eligibility + tier progress data for the DailySpinProgress component.
+   *  Includes: current_tier_name, today_amount_naira, progress_percent,
+   *  available_spins, spins_used_today, max_spins_today, and upgrade nudge fields. */
+  getSpinEligibility() {
+    return this.request<{
+      eligible: boolean;
+      available_spins: number;
+      spins_used_today: number;
+      max_spins_today: number;
+      spin_credits: number;
+      message: string;
+      current_tier_name: string;
+      today_amount_naira: number;
+      progress_percent: number;
+      trigger_naira?: number;
+      next_tier_name?: string;
+      next_tier_min_amount?: number;
+      amount_to_next_tier?: number;
+      next_tier_spins?: number;
+    }>("GET", "/spin/eligibility");
+  }
 
   // ── Studio ────────────────────────────────────────────────────────────────
   getStudioTools() { return this.request("GET", "/studio/tools"); }
