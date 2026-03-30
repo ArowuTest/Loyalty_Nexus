@@ -198,19 +198,36 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 	var users []userRow
 	var total int64
-	base := h.db.WithContext(r.Context()).Table("users u").
+
+	// Build base filter conditions
+	search := q.Get("search")
+	state := q.Get("state")
+
+	// Count query (separate from find to avoid GORM SELECT clause conflict)
+	countQ := h.db.WithContext(r.Context()).Table("users u").
+		Joins("LEFT JOIN wallets w ON w.user_id = u.id")
+	if search != "" {
+		countQ = countQ.Where("u.phone_number LIKE ?", "%"+search+"%")
+	}
+	if state != "" {
+		countQ = countQ.Where("u.state = ?", state)
+	}
+	countQ.Count(&total)
+
+	// Data query
+	dataQ := h.db.WithContext(r.Context()).Table("users u").
 		Select("u.id, u.phone_number, u.tier, u.state, u.is_active, u.streak_count, u.last_recharge_at, u.created_at, COALESCE(w.pulse_points,0) AS pulse_points, COALESCE(w.spin_credits,0) AS spin_credits").
 		Joins("LEFT JOIN wallets w ON w.user_id = u.id")
-
-	if search := q.Get("search"); search != "" {
-		base = base.Where("u.phone_number LIKE ?", "%"+search+"%")
+	if search != "" {
+		dataQ = dataQ.Where("u.phone_number LIKE ?", "%"+search+"%")
 	}
-	if state := q.Get("state"); state != "" {
-		base = base.Where("u.state = ?", state)
+	if state != "" {
+		dataQ = dataQ.Where("u.state = ?", state)
 	}
-
-	base.Count(&total)
-	base.Order("u.created_at DESC").Limit(limit).Offset((page-1)*limit).Find(&users)
+	dataQ.Order("u.created_at DESC").Limit(limit).Offset((page-1)*limit).Find(&users)
+	if users == nil {
+		users = []userRow{}
+	}
 
 	jsonOK(w, map[string]interface{}{
 		"users":  users,

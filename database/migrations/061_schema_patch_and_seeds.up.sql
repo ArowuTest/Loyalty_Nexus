@@ -51,7 +51,6 @@ END $$;
 -- Add unique constraint on email if not present
 DO $$ BEGIN
     ALTER TABLE admin_users ADD CONSTRAINT admin_users_email_key UNIQUE (email);
-EXCEPTION WHEN duplicate_table THEN NULL;
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 

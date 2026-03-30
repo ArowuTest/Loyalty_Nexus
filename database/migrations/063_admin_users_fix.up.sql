@@ -16,9 +16,7 @@ ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ NOT N
 -- Step 2: Add unique constraint on email (ignore if already exists)
 DO $$ BEGIN
     ALTER TABLE admin_users ADD CONSTRAINT admin_users_email_key UNIQUE (email);
-EXCEPTION WHEN duplicate_table THEN NULL;
-             WHEN duplicate_object THEN NULL;
-             WHEN OTHERS THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- Step 3: Widen role column to accept any text (it was a CHECK constraint)

@@ -15,10 +15,11 @@ services:
     dockerContext: .
     dockerBuildTarget: api
 
-    # Migrations run inside entrypoint.sh (before exec /api).
-    # golang-migrate is idempotent — already-applied migrations are skipped.
-    # If a migration fails → container exits non-zero → Render keeps
-    # the previous healthy version live (zero-downtime guarantee).
+    # Migrations run as a preDeployCommand — before the new container goes live.
+    # If any migration fails, Render aborts the deploy and keeps the previous
+    # healthy version live (zero-downtime guarantee).
+    # The entrypoint.sh only starts the API binary — no migration logic.
+    preDeployCommand: /migrate fix-and-up
 
     # Render web services always bind on port 10000.
     # The Go API reads PORT env var and defaults to 8080 — we override here.
@@ -44,6 +45,12 @@ services:
         fromDatabase:
           name: loyalty-nexus-db
           property: connectionString
+      # MIGRATE_DATABASE_URL uses the external hostname + SSL — required for
+      # preDeployCommand which runs outside the private network
+      - key: MIGRATE_DATABASE_URL
+        fromDatabase:
+          name: loyalty-nexus-db
+          property: externalConnectionString
 
 
       # ── Redis ─────────────────────────────────────────────────────────────
@@ -171,11 +178,11 @@ services:
 
       # ── CORS / Frontend URLs ─────────────────────────────────────────────
       - key: FRONTEND_URL
-        value: https://loyalty-nexus-frontend.vercel.app
+        value: https://loyalty-nexus.vercel.app
       - key: ADMIN_URL
         value: https://loyalty-nexus-admin.vercel.app
       - key: CORS_ORIGINS
-        value: https://loyalty-nexus-frontend.vercel.app,https://loyalty-nexus-admin.vercel.app,http://localhost:3000,http://localhost:5173
+        value: https://loyalty-nexus.vercel.app,https://loyalty-nexus-frontend.vercel.app,https://loyalty-nexus-admin.vercel.app,http://localhost:3000,http://localhost:5173
       - key: APP_BASE_URL
         value: https://loyalty-nexus-api.onrender.com
 

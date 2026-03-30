@@ -1,13 +1,7 @@
 #!/bin/sh
-
-echo "[entrypoint] Running pending migrations..."
-
-if /migrate up; then
-    echo "[entrypoint] ✓ Migrations applied"
-else
-    echo "[entrypoint] WARNING: migrate up returned non-zero — checking version"
-    /migrate version || true
-fi
+# entrypoint.sh — Starts the API binary.
+# Database migrations are handled by Render's preDeployCommand (/migrate up)
+# which runs before this container goes live. This script only starts the app.
 
 echo "[entrypoint] Starting API..."
 exec /api
