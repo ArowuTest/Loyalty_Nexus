@@ -135,28 +135,6 @@ func txDB(t *testing.T, db *gorm.DB) *gorm.DB {
 
 // ─── Seed helpers ─────────────────────────────────────────────────────────────
 
-// toE164 converts any Nigerian phone format to E.164 (+234XXXXXXXXXX).
-// This matches the canonical storage format used in the production database.
-func toE164(phone string) string {
-	var digits strings.Builder
-	for _, r := range phone {
-		if r >= '0' && r <= '9' {
-			digits.WriteRune(r)
-		}
-	}
-	d := digits.String()
-	switch {
-	case strings.HasPrefix(d, "234") && len(d) == 13:
-		return "+" + d
-	case strings.HasPrefix(d, "0") && len(d) == 11:
-		return "+234" + d[1:]
-	case len(d) == 10:
-		return "+234" + d
-	default:
-		return phone
-	}
-}
-
 func seedUser(t *testing.T, db *gorm.DB, phone string) *entities.User {
 	t.Helper()
 	userID := uuid.New()
