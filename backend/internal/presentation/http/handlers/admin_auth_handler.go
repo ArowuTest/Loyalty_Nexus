@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 	"loyalty-nexus/internal/application/services"
@@ -207,15 +206,6 @@ func (h *AdminAuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		"role":     claims.Role,
 		"is_admin": claims.IsAdmin,
 	})
-}
-
-// bearerToken extracts the raw token from an Authorization: Bearer <token> header.
-func bearerToken(r *http.Request) string {
-	h := r.Header.Get("Authorization")
-	if strings.HasPrefix(h, "Bearer ") {
-		return strings.TrimPrefix(h, "Bearer ")
-	}
-	return ""
 }
 
 // claimsFromCtx extracts JWTClaims stored in context by AdminAuthMiddleware.
