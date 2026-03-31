@@ -149,6 +149,7 @@ func (r *mockWarsUserRepo) FindInactiveUsers(_ context.Context, _, _ int) ([]ent
 func (r *mockWarsUserRepo) FindUsersWithExpiringPoints(_ context.Context, _, _ int) ([]entities.User, error) { return nil, nil }
 func (r *mockWarsUserRepo) CountByState(_ context.Context, _ string) (int64, error)               { return 0, nil }
 func (r *mockWarsUserRepo) UpdateState(_ context.Context, _ uuid.UUID, _ string) error            { return nil }
+func (r *mockWarsUserRepo) CreateWallet(_ context.Context, _ *entities.Wallet) error              { return nil }
 
 var _ repositories.UserRepository = (*mockWarsUserRepo)(nil)
 

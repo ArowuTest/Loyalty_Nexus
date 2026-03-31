@@ -122,7 +122,8 @@ func (m *mockUserRepoAuth) FindUsersWithExpiringPoints(_ context.Context, _, _ i
 	return nil, nil
 }
 func (m *mockUserRepoAuth) CountByState(_ context.Context, _ string) (int64, error) { return 0, nil }
-func (m *mockUserRepoAuth) UpdateState(_ context.Context, _ uuid.UUID, _ string) error { return nil }
+func (m *mockUserRepoAuth) UpdateState(_ context.Context, _ uuid.UUID, _ string) error  { return nil }
+func (m *mockUserRepoAuth) CreateWallet(_ context.Context, _ *entities.Wallet) error    { return nil }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
