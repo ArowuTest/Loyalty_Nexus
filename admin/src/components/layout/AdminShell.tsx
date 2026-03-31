@@ -46,8 +46,19 @@ export default function AdminShell({ children }: { children: ReactNode }) {
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    if (!adminAPI.getToken()) {
-      router.replace("/login");
+    const accessToken = adminAPI.getToken();
+    const refreshToken = adminAPI.getRefreshToken();
+    if (!accessToken) {
+      if (refreshToken) {
+        // Access token missing but refresh token exists — attempt silent refresh
+        // before redirecting to login. This handles backend restarts gracefully.
+        adminAPI.silentRefresh().then(newToken => {
+            if (newToken) setInitialized(true);
+            else router.replace("/login");
+          }).catch(() => router.replace("/login"));
+      } else {
+        router.replace("/login");
+      }
     } else {
       setInitialized(true);
     }
@@ -113,7 +124,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div style={{ padding: "16px 20px", borderTop: "1px solid rgba(95,114,249,0.1)" }}>
-          <button onClick={() => { adminAPI.clearToken(); router.replace("/login"); }}
+          <button onClick={() => { adminAPI.logout().finally(() => router.replace("/login")); }}
             style={{ color: "#f43f5e", fontSize: 12, background: "none", border: "none", cursor: "pointer" }}>
             Sign out
           </button>

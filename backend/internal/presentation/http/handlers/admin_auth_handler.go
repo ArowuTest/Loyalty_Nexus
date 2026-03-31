@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"loyalty-nexus/internal/application/services"
@@ -10,7 +11,7 @@ import (
 	"loyalty-nexus/internal/presentation/http/middleware"
 )
 
-// AdminAuthHandler handles admin login, admin user management, and password changes.
+// AdminAuthHandler handles admin login, token refresh, logout, and admin user management.
 type AdminAuthHandler struct {
 	adminAuthSvc *services.AdminAuthService
 }
@@ -19,7 +20,7 @@ func NewAdminAuthHandler(adminAuthSvc *services.AdminAuthService) *AdminAuthHand
 	return &AdminAuthHandler{adminAuthSvc: adminAuthSvc}
 }
 
-// POST /api/v1/admin/auth/login — email + password → JWT
+// POST /api/v1/admin/auth/login — email + password → access_token + refresh_token
 func (h *AdminAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
@@ -34,18 +35,71 @@ func (h *AdminAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, admin, err := h.adminAuthSvc.Login(r.Context(), req.Email, req.Password)
+	result, err := h.adminAuthSvc.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"token":     token,
-		"admin_id":  admin.ID,
-		"email":     admin.Email,
-		"full_name": admin.FullName,
-		"role":      admin.Role,
+		"token":         result.AccessToken,
+		"refresh_token": result.RefreshToken,
+		"admin_id":      result.Admin.ID,
+		"email":         result.Admin.Email,
+		"full_name":     result.Admin.FullName,
+		"role":          result.Admin.Role,
 	})
+}
+
+// POST /api/v1/admin/auth/refresh — refresh_token → new access_token + new refresh_token
+func (h *AdminAuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.RefreshToken == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "refresh_token required"})
+		return
+	}
+
+	result, err := h.adminAuthSvc.Refresh(r.Context(), req.RefreshToken)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"token":         result.AccessToken,
+		"refresh_token": result.RefreshToken,
+		"admin_id":      result.Admin.ID,
+		"email":         result.Admin.Email,
+		"full_name":     result.Admin.FullName,
+		"role":          result.Admin.Role,
+	})
+}
+
+// POST /api/v1/admin/auth/logout — revoke all refresh tokens for the current admin
+func (h *AdminAuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	// Try to revoke the specific refresh token if provided in body
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	claims := claimsFromCtx(r)
+	adminID, err := uuid.Parse(claims.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid admin id in token"})
+		return
+	}
+
+	if req.RefreshToken != "" {
+		_ = h.adminAuthSvc.RevokeRefreshToken(r.Context(), req.RefreshToken)
+	} else {
+		_ = h.adminAuthSvc.Logout(r.Context(), adminID)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out"})
 }
 
 // POST /api/v1/admin/auth/admins — create a new admin (super_admin only)
@@ -148,15 +202,23 @@ func (h *AdminAuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request
 func (h *AdminAuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFromCtx(r)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"admin_id":  claims.UserID,
-		"email":     claims.Email,
-		"role":      claims.Role,
-		"is_admin":  claims.IsAdmin,
+		"admin_id": claims.UserID,
+		"email":    claims.Email,
+		"role":     claims.Role,
+		"is_admin": claims.IsAdmin,
 	})
 }
 
+// bearerToken extracts the raw token from an Authorization: Bearer <token> header.
+func bearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	if strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimPrefix(h, "Bearer ")
+	}
+	return ""
+}
+
 // claimsFromCtx extracts JWTClaims stored in context by AdminAuthMiddleware.
-// Uses middleware.ContextAdminClaims key — must match what AdminAuthMiddleware stores.
 func claimsFromCtx(r *http.Request) *entities.JWTClaims {
 	if c, ok := r.Context().Value(middleware.ContextAdminClaims).(*entities.JWTClaims); ok {
 		return c

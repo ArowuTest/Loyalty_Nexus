@@ -383,6 +383,8 @@ func main() {
 
 		// ─── Admin Auth (email + password + RBAC) ────────────────────────────────
 		mux.HandleFunc("POST /api/v1/admin/auth/login",           adminAuthH.Login)
+		mux.HandleFunc("POST /api/v1/admin/auth/refresh",         adminAuthH.Refresh)
+		mux.Handle("POST   /api/v1/admin/auth/logout",            adminAuth(http.HandlerFunc(adminAuthH.Logout)))
 		mux.Handle("GET    /api/v1/admin/auth/me",                adminAuth(http.HandlerFunc(adminAuthH.Me)))
 		mux.Handle("POST   /api/v1/admin/auth/change-password",   adminAuth(http.HandlerFunc(adminAuthH.ChangePassword)))
 		mux.Handle("GET    /api/v1/admin/auth/admins",            adminAuth(http.HandlerFunc(adminAuthH.ListAdmins)))

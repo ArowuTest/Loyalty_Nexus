@@ -37,24 +37,122 @@ export interface USSDSession {
 
 class AdminAPI {
   private token: string | null = null;
-  setToken(t: string) { this.token = t; typeof window !== "undefined" && localStorage.setItem("nexus_admin_token", t); }
+  private refreshToken: string | null = null;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private isRefreshing = false;
+  private refreshQueue: Array<(token: string | null) => void> = [];
+
+  // ── Access token ──────────────────────────────────────────────────────────
+  setToken(t: string) {
+    this.token = t;
+    if (typeof window !== "undefined") localStorage.setItem("nexus_admin_token", t);
+    this.scheduleProactiveRefresh(t);
+  }
   getToken(): string | null {
     if (this.token) return this.token;
     if (typeof window !== "undefined") this.token = localStorage.getItem("nexus_admin_token");
     return this.token;
   }
-  clearToken() { this.token = null; typeof window !== "undefined" && localStorage.removeItem("nexus_admin_token"); }
+  clearToken() {
+    this.token = null;
+    this.refreshToken = null;
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("nexus_admin_token");
+      localStorage.removeItem("nexus_admin_refresh_token");
+    }
+  }
+
+  // ── Refresh token ─────────────────────────────────────────────────────────
+  setRefreshToken(rt: string) {
+    this.refreshToken = rt;
+    if (typeof window !== "undefined") localStorage.setItem("nexus_admin_refresh_token", rt);
+  }
+  getRefreshToken(): string | null {
+    if (this.refreshToken) return this.refreshToken;
+    if (typeof window !== "undefined") this.refreshToken = localStorage.getItem("nexus_admin_refresh_token");
+    return this.refreshToken;
+  }
+
+  // ── Proactive refresh: fire 2 min before the 15-min access token expires ──
+  private scheduleProactiveRefresh(accessToken: string) {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    try {
+      const payload = JSON.parse(atob(accessToken.split(".")[1]));
+      const expiresIn = (payload.exp * 1000) - Date.now();
+      const refreshIn = Math.max(expiresIn - 2 * 60 * 1000, 30_000); // 2 min before expiry, min 30s
+      this.refreshTimer = setTimeout(() => this.silentRefresh(), refreshIn);
+    } catch { /* ignore parse errors */ }
+  }
+
+  // ── Silent refresh: exchange refresh token for new access + refresh tokens ─
+  async silentRefresh(): Promise<string | null> {
+    const rt = this.getRefreshToken();
+    if (!rt) { this.clearToken(); if (typeof window !== "undefined") window.location.href = "/login"; return null; }
+
+    if (this.isRefreshing) {
+      return new Promise<string | null>(resolve => this.refreshQueue.push(resolve));
+    }
+    this.isRefreshing = true;
+    try {
+      const resp = await fetch(`${BASE_URL}/admin/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+      if (!resp.ok) throw new Error("refresh failed");
+      const data = await resp.json() as { token: string; refresh_token: string };
+      this.setToken(data.token);
+      this.setRefreshToken(data.refresh_token);
+      this.refreshQueue.forEach(cb => cb(data.token));
+      this.refreshQueue = [];
+      return data.token;
+    } catch {
+      this.clearToken();
+      this.refreshQueue.forEach(cb => cb(null));
+      this.refreshQueue = [];
+      if (typeof window !== "undefined") window.location.href = "/login";
+      return null;
+    } finally {
+      this.isRefreshing = false;
+    }
+  }
+
+  // ── Core request with automatic 401 → silent refresh → retry ─────────────
   async req<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const resp = await fetch(`${BASE_URL}${path}`, {
+    const doFetch = (tok: string | null) => fetch(`${BASE_URL}${path}`, {
       method,
-      headers: { "Content-Type": "application/json", ...(this.getToken() ? { Authorization: `Bearer ${this.getToken()}` } : {}) },
+      headers: { "Content-Type": "application/json", ...(tok ? { Authorization: `Bearer ${tok}` } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
-    if (resp.status === 401) { this.clearToken(); window.location.href = "/login"; throw new Error("Unauthorized"); }
+
+    let resp = await doFetch(this.getToken());
+
+    // On 401: attempt silent refresh once, then retry
+    if (resp.status === 401) {
+      const newToken = await this.silentRefresh();
+      if (!newToken) throw new Error("Unauthorized");
+      resp = await doFetch(newToken);
+      if (resp.status === 401) {
+        this.clearToken();
+        if (typeof window !== "undefined") window.location.href = "/login";
+        throw new Error("Unauthorized");
+      }
+    }
+
     const data = await resp.json();
-    if (!resp.ok) throw new Error((data as {error?: string}).error || "Request failed");
+    if (!resp.ok) throw new Error((data as { error?: string }).error || "Request failed");
     return data as T;
   }
+  // ── Logout: revoke refresh token on backend then clear local tokens ─────────────
+  async logout(): Promise<void> {
+    const rt = this.getRefreshToken();
+    try {
+      await this.req("POST", "/admin/auth/logout", rt ? { refresh_token: rt } : {});
+    } catch { /* ignore errors — clear tokens regardless */ }
+    this.clearToken();
+  }
+
   getDashboard()   { return this.req<DashboardStats>("GET", "/admin/dashboard"); }
   getConfig()      { return this.req<{ configs: ConfigEntry[] }>("GET", "/admin/config"); }
   updateConfig(key: string, value: string) { return this.req("PUT", `/admin/config/${encodeURIComponent(key)}`, { value }); }

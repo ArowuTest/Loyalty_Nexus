@@ -175,7 +175,12 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 	// ── 0. Normalise inputs ───────────────────────────────────────────────────
 	phone := normalisePhone(payload.MSISDN)
 	rechargeType := strings.ToUpper(strings.TrimSpace(payload.RechargeType))
-	if rechargeType == "" {
+	// Validate against DB CHECK constraint: only AIRTIME, DATA, BUNDLE are allowed.
+	// Any unrecognised value (e.g. "MTN", "VOICE", "") is normalised to AIRTIME.
+	switch rechargeType {
+	case "AIRTIME", "DATA", "BUNDLE":
+		// valid — keep as-is
+	default:
 		rechargeType = "AIRTIME"
 	}
 	amountKobo := int64(math.Round(payload.Amount * 100))

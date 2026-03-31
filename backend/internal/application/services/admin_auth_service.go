@@ -2,6 +2,9 @@ package services
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -16,7 +19,8 @@ import (
 	"loyalty-nexus/internal/domain/entities"
 )
 
-// AdminAuthService handles admin authentication (email + bcrypt password) and RBAC token issuance.
+// AdminAuthService handles admin authentication (email + bcrypt password),
+// RBAC token issuance, and refresh token lifecycle management.
 type AdminAuthService struct {
 	db        *gorm.DB
 	jwtSecret []byte
@@ -28,38 +32,139 @@ func NewAdminAuthService(db *gorm.DB) *AdminAuthService {
 		secret = "change-this-in-production"
 	}
 	svc := &AdminAuthService{db: db, jwtSecret: []byte(secret)}
-	// Seed default super_admin on startup if no admin exists
 	svc.seedDefaultAdmin()
 	return svc
 }
 
-// Login verifies email + password and returns a signed JWT on success.
-func (s *AdminAuthService) Login(ctx context.Context, email, password string) (string, *entities.AdminUser, error) {
+// ─── Token durations ─────────────────────────────────────────────────────────
+const (
+	accessTokenTTL  = 15 * time.Minute
+	refreshTokenTTL = 7 * 24 * time.Hour
+)
+
+// ─── LoginResult holds both tokens returned on successful login ───────────────
+type LoginResult struct {
+	AccessToken  string
+	RefreshToken string
+	Admin        *entities.AdminUser
+}
+
+// Login verifies email + password and returns access + refresh tokens on success.
+func (s *AdminAuthService) Login(ctx context.Context, email, password string) (*LoginResult, error) {
 	var admin entities.AdminUser
 	if err := s.db.WithContext(ctx).
 		Where("email = ? AND is_active = true", email).
 		First(&admin).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			log.Printf("[AdminAuth] Login failed: no active admin with email=%s", email)
-			return "", nil, errors.New("invalid credentials")
+			return nil, errors.New("invalid credentials")
 		}
 		log.Printf("[AdminAuth] Login DB error for email=%s: %v", email, err)
-		return "", nil, fmt.Errorf("db error: %w", err)
+		return nil, fmt.Errorf("db error: %w", err)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(password)); err != nil {
 		log.Printf("[AdminAuth] Login failed: password mismatch for email=%s", email)
-		return "", nil, errors.New("invalid credentials")
+		return nil, errors.New("invalid credentials")
 	}
 
 	// Update last login
 	s.db.WithContext(ctx).Model(&admin).Update("last_login_at", time.Now())
 
-	token, err := s.mintAdminJWT(&admin)
+	accessToken, err := s.mintAdminJWT(&admin)
 	if err != nil {
-		return "", nil, fmt.Errorf("token mint failed: %w", err)
+		return nil, fmt.Errorf("access token mint failed: %w", err)
 	}
-	return token, &admin, nil
+
+	refreshToken, err := s.issueRefreshToken(ctx, admin.ID, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("refresh token issue failed: %w", err)
+	}
+
+	return &LoginResult{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		Admin:        &admin,
+	}, nil
+}
+
+// Refresh validates a refresh token and issues a new access token + rotated refresh token.
+func (s *AdminAuthService) Refresh(ctx context.Context, rawRefreshToken string) (*LoginResult, error) {
+	tokenHash := hashToken(rawRefreshToken)
+
+	var rt struct {
+		ID        uuid.UUID  `gorm:"column:id"`
+		AdminID   uuid.UUID  `gorm:"column:admin_id"`
+		ExpiresAt time.Time  `gorm:"column:expires_at"`
+		RevokedAt *time.Time `gorm:"column:revoked_at"`
+	}
+	if err := s.db.WithContext(ctx).
+		Table("admin_refresh_tokens").
+		Where("token_hash = ?", tokenHash).
+		First(&rt).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("refresh token not found")
+		}
+		return nil, fmt.Errorf("db error: %w", err)
+	}
+
+	if rt.RevokedAt != nil {
+		return nil, errors.New("refresh token has been revoked")
+	}
+	if time.Now().After(rt.ExpiresAt) {
+		return nil, errors.New("refresh token expired")
+	}
+
+	// Revoke the used refresh token (rotation — one-time use)
+	now := time.Now()
+	s.db.WithContext(ctx).
+		Table("admin_refresh_tokens").
+		Where("id = ?", rt.ID).
+		Update("revoked_at", now)
+
+	// Load the admin
+	var admin entities.AdminUser
+	if err := s.db.WithContext(ctx).
+		Where("id = ? AND is_active = true", rt.AdminID).
+		First(&admin).Error; err != nil {
+		return nil, errors.New("admin not found or deactivated")
+	}
+
+	// Issue new access + refresh tokens
+	accessToken, err := s.mintAdminJWT(&admin)
+	if err != nil {
+		return nil, fmt.Errorf("access token mint failed: %w", err)
+	}
+
+	newRefreshToken, err := s.issueRefreshToken(ctx, admin.ID, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("refresh token issue failed: %w", err)
+	}
+
+	return &LoginResult{
+		AccessToken:  accessToken,
+		RefreshToken: newRefreshToken,
+		Admin:        &admin,
+	}, nil
+}
+
+// Logout revokes all refresh tokens for the given admin.
+func (s *AdminAuthService) Logout(ctx context.Context, adminID uuid.UUID) error {
+	now := time.Now()
+	return s.db.WithContext(ctx).
+		Table("admin_refresh_tokens").
+		Where("admin_id = ? AND revoked_at IS NULL", adminID).
+		Update("revoked_at", now).Error
+}
+
+// RevokeRefreshToken revokes a specific refresh token by its raw value.
+func (s *AdminAuthService) RevokeRefreshToken(ctx context.Context, rawToken string) error {
+	tokenHash := hashToken(rawToken)
+	now := time.Now()
+	return s.db.WithContext(ctx).
+		Table("admin_refresh_tokens").
+		Where("token_hash = ? AND revoked_at IS NULL", tokenHash).
+		Update("revoked_at", now).Error
 }
 
 // CreateAdmin creates a new admin user (super_admin only operation, enforced at handler layer).
@@ -110,8 +215,10 @@ func (s *AdminAuthService) ListAdmins(ctx context.Context) ([]entities.AdminUser
 	return admins, err
 }
 
-// DeactivateAdmin marks an admin as inactive.
+// DeactivateAdmin marks an admin as inactive and revokes all their refresh tokens.
 func (s *AdminAuthService) DeactivateAdmin(ctx context.Context, adminID uuid.UUID) error {
+	// Revoke all active refresh tokens
+	_ = s.Logout(ctx, adminID)
 	return s.db.WithContext(ctx).
 		Model(&entities.AdminUser{}).
 		Where("id = ?", adminID).
@@ -147,23 +254,52 @@ func (s *AdminAuthService) ValidateAdminJWT(tokenStr string) (*entities.JWTClaim
 	}, nil
 }
 
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
 func (s *AdminAuthService) mintAdminJWT(admin *entities.AdminUser) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"uid":      admin.ID.String(),
 		"email":    admin.Email,
 		"role":     string(admin.Role),
 		"is_admin": true,
-		"exp":      time.Now().Add(12 * time.Hour).Unix(),
+		"exp":      time.Now().Add(accessTokenTTL).Unix(),
 		"iat":      time.Now().Unix(),
 	})
 	return token.SignedString(s.jwtSecret)
 }
 
-// seedDefaultAdmin creates a super_admin from env vars if no admin exists.
-// ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD must be set.
+// issueRefreshToken generates a cryptographically random refresh token,
+// stores its SHA-256 hash in the DB, and returns the raw token to the caller.
+func (s *AdminAuthService) issueRefreshToken(ctx context.Context, adminID uuid.UUID, userAgent, ipAddress string) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("rand error: %w", err)
+	}
+	rawHex := hex.EncodeToString(raw)
+	tokenHash := hashToken(rawHex)
+
+	row := map[string]interface{}{
+		"id":         uuid.New(),
+		"admin_id":   adminID,
+		"token_hash": tokenHash,
+		"expires_at": time.Now().Add(refreshTokenTTL),
+		"created_at": time.Now(),
+		"user_agent": userAgent,
+		"ip_address": ipAddress,
+	}
+	if err := s.db.WithContext(ctx).Table("admin_refresh_tokens").Create(row).Error; err != nil {
+		return "", fmt.Errorf("store refresh token: %w", err)
+	}
+	return rawHex, nil
+}
+
+// hashToken returns the SHA-256 hex digest of a raw token string.
+func hashToken(raw string) string {
+	h := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(h[:])
+}
 
 // MintIntegrationTestToken issues a short-lived admin JWT for integration tests only.
-// It does NOT require a real admin row in the database and must never be called in production.
 func (s *AdminAuthService) MintIntegrationTestToken(adminID uuid.UUID) (string, error) {
 	admin := &entities.AdminUser{
 		ID:    adminID,

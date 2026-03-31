@@ -1,0 +1,957 @@
+Found 72 migration files
+
+Tables in final schema: 69
+Dropped tables: {'wars_snapshots'}
+
+Found 121 Go files
+
+============================================================
+TABLE CLASSIFICATION
+============================================================
+
+✅ ACTIVE (in both DB and Go): 48
+   admin_users
+   ai_generations
+   ai_provider_configs
+   arpu_uplift_tracking
+   auth_otps
+   chat_messages
+   chat_sessions
+   churn_recovery_bounties
+   draw_entries
+   draw_schedules
+   draw_winners
+   draws
+   fraud_events
+   ghost_nudge_log
+   google_wallet_objects
+   msisdn_blacklist
+   mtn_push_csv_rows
+   mtn_push_csv_uploads
+   mtn_push_events
+   network_cache
+   network_configs
+   notification_broadcasts
+   notification_preferences
+   notifications
+   passport_events
+   passport_push_log
+   prize_pool
+   pulse_point_awards
+   push_tokens
+   recharge_tiers
+   regional_settings
+   regional_stats
+   regional_war_winners
+   regional_wars
+   session_summaries
+   spin_results
+   spin_tiers
+   studio_sessions
+   studio_tools
+   studio_usage_metrics
+   transactions
+   user_badges
+   users
+   ussd_sessions
+   wallet_registrations
+   wallets
+   war_secondary_draw_winners
+   war_secondary_draws
+
+⚠️  ORPHANED (in DB migrations, NOT referenced in Go): 21
+   chat_session_summaries  [first seen: 026_phase10_studio_hardening.up.sql]
+   fulfilment_webhooks  [first seen: 022_notifications_and_subscriptions.up.sql]
+   ledger_entries  [first seen: 060_ensure_critical_tables.up.sql]
+   multiplier_audit_logs  [first seen: 010_regional_wars_admin.up.sql]
+   points_expiry_policies  [first seen: 020_spec_alignment_and_complete_schema.up.sql]
+   prize_claims  [first seen: 013_prize_fulfillment.up.sql]
+   prize_fulfillment_logs  [first seen: 024_phase8_draw_spin_winner.up.sql]
+   program_bonuses  [first seen: 017_tiered_earning_and_bonuses.up.sql]
+   program_configs  [first seen: 001_cockpit_configuration.up.sql]
+   qr_scan_log  [first seen: 025_phase9_passport_ussd.up.sql]
+   region_tournaments  [first seen: 005_regional_wars.up.sql]
+   regional_wars_cycles  [first seen: 020_spec_alignment_and_complete_schema.up.sql]
+   regional_wars_snapshots  [first seen: 020_spec_alignment_and_complete_schema.up.sql]
+   scheduled_multipliers  [first seen: 020_spec_alignment_and_complete_schema.up.sql]
+   segment_multipliers  [first seen: 020_spec_alignment_and_complete_schema.up.sql]
+   sms_templates  [first seen: 020_spec_alignment_and_complete_schema.up.sql]
+   studio_config  [first seen: 001_cockpit_configuration.up.sql]
+   subscription_events  [first seen: 022_notifications_and_subscriptions.up.sql]
+   subscription_plans  [first seen: 006_daily_subscriptions.up.sql]
+   user_subscriptions  [first seen: 006_daily_subscriptions.up.sql]
+   wallet_passes  [first seen: 004_digital_passport.up.sql]
+
+❌ GHOST (referenced in Go, NOT in DB migrations): 76
+   active
+   admin_alerts
+   apple
+   apple_team_id
+   batch
+   business
+   config
+   configmanager
+   cumulative
+   current_menu
+   cycling
+   dedicated
+   draw
+   each
+   envelope
+   environment
+   expiry
+   failed
+   find
+   gorm
+   handled
+   http
+   instruction
+   last
+   last_active
+   lock
+   logs
+   loyalty
+   migration
+   mock
+   mtn_push_secret
+   name
+   paystackevent
+   pending_momo_setup
+   platform_config
+   postgres
+   private
+   prize
+   product
+   profile
+   provider_encryption_key
+   ranks
+   recharge
+   rechargemax
+   redis
+   regional
+   response
+   right
+   saves
+   seedance
+   seeded
+   sends
+   session
+   simulation
+   spec
+   spinservice
+   sqlite
+   started_at
+   streak
+   string
+   studiohandler
+   targetlang
+   test
+   their
+   this
+   tier
+   today
+   total_entries
+   updates
+   updatewallet
+   used
+   user
+   ussd
+   wallet
+   would
+   your
+
+============================================================
+COLUMN GAP ANALYSIS (DB schema vs Go struct fields)
+============================================================
+
+  Table: admin_users
+    ⚠️  DB has but Go ignores: ['username']
+
+  Table: ai_generations
+    ❌ Go expects but DB lacks: ['cost_micros', 'duration_ms', 'error_message', 'output_text', 'provider', 'refund_granted', 'refund_pts', 'updated_at']
+    ⚠️  DB has but Go ignores: ['--']
+
+  Table: ai_provider_configs
+    ❌ Go expects but DB lacks: ['api_key_enc', 'category', 'env_key', 'extra_config', 'is_primary', 'last_tested_at', 'model_id', 'notes', 'priority', 'pulse_pts', 'slug', 'template']
+    ⚠️  DB has but Go ignores: ['--', 'e.g.', 'higher=backup']
+
+  Table: draw_entries
+    ❌ Go expects but DB lacks: ['amount']
+    ⚠️  DB has but Go ignores: ['phone_number']
+
+  Table: draw_schedules
+    ❌ Go expects but DB lacks: ['cutoff_hour_utc', 'draw_day_of_week', 'draw_name', 'draw_time_wat', 'draw_type', 'is_active', 'sort_order', 'window_close_dow', 'window_close_time', 'window_open_dow', 'window_open_time']
+    ⚠️  DB has but Go ignores: ['--', 'close_day_of_week']
+
+  Table: draw_winners
+    ❌ Go expects but DB lacks: ['prize_name']
+    ⚠️  DB has but Go ignores: ['--', 'etc.']
+
+  Table: draws
+    ❌ Go expects but DB lacks: ['name']
+    ⚠️  DB has but Go ignores: ['--', 'prize_pool_total', 'type']
+
+  Table: fraud_events
+    ⚠️  DB has but Go ignores: ['event_type', 'notes']
+
+  Table: ghost_nudge_log
+    ❌ Go expects but DB lacks: ['created_at', 'message', 'status']
+    ⚠️  DB has but Go ignores: ['channel']
+
+  Table: google_wallet_objects
+    ❌ Go expects but DB lacks: ['class_id', 'last_sync_status', 'last_synced_at']
+    ⚠️  DB has but Go ignores: ['--', 'points_at_last_sync', 'tier_at_last_sync']
+
+  Table: mtn_push_csv_rows
+    ❌ Go expects but DB lacks: ['error_msg', 'msisdn', 'raw_amount', 'raw_msisdn', 'raw_time', 'recharge_type', 'row_number', 'spin_credits', 'status', 'transaction_ref']
+    ⚠️  DB has but Go ignores: ['--', 'below_minimum']
+
+  Table: mtn_push_csv_uploads
+    ❌ Go expects but DB lacks: ['failed_rows', 'filename', 'note', 'status', 'total_rows', 'uploaded_at', 'uploaded_by']
+    ⚠️  DB has but Go ignores: ['--']
+
+  Table: mtn_push_events
+    ❌ Go expects but DB lacks: ['msisdn', 'raw_payload', 'recharge_type', 'status']
+    ⚠️  DB has but Go ignores: ['--']
+
+  Table: passport_events
+    ❌ Go expects but DB lacks: ['details']
+    ⚠️  DB has but Go ignores: ['--']
+
+  Table: prize_pool
+    ❌ Go expects but DB lacks: ['daily_inventory_cap', 'icon_name', 'prize_code', 'terms_and_conditions', 'variation_code']
+    ⚠️  DB has but Go ignores: ['--']
+
+  Table: pulse_point_awards
+    ❌ Go expects but DB lacks: ['awarded_by', 'awarded_by_name', 'created_at', 'note', 'points', 'transaction_id', 'user_id']
+    ⚠️  DB has but Go ignores: ['--', 'Beta']
+
+  Table: regional_war_winners
+    ⚠️  DB has but Go ignores: ['--']
+
+  Table: regional_wars
+    ❌ Go expects but DB lacks: ['starts_at', 'status', 'total_prize_kobo']
+    ⚠️  DB has but Go ignores: ['--', '000']
+
+  Table: spin_results
+    ❌ Go expects but DB lacks: ['admin_notes', 'bank_account_name', 'bank_account_number', 'bank_name', 'error_message', 'expires_at', 'fulfillment_status', 'payment_reference', 'rejection_reason', 'reviewed_at']
+    ⚠️  DB has but Go ignores: ['--']
+
+  Table: studio_tools
+    ❌ Go expects but DB lacks: ['icon', 'is_active', 'is_free', 'provider_tool', 'refund_pct', 'refund_window_mins', 'sort_order', 'ui_config']
+    ⚠️  DB has but Go ignores: ["'GOOGLE'", "'llama-3-70b'", '--']
+
+  Table: transactions
+    ❌ Go expects but DB lacks: ['balance_after', 'points_delta', 'reference']
+    ⚠️  DB has but Go ignores: ['--', 'stamps_delta', 'studio_spend']
+
+  Table: wallet_registrations
+    ❌ Go expects but DB lacks: ['is_active', 'push_token', 'serial_number']
+    ⚠️  DB has but Go ignores: ['--']
+
+  Table: wallets
+    ❌ Go expects but DB lacks: ['daily_recharge_date', 'daily_recharge_kobo', 'daily_spins_awarded', 'draw_counter', 'pulse_counter', 'recharge_counter', 'spin_credits', 'updated_at']
+    ⚠️  DB has but Go ignores: ['--', 'for']
+
+  Table: war_secondary_draw_winners
+    ❌ Go expects but DB lacks: ['payment_status', 'prize_kobo']
+    ⚠️  DB has but Go ignores: ['--']
+
+  Table: war_secondary_draws
+    ❌ Go expects but DB lacks: ['participant_count', 'status', 'total_pool_kobo']
+    ⚠️  DB has but Go ignores: ['--']
+
+============================================================
+RENAMED/DROPPED COLUMN USAGE IN GO CODE
+============================================================
+  ⚠️  users.msisdn was renamed to phone_number but still used in fraud_service.go
+  ⚠️  users.msisdn was renamed to phone_number but still used in monetization_service.go
+  ⚠️  users.msisdn was renamed to phone_number but still used in mtn_push_service.go
+  ⚠️  users.msisdn was renamed to phone_number but still used in mtn_push_csv_service.go
+  ⚠️  users.msisdn was renamed to phone_number but still used in mtn_push_integration_test.go
+  ⚠️  users.msisdn was renamed to phone_number but still used in recharge_handler.go
+  ⚠️  users.msisdn was renamed to phone_number but still used in jwt.go
+  ⚠️  transactions.msisdn was renamed to phone_number but still used in fraud_service.go
+  ⚠️  transactions.msisdn was renamed to phone_number but still used in monetization_service.go
+  ⚠️  transactions.msisdn was renamed to phone_number but still used in mtn_push_service.go
+  ⚠️  transactions.msisdn was renamed to phone_number but still used in mtn_push_csv_service.go
+  ⚠️  transactions.msisdn was renamed to phone_number but still used in mtn_push_integration_test.go
+  ⚠️  transactions.msisdn was renamed to phone_number but still used in recharge_handler.go
+  ⚠️  transactions.msisdn was renamed to phone_number but still used in jwt.go
+  ⚠️  auth_otps.msisdn was renamed to phone_number but still used in fraud_service.go
+  ⚠️  auth_otps.msisdn was renamed to phone_number but still used in monetization_service.go
+  ⚠️  auth_otps.msisdn was renamed to phone_number but still used in mtn_push_service.go
+  ⚠️  auth_otps.msisdn was renamed to phone_number but still used in mtn_push_csv_service.go
+  ⚠️  auth_otps.msisdn was renamed to phone_number but still used in mtn_push_integration_test.go
+  ⚠️  auth_otps.msisdn was renamed to phone_number but still used in recharge_handler.go
+  ⚠️  auth_otps.msisdn was renamed to phone_number but still used in jwt.go
+  ⚠️  network_cache.msisdn was renamed to phone_number but still used in fraud_service.go
+  ⚠️  network_cache.msisdn was renamed to phone_number but still used in monetization_service.go
+  ⚠️  network_cache.msisdn was renamed to phone_number but still used in mtn_push_service.go
+  ⚠️  network_cache.msisdn was renamed to phone_number but still used in mtn_push_csv_service.go
+  ⚠️  network_cache.msisdn was renamed to phone_number but still used in mtn_push_integration_test.go
+  ⚠️  network_cache.msisdn was renamed to phone_number but still used in recharge_handler.go
+  ⚠️  network_cache.msisdn was renamed to phone_number but still used in jwt.go
+  ⚠️  msisdn_blacklist.msisdn was renamed to phone_number but still used in fraud_service.go
+  ⚠️  msisdn_blacklist.msisdn was renamed to phone_number but still used in monetization_service.go
+  ⚠️  msisdn_blacklist.msisdn was renamed to phone_number but still used in mtn_push_service.go
+  ⚠️  msisdn_blacklist.msisdn was renamed to phone_number but still used in mtn_push_csv_service.go
+  ⚠️  msisdn_blacklist.msisdn was renamed to phone_number but still used in mtn_push_integration_test.go
+  ⚠️  msisdn_blacklist.msisdn was renamed to phone_number but still used in recharge_handler.go
+  ⚠️  msisdn_blacklist.msisdn was renamed to phone_number but still used in jwt.go
+  ❌  users.subscription_tier was DROPPED but still referenced in user.go
+  ❌  users.subscription_expires_at was DROPPED but still referenced in user.go
+  ❌  users.subscription_status was DROPPED but still referenced in user.go
+  ❌  fraud_events.details was DROPPED but still referenced in fraud_service.go
+  ❌  fraud_events.details was DROPPED but still referenced in passport.go
+
+============================================================
+RAW SQL COLUMN REFERENCES VS DB SCHEMA
+============================================================
+  ❌ Raw SQL references table 'a' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'admin_alerts' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'admin_seed_email' which does NOT exist in DB schema
+  ❌ Raw SQL: ai_generations.completed — column not in DB schema
+  ❌ Raw SQL: ai_generations.failed — column not in DB schema
+  ❌ Raw SQL: ai_generations.gens — column not in DB schema
+  ❌ Raw SQL: ai_generations.int — column not in DB schema
+  ❌ Raw SQL: ai_generations.stats — column not in DB schema
+  ❌ Raw SQL: ai_generations.text — column not in DB schema
+  ❌ Raw SQL: ai_generations.total — column not in DB schema
+  ❌ Raw SQL references table 'aistudioorchestrator' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'all' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'an' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'batch' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'business' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'configmanager' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'csv' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'cycling' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'db' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'draw' which does NOT exist in DB schema
+  ❌ Raw SQL: draws.name — column not in DB schema
+  ❌ Raw SQL: draws.now — column not in DB schema
+  ❌ Raw SQL references table 'each' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'env' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'envelope' which does NOT exist in DB schema
+  ❌ Raw SQL: ghost_nudge_log.phone_number — column not in DB schema
+  ❌ Raw SQL: ghost_nudge_log.text — column not in DB schema
+  ❌ Raw SQL references table 'go' which does NOT exist in DB schema
+  ❌ Raw SQL: google_wallet_objects.class_id — column not in DB schema
+  ❌ Raw SQL: google_wallet_objects.ctx — column not in DB schema
+  ❌ Raw SQL: google_wallet_objects.last_synced_at — column not in DB schema
+  ❌ Raw SQL references table 'instruction' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'is' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'last_active' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'listactiveprizes' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'logs' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'map' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'mtn_push_secret' which does NOT exist in DB schema
+  ❌ Raw SQL: network_configs.key — column not in DB schema
+  ❌ Raw SQL: network_configs.value — column not in DB schema
+  ❌ Raw SQL: notification_broadcasts.message — column not in DB schema
+  ❌ Raw SQL: notification_broadcasts.status — column not in DB schema
+  ❌ Raw SQL: notification_broadcasts.target_count — column not in DB schema
+  ❌ Raw SQL: notification_preferences.now — column not in DB schema
+  ❌ Raw SQL: passport_events.badge_count — column not in DB schema
+  ❌ Raw SQL: passport_events.details — column not in DB schema
+  ❌ Raw SQL: passport_events.phone — column not in DB schema
+  ❌ Raw SQL: passport_events.phone_number — column not in DB schema
+  ❌ Raw SQL: passport_events.text — column not in DB schema
+  ❌ Raw SQL: passport_push_log.error_msg — column not in DB schema
+  ❌ Raw SQL: passport_push_log.status — column not in DB schema
+  ❌ Raw SQL references table 'pending_momo_setup' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'prompt' which does NOT exist in DB schema
+  ❌ Raw SQL: pulse_point_awards.user_id — column not in DB schema
+  ❌ Raw SQL: push_tokens.now — column not in DB schema
+  ❌ Raw SQL: regional_stats.new_rank — column not in DB schema
+  ❌ Raw SQL: regional_stats.ranks — column not in DB schema
+  ❌ Raw SQL: regional_stats.region_name — column not in DB schema
+  ❌ Raw SQL references table 'right' which does NOT exist in DB schema
+  ❌ Raw SQL references table 's3' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'sends' which does NOT exist in DB schema
+  ❌ Raw SQL: spin_results.count — column not in DB schema
+  ❌ Raw SQL: spin_results.expires_at — column not in DB schema
+  ❌ Raw SQL: spin_results.fulfillment_status — column not in DB schema
+  ❌ Raw SQL: spin_results.nil — column not in DB schema
+  ❌ Raw SQL: spin_results.pending — column not in DB schema
+  ❌ Raw SQL: spin_results.status — column not in DB schema
+  ❌ Raw SQL references table 'spinservice' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'string' which does NOT exist in DB schema
+  ❌ Raw SQL: studio_tools.is_active — column not in DB schema
+  ❌ Raw SQL references table 'the' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'this' which does NOT exist in DB schema
+  ❌ Raw SQL references table 'today' which does NOT exist in DB schema
+  ❌ Raw SQL: transactions.points_delta — column not in DB schema
+  ❌ Raw SQL: transactions.reference — column not in DB schema
+  ❌ Raw SQL: transactions.state — column not in DB schema
+  ❌ Raw SQL: users.amount — column not in DB schema
+  ❌ Raw SQL: users.count — column not in DB schema
+  ❌ Raw SQL: users.last_synced_at — column not in DB schema
+  ❌ Raw SQL: users.phone — column not in DB schema
+  ❌ Raw SQL: users.points_at_last_sync — column not in DB schema
+  ❌ Raw SQL: users.ready — column not in DB schema
+  ❌ Raw SQL: users.reference — column not in DB schema
+  ❌ Raw SQL: users.result — column not in DB schema
+  ❌ Raw SQL: users.tier_at_last_sync — column not in DB schema
+  ❌ Raw SQL: users.type — column not in DB schema
+  ❌ Raw SQL: users.upgrade — column not in DB schema
+  ❌ Raw SQL: users.user_id — column not in DB schema
+  ❌ Raw SQL: users.won — column not in DB schema
+  ❌ Raw SQL: wallet_registrations.is_active — column not in DB schema
+  ❌ Raw SQL: wallet_registrations.now — column not in DB schema
+  ❌ Raw SQL: wallet_registrations.push_token — column not in DB schema
+  ❌ Raw SQL: wallet_registrations.serial_number — column not in DB schema
+  ❌ Raw SQL: wallet_registrations.string — column not in DB schema
+  ❌ Raw SQL: wallets.ctx — column not in DB schema
+  ❌ Raw SQL: wallets.daily_recharge_kobo — column not in DB schema
+  ❌ Raw SQL: wallets.draw_counter — column not in DB schema
+  ❌ Raw SQL: wallets.pulse_counter — column not in DB schema
+  ❌ Raw SQL: wallets.recharge_counter — column not in DB schema
+  ❌ Raw SQL: wallets.spin_credits — column not in DB schema
+  ❌ Raw SQL: wallets.user — column not in DB schema
+
+============================================================
+FINAL AUTHORITATIVE SCHEMA (active tables)
+============================================================
+
+  [admin_users]
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    email                               TEXT
+    full_name                           TEXT NOT NULL DEFAULT ''
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    is_active                           BOOLEAN NOT NULL DEFAULT TRUE
+    last_login_at                       TIMESTAMPTZ
+    password_hash                       TEXT NOT NULL
+    role                                TEXT CHECK (role IN ('platform_admin', 'mno_executive')) DEFAULT 'platform_admin
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    username                            TEXT UNIQUE NOT NULL
+
+  [ai_generations]
+    --                                  30-day lifecycle metadata JSONB DEFAULT '{}'
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    disputed_at                         TIMESTAMPTZ
+    expires_at                          TIMESTAMPTZ NOT NULL
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    output_url                          TEXT
+    points_deducted                     BIGINT NOT NULL
+    prompt                              TEXT NOT NULL
+    status                              TEXT CHECK (status IN ('pending', 'processing', 'completed', 'failed')) DEFAULT 
+    tool_id                             UUID NOT NULL REFERENCES studio_tools(id)
+    tool_slug                           TEXT        NOT NULL DEFAULT ''
+    user_id                             UUID NOT NULL REFERENCES users(id)
+
+  [ai_provider_configs]
+    --                                  admin notes / display description last_tested_at TIMESTAMPTZ
+    cost_micros                         INT NOT NULL DEFAULT 0
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    e.g.                                "pollinations-flux" category TEXT NOT NULL
+    higher=backup                       is_primary BOOLEAN NOT NULL DEFAULT false
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    is_active                           BOOLEAN NOT NULL DEFAULT true
+    last_test_msg                       TEXT NOT NULL DEFAULT ''
+    last_test_ok                        BOOLEAN
+    name                                TEXT NOT NULL
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+
+  [arpu_uplift_tracking]
+    --                                  Baseline before joining program current_month_spend BIGINT DEFAULT 0
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    month_period                        DATE NOT NULL
+    msisdn                              TEXT NOT NULL
+    uplift_amount                       BIGINT GENERATED ALWAYS AS (current_month_spend - COALESCE(pre_program_avg_spend
+    user_id                             UUID NOT NULL REFERENCES users(id)
+
+  [auth_otps]
+    code                                TEXT NOT NULL
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    expires_at                          TIMESTAMPTZ NOT NULL
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    phone_number                        TEXT NOT NULL
+    purpose                             TEXT CHECK (purpose IN ('login', 'momo_link', 'prize_claim'))
+    status                              TEXT CHECK (status IN ('pending', 'verified', 'expired')) DEFAULT 'pending'
+
+  [chat_messages]
+    content                             TEXT NOT NULL
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    role                                TEXT CHECK (role IN ('user', 'assistant'))
+    session_id                          UUID NOT NULL REFERENCES chat_sessions(id)
+
+  [chat_sessions]
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    last_activity_at                    TIMESTAMPTZ DEFAULT now()
+    status                              TEXT CHECK (status IN ('active', 'expired', 'summarized')) DEFAULT 'active'
+    user_id                             UUID NOT NULL REFERENCES users(id)
+
+  [churn_recovery_bounties]
+    --                                  Fixed 150 Naira fee per Section 6.3 processed_at TIMESTAMPTZ
+    bounty_amount_kobo                  INTEGER DEFAULT 15000
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    last_activity_before_reactivation   TIMESTAMPTZ NOT NULL
+    reactivation_recharge_id            UUID REFERENCES transactions(id)
+    user_id                             UUID NOT NULL REFERENCES users(id)
+
+  [draw_entries]
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    draw_id                             UUID NOT NULL REFERENCES draws(id)
+    entries_count                       INTEGER DEFAULT 1
+    entry_source                        TEXT NOT NULL DEFAULT 'recharge'
+        CHECK (entry_source IN ('recharge'
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    msisdn                              TEXT NOT NULL
+    phone_number                        TEXT GENERATED ALWAYS AS (msisdn) STORED
+    user_id                             UUID NOT NULL REFERENCES users(id)
+
+  [draw_schedules]
+    --                                  Sort order for admin UI display sort_order INTEGER NOT NULL DEFAULT 0
+    close_day_of_week                   + close_time -- This is more explicit and avoids day-count arithmetic confusion.
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+
+  [draw_winners]
+    --                                  1st
+    claim_status                        TEXT DEFAULT 'pending'
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    draw_id                             UUID NOT NULL REFERENCES draws(id)
+    etc.                                prize_name TEXT NOT NULL
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    msisdn                              TEXT NOT NULL
+    position                            INTEGER NOT NULL
+    prize_value                         NUMERIC NOT NULL
+    user_id                             UUID NOT NULL REFERENCES users(id)
+
+  [draws]
+    --                                  DRAW-YYYYMMDD-XXXX name TEXT NOT NULL
+    completed_at                        TIMESTAMPTZ
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    draw_code                           TEXT
+    draw_time                           TIMESTAMPTZ
+    draw_type                           TEXT NOT NULL DEFAULT 'MONTHLY'
+    end_time                            TIMESTAMPTZ
+    executed_at                         TIMESTAMPTZ
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    next_draw_at                        TIMESTAMPTZ
+    prize_pool                          NUMERIC(12
+    prize_pool_total                    NUMERIC DEFAULT 0
+    recurrence                          TEXT NOT NULL DEFAULT 'none'
+    runner_ups_count                    INTEGER NOT NULL DEFAULT 0
+    start_time                          TIMESTAMPTZ
+    status                              TEXT CHECK (status IN ('UPCOMING', 'ACTIVE', 'COMPLETED', 'CANCELLED')) DEFAULT 
+    total_entries                       INTEGER NOT NULL DEFAULT 0
+    total_winners                       INTEGER NOT NULL DEFAULT 0
+    type                                TEXT CHECK (type IN ('DAILY', 'WEEKLY', 'MONTHLY'))
+    winner_count                        INTEGER NOT NULL DEFAULT 1
+
+  [fraud_events]
+    created_at                          TIMESTAMPTZ DEFAULT NOW()
+    details                             TEXT NOT NULL DEFAULT ''
+    event_type                          TEXT NOT NULL DEFAULT ''
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    notes                               TEXT NOT NULL DEFAULT ''
+    phone_number                        VARCHAR(15)
+    resolved                            BOOLEAN DEFAULT FALSE
+    resolved_at                         TIMESTAMPTZ
+    resolved_by                         TEXT
+    rule_name                           VARCHAR(100) NOT NULL
+    severity                            VARCHAR(20) DEFAULT 'medium' CHECK (severity IN ('low','medium','high','critical
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    user_id                             UUID REFERENCES users(id)
+
+  [ghost_nudge_log]
+    channel                             TEXT NOT NULL DEFAULT 'sms'
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    nudged_at                           TIMESTAMPTZ DEFAULT NOW()
+    user_id                             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE UNIQUE
+
+  [google_wallet_objects]
+    --                                  Google Wallet class ID (issuer.LoyaltyNexus) last_synced_at TIMESTAMPTZ
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    object_id                           TEXT NOT NULL UNIQUE
+    points_at_last_sync                 BIGINT NOT NULL DEFAULT 0
+    streak_expiry_alert                 BOOLEAN NOT NULL DEFAULT FALSE
+    tier_at_last_sync                   TEXT NOT NULL DEFAULT 'BRONZE'
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    user_id                             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+
+  [msisdn_blacklist]
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    is_active                           BOOLEAN DEFAULT true
+    phone_number                        TEXT PRIMARY KEY
+    reason                              TEXT
+    updated_at                          TIMESTAMPTZ DEFAULT now()
+
+  [mtn_push_csv_rows]
+    --                                  the synthetic ref used for idempotency spin_credits INTEGER
+    amount_naira                        NUMERIC(12,2)
+    below_minimum                       error_msg TEXT
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    draw_entries                        INTEGER
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    processed_at                        TIMESTAMPTZ
+    pulse_points                        BIGINT
+    raw_date                            TEXT NOT NULL
+    recharge_at                         TIMESTAMPTZ
+    skip_reason                         TEXT
+    upload_id                           UUID NOT NULL REFERENCES mtn_push_csv_uploads(id) ON DELETE CASCADE
+
+  [mtn_push_csv_uploads]
+    --                                  Optional admin note note TEXT
+    completed_at                        TIMESTAMPTZ
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    processed_rows                      INTEGER NOT NULL DEFAULT 0
+    skipped_rows                        INTEGER NOT NULL DEFAULT 0
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+
+  [mtn_push_events]
+    --                                  full original payload status TEXT NOT NULL DEFAULT 'RECEIVED' CHECK (status IN (
+    amount_kobo                         BIGINT NOT NULL CHECK (amount_kobo > 0)
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    draw_entries_created                INT NOT NULL DEFAULT 0
+    event_timestamp                     TIMESTAMPTZ NOT NULL
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    points_awarded                      BIGINT NOT NULL DEFAULT 0
+    processed_at                        TIMESTAMPTZ
+    processing_error                    TEXT
+    spin_credits_awarded                INT NOT NULL DEFAULT 0
+    transaction_ref                     TEXT NOT NULL UNIQUE
+
+  [network_cache]
+    --                                  MTN
+    9mobile                             last_verified TIMESTAMPTZ DEFAULT now()
+    cache_expires                       TIMESTAMPTZ NOT NULL
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    is_valid                            BOOLEAN DEFAULT true
+    lookup_source                       TEXT CHECK (lookup_source IN ('hlr_api', 'user_selection', 'prefix_fallback'))
+    phone_number                        TEXT PRIMARY KEY
+
+  [network_configs]
+    is_public                           BOOLEAN NOT NULL DEFAULT FALSE
+    updated_by                          TEXT NOT NULL DEFAULT 'system'
+
+  [notification_broadcasts]
+    body                                TEXT NOT NULL
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    sent_count                          INTEGER NOT NULL DEFAULT 0
+    target                              VARCHAR(50) NOT NULL DEFAULT 'all'
+    title                               TEXT NOT NULL
+    type                                VARCHAR(50) NOT NULL
+
+  [notification_preferences]
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    draw_result_push                    BOOLEAN NOT NULL DEFAULT TRUE
+    marketing_enabled                   BOOLEAN NOT NULL DEFAULT TRUE
+    push_enabled                        BOOLEAN NOT NULL DEFAULT TRUE
+    sms_enabled                         BOOLEAN NOT NULL DEFAULT TRUE
+    spin_win_push                       BOOLEAN NOT NULL DEFAULT TRUE
+    streak_warn_push                    BOOLEAN NOT NULL DEFAULT TRUE
+    sub_warn_push                       BOOLEAN NOT NULL DEFAULT TRUE
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    user_id                             UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE
+
+  [notifications]
+    --                                  e.g. /draws/uuid or /spins image_url TEXT
+    body                                TEXT NOT NULL
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    deep_link                           TEXT
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    is_read                             BOOLEAN NOT NULL DEFAULT FALSE
+    metadata                            JSONB
+    read_at                             TIMESTAMPTZ
+    title                               TEXT NOT NULL
+    type                                TEXT NOT NULL CHECK (type IN ('spin_win','prize_fulfil','draw_result','streak_wa
+    user_id                             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+
+  [passport_events]
+    --                                  tier_upgrade | badge_earned | streak_milestone | qr_scanned details JSONB DEFAUL
+    created_at                          TIMESTAMPTZ DEFAULT NOW()
+    event_type                          TEXT NOT NULL
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    user_id                             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+
+  [passport_push_log]
+    --                                  pending | sent | failed error_msg TEXT
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    platform                            TEXT NOT NULL CHECK (platform IN ('apple', 'google'))
+    pushed_at                           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    trigger                             TEXT NOT NULL
+    user_id                             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+
+  [prize_pool]
+    --                                  Max wins per day updated_at TIMESTAMPTZ DEFAULT now()
+    base_value                          NUMERIC NOT NULL
+    color_scheme                        TEXT
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    is_active                           BOOLEAN NOT NULL DEFAULT TRUE
+    is_no_win                           BOOLEAN     NOT NULL DEFAULT FALSE
+    minimum_recharge                    BIGINT
+    name                                TEXT NOT NULL
+    no_win_message                      TEXT
+    prize_type                          TEXT CHECK (prize_type IN ('airtime', 'data', 'momo_cash', 'studio_credits'))
+    sort_order                          INTEGER NOT NULL DEFAULT 0
+    win_probability_weight              INTEGER DEFAULT 100
+
+  [pulse_point_awards]
+    --                                  FK to transactions.id created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    Beta                                Tester" note TEXT NOT NULL DEFAULT ''
+    campaign                            TEXT NOT NULL DEFAULT ''
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    phone_number                        TEXT NOT NULL
+
+  [push_tokens]
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    is_active                           BOOLEAN NOT NULL DEFAULT TRUE
+    last_seen_at                        TIMESTAMPTZ
+    platform                            TEXT NOT NULL CHECK (platform IN ('android','ios','web'))
+    token                               TEXT NOT NULL
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    user_id                             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+
+  [recharge_tiers]
+    --                                  e.g. 1 pt per N250 -> rate = 1/250 is_active BOOLEAN DEFAULT true
+    Gold                                min_amount_kobo BIGINT NOT NULL
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    name                                TEXT NOT NULL
+    points_per_naira                    NUMERIC NOT NULL
+
+  [regional_settings]
+    'KAN'                               multiplier NUMERIC DEFAULT 1.0
+    --                                  e.g.
+    base_multiplier                     NUMERIC DEFAULT 1.0
+    golden_hour_multiplier              NUMERIC DEFAULT 2.0
+    is_golden_hour                      BOOLEAN DEFAULT false
+    region_code                         TEXT PRIMARY KEY
+    region_name                         TEXT    NOT NULL DEFAULT ''
+    updated_at                          TIMESTAMPTZ DEFAULT now()
+
+  [regional_stats]
+    active_subscribers                  INTEGER DEFAULT 0
+    last_recharge_at                    TIMESTAMPTZ
+    rank                                INTEGER DEFAULT 0
+    region_code                         TEXT PRIMARY KEY REFERENCES regional_settings(region_code)
+    total_recharge_kobo                 BIGINT DEFAULT 0
+    updated_at                          TIMESTAMPTZ DEFAULT now()
+
+  [regional_war_winners]
+    --                                  PENDING|PAID created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    prize_kobo                          BIGINT NOT NULL DEFAULT 0
+    rank                                SMALLINT NOT NULL
+    state                               VARCHAR(64) NOT NULL
+    status                              VARCHAR(30) NOT NULL DEFAULT 'PENDING'
+    total_points                        BIGINT NOT NULL DEFAULT 0
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    war_id                              UUID NOT NULL REFERENCES regional_wars(id)
+
+  [regional_wars]
+    --                                  ₦500
+    000                                 default starts_at TIMESTAMPTZ NOT NULL
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    ends_at                             TIMESTAMPTZ NOT NULL
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    period                              VARCHAR(7) NOT NULL UNIQUE
+    resolved_at                         TIMESTAMPTZ
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+
+  [session_summaries]
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    summary                             TEXT NOT NULL
+    user_id                             UUID NOT NULL REFERENCES users(id)
+
+  [spin_results]
+    --                                  MoMo target for cash prizes error_message TEXT
+    claim_status                        TEXT        NOT NULL DEFAULT 'PENDING'
+    claimed_at                          TIMESTAMPTZ
+    created_at                          TIMESTAMPTZ DEFAULT NOW()
+    fulfilled_at                        TIMESTAMPTZ
+    fulfillment_ref                     VARCHAR(255)
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    mo_mo_number                        TEXT NOT NULL DEFAULT ''
+    momo_claim_number                   TEXT        NOT NULL DEFAULT ''
+    prize_type                          VARCHAR(30) NOT NULL CHECK (prize_type IN ('try_again','pulse_points','airtime',
+    prize_value                         DECIMAL(12,2) NOT NULL DEFAULT 0
+    retry_count                         INTEGER NOT NULL DEFAULT 0
+    reviewed_by                         UUID        REFERENCES users(id) ON DELETE SET NULL
+    slot_index                          INTEGER
+    user_id                             UUID NOT NULL REFERENCES users(id)
+
+  [spin_tiers]
+    created_at                          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    description                         TEXT
+    id                                  UUID PRIMARY KEY
+    is_active                           BOOLEAN NOT NULL DEFAULT TRUE
+    max_daily_amount                    BIGINT NOT NULL
+    min_daily_amount                    BIGINT NOT NULL
+    sort_order                          INTEGER NOT NULL
+    spins_per_day                       INTEGER NOT NULL
+    tier_badge                          TEXT
+    tier_color                          TEXT
+    tier_display_name                   TEXT NOT NULL
+    tier_icon                           TEXT
+    tier_name                           TEXT NOT NULL
+    updated_at                          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+  [studio_sessions]
+    ended_at                            TIMESTAMPTZ
+    generation_count                    INT NOT NULL DEFAULT 0 CONSTRAINT chk_session_gen_nonneg CHECK (generation_count
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    last_active_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    started_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    total_pts_used                      BIGINT NOT NULL DEFAULT 0 CONSTRAINT chk_session_pts_nonneg CHECK (total_pts_use
+    user_id                             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+
+  [studio_tools]
+    'GOOGLE'                            provider_tool_id TEXT NOT NULL
+    'llama-3-70b'                       icon_name TEXT
+    --                                  Lucide icon key is_active BOOLEAN DEFAULT true
+    category                            TEXT CHECK (category IN ('Chat', 'Create', 'Learn', 'Build'))
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    description                         TEXT
+    entry_point_cost                    BIGINT  NOT NULL DEFAULT 0
+        CONSTRAINT chk_entry_point_cost_nonneg CHECK 
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    name                                TEXT NOT NULL
+    point_cost                          BIGINT NOT NULL DEFAULT 0
+    provider                            TEXT NOT NULL
+    slug                                TEXT        NOT NULL DEFAULT ''
+    ui_template                         VARCHAR(40)  NOT NULL DEFAULT 'knowledge-doc'
+    updated_at                          TIMESTAMPTZ DEFAULT now()
+
+  [studio_usage_metrics]
+    --                                  Internal tracking of API costs created_at TIMESTAMPTZ DEFAULT now()
+    compute_cost_micros                 INTEGER
+    generation_id                       UUID NOT NULL REFERENCES ai_generations(id)
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    provider                            TEXT NOT NULL
+
+  [transactions]
+    --                                  in Kobo balance_after BIGINT
+    amount                              BIGINT DEFAULT 0
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    metadata                            JSONB
+    phone_number                        TEXT NOT NULL
+    spin_delta                          INTEGER NOT NULL DEFAULT 0
+    stamps_delta                        INTEGER DEFAULT 0
+    studio_spend                        points_delta BIGINT DEFAULT 0
+    type                                TEXT NOT NULL
+    user_id                             UUID REFERENCES users(id)
+
+  [user_badges]
+    badge_key                           VARCHAR(64) NOT NULL
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    earned_at                           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    user_id                             UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
+
+  [users]
+    --                                  Normalized 234... user_code TEXT UNIQUE NOT NULL
+    apple_pass_serial                   TEXT         NOT NULL DEFAULT ''
+    created_at                          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    device_type                         TEXT         NOT NULL DEFAULT 'smartphone'
+    google_wallet_object_id             TEXT        NOT NULL DEFAULT ''
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    is_active                           BOOLEAN      NOT NULL DEFAULT TRUE
+    kyc_status                          TEXT         NOT NULL DEFAULT 'unverified'
+    last_recharge_at                    TIMESTAMPTZ
+    last_visit_at                       TIMESTAMPTZ
+    lifetime_points                     BIGINT       NOT NULL DEFAULT 0
+    momo_number                         TEXT         NOT NULL DEFAULT ''
+    momo_verified                       BOOLEAN      NOT NULL DEFAULT FALSE
+    momo_verified_at                    TIMESTAMPTZ
+    phone_number                        TEXT NOT NULL DEFAULT ''
+    points_expire_at                    TIMESTAMPTZ
+    referred_by                         UUID
+    spin_credits                        INTEGER      NOT NULL DEFAULT 0
+    stamps_count                        INTEGER      NOT NULL DEFAULT 0
+    state                               TEXT         NOT NULL DEFAULT ''
+    streak_count                        INTEGER      NOT NULL DEFAULT 0
+    streak_expires_at                   TIMESTAMPTZ
+    streak_grace_month                  INTEGER
+    streak_grace_used                   INTEGER      NOT NULL DEFAULT 0
+    studio_use_count                    INTEGER      NOT NULL DEFAULT 0
+    subscription_expires_at             TIMESTAMPTZ
+    subscription_grace_until            TIMESTAMPTZ
+    subscription_status                 TEXT         NOT NULL DEFAULT ''
+    subscription_tier                   TEXT         NOT NULL DEFAULT ''
+    tier                                TEXT         NOT NULL DEFAULT 'BRONZE'
+    total_points                        BIGINT       NOT NULL DEFAULT 0
+    total_recharge_amount               BIGINT       NOT NULL DEFAULT 0
+    total_referrals                     INTEGER      NOT NULL DEFAULT 0
+    total_spins                         INTEGER      NOT NULL DEFAULT 0
+    updated_at                          TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    user_code                           TEXT         NOT NULL DEFAULT ''
+    wallet_pass_id                      TEXT         NOT NULL DEFAULT ''
+
+  [ussd_sessions]
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    expires_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '10 minutes'
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    input_buffer                        TEXT NOT NULL DEFAULT ''
+    menu_state                          TEXT NOT NULL DEFAULT 'root'
+    pending_spin_id                     UUID REFERENCES spin_results(id) ON DELETE SET NULL
+    phone_number                        TEXT NOT NULL
+    session_id                          TEXT NOT NULL UNIQUE
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+
+  [wallet_registrations]
+    --                                  Token for push notifications serial_number TEXT UNIQUE NOT NULL
+    created_at                          TIMESTAMPTZ DEFAULT now()
+    device_id                           TEXT NOT NULL
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    platform                            TEXT CHECK (platform IN ('apple', 'google')) NOT NULL
+    push_token_updated_at               TIMESTAMPTZ DEFAULT NOW()
+    updated_at                          TIMESTAMPTZ DEFAULT now()
+    user_id                             UUID NOT NULL REFERENCES users(id)
+
+  [wallets]
+    --                                  Cumulative towards next spin credit updated_at TIMESTAMPTZ DEFAULT NOW()
+    for                                 tier calc recharge_counter BIGINT DEFAULT 0
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    lifetime_points                     BIGINT NOT NULL DEFAULT 0
+    pulse_points                        BIGINT DEFAULT 0 CHECK (pulse_points >= 0)
+    spin_counter                        BIGINT  NOT NULL DEFAULT 0 CHECK (spin_counter >= 0)
+    spin_draw_counter                   BIGINT NOT NULL DEFAULT 0
+        CHECK (spin_draw_counter >= 0)
+    user_id                             UUID UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE
+
+  [war_secondary_draw_winners]
+    --                                  filled when admin pays payment_status TEXT NOT NULL DEFAULT 'PENDING_PAYMENT' CH
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    momo_number                         TEXT
+    notes                               TEXT
+    paid_at                             TIMESTAMPTZ
+    paid_by                             UUID REFERENCES admin_users(id)
+    phone_number                        TEXT NOT NULL
+    position                            INT NOT NULL
+    secondary_draw_id                   UUID NOT NULL REFERENCES war_secondary_draws(id) ON DELETE CASCADE
+    state                               TEXT NOT NULL
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    user_id                             UUID NOT NULL REFERENCES users(id)
+    war_id                              UUID NOT NULL
+
+  [war_secondary_draws]
+    --                                  Only one draw per (war, state) — admin cannot re-run UNIQUE (war_id, state)
+    created_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    executed_at                         TIMESTAMPTZ
+    id                                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    prize_per_winner_kobo               BIGINT NOT NULL DEFAULT 0
+    state                               TEXT NOT NULL
+    triggered_by                        UUID REFERENCES admin_users(id)
+    updated_at                          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    war_id                              UUID NOT NULL REFERENCES regional_wars(id) ON DELETE CASCADE
+    winner_count                        INT NOT NULL DEFAULT 1 CHECK (winner_count BETWEEN 1 AND 10)
+
+
+Done.

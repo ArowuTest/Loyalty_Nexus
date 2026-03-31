@@ -31,11 +31,12 @@ export default function AdminLoginPage() {
         setError((data as { error?: string }).error || "Invalid email or password.");
         return;
       }
-      const result = data as { token: string; email: string; full_name: string; role: string };
+      const result = data as { token: string; refresh_token: string; email: string; full_name: string; role: string };
       adminAPI.setToken(result.token);
+      if (result.refresh_token) adminAPI.setRefreshToken(result.refresh_token);
       localStorage.setItem("admin_role", result.role);
       localStorage.setItem("admin_email", result.email);
-      localStorage.setItem("admin_name", result.full_name);
+      localStorage.setItem("admin_name", result.full_name ?? "");
       router.push("/dashboard");
     } catch {
       setError("Unable to connect to server. Please try again.");
