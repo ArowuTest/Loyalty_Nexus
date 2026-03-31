@@ -111,8 +111,14 @@ func (s *BonusPulseService) AwardBonusPulse(ctx context.Context, req AwardBonusP
 
 	txErr := s.db.WithContext(ctx).Transaction(func(dbTx *gorm.DB) error {
 		// Ensure a wallet row exists for this user (create if missing).
+		// When creating fresh, seed spin_credits from the users table so the
+		// wallet reflects any credits the user already earned before the wallet
+		// row was first created.
 		var wallet entities.Wallet
-		createResult := dbTx.Where(entities.Wallet{UserID: user.ID}).FirstOrCreate(&wallet)
+		createResult := dbTx.Where(entities.Wallet{UserID: user.ID}).FirstOrCreate(&wallet, entities.Wallet{
+			UserID:      user.ID,
+			SpinCredits: user.SpinCredits,
+		})
 		if createResult.Error != nil {
 			return fmt.Errorf("ensure wallet: %w", createResult.Error)
 		}
