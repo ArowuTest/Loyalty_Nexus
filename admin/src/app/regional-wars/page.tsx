@@ -371,7 +371,7 @@ export default function RegionalWarsPage() {
     try {
       await adminAPI.req("PUT", "/admin/wars/prize-pool", {
         period: activeWar.period,
-        total_prize_kobo: Number(prizeInput) * 100,
+        prize_kobo: Number(prizeInput) * 100,
       });
       setEditPrize(false);
       await load();
