@@ -237,7 +237,7 @@ func (s *DrawWindowService) DeleteSchedule(ctx context.Context, id uuid.UUID) er
 //
 // A recharge qualifies for a draw if:
 //   1. The recharge timestamp falls within the draw's eligibility window
-//   2. There is an active (ACTIVE or SCHEDULED) draw of that draw_type
+//   2. There is an active (ACTIVE or UPCOMING) draw of that draw_type
 //      whose draw_time is in the future relative to rechargeTime
 //
 // Typically returns 2 draws: one DAILY + one WEEKLY (Saturday mega).
@@ -366,12 +366,13 @@ func nextDOWAfter(after time.Time, dayOfWeek int, tod timeOfDay) time.Time {
 	return candidate
 }
 
-// findNextActiveDraw finds the next ACTIVE or SCHEDULED draw of the given
+// findNextActiveDraw finds the next ACTIVE or UPCOMING draw of the given
 // draw_type whose draw_time is in the future (or whose end_time is in the future).
+// Schema alignment: valid status values are UPCOMING | ACTIVE | COMPLETED | CANCELLED.
 func (s *DrawWindowService) findNextActiveDraw(ctx context.Context, drawType string, after time.Time) (*DrawRecord, error) {
 	var draw DrawRecord
 	err := s.db.WithContext(ctx).
-		Where("draw_type = ? AND status IN ('ACTIVE','SCHEDULED') AND end_time > ?", drawType, after).
+		Where("draw_type = ? AND status IN ('ACTIVE','UPCOMING') AND end_time > ?", drawType, after).
 		Order("draw_time ASC NULLS LAST, end_time ASC").
 		First(&draw).Error
 	if err != nil {

@@ -32,7 +32,7 @@ type DrawRecord struct {
 	Name            string     `gorm:"column:name" json:"name"`
 	DrawCode        string     `gorm:"column:draw_code;uniqueIndex" json:"draw_code"`
 	DrawType        string     `gorm:"column:draw_type" json:"draw_type"` // DAILY | WEEKLY | MONTHLY | SPECIAL
-	Status          string     `gorm:"column:status" json:"status"`   // SCHEDULED | ACTIVE | COMPLETED | CANCELLED
+	Status          string     `gorm:"column:status" json:"status"`   // UPCOMING | ACTIVE | COMPLETED | CANCELLED
 	PrizePool       float64    `gorm:"column:prize_pool" json:"prize_pool_kobo"`
 	WinnerCount     int        `gorm:"column:winner_count" json:"winner_count"`
 	RunnerUpsCount  int        `gorm:"column:runner_ups_count" json:"runner_ups_count"`
@@ -163,7 +163,7 @@ func (svc *DrawService) CreateDraw(
 		DrawCode:       generateDrawCode(),
 		Name:           name,
 		DrawType:       drawType,
-		Status:         "SCHEDULED",
+		Status:         "UPCOMING", // DB CHECK constraint: UPCOMING | ACTIVE | COMPLETED | CANCELLED
 		PrizePool:      prizePool,
 		WinnerCount:    winnerCount,
 		RunnerUpsCount: runnerUpsCount,
@@ -234,7 +234,7 @@ func (svc *DrawService) UpdateDraw(ctx context.Context, drawID uuid.UUID, update
 		draw.Name = v
 	}
 	if v, ok := updates["status"].(string); ok {
-		allowed := map[string]bool{"SCHEDULED": true, "ACTIVE": true, "COMPLETED": true, "CANCELLED": true}
+		allowed := map[string]bool{"UPCOMING": true, "ACTIVE": true, "COMPLETED": true, "CANCELLED": true}
 		if allowed[v] {
 			safe["status"] = v
 			draw.Status = v
@@ -290,7 +290,7 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 	return svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1 — fetch draw
 		var draw DrawRecord
-		if err := tx.Where("id = ? AND status IN ('SCHEDULED','ACTIVE')", drawID).First(&draw).Error; err != nil {
+		if err := tx.Where("id = ? AND status IN ('UPCOMING','ACTIVE')", drawID).First(&draw).Error; err != nil {
 			return fmt.Errorf("draw not found or not executable: %w", err)
 		}
 
@@ -407,7 +407,7 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 					DrawCode:       generateDrawCode(),
 					Name:           draw.Name,
 					DrawType:       draw.DrawType,
-					Status:         "SCHEDULED",
+					Status:         "UPCOMING",
 					PrizePool:      draw.PrizePool,
 					WinnerCount:    draw.WinnerCount,
 					RunnerUpsCount: draw.RunnerUpsCount,
@@ -620,11 +620,11 @@ func (svc *DrawService) ImportWinners(ctx context.Context, drawID uuid.UUID, csv
 
 // ─── Stats ────────────────────────────────────────────────────────────────
 
-// ListUpcomingDraws returns draws with status SCHEDULED or ACTIVE.
+// ListUpcomingDraws returns draws with status UPCOMING or ACTIVE.
 func (svc *DrawService) ListUpcomingDraws(ctx context.Context) ([]DrawRecord, error) {
 	var draws []DrawRecord
 	err := svc.db.WithContext(ctx).
-		Where("status IN ('SCHEDULED','ACTIVE')").
+		Where("status IN ('UPCOMING','ACTIVE')").
 		Order("draw_time ASC").
 		Find(&draws).Error
 	return draws, err
@@ -646,7 +646,7 @@ func (svc *DrawService) GetStats(ctx context.Context) (map[string]interface{}, e
 	var totalWinners int64
 	svc.db.Model(&DrawRecord{}).Count(&totalDraws)
 	svc.db.Model(&DrawRecord{}).Where("status = 'COMPLETED'").Count(&completedDraws)
-	svc.db.Model(&DrawRecord{}).Where("status = 'SCHEDULED'").Count(&scheduledDraws)
+	svc.db.Model(&DrawRecord{}).Where("status = 'UPCOMING'").Count(&scheduledDraws)
 	svc.db.Model(&DrawWinner{}).Count(&totalWinners)
 	return map[string]interface{}{
 		"total_draws":     totalDraws,

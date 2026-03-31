@@ -101,8 +101,12 @@ func (h *AdminHandler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 	h.db.WithContext(ctx).Table("spin_results").
 		Where("fulfillment_status IN ('pending','processing','pending_momo_setup')").
 		Count(&pendingPrizes)
+	// Transaction types from entities.TransactionType constants (migration 020):
+	//   'points_award' = points earned from recharge (was 'recharge_reward' — does not exist)
+	//   'bonus'        = admin/streak/referral bonus
+	//   'prize_award'  = prize value awarded
 	h.db.WithContext(ctx).Table("transactions").
-		Where("type IN ('recharge_reward','prize_award','bonus')").
+		Where("type IN ('points_award','prize_award','bonus','spin_credit_award','draw_entry_award') AND points_delta > 0").
 		Select("COALESCE(SUM(points_delta), 0)").
 		Scan(&totalPointsIssued)
 
@@ -487,7 +491,10 @@ func (h *AdminHandler) CreateDraw(w http.ResponseWriter, r *http.Request) {
 		Description    string    `json:"description"`
 		DrawType       string    `json:"draw_type"`
 		Recurrence     string    `json:"recurrence"`
-		DrawDate       time.Time `json:"draw_date"`
+		// draw_time is the correct DB column name (migration 024 ADD COLUMN draw_time).
+		// The legacy JSON key draw_date is also accepted for backwards compatibility.
+		DrawTime       time.Time `json:"draw_time"`
+		DrawDateLegacy time.Time `json:"draw_date"` // deprecated alias — use draw_time
 		PrizePool      float64   `json:"prize_pool"`
 		WinnerCount    int       `json:"winner_count"`
 		RunnerUpsCount int       `json:"runner_ups_count"`
@@ -496,13 +503,18 @@ func (h *AdminHandler) CreateDraw(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	if body.DrawDate.IsZero() {
-		body.DrawDate = time.Now().Add(30 * 24 * time.Hour)
+	// Prefer draw_time; fall back to legacy draw_date if draw_time was not provided.
+	effectiveDrawTime := body.DrawTime
+	if effectiveDrawTime.IsZero() {
+		effectiveDrawTime = body.DrawDateLegacy
+	}
+	if effectiveDrawTime.IsZero() {
+		effectiveDrawTime = time.Now().Add(30 * 24 * time.Hour)
 	}
 	draw, err := h.drawSvc.CreateDraw(
 		r.Context(),
 		body.Name, body.Description, body.DrawType, body.Recurrence,
-		body.DrawDate, body.PrizePool, body.WinnerCount, body.RunnerUpsCount,
+		effectiveDrawTime, body.PrizePool, body.WinnerCount, body.RunnerUpsCount,
 	)
 	if err != nil {
 		jsonError(w, err.Error(), http.StatusBadRequest)
@@ -903,8 +915,9 @@ func (h *AdminHandler) GetPointsStats(w http.ResponseWriter, r *http.Request) {
 		ActiveWallets     int64 `json:"active_wallets"`
 	}
 	var s stats
+	// 'recharge_reward' does not exist; correct types are 'points_award' and 'bonus'.
 	h.db.WithContext(r.Context()).Table("transactions").
-		Where("type IN ('recharge_reward','bonus','prize_award') AND points_delta > 0").
+		Where("type IN ('points_award','bonus','prize_award','spin_credit_award','draw_entry_award') AND points_delta > 0").
 		Select("COALESCE(SUM(points_delta), 0)").Scan(&s.TotalPointsIssued)
 	h.db.WithContext(r.Context()).Table("transactions").
 		Where("type = 'studio_spend' AND points_delta < 0").
@@ -932,7 +945,9 @@ func (h *AdminHandler) GetPointsHistory(w http.ResponseWriter, r *http.Request) 
 	base := h.db.WithContext(r.Context()).Table("transactions t").
 		Select("t.*, u.phone_number").
 		Joins("LEFT JOIN users u ON u.id = t.user_id").
-		Where("t.type IN ('recharge_reward','bonus','prize_award','studio_spend','admin_adjust','spin_play')")
+		// 'recharge_reward' does not exist; replaced with 'points_award' and 'recharge'.
+		// 'admin_adjust' is written by the admin points adjustment handler (valid).
+		Where("t.type IN ('recharge','points_award','bonus','prize_award','studio_spend','studio_refund','admin_adjust','spin_play','spin_credit_award','draw_entry_award')")
 
 	if phone := q.Get("phone"); phone != "" {
 		base = base.Where("u.phone_number LIKE ?", "%"+phone+"%")

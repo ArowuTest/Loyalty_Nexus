@@ -259,9 +259,13 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 		eventDateWAT := eventTime.In(watLocation).Truncate(24 * time.Hour)
 
 		if wallet.DailyRechargeDate == nil || wallet.DailyRechargeDate.In(watLocation).Truncate(24*time.Hour).Before(eventDateWAT) {
-			// New day — reset daily tracking
+			// New day — reset daily tracking.
+			// draw_counter resets to 0: unspent kobo from the previous day does NOT
+			// carry over. Users must earn their ₦200 threshold within the same day.
+			// Pulse Points are intentionally NOT reset — they persist indefinitely.
 			wallet.DailyRechargeKobo = 0
 			wallet.DailySpinsAwarded = 0
+			wallet.DrawCounter = 0
 			wallet.DailyRechargeDate = &eventDateWAT
 		}
 

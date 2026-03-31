@@ -2,14 +2,16 @@
 import AdminShell from "@/components/layout/AdminShell";
 import { useEffect, useState } from "react";
 import adminAPI, {
-  Draw, CreateDrawPayload, DrawWinner,
+  Draw, DrawWinner,
   DrawSchedule, CreateDrawSchedulePayload,
 } from "@/lib/api";
 
+// Backend returns uppercase statuses: UPCOMING | ACTIVE | COMPLETED | CANCELLED
 const STATUS_COLORS: Record<string, string> = {
-  scheduled:  "bg-blue-100 text-blue-800",
-  completed:  "bg-green-100 text-green-800",
-  cancelled:  "bg-red-100 text-red-800",
+  UPCOMING:  "bg-blue-100 text-blue-800",
+  ACTIVE:    "bg-yellow-100 text-yellow-800",
+  COMPLETED: "bg-green-100 text-green-800",
+  CANCELLED: "bg-red-100 text-red-800",
 };
 const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
@@ -20,11 +22,24 @@ function fmtDate(iso: string) {
     hour: "2-digit", minute: "2-digit",
   });
 }
-function fmtNaira(kobo: number) {
-  return "₦" + (kobo / 100).toLocaleString("en-NG");
+function fmtNaira(naira: number) {
+  // Despite the JSON key being prize_pool_kobo, the DrawRecord backend struct
+  // stores and serialises the prize_pool column (Naira float) directly.
+  // So the value is already in Naira — display as-is.
+  return "₦" + naira.toLocaleString("en-NG", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-const BLANK_DRAW: CreateDrawPayload = { name: "", prize_pool_kobo: 0, draw_date: "", recurrence: "once" };
+// DrawForm uses backend field names directly (prize_pool in Naira, draw_date accepted as alias)
+interface DrawForm {
+  name: string;
+  prize_pool: number;   // Naira (backend field name)
+  draw_date: string;    // ISO datetime-local string (backend accepts draw_date as alias for draw_time)
+  recurrence: "once" | "weekly" | "monthly";
+  winner_count: number;
+  runner_ups_count: number;
+}
+
+const BLANK_DRAW: DrawForm = { name: "", prize_pool: 0, draw_date: "", recurrence: "once", winner_count: 1, runner_ups_count: 2 };
 const BLANK_SCHED: CreateDrawSchedulePayload = {
   draw_name: "", draw_type: "WEEKLY",
   draw_day_of_week: 5, draw_time_wat: "20:00:00",
@@ -44,7 +59,7 @@ export default function DrawsPage() {
   const [executing, setExec]    = useState<string | null>(null);
   const [drawModal, setDrawModal] = useState<DrawModal | null>(null);
   const [schedModal, setSchedModal] = useState<SchedModal | null>(null);
-  const [drawForm, setDrawForm] = useState<CreateDrawPayload>(BLANK_DRAW);
+  const [drawForm, setDrawForm] = useState<DrawForm>(BLANK_DRAW);
   const [schedForm, setSchedForm] = useState<CreateDrawSchedulePayload>(BLANK_SCHED);
   const [winners, setWinners]   = useState<{ drawId: string; data: DrawWinner[] } | null>(null);
   const [saving, setSaving]     = useState(false);
@@ -63,15 +78,39 @@ export default function DrawsPage() {
   /* ── Draw CRUD ── */
   const openCreate = () => { setDrawForm(BLANK_DRAW); setDrawModal({ mode: "create" }); setErr(""); };
   const openEdit   = (d: Draw) => {
-    setDrawForm({ name: d.name, prize_pool_kobo: d.prize_pool_kobo, draw_date: d.draw_date.slice(0,16), recurrence: d.recurrence as "once"|"weekly"|"monthly" });
+    // prize_pool_kobo field in the Draw interface actually holds the raw Naira value from backend
+    setDrawForm({
+      name: d.name,
+      prize_pool: d.prize_pool_kobo,   // backend serialises prize_pool column as prize_pool_kobo JSON key
+      draw_date: d.draw_date ? d.draw_date.slice(0,16) : "",
+      recurrence: d.recurrence as "once"|"weekly"|"monthly",
+      winner_count: (d as unknown as {winner_count?: number}).winner_count ?? 1,
+      runner_ups_count: (d as unknown as {runner_ups_count?: number}).runner_ups_count ?? 2,
+    });
     setDrawModal({ mode: "edit", draw: d });
     setErr("");
   };
   const saveDraw = async () => {
     setSaving(true); setErr("");
     try {
-      if (drawModal?.mode === "create") await adminAPI.createDraw(drawForm);
-      else if (drawModal?.mode === "edit") await adminAPI.updateDraw(drawModal.draw.id, drawForm);
+      // Convert datetime-local value ("YYYY-MM-DDTHH:mm") to RFC3339 ("YYYY-MM-DDTHH:mm:00Z")
+      // Go's time.Time JSON unmarshalling requires RFC3339 format.
+      const drawTimeRFC3339 = drawForm.draw_date
+        ? (drawForm.draw_date.length === 16 ? drawForm.draw_date + ":00Z" : drawForm.draw_date)
+        : "";
+      const payload = {
+        name: drawForm.name,
+        prize_pool: drawForm.prize_pool,
+        draw_date: drawTimeRFC3339,
+        recurrence: drawForm.recurrence,
+        winner_count: drawForm.winner_count,
+        runner_ups_count: drawForm.runner_ups_count,
+      };
+      if (drawModal?.mode === "create") {
+        await adminAPI.createDraw(payload);
+      } else if (drawModal?.mode === "edit") {
+        await adminAPI.updateDraw(drawModal.draw.id, payload);
+      }
       setDrawModal(null); await loadDraws();
     } catch (e: unknown) { setErr((e as Error).message); }
     finally { setSaving(false); }
@@ -191,7 +230,8 @@ export default function DrawsPage() {
                     <td className="px-4 py-3 text-gray-600">{(d.entry_count ?? 0).toLocaleString()}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1 flex-wrap">
-                        {d.status === "scheduled" && (
+                        {/* Edit & Execute available for UPCOMING and ACTIVE draws */}
+                        {(d.status === "UPCOMING" || d.status === "ACTIVE") && (
                           <>
                             <button onClick={() => openEdit(d)}
                               className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200">
@@ -203,7 +243,8 @@ export default function DrawsPage() {
                             </button>
                           </>
                         )}
-                        {d.status === "completed" && (
+                        {/* Winners & Export available for COMPLETED draws */}
+                        {d.status === "COMPLETED" && (
                           <>
                             <button onClick={() => showWinners(d.id)}
                               className="px-2 py-1 bg-indigo-600 text-white rounded text-xs hover:bg-indigo-700">
@@ -289,16 +330,31 @@ export default function DrawsPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Prize Pool (₦)</label>
-                  <input type="number" value={drawForm.prize_pool_kobo / 100}
-                    onChange={e => setDrawForm({...drawForm, prize_pool_kobo: Math.round(parseFloat(e.target.value || "0") * 100)})}
+                  <input type="number" min={0} step={1000} value={drawForm.prize_pool}
+                    onChange={e => setDrawForm({...drawForm, prize_pool: parseFloat(e.target.value || "0")})}
                     placeholder="e.g. 500000"
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Draw Date &amp; Time</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Draw Date &amp; Time (WAT)</label>
                   <input type="datetime-local" value={drawForm.draw_date}
+                    min={new Date().toISOString().slice(0,16)}
                     onChange={e => setDrawForm({...drawForm, draw_date: e.target.value})}
                     className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Winners</label>
+                    <input type="number" min={1} max={10} value={drawForm.winner_count}
+                      onChange={e => setDrawForm({...drawForm, winner_count: parseInt(e.target.value||"1")})}
+                      className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Runner-ups</label>
+                    <input type="number" min={0} max={20} value={drawForm.runner_ups_count}
+                      onChange={e => setDrawForm({...drawForm, runner_ups_count: parseInt(e.target.value||"0")})}
+                      className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"/>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Recurrence</label>

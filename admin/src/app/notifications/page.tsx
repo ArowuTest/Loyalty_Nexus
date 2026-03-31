@@ -15,8 +15,9 @@ export default function NotificationsPage() {
   const [sending, setSending]   = useState(false);
   const [success, setSuccess]   = useState("");
   const [error, setError]       = useState("");
+  // Backend expects `message` not `body` — use the correct field name throughout.
   const [form, setForm]         = useState<BroadcastPayload>({
-    title: "", body: "", type: "system", target: "all", deep_link: "",
+    title: "", message: "", type: "system", target: "all", deep_link: "",
   });
   const [phoneList, setPhoneList] = useState("");
 
@@ -30,7 +31,7 @@ export default function NotificationsPage() {
   useEffect(() => { load(); }, [load]);
 
   async function send() {
-    if (!form.title.trim() || !form.body.trim()) { setError("Title and body are required"); return; }
+    if (!form.title.trim() || !form.message.trim()) { setError("Title and message are required"); return; }
     setSending(true); setError(""); setSuccess("");
     try {
       const payload: BroadcastPayload = { ...form };
@@ -40,7 +41,7 @@ export default function NotificationsPage() {
       }
       await adminAPI.broadcastNotification(payload);
       setSuccess("✅ Broadcast queued successfully");
-      setForm({ title: "", body: "", type: "system", target: "all", deep_link: "" });
+      setForm({ title: "", message: "", type: "system", target: "all", deep_link: "" });
       setPhoneList("");
       load();
     } catch (e: unknown) {
@@ -77,13 +78,13 @@ export default function NotificationsPage() {
               </select>
             </div>
             <div className="md:col-span-2">
-              <label className="text-xs text-gray-400 mb-1 block">Body *</label>
+              <label className="text-xs text-gray-400 mb-1 block">Message *</label>
               <textarea
                 className="w-full bg-[#0f1628] border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-[#4A56EE] resize-none"
                 rows={3}
-                value={form.body}
-                onChange={e => setForm(f => ({ ...f, body: e.target.value }))}
-                placeholder="Notification body text..."
+                value={form.message}
+                onChange={e => setForm(f => ({ ...f, message: e.target.value }))}
+                placeholder="Notification message text…"
               />
             </div>
             <div>
@@ -143,7 +144,7 @@ export default function NotificationsPage() {
             <table className="w-full text-sm">
               <thead className="bg-white/5">
                 <tr>
-                  {["Title","Type","Target","Sent","Date"].map(h => (
+                  {["Title","Message","Type","Recipients","Status","Date"].map(h => (
                     <th key={h} className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
@@ -152,9 +153,15 @@ export default function NotificationsPage() {
                 {history.map(b => (
                   <tr key={b.id} className="hover:bg-white/5 transition-colors">
                     <td className="px-6 py-3 text-white font-medium">{b.title}</td>
+                    <td className="px-6 py-3 text-gray-300 max-w-xs truncate">{b.message}</td>
                     <td className="px-6 py-3"><span className="bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded text-xs">{b.type}</span></td>
-                    <td className="px-6 py-3 text-gray-400">{b.target}</td>
-                    <td className="px-6 py-3 text-gray-400">{b.sent_count.toLocaleString()}</td>
+                    {/* DB stores target_count (number of recipients), not a target string */}
+                    <td className="px-6 py-3 text-gray-400">{(b.target_count ?? 0).toLocaleString()}</td>
+                    <td className="px-6 py-3">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${b.status === "sent" ? "bg-green-500/20 text-green-300" : "bg-yellow-500/20 text-yellow-300"}`}>
+                        {b.status ?? "queued"}
+                      </span>
+                    </td>
                     <td className="px-6 py-3 text-gray-400">{new Date(b.created_at).toLocaleString()}</td>
                   </tr>
                 ))}

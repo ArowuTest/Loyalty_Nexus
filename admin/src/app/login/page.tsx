@@ -17,20 +17,28 @@ export default function AdminLoginPage() {
     setError("");
     setLoading(true);
     try {
-      const result = await adminAPI.req<{
-        token: string;
-        email: string;
-        full_name: string;
-        role: string;
-      }>("POST", "/admin/auth/login", { email, password });
+      // Use raw fetch to avoid the shared req() 401-redirect interceptor firing on bad credentials
+      const resp = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/api/v1"}/admin/auth/login`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        }
+      );
+      const data = await resp.json();
+      if (!resp.ok) {
+        setError((data as { error?: string }).error || "Invalid email or password.");
+        return;
+      }
+      const result = data as { token: string; email: string; full_name: string; role: string };
       adminAPI.setToken(result.token);
-      // Store role in localStorage for client-side RBAC checks
       localStorage.setItem("admin_role", result.role);
       localStorage.setItem("admin_email", result.email);
       localStorage.setItem("admin_name", result.full_name);
       router.push("/dashboard");
     } catch {
-      setError("Invalid email or password.");
+      setError("Unable to connect to server. Please try again.");
     } finally {
       setLoading(false);
     }

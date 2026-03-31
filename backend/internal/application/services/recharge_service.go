@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"time"
 
@@ -26,23 +25,23 @@ var ErrDuplicateRecharge = errors.New("recharge already processed")
 
 // PaystackEvent is the incoming webhook payload from Paystack.
 type PaystackEvent struct {
-	Event string          `json:"event"`
-	Data  PaystackCharge  `json:"data"`
+	Event string         `json:"event"`
+	Data  PaystackCharge `json:"data"`
 }
 
 type PaystackCharge struct {
-	Reference   string  `json:"reference"`
-	Amount      int64   `json:"amount"` // in kobo
-	Status      string  `json:"status"`
-	Customer    struct {
+	Reference string `json:"reference"`
+	Amount    int64  `json:"amount"` // in kobo
+	Status    string `json:"status"`
+	Customer  struct {
 		PhoneNumber string `json:"phone"`
 	} `json:"customer"`
 	Metadata json.RawMessage `json:"metadata"`
 }
 
 type RechargeService struct {
-	userRepo repositories.UserRepository
-	txRepo   repositories.TransactionRepository
+	userRepo  repositories.UserRepository
+	txRepo    repositories.TransactionRepository
 	notifySvc *NotificationService
 	cfg       *config.ConfigManager
 	db        *gorm.DB
@@ -91,8 +90,8 @@ func (s *RechargeService) ProcessRechargeWebhook(ctx context.Context, event *Pay
 		return ErrDuplicateRecharge
 	}
 
-	// Minimum recharge check (read from config — never hardcoded)
-	minKobo := s.cfg.GetInt64("min_qualifying_recharge_naira", 50) * 100
+	// Minimum recharge check — reads min_recharge_naira from DB (set by Points Engine UI)
+	minKobo := s.cfg.GetInt64("min_recharge_naira", 50) * 100
 	if amountKobo < minKobo {
 		log.Printf("[RECHARGE] Below minimum (₦%d): %s", amountKobo/100, phone)
 		return nil
@@ -119,7 +118,18 @@ func (s *RechargeService) ProcessMNOWebhook(ctx context.Context, phone string, a
 	return s.processAwardTransaction(ctx, user, amountKobo, reference, true)
 }
 
-// processAwardTransaction is the core atomic function — executed inside a DB transaction.
+// processAwardTransaction is the core atomic reward function — executed inside a DB transaction.
+//
+// Reward logic (all thresholds are admin-configurable via the Points Engine UI):
+//
+//   - Pulse Points: flat accumulator — every pulse_naira_per_point naira = 1 point.
+//     The kobo remainder carries forward in wallet.pulse_counter across transactions.
+//
+//   - Draw Entries: flat accumulator — every draw_naira_per_entry naira = 1 entry.
+//     The kobo remainder carries forward in wallet.draw_counter, resetting daily (WAT).
+//
+//   - Spin Credits: the ONLY tiered reward — based on the user's CUMULATIVE daily
+//     recharge total crossing spin_tiers thresholds. Max spin_max_per_day per day.
 func (s *RechargeService) processAwardTransaction(ctx context.Context, user *entities.User, amountKobo int64, reference string, isIntegrated bool) error {
 	return s.db.WithContext(ctx).Transaction(func(dbTx *gorm.DB) error {
 		// --- Row-level lock on wallet ---
@@ -128,41 +138,63 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 			return fmt.Errorf("wallet lock failed: %w", err)
 		}
 
-		amountNaira := amountKobo / 100
+		// ── Pulse Points (flat accumulator) ──────────────────────────────────
+		// Every pulse_naira_per_point naira = 1 Pulse Point.
+		// pulse_counter carries the kobo remainder across transactions (never wasted).
+		pulseKoboPerPoint := s.cfg.GetInt64("pulse_naira_per_point", 250) * 100
+		newPulseCounter := wallet.PulseCounter + amountKobo
+		ptsEarned := newPulseCounter / pulseKoboPerPoint
+		newPulseCounter = newPulseCounter % pulseKoboPerPoint
 
-		// --- Calculate Pulse Points ---
-		baseRate := s.cfg.GetFloat("points_per_250_naira", 1.0) / 250.0
-		tieredRate := s.getTieredRate(ctx, wallet.LifetimePoints)
-		globalMultiplier := s.cfg.GetFloat("global_points_multiplier", 1.0)
-		scheduledMultiplier := s.getActiveScheduledMultiplier(ctx, user.ID)
-		segmentMultiplier := s.getSegmentMultiplier(ctx, user)
+		// ── Draw Entries (flat daily accumulator) ─────────────────────────────
+		// Every draw_naira_per_entry naira = 1 Draw Entry.
+		// draw_counter resets at midnight WAT; remainder within the day carries forward.
+		wat := time.FixedZone("WAT", 3600)
+		todayWAT := time.Now().In(wat).Truncate(24 * time.Hour)
+		effectiveDrawCounter := wallet.DrawCounter
+		if wallet.DailyRechargeDate == nil || wallet.DailyRechargeDate.Before(todayWAT) {
+			effectiveDrawCounter = 0 // New day — discard yesterday's remainder
+		}
+		drawThresholdKobo := s.cfg.GetInt64("draw_naira_per_entry", 200) * 100
+		newDrawCounter := effectiveDrawCounter + amountKobo
+		drawEntriesEarned := int(newDrawCounter / drawThresholdKobo)
+		newDrawCounter = newDrawCounter % drawThresholdKobo
+		_ = drawEntriesEarned // tracked via draw_counter; entries credited by draw_service
 
-		effectiveRate := baseRate * tieredRate * globalMultiplier * scheduledMultiplier * segmentMultiplier
-		ptsEarned := int64(math.Floor(float64(amountNaira) * effectiveRate))
+		// ── Spin Credits (tiered daily cumulative) ────────────────────────────
+		// The ONLY tiered reward. Based on cumulative daily recharge crossing
+		// spin_tiers thresholds. Max spin_max_per_day spins per calendar day.
+		spinCreditsEarned, newDailyKobo, newDailySpinsAwarded, newDailyDate := s.calculateDailySpinCredits(
+			ctx, wallet, amountKobo,
+		)
 
-		// --- Calculate Spin Credits ---
-		spinTriggerKobo := s.cfg.GetInt64("spin_trigger_naira", 1000) * 100
-		newCounter := wallet.RechargeCounter + amountKobo
-		spinCreditsEarned := int(newCounter / spinTriggerKobo)
-		newCounter = newCounter % spinTriggerKobo
-
-		// --- Update wallet ---
-		// Use dbTx directly to ensure it's part of the transaction, and use gorm.Expr for atomic increments.
-		if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).Updates(map[string]interface{}{
-			"pulse_points":     gorm.Expr("pulse_points + ?", ptsEarned),
-			"lifetime_points":  gorm.Expr("lifetime_points + ?", ptsEarned),
-			"spin_credits":     gorm.Expr("spin_credits + ?", spinCreditsEarned),
-			"recharge_counter": newCounter,
-		}).Error; err != nil {
+		// ── Update wallet atomically ──────────────────────────────────────────
+		walletUpdates := map[string]interface{}{
+			"pulse_points":        gorm.Expr("pulse_points + ?", ptsEarned),
+			"lifetime_points":     gorm.Expr("lifetime_points + ?", ptsEarned),
+			"pulse_counter":       newPulseCounter,
+			"draw_counter":        newDrawCounter,
+			"daily_recharge_kobo": newDailyKobo,
+			"daily_recharge_date": newDailyDate,
+			"daily_spins_awarded": newDailySpinsAwarded,
+		}
+		if spinCreditsEarned > 0 {
+			walletUpdates["spin_credits"] = gorm.Expr("spin_credits + ?", spinCreditsEarned)
+		}
+		if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).Updates(walletUpdates).Error; err != nil {
 			return fmt.Errorf("wallet update failed: %w", err)
 		}
-		// Update the in-memory struct for subsequent use in this function
+		// Update in-memory struct for subsequent use in this function
 		wallet.PulsePoints += ptsEarned
 		wallet.LifetimePoints += ptsEarned
+		wallet.PulseCounter = newPulseCounter
 		wallet.SpinCredits += spinCreditsEarned
-		wallet.RechargeCounter = newCounter
+		wallet.DrawCounter = newDrawCounter
+		wallet.DailyRechargeKobo = newDailyKobo
+		wallet.DailySpinsAwarded = newDailySpinsAwarded
+		wallet.DailyRechargeDate = &newDailyDate
 
-		// --- Update streak ---
+		// ── Update streak ─────────────────────────────────────────────────────
 		streakHours := s.cfg.GetInt("streak_expiry_hours", 36)
 		newStreak := s.calculateNewStreak(user, streakHours)
 		streakExpiresAt := time.Now().Add(time.Duration(streakHours) * time.Hour)
@@ -170,7 +202,7 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 			return err
 		}
 
-		// --- Update user recharge stats ---
+		// ── Update user recharge stats ────────────────────────────────────────
 		now := time.Now()
 		user.TotalRechargeAmount += amountKobo
 		user.LastRechargeAt = &now
@@ -178,13 +210,13 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 			return err
 		}
 
-		// --- Update tier ---
+		// ── Update user tier (based on lifetime points) ───────────────────────
 		newTier := entities.TierFromLifetimePoints(wallet.LifetimePoints)
 		if newTier != user.Tier {
 			_ = s.userRepo.UpdateTier(ctx, user.ID, newTier)
 		}
 
-		// --- Write immutable ledger entries ---
+		// ── Write immutable ledger entries ────────────────────────────────────
 		// 1. Recharge record
 		rechargeTx := &entities.Transaction{
 			ID:           uuid.New(),
@@ -203,13 +235,8 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 		// 2. Points award record
 		if ptsEarned > 0 {
 			awardMeta, _ := json.Marshal(map[string]interface{}{
-				"amount_kobo": amountKobo,
-				"rate":        effectiveRate,
-				"multipliers": map[string]float64{
-					"global":    globalMultiplier,
-					"scheduled": scheduledMultiplier,
-					"segment":   segmentMultiplier,
-				},
+				"amount_kobo":          amountKobo,
+				"pulse_naira_per_point": pulseKoboPerPoint / 100,
 			})
 			ptsTx := &entities.Transaction{
 				ID:           uuid.New(),
@@ -249,25 +276,10 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 		})
 
 		log.Printf("[RECHARGE] Processed %s: ₦%d -> +%d pts, +%d spins (streak: %d)",
-			user.PhoneNumber, amountNaira, ptsEarned, spinCreditsEarned, newStreak)
+			user.PhoneNumber, amountKobo/100, ptsEarned, spinCreditsEarned, newStreak)
 
 		return nil
 	})
-}
-
-func (s *RechargeService) getTieredRate(ctx context.Context, lifetimePoints int64) float64 {
-	basePerNaira := s.cfg.GetFloat("points_per_250_naira", 1.0) / 250.0
-	// Tier rates from recharge_tiers table — simplified inline for now
-	switch {
-	case lifetimePoints >= 5000: // Platinum
-		return basePerNaira * 1.5
-	case lifetimePoints >= 1500: // Gold
-		return basePerNaira * 1.25
-	case lifetimePoints >= 500: // Silver
-		return basePerNaira * 1.1
-	default:
-		return basePerNaira
-	}
 }
 
 func (s *RechargeService) calculateNewStreak(user *entities.User, expiryHours int) int {
@@ -291,35 +303,6 @@ func (s *RechargeService) calculateNewStreak(user *entities.User, expiryHours in
 	return 1 // Reset
 }
 
-func (s *RechargeService) getActiveScheduledMultiplier(ctx context.Context, userID uuid.UUID) float64 {
-	var multiplier float64
-	s.db.WithContext(ctx).
-		Table("scheduled_multipliers").
-		Where("is_active = true AND start_at <= NOW() AND end_at >= NOW()").
-		Select("COALESCE(MAX(multiplier), 1.0)").
-		Scan(&multiplier)
-	if multiplier < 1.0 {
-		return 1.0
-	}
-	return multiplier
-}
-
-func (s *RechargeService) getSegmentMultiplier(ctx context.Context, user *entities.User) float64 {
-	// Check for state-based or tier-based overrides
-	var multiplier float64
-	s.db.WithContext(ctx).
-		Table("segment_multipliers").
-		Where("is_active = true AND (start_at IS NULL OR start_at <= NOW()) AND (end_at IS NULL OR end_at >= NOW())").
-		Where("(segment_type = 'state' AND segment_value = ?) OR (segment_type = 'tier' AND segment_value = ?)",
-			user.State, user.Tier).
-		Select("COALESCE(MAX(multiplier), 1.0)").
-		Scan(&multiplier)
-	if multiplier < 1.0 {
-		return 1.0
-	}
-	return multiplier
-}
-
 func (s *RechargeService) checkFirstRechargeBonus(ctx context.Context, user *entities.User, _ int64) {
 	count, err := s.txRepo.CountByPhoneAndTypeSince(ctx, user.PhoneNumber, entities.TxTypeRecharge, 0)
 	if err != nil || count != 1 {
@@ -341,4 +324,90 @@ func (s *RechargeService) checkFirstRechargeBonus(ctx context.Context, user *ent
 	}
 	welcomeMsg := fmt.Sprintf("Welcome to Loyalty Nexus! You have earned %d bonus Pulse Points. Start exploring Nexus Studio now.", bonus)
 	_ = s.notifySvc.SendSMS(ctx, user.PhoneNumber, welcomeMsg)
+}
+
+// calculateDailySpinCredits implements the tier-based daily spin credit logic.
+//
+// Spin credits are the ONLY tiered reward. They are based on the user's CUMULATIVE
+// daily recharge total (in kobo) crossing spin_tiers thresholds — NOT per-transaction.
+//
+// Algorithm:
+//  1. Reset daily_recharge_kobo if daily_recharge_date != today (WAT).
+//  2. Add amountKobo to the daily total.
+//  3. Look up the matching spin tier for the new cumulative total.
+//  4. spinCreditsEarned = tier.SpinsPerDay - wallet.DailySpinsAwarded (never negative).
+//  5. Increment daily_spins_awarded by spinCreditsEarned.
+//
+// The WAT timezone (UTC+1) is used for the daily reset boundary.
+func (s *RechargeService) calculateDailySpinCredits(
+	ctx context.Context,
+	wallet *entities.Wallet,
+	amountKobo int64,
+) (spinCreditsEarned int, newDailyKobo int64, newDailySpinsAwarded int, newDailyDate time.Time) {
+	// WAT = UTC+1
+	wat := time.FixedZone("WAT", 3600)
+	todayWAT := time.Now().In(wat).Truncate(24 * time.Hour)
+
+	// Step 1: Reset daily counters if date has changed
+	currentDailyKobo := wallet.DailyRechargeKobo
+	currentDailySpins := wallet.DailySpinsAwarded
+	if wallet.DailyRechargeDate == nil || wallet.DailyRechargeDate.Before(todayWAT) {
+		currentDailyKobo = 0
+		currentDailySpins = 0
+	}
+
+	// Step 2: Add this recharge to the daily total
+	newDailyKobo = currentDailyKobo + amountKobo
+	newDailyDate = todayWAT
+
+	// Step 3: Look up the spin tier for the new cumulative total from the DB.
+	// Falls back to hardcoded thresholds if the spin_tiers table is empty.
+	var tiers []entities.SpinTier
+	s.db.WithContext(ctx).
+		Table("spin_tiers").
+		Where("is_active = true AND min_daily_amount <= ? AND max_daily_amount >= ?", newDailyKobo, newDailyKobo).
+		Order("spins_per_day DESC").
+		Limit(1).
+		Find(&tiers)
+
+	var spinsPerDay int
+	if len(tiers) > 0 {
+		spinsPerDay = tiers[0].SpinsPerDay
+	} else {
+		// Fallback: hardcoded thresholds matching migration 067 canonical tiers (in kobo)
+		// Bronze:   ₦1,000–₦4,999  → 1 spin
+		// Silver:   ₦5,000–₦9,999  → 2 spins
+		// Gold:     ₦10,000–₦19,999 → 3 spins
+		// Platinum: ₦20,000+        → 5 spins
+		switch {
+		case newDailyKobo >= 2000000: // ₦20,000+ → Platinum
+			spinsPerDay = 5
+		case newDailyKobo >= 1000000: // ₦10,000–₦19,999 → Gold
+			spinsPerDay = 3
+		case newDailyKobo >= 500000: // ₦5,000–₦9,999 → Silver
+			spinsPerDay = 2
+		case newDailyKobo >= 100000: // ₦1,000–₦4,999 → Bronze
+			spinsPerDay = 1
+		default:
+			spinsPerDay = 0 // Below ₦1,000 — no spins
+		}
+	}
+
+	// Respect the global daily spin cap from config
+	spinMaxPerDay := s.cfg.GetInt("spin_max_per_day", 5)
+	if spinsPerDay > spinMaxPerDay {
+		spinsPerDay = spinMaxPerDay
+	}
+
+	// Step 4: Award the DIFFERENCE between the new tier cap and spins already awarded today.
+	// This prevents double-awarding when the user makes multiple recharges in one day.
+	spinCreditsEarned = spinsPerDay - currentDailySpins
+	if spinCreditsEarned < 0 {
+		spinCreditsEarned = 0
+	}
+
+	// Step 5: Update the daily spins awarded counter
+	newDailySpinsAwarded = currentDailySpins + spinCreditsEarned
+
+	return spinCreditsEarned, newDailyKobo, newDailySpinsAwarded, newDailyDate
 }

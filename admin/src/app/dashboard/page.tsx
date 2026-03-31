@@ -4,6 +4,9 @@ import AdminShell from "@/components/layout/AdminShell";
 import adminAPI from "@/lib/api";
 import Link from "next/link";
 
+// Matches the actual backend GetDashboard response shape:
+// spin_stats: { total_spins, spins_today, pending_fulfillments }
+// draw_stats: { total_draws, completed_draws, scheduled_draws, total_winners }
 interface DashboardData {
   total_users: number;
   active_today: number;
@@ -11,14 +14,14 @@ interface DashboardData {
   pending_prizes: number;
   total_points_issued: number;
   spin_stats?: {
+    total_spins?: number;
     spins_today?: number;
-    spins_this_week?: number;
-    total_prizes_awarded?: number;
-    total_prizes_value_kobo?: number;
+    pending_fulfillments?: number;
   };
   draw_stats?: {
-    active_draws?: number;
-    total_entries?: number;
+    total_draws?: number;
+    completed_draws?: number;
+    scheduled_draws?: number;
     total_winners?: number;
   };
   generated_at?: string;
@@ -53,14 +56,15 @@ export default function Dashboard() {
   useEffect(() => { load(); }, [load]);
 
   const kpis = data ? [
-    { label: "Total Users",       value: data.total_users.toLocaleString(),                  icon: "👥", color: "#5f72f9", link: "/users" },
-    { label: "Active Today",      value: data.active_today.toLocaleString(),                 icon: "⚡", color: "#f59e0b", link: null },
+    { label: "Total Users",       value: data.total_users.toLocaleString(),                    icon: "👥", color: "#5f72f9", link: "/users" },
+    { label: "Active Today",      value: data.active_today.toLocaleString(),                   icon: "⚡", color: "#f59e0b", link: null },
     { label: "Spins Today",       value: (data.spin_stats?.spins_today ?? 0).toLocaleString(), icon: "🎡", color: "#10b981", link: null },
-    { label: "Pending Prizes",    value: data.pending_prizes.toLocaleString(),               icon: "🏆", color: data.pending_prizes > 0 ? "#ef4444" : "#6b7280", link: "/spin-claims" },
-    { label: "Active Draws",      value: (data.draw_stats?.active_draws ?? 0).toLocaleString(), icon: "🎰", color: "#a78bfa", link: "/draws" },
-    { label: "Total Spins",       value: data.total_spins.toLocaleString(),                  icon: "🌀", color: "#5f72f9", link: null },
-    { label: "Points Issued",     value: data.total_points_issued.toLocaleString(),          icon: "💎", color: "#10b981", link: null },
-    { label: "Prize Value Paid",  value: fmtNaira(data.spin_stats?.total_prizes_value_kobo ?? 0), icon: "💰", color: "#f59e0b", link: null },
+    { label: "Pending Prizes",    value: data.pending_prizes.toLocaleString(),                 icon: "🏆", color: data.pending_prizes > 0 ? "#ef4444" : "#6b7280", link: "/spin-claims" },
+    // draw_stats.scheduled_draws = UPCOMING draws (backend field name)
+    { label: "Scheduled Draws",   value: (data.draw_stats?.scheduled_draws ?? 0).toLocaleString(), icon: "🎰", color: "#a78bfa", link: "/draws" },
+    { label: "Total Spins",       value: data.total_spins.toLocaleString(),                    icon: "🌀", color: "#5f72f9", link: null },
+    { label: "Points Issued",     value: data.total_points_issued.toLocaleString(),            icon: "💎", color: "#10b981", link: null },
+    { label: "Pending Fulfilment",value: (data.spin_stats?.pending_fulfillments ?? 0).toLocaleString(), icon: "💰", color: "#f59e0b", link: "/spin-claims" },
   ] : [];
 
   return (
@@ -138,10 +142,9 @@ export default function Dashboard() {
                   <div className="card" style={{ padding: 20 }}>
                     <h2 style={{ fontSize: 14, fontWeight: 600, color: "#e2e8ff", marginBottom: 14 }}>🎡 Spin Statistics</h2>
                     {[
-                      ["Spins Today",         (data.spin_stats.spins_today ?? 0).toLocaleString()],
-                      ["Spins This Week",     (data.spin_stats.spins_this_week ?? 0).toLocaleString()],
-                      ["Prizes Awarded",      (data.spin_stats.total_prizes_awarded ?? 0).toLocaleString()],
-                      ["Total Prize Value",   fmtNaira(data.spin_stats.total_prizes_value_kobo ?? 0)],
+                      ["Spins Today",           (data.spin_stats.spins_today ?? 0).toLocaleString()],
+                      ["Total Spins",           (data.spin_stats.total_spins ?? 0).toLocaleString()],
+                      ["Pending Fulfilments",   (data.spin_stats.pending_fulfillments ?? 0).toLocaleString()],
                     ].map(([k, v]) => (
                       <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(95,114,249,0.08)" }}>
                         <span style={{ fontSize: 13, color: "#828cb4" }}>{k}</span>
@@ -154,9 +157,10 @@ export default function Dashboard() {
                   <div className="card" style={{ padding: 20 }}>
                     <h2 style={{ fontSize: 14, fontWeight: 600, color: "#e2e8ff", marginBottom: 14 }}>🎰 Draw Statistics</h2>
                     {[
-                      ["Active Draws",    (data.draw_stats.active_draws ?? 0).toLocaleString()],
-                      ["Total Entries",   (data.draw_stats.total_entries ?? 0).toLocaleString()],
-                      ["Total Winners",   (data.draw_stats.total_winners ?? 0).toLocaleString()],
+                      ["Total Draws",      (data.draw_stats.total_draws ?? 0).toLocaleString()],
+                      ["Scheduled (UPCOMING)", (data.draw_stats.scheduled_draws ?? 0).toLocaleString()],
+                      ["Completed",        (data.draw_stats.completed_draws ?? 0).toLocaleString()],
+                      ["Total Winners",    (data.draw_stats.total_winners ?? 0).toLocaleString()],
                     ].map(([k, v]) => (
                       <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(95,114,249,0.08)" }}>
                         <span style={{ fontSize: 13, color: "#828cb4" }}>{k}</span>

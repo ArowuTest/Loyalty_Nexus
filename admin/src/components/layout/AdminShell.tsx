@@ -1,5 +1,5 @@
 "use client";
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import adminAPI from "@/lib/api";
@@ -41,9 +41,33 @@ const NAV = [
 export default function AdminShell({ children }: { children: ReactNode }) {
   const router  = useRouter();
   const path    = usePathname();
+  // initialized prevents children from rendering before the token check runs,
+  // which eliminates the login-page flicker on first paint.
+  const [initialized, setInitialized] = useState(false);
+
   useEffect(() => {
-    if (!adminAPI.getToken()) router.push("/login");
+    if (!adminAPI.getToken()) {
+      router.replace("/login");
+    } else {
+      setInitialized(true);
+    }
   }, [router]);
+
+  // Render nothing until the client-side token check is complete.
+  // This prevents the flash of unauthenticated content.
+  if (!initialized) {
+    return (
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "center",
+        minHeight: "100vh", background: "#f8f9fc",
+      }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 28, marginBottom: 12 }}>⚡</div>
+          <div style={{ color: "#828cb4", fontSize: 13 }}>Loading Nexus Admin…</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
@@ -89,7 +113,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div style={{ padding: "16px 20px", borderTop: "1px solid rgba(95,114,249,0.1)" }}>
-          <button onClick={() => { adminAPI.clearToken(); router.push("/login"); }}
+          <button onClick={() => { adminAPI.clearToken(); router.replace("/login"); }}
             style={{ color: "#f43f5e", fontSize: 12, background: "none", border: "none", cursor: "pointer" }}>
             Sign out
           </button>

@@ -78,20 +78,34 @@ class AdminAPI {
   disableStudioTool(id: string): Promise<void> { return this.req<void>("DELETE", `/admin/studio-tools/${id}`); }
   getStudioToolErrors(id: string): Promise<{ errors: GenerationError[]; count: number }> { return this.req<{ errors: GenerationError[]; count: number }>("GET", `/admin/studio-tools/${id}/errors`); }
   getStudioToolStats(): Promise<{ stats: ToolStat[] }> { return this.req<{ stats: ToolStat[] }>("GET", "/admin/studio-tools/stats"); }
-  getStudioGenerations(params?: { status?: string; tool_slug?: string; limit?: number; offset?: number }): Promise<{ items: Generation[]; total: number }> {
+  getStudioGenerations(params?: { status?: string; tool_slug?: string; limit?: number; offset?: number }): Promise<{ generations: Generation[]; total: number }> {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
     if (params?.tool_slug) qs.set("tool_slug", params.tool_slug);
     if (params?.limit !== undefined) qs.set("limit", String(params.limit));
     if (params?.offset !== undefined) qs.set("offset", String(params.offset));
     const q = qs.toString();
-    return this.req<{ items: Generation[]; total: number }>("GET", `/admin/studio-generations${q ? `?${q}` : ""}`);
+    // Backend returns { generations: [...], total } — NOT { items: [...], total }
+    return this.req<{ generations: Generation[]; total: number }>("GET", `/admin/studio-generations${q ? `?${q}` : ""}`);
   }
   getBroadcasts() { return this.req<{ broadcasts: Broadcast[] }>("GET", "/admin/notifications/broadcasts"); }
-  createBroadcast(payload: BroadcastPayload) { return this.req<{ id: string }>("POST", "/admin/notifications/broadcast", payload); }
+  createBroadcast(payload: BroadcastPayload) {
+    // Backend handler reads `targets` (string[]) — empty = all users.
+    // Convert frontend target+phone_list UX fields to backend `targets` array.
+    const backendPayload = {
+      title:   payload.title,
+      message: payload.message,
+      type:    payload.type,
+      targets: payload.target === "phone_list" ? (payload.phone_list ?? []) : [],
+    };
+    return this.req<{ id: string }>("POST", "/admin/notifications/broadcast", backendPayload);
+  }
   // Draws management
   getDraws()               { return this.req<{ draws: Draw[] }>("GET", "/admin/draws"); }
-  createDraw(d: CreateDrawPayload) { return this.req<Draw>("POST", "/admin/draws", d); }
+  // createDraw: backend expects prize_pool (Naira float) + draw_date + name + recurrence
+  createDraw(d: { name: string; prize_pool: number; draw_date: string; recurrence: string }) {
+    return this.req<Draw>("POST", "/admin/draws", d);
+  }
   executeDraw(id: string)  { return this.req("POST", `/admin/draws/${id}/execute`, {}); }
   getDrawWinners(id: string){ return this.req<{ winners: DrawWinner[] }>("GET", `/admin/draws/${id}/winners`); }
   // Notification aliases
@@ -229,7 +243,8 @@ class AdminAPI {
   }
 
   // ─── Draws extras ───────────────────────────────────────────────────────
-  updateDraw(id: string, data: Partial<CreateDrawPayload>) {
+  // updateDraw: backend expects prize_pool (Naira float), not prize_pool_kobo
+  updateDraw(id: string, data: Partial<{ name: string; prize_pool: number; draw_date: string; recurrence: string; status: string }>) {
     return this.req<Draw>("PUT", `/admin/draws/${id}`, data);
   }
   exportDrawEntries(id: string) {
@@ -406,15 +421,26 @@ export const adminAPI = new AdminAPI();
 export default adminAPI;
 export interface BroadcastPayload {
   title: string;
-  body: string;
+  message: string;  // backend field name
   type: string;
+  // Backend handler reads `targets` (string[]) — empty array means all users.
+  // Frontend uses target+phone_list for UX; createBroadcast converts before sending.
   target: "all" | "active_subscribers" | "free_tier" | "phone_list";
   phone_list?: string[];
   deep_link?: string;
+  // Internal: populated by createBroadcast before sending to backend
+  targets?: string[];
 }
 export interface Broadcast {
-  id: string; title: string; body: string; type: string;
-  target: string; sent_count: number; created_at: string;
+  id: string;
+  title: string;
+  message: string;
+  type: string;
+  // DB columns: target_count (not target/sent_count)
+  target_count: number;
+  status: string;
+  sent_at: string | null;
+  created_at: string;
 }
 export interface Draw {
   id: string; name: string; prize_pool_kobo: number;

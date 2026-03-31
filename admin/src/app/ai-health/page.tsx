@@ -251,7 +251,7 @@ export default function AIHealthPage() {
     setErrorsLoading(true);
     try {
       const r = await adminAPI.getStudioGenerations({ status: "failed", limit: 10 });
-      setRecentErrors(r.items ?? []);
+      setRecentErrors(r.generations ?? []);
     } catch {
       // non-fatal — errors feed is bonus info
     } finally {

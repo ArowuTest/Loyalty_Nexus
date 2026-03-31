@@ -51,10 +51,9 @@ export default function GenerationsPage() {
         limit,
         offset: page * limit,
       });
-      // backend returns { generations, total } — api.ts maps to { items, total }
-      const data = res as unknown as { generations?: Generation[]; items?: Generation[]; total: number };
-      setRows(data.generations ?? data.items ?? []);
-      setTotal(data.total ?? 0);
+      // backend returns { generations: [...], total }
+      setRows(res.generations ?? []);
+      setTotal(res.total ?? 0);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load generations");
     } finally {

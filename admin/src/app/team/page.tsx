@@ -139,7 +139,7 @@ export default function TeamPage() {
                 <div key={admin.id} className={`flex items-center justify-between bg-gray-900 border rounded-2xl px-5 py-4 ${!admin.is_active ? "opacity-40" : ""}`}>
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center text-lg font-black text-white">
-                      {admin.full_name?.[0] || admin.email[0].toUpperCase()}
+                      {admin.full_name?.[0] || (admin.email?.[0] ?? "?").toUpperCase()}
                     </div>
                     <div>
                       <p className="text-white font-semibold text-sm">{admin.full_name || "—"}</p>

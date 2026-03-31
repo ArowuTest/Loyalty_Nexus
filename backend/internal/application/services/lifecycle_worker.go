@@ -267,15 +267,22 @@ func (w *LifecycleWorker) studioStaleRecovery(ctx context.Context) {
 }
 
 // RunScheduledDraws auto-executes draws that are due.
+//
+// Schema alignment (fixed 2026-03-31):
+//   draws.draw_time is the correct column (migration 024 ADD COLUMN draw_time TIMESTAMPTZ).
+//   draw_date never existed — it was a stale name used only in Go code.
+//   Valid status values (migration 060 DEFAULT 'UPCOMING'): UPCOMING, ACTIVE, COMPLETED, CANCELLED.
+//   IN_PROGRESS is not a valid status; transitioning to ACTIVE during execution is correct.
 func (w *LifecycleWorker) RunScheduledDraws(ctx context.Context) {
 	now := time.Now().UTC()
 	var dueDraw struct {
 		ID string `gorm:"column:id"`
 	}
+	// draw_time is the correct column (migration 024). Status 'UPCOMING' means scheduled.
 	err := w.db.WithContext(ctx).Table("draws").
 		Select("id").
-		Where("status = 'SCHEDULED' AND draw_date <= ?", now).
-		Order("draw_date ASC").
+		Where("status = 'UPCOMING' AND draw_time <= ?", now).
+		Order("draw_time ASC").
 		Limit(1).
 		Scan(&dueDraw).Error
 
@@ -285,10 +292,11 @@ func (w *LifecycleWorker) RunScheduledDraws(ctx context.Context) {
 
 	log.Printf("[WORKER] scheduled-draws: executing draw %s", dueDraw.ID)
 
-	// Mark as IN_PROGRESS first (idempotency guard)
+	// Mark as ACTIVE first (idempotency guard — prevents double-execution).
+	// IN_PROGRESS is not a valid status value; ACTIVE is the in-execution state.
 	w.db.WithContext(ctx).Table("draws").
-		Where("id = ? AND status = 'SCHEDULED'", dueDraw.ID).
-		Updates(map[string]interface{}{"status": "IN_PROGRESS", "updated_at": now})
+		Where("id = ? AND status = 'UPCOMING'", dueDraw.ID).
+		Updates(map[string]interface{}{"status": "ACTIVE", "updated_at": now})
 
 	// Execute draw via DrawService
 	if w.drawSvc == nil {
@@ -301,9 +309,9 @@ func (w *LifecycleWorker) RunScheduledDraws(ctx context.Context) {
 	}
 	if execErr := w.drawSvc.ExecuteDraw(ctx, parsedID); execErr != nil {
 		log.Printf("[WORKER] scheduled-draws: ExecuteDraw %s failed: %v", dueDraw.ID, execErr)
-		// Revert status so it can be retried
+		// Revert to UPCOMING so the next tick can retry
 		w.db.WithContext(ctx).Table("draws").Where("id = ?", dueDraw.ID).
-			Updates(map[string]interface{}{"status": "SCHEDULED", "updated_at": now})
+			Updates(map[string]interface{}{"status": "UPCOMING", "updated_at": now})
 	} else {
 		log.Printf("[WORKER] scheduled-draws: draw %s completed successfully", dueDraw.ID)
 	}
