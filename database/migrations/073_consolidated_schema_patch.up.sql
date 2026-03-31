@@ -34,6 +34,21 @@ ALTER TABLE ghost_nudge_log
     ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 -- 4. google_wallet_objects
+-- Guard: create the table if it was never created by migration 036
+-- (can happen on DBs provisioned from a dump that pre-dates migration 036)
+CREATE TABLE IF NOT EXISTS google_wallet_objects (
+    id                  UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id             UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    object_id           TEXT        NOT NULL UNIQUE,
+    class_id            TEXT        NOT NULL,
+    last_synced_at      TIMESTAMPTZ,
+    points_at_last_sync BIGINT      NOT NULL DEFAULT 0,
+    tier_at_last_sync   TEXT        NOT NULL DEFAULT 'BRONZE',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_google_wallet_objects_user ON google_wallet_objects(user_id);
+CREATE INDEX        IF NOT EXISTS idx_google_wallet_objects_sync  ON google_wallet_objects(last_synced_at);
 ALTER TABLE google_wallet_objects
     ADD COLUMN IF NOT EXISTS last_sync_status TEXT;
 

@@ -114,6 +114,8 @@ export default function AuthModal({ open, onClose }: AuthModalProps) {
     setError(null);
     try {
       const res = await api.verifyOTP(fullPhone, code) as unknown as { token: string; is_new_user: boolean };
+      // Sync the API client token FIRST so subsequent requests are authenticated
+      api.setToken(res.token);
       setToken(res.token);
       // Fetch the user profile after login to populate the store
       const profile = await api.getProfile() as { id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean };

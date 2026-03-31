@@ -41,6 +41,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
     }
   }, [_hasHydrated, isAuthenticated, router]);
 
+  useEffect(() => {
+    // Listen for the soft session-expired event dispatched by the API client
+    // when a 401 is received. This replaces the hard window.location.href redirect
+    // that was causing the dashboard to crash and flicker.
+    const handleSessionExpired = () => {
+      logout();
+      router.push("/");
+    };
+    window.addEventListener("nexus:session-expired", handleSessionExpired);
+    return () => window.removeEventListener("nexus:session-expired", handleSessionExpired);
+  }, [logout, router]);
+
   // Show nothing until hydration is complete to avoid a flash of the landing page
   if (!_hasHydrated) return null;
   if (!isAuthenticated) return null;

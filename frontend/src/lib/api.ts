@@ -95,7 +95,12 @@ class APIClient {
 
     if (resp.status === 401) {
       this.clearToken();
-      window.location.href = "/";
+      // Dispatch a soft event so the app can handle session expiry gracefully
+      // (e.g., show the login modal) without a hard page reload that causes flicker.
+      // Components listening to this event can redirect or show the auth modal.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("nexus:session-expired"));
+      }
       throw new Error("Session expired");
     }
 

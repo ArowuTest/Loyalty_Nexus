@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { api } from "@/lib/api";
 
 interface User {
   id: string;
@@ -54,6 +55,11 @@ export const useStore = create<AppState>()(
         if (state) {
           if (state.token && !state.isAuthenticated) {
             state.isAuthenticated = true;
+          }
+          // Sync the API client token so requests work immediately after page reload
+          // without waiting for a component to call api.setToken() manually
+          if (state.token) {
+            api.setToken(state.token);
           }
           state._hasHydrated = true;
         }
