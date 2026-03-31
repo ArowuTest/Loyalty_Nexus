@@ -110,8 +110,13 @@ func (s *BonusPulseService) AwardBonusPulse(ctx context.Context, req AwardBonusP
 	var result *AwardBonusPulseResult
 
 	txErr := s.db.WithContext(ctx).Transaction(func(dbTx *gorm.DB) error {
-		// Lock the wallet row to prevent concurrent balance races.
+		// Ensure a wallet row exists for this user (create if missing).
 		var wallet entities.Wallet
+		createResult := dbTx.Where(entities.Wallet{UserID: user.ID}).FirstOrCreate(&wallet)
+		if createResult.Error != nil {
+			return fmt.Errorf("ensure wallet: %w", createResult.Error)
+		}
+		// Now lock the wallet row to prevent concurrent balance races.
 		if err := dbTx.
 			Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("user_id = ?", user.ID).
