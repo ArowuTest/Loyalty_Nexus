@@ -86,6 +86,7 @@ func (w *LifecycleWorker) Run(ctx context.Context) {
 	go w.runEvery(ctx, 2*time.Hour,    "momo-held-expiry",      w.momoHeldExpiry)
 	go w.runEvery(ctx, 10*time.Minute, "studio-stale-recovery", w.studioStaleRecovery)
 	go w.runEvery(ctx, 24*time.Hour,   "wars-monthly-resolve",  w.RunWarsMonthlyResolve)
+	go w.runEvery(ctx, 24*time.Hour,   "chat-retention",        w.chatRetentionCleanup)
 
 	<-ctx.Done()
 	log.Println("[WORKER] Lifecycle worker stopped")
@@ -336,5 +337,36 @@ func (w *LifecycleWorker) momoHeldExpiry(ctx context.Context) {
 	}
 	if err := w.winnerSvc.ExpireHeldPrizes(ctx); err != nil {
 		log.Printf("[WORKER] momo-held-expiry error: %v", err)
+	}
+}
+
+// chatRetentionCleanup implements ARCH-01: delete raw chat_messages rows that are
+// older than 7 days AND belong to sessions that have already been summarised.
+// Summaries (session_summaries) are kept indefinitely — they are tiny (~200 bytes)
+// and are the AI's long-term memory. Raw messages beyond 7 days are redundant.
+func (w *LifecycleWorker) chatRetentionCleanup(ctx context.Context) {
+	retentionDays := w.cfg.GetInt("chat_retention_days", 7)
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
+
+	// Delete raw messages from summarised sessions older than the retention window.
+	// We join on chat_sessions to ensure we only delete from sessions that have
+	// been summarised (status = 'summarized') — never from active sessions.
+	result := w.db.WithContext(ctx).Exec(`
+		DELETE FROM chat_messages
+		WHERE created_at < ?
+		  AND session_id IN (
+				SELECT id FROM chat_sessions
+				WHERE status = 'summarized'
+				  AND last_activity_at < ?
+		  )
+	`, cutoff, cutoff)
+
+	if result.Error != nil {
+		log.Printf("[WORKER] chat-retention: delete failed: %v", result.Error)
+		return
+	}
+	if result.RowsAffected > 0 {
+		log.Printf("[WORKER] chat-retention: deleted %d raw messages older than %d days from summarised sessions",
+			result.RowsAffected, retentionDays)
 	}
 }

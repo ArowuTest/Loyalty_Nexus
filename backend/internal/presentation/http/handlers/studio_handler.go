@@ -79,23 +79,46 @@ func (h *StudioHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	// Safety: only allow audio and image MIME types
-	if !strings.HasPrefix(contentType, "audio/") && !strings.HasPrefix(contentType, "image/") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only audio and image files are accepted"})
+	// Allow audio, image, PDF, and plain text uploads
+	allowedExts := map[string]string{
+		"audio/mpeg":      ".mp3",
+		"audio/wav":       ".wav",
+		"audio/mp4":       ".m4a",
+		"audio/x-m4a":    ".m4a",
+		"audio/ogg":       ".ogg",
+		"audio/webm":      ".webm",
+		"image/jpeg":      ".jpg",
+		"image/png":       ".png",
+		"image/webp":      ".webp",
+		"image/gif":       ".gif",
+		"application/pdf": ".pdf",
+		"text/plain":      ".txt",
+		"text/markdown":   ".md",
+	}
+	ext, allowed := allowedExts[contentType]
+	if !allowed {
+		if strings.HasPrefix(contentType, "audio/") {
+			parts := strings.SplitN(contentType, "/", 2)
+			if len(parts) == 2 {
+				ext = "." + strings.ToLower(strings.TrimPrefix(parts[1], "x-"))
+				allowed = true
+			}
+		} else if strings.HasPrefix(contentType, "image/") {
+			parts := strings.SplitN(contentType, "/", 2)
+			if len(parts) == 2 {
+				ext = "." + strings.ToLower(parts[1])
+				allowed = true
+			}
+		}
+	}
+	if !allowed {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "unsupported file type. Allowed: images (JPG/PNG/WebP/GIF), audio (MP3/WAV/M4A), PDF, TXT",
+		})
 		return
 	}
-
-	ext := ".bin"
-	if strings.HasPrefix(contentType, "audio/") {
-		parts := strings.SplitN(contentType, "/", 2)
-		if len(parts) == 2 {
-			ext = "." + strings.ToLower(strings.TrimPrefix(parts[1], "x-"))
-		}
-	} else if strings.HasPrefix(contentType, "image/") {
-		parts := strings.SplitN(contentType, "/", 2)
-		if len(parts) == 2 {
-			ext = "." + strings.ToLower(parts[1])
-		}
+	if ext == "" {
+		ext = ".bin"
 	}
 
 	key := "uploads/" + uuid.New().String() + ext
@@ -155,6 +178,7 @@ type generateRequest struct {
 	StyleTags       []string               `json:"style_tags,omitempty"`        // image / video: style hints
 	NegativePrompt  string                 `json:"negative_prompt,omitempty"`   // image / video: what to avoid
 	ImageURL        string                 `json:"image_url,omitempty"`         // image-editor / video-animator: source image (pre-uploaded URL)
+	DocumentURL     string                 `json:"document_url,omitempty"`      // FEAT-01: knowledge tools — pre-uploaded PDF/TXT URL for Gemini multimodal analysis
 	ExtraParams     map[string]interface{} `json:"extra_params,omitempty"`      // catch-all for future template fields
 }
 
@@ -377,13 +401,14 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleGeneralChat routes to the standard Groq → Gemini → DeepSeek cascade.
+// handleGeneralChat routes to the standard Gemini → Groq → DeepSeek cascade.
 func (h *StudioHandler) handleGeneralChat(w http.ResponseWriter, r *http.Request, uid, sessionID string, req chatRequest) {
 	resp, err := h.llmOrch.Chat(r.Context(), external.LLMRequest{
 		UserID:    uid,
 		SessionID: sessionID,
 		Prompt:    req.Message,
 		History:   req.History,
+		ToolSlug:  req.ToolSlug,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
@@ -405,8 +430,42 @@ func (h *StudioHandler) handleGeneralChat(w http.ResponseWriter, r *http.Request
 func timeNowUnix() int64 {
 	return time.Now().UnixNano() / 1e6 // milliseconds
 }
+// ─── GET /api/v1/studio/chat/history ──────────────────────────────────────────────
+// Returns the active session ID and all messages for the given mode (?mode=general|search|code).
+// Used by the frontend to restore chat history on page load (BUG-05 fix).
 
-// ─── GET /api/v1/studio/chat/usage ───────────────────────────────────────────
+func (h *StudioHandler) GetChatHistory(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	toolSlug := r.URL.Query().Get("mode")
+	if toolSlug == "" {
+		toolSlug = "general"
+	}
+	sessionID, msgs, err := h.llmOrch.GetChatHistory(r.Context(), uid, toolSlug)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load history"})
+		return
+	}
+	type msgDTO struct {
+		Role      string `json:"role"`
+		Content   string `json:"content"`
+		CreatedAt string `json:"created_at"`
+	}
+	dtos := make([]msgDTO, 0, len(msgs))
+	for _, m := range msgs {
+		dtos = append(dtos, msgDTO{
+			Role:      m.Role,
+			Content:   m.Content,
+			CreatedAt: m.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"session_id": sessionID,
+		"tool_slug":  toolSlug,
+		"messages":   dtos,
+	})
+}
+
+// ─── GET /api/v1/studio/chat/usage ───────────────────────────────────────────────
 
 func (h *StudioHandler) GetChatUsage(w http.ResponseWriter, r *http.Request) {
 	uid := r.Context().Value(middleware.ContextUserID).(string)
@@ -532,6 +591,9 @@ func buildEnrichedPrompt(req generateRequest) string {
 	}
 	if req.ImageURL != "" {
 		payload["image_url"] = req.ImageURL
+	}
+	if req.DocumentURL != "" {
+		payload["document_url"] = req.DocumentURL
 	}
 	if len(req.ExtraParams) > 0 {
 		payload["extra"] = req.ExtraParams

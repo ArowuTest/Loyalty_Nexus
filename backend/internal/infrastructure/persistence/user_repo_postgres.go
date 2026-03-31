@@ -78,10 +78,17 @@ func (r *postgresUserRepository) SetPointsExpiry(ctx context.Context, userID uui
 	return r.db.WithContext(ctx).Table("users").Where("id = ?", userID).Update("points_expire_at", expiresAt).Error
 }
 
+func (r *postgresUserRepository) CreateWallet(ctx context.Context, wallet *entities.Wallet) error {
+	return r.db.WithContext(ctx).Table("wallets").Create(wallet).Error
+}
+
 func (r *postgresUserRepository) GetWallet(ctx context.Context, userID uuid.UUID) (*entities.Wallet, error) {
 	var w entities.Wallet
 	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&w).Error; err != nil {
-		return nil, err
+		// ARCH-03: lazily create wallet row for existing users who registered before this fix
+		w = entities.Wallet{ID: uuid.New(), UserID: userID}
+		_ = r.db.WithContext(ctx).Table("wallets").Create(&w).Error
+		return &w, nil
 	}
 	return &w, nil
 }

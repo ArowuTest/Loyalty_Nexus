@@ -183,11 +183,13 @@ class APIClient {
 
   // ── Studio ────────────────────────────────────────────────────────────────
   getStudioTools() { return this.request("GET", "/studio/tools"); }
-  sendChat(message: string, sessionId?: string, toolSlug?: string) {
+  sendChat(message: string, sessionId?: string, toolSlug?: string, imageURL?: string, documentURL?: string) {
     return this.request("POST", "/studio/chat", {
       message,
-      session_id: sessionId,
-      tool_slug:  toolSlug,
+      session_id:   sessionId,
+      tool_slug:    toolSlug,
+      ...(imageURL    ? { image_url:    imageURL    } : {}),
+      ...(documentURL ? { document_url: documentURL } : {}),
     });
   }
   generateTool(
@@ -297,6 +299,15 @@ class APIClient {
   }
   claimPrize(id: string, payload: { momo_number?: string; bank_account_number?: string; bank_account_name?: string; bank_name?: string } = {}) {
     return this.request<{ id: string; claim_status: string; fulfillment_status: string }>("POST", `/spin/wins/${id}/claim`, payload);
+  }
+
+  // ── Chat history restore (BUG-05 fix) ──────────────────────────────────
+  getChatHistory(mode: string) {
+    return this.request<{
+      session_id: string;
+      tool_slug: string;
+      messages: { role: string; content: string; created_at: string }[];
+    }>("GET", `/studio/chat/history?mode=${mode}`);
   }
 
   // ── Chat usage quota ──────────────────────────────────────────────────────

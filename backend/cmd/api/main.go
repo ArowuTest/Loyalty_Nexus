@@ -340,11 +340,12 @@ func main() {
 		mux.Handle("GET /api/v1/studio/session", auth(http.HandlerFunc(studioH.GetSessionUsage)))
 		mux.Handle("POST /api/v1/studio/upload", auth(http.HandlerFunc(studioH.UploadAsset)))			// REQ: VoiceToPlan + image-editor pre-upload
 
-		// ─── Nexus Chat ───────────────────────────────────────────
-		mux.Handle("POST /api/v1/studio/chat", auth(http.HandlerFunc(studioH.Chat)))
-		mux.Handle("GET /api/v1/studio/chat/usage", auth(http.HandlerFunc(studioH.GetChatUsage)))
+			// ─── Nexus Chat ─────────────────────────────────────────────────────
+			mux.Handle("POST /api/v1/studio/chat", auth(http.HandlerFunc(studioH.Chat)))
+			mux.Handle("GET /api/v1/studio/chat/history", auth(http.HandlerFunc(studioH.GetChatHistory))) // BUG-05: restore chat history on page load
+				mux.Handle("GET /api/v1/studio/chat/usage", auth(http.HandlerFunc(studioH.GetChatUsage)))
 
-		// ─── Regional Wars ────────────────────────────────────────
+			// ─── Regional Wars ─────────────────────────────────────────────────────
 		mux.Handle("GET /api/v1/wars/leaderboard", auth(http.HandlerFunc(warsH.GetLeaderboard)))
 		mux.Handle("GET /api/v1/wars/my-rank", auth(http.HandlerFunc(warsH.GetMyRank)))
 		mux.Handle("GET /api/v1/wars/history", auth(http.HandlerFunc(warsH.GetHistory)))

@@ -215,6 +215,19 @@ func (s *AuthService) registerNewUser(ctx context.Context, phone string) (*entit
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err
 	}
+	// ARCH-03 fix: create a wallet row for every new user so GetWallet never returns 404
+	wallet := &entities.Wallet{
+		ID:              uuid.New(),
+		UserID:          user.ID,
+		PulsePoints:     0,
+		SpinCredits:     0,
+		LifetimePoints:  0,
+		RechargeCounter: 0,
+	}
+	if err := s.userRepo.CreateWallet(ctx, wallet); err != nil {
+		// Non-fatal: log and continue — GetWallet will lazily create the row on first access
+		log.Printf("[auth] WARN: failed to create wallet for new user %s: %v", user.ID, err)
+	}
 	return user, nil
 }
 

@@ -256,6 +256,7 @@ func (o *AIStudioOrchestrator) route(ctx context.Context, gen *entities.AIGenera
 type promptEnvelope struct {
 	Prompt         string                 `json:"prompt"`
 	ImageURL       string                 `json:"image_url"`
+	DocumentURL    string                 `json:"document_url"` // FEAT-01: PDF/TXT for knowledge tools
 	VoiceID        string                 `json:"voice_id"`
 	Language       string                 `json:"language"`
 	AspectRatio    string                 `json:"aspect_ratio"`
@@ -317,7 +318,25 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 
 	systemPrompt, userPrompt := buildTextPrompts(slug, prompt)
 
-	// ── DB-first: admin can override/reorder providers per category ──────────
+	// FEAT-01: if a document was uploaded, route through Gemini multimodal (PDF/TXT analysis)
+	// Applies to the 8 knowledge tools: study-guide, quiz, mindmap, research-brief,
+	// bizplan, slide-deck, infographic, podcast
+	knowledgeSlugs := map[string]bool{
+		"study-guide": true, "quiz": true, "mindmap": true, "research-brief": true,
+		"bizplan": true, "slide-deck": true, "infographic": true, "podcast": true,
+	}
+	if env.DocumentURL != "" && knowledgeSlugs[slug] {
+		// Enrich the user prompt to instruct Gemini to use the uploaded document
+		docPrompt := fmt.Sprintf("%s\n\n[The user has uploaded a document. Use its content as the primary source material for the above task. Analyse the document thoroughly and base your response on it.]", userPrompt)
+		text, err := o.callGeminiWithDocument(ctx, systemPrompt, docPrompt, env.DocumentURL)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "gemini-flash/document", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] callGeminiWithDocument failed for %s: %v — falling back to text-only", slug, err)
+		// Fall through to standard text chain below
+	}
+
+	// ── DB-first: admin can override/reorder providers per category ──────
 	in := providerInput{SystemPrompt: systemPrompt, UserPrompt: userPrompt}
 	if url, text, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryText, in); err == nil {
 		return &studioProviderResult{OutputText: text, OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
@@ -2537,4 +2556,126 @@ func truncateStr(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// ─── FEAT-01: Gemini multimodal document analysis ─────────────────────────────
+// callGeminiWithDocument fetches a PDF or TXT file from a CDN URL, base64-encodes
+// it, and sends it to Gemini as inline_data alongside the user prompt.
+// Supported MIME types: application/pdf, text/plain, text/markdown.
+// Falls back to callGeminiFlash (text-only) if the document cannot be fetched.
+func (o *AIStudioOrchestrator) callGeminiWithDocument(ctx context.Context, systemPrompt, userPrompt, documentURL string) (string, error) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		return "", fmt.Errorf("GEMINI_API_KEY not configured")
+	}
+
+	// Fetch the document from CDN
+	docReq, err := http.NewRequestWithContext(ctx, http.MethodGet, documentURL, nil)
+	if err != nil {
+		return o.callGeminiFlash(ctx, systemPrompt, userPrompt)
+	}
+	docResp, err := o.httpClient.Do(docReq)
+	if err != nil || docResp.StatusCode != http.StatusOK {
+		log.Printf("[AIStudio] callGeminiWithDocument: fetch failed (%v) — falling back to text-only", err)
+		return o.callGeminiFlash(ctx, systemPrompt, userPrompt)
+	}
+	defer docResp.Body.Close()
+	docBytes, err := io.ReadAll(io.LimitReader(docResp.Body, 50<<20)) // 50 MB limit
+	if err != nil {
+		return o.callGeminiFlash(ctx, systemPrompt, userPrompt)
+	}
+
+	// Determine MIME type from Content-Type header or URL extension
+	mimeType := docResp.Header.Get("Content-Type")
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		lower := strings.ToLower(documentURL)
+		switch {
+		case strings.HasSuffix(lower, ".pdf"):
+			mimeType = "application/pdf"
+		case strings.HasSuffix(lower, ".md"):
+			mimeType = "text/markdown"
+		default:
+			mimeType = "text/plain"
+		}
+	}
+	// Strip charset suffix if present (e.g. "text/plain; charset=utf-8")
+	if idx := strings.Index(mimeType, ";"); idx != -1 {
+		mimeType = strings.TrimSpace(mimeType[:idx])
+	}
+
+	// Only allow Gemini-supported document MIME types
+	allowed := map[string]bool{
+		"application/pdf": true,
+		"text/plain":      true,
+		"text/markdown":   true,
+		"text/html":       true,
+		"text/csv":        true,
+	}
+	if !allowed[mimeType] {
+		log.Printf("[AIStudio] callGeminiWithDocument: unsupported MIME %s — falling back to text-only", mimeType)
+		return o.callGeminiFlash(ctx, systemPrompt, userPrompt)
+	}
+
+	docB64 := base64.StdEncoding.EncodeToString(docBytes)
+
+	geminiURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", apiKey)
+	payload := map[string]interface{}{
+		"system_instruction": map[string]interface{}{
+			"parts": []map[string]string{{"text": systemPrompt}},
+		},
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]interface{}{
+					{
+						"inline_data": map[string]string{
+							"mime_type": mimeType,
+							"data":      docB64,
+						},
+					},
+					{"text": userPrompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature":     0.7,
+			"maxOutputTokens": 8192,
+		},
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiURL, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Gemini document request: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Gemini document %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+	}
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("Gemini document parse: %w", err)
+	}
+	if result.Error != nil {
+		return "", fmt.Errorf("Gemini document API error: %s", result.Error.Message)
+	}
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("Gemini document: no content returned")
+	}
+	return result.Candidates[0].Content.Parts[0].Text, nil
 }

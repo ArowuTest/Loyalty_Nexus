@@ -11,6 +11,7 @@ export interface GeneratePayload {
   style_tags?: string[];
   negative_prompt?: string;
   image_url?: string;
+  document_url?: string;  // FEAT-01: pre-uploaded PDF/TXT CDN URL for knowledge tools
   extra_params?: Record<string, unknown>;
 }
 

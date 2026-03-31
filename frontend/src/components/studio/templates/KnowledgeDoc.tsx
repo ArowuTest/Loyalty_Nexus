@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { Loader2, Sparkles, ArrowRight } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Loader2, Sparkles, ArrowRight, Paperclip, X, FileText, AlertCircle } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
+import api from '@/lib/api';
 
 // Default fallback for tools with no ui_config.fields
 const DEFAULT_FIELDS = [
@@ -30,6 +31,12 @@ const TRANSLATE_LANGUAGES = [
   { code: 'pcm',   label: 'Nigerian Pidgin' },
   { code: 'af',    label: 'Afrikaans' },
 ];
+
+// ─── Slugs that support document upload (FEAT-01) ─────────────────────────────
+const DOCUMENT_UPLOAD_SLUGS = new Set([
+  'study-guide', 'quiz', 'mindmap', 'research-brief',
+  'bizplan', 'slide-deck', 'infographic', 'podcast',
+]);
 
 // ─── Translate layout ─────────────────────────────────────────────────────────
 function TranslateLayout({
@@ -160,6 +167,14 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
   const fields = cfg.fields?.length ? cfg.fields : DEFAULT_FIELDS;
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
+  const supportsDocUpload = DOCUMENT_UPLOAD_SLUGS.has(tool.slug);
+
+  // ── Document upload state (FEAT-01) ──────────────────────────────────────
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [docFile,       setDocFile]       = useState<File | null>(null);
+  const [docURL,        setDocURL]        = useState<string | null>(null);
+  const [docUploading,  setDocUploading]  = useState(false);
+  const [docUploadErr,  setDocUploadErr]  = useState<string | null>(null);
 
   // If this is the translate tool, render dedicated layout
   if (tool.slug === 'translate') {
@@ -188,16 +203,59 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
   });
 
   function isValid(): boolean {
+    // If a document is uploaded, the prompt field is optional (document provides context)
+    if (docURL) return true;
     return typedFields.every((f) => !f.required || (values[f.key]?.trim().length ?? 0) >= 3);
   }
 
+  async function handleDocumentSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowed = ['application/pdf', 'text/plain', 'text/markdown'];
+    const ext = file.name.toLowerCase();
+    const isAllowed = allowed.includes(file.type) || ext.endsWith('.pdf') || ext.endsWith('.txt') || ext.endsWith('.md');
+    if (!isAllowed) {
+      setDocUploadErr('Only PDF, TXT, and Markdown files are supported.');
+      return;
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      setDocUploadErr('File must be under 50 MB.');
+      return;
+    }
+
+    setDocFile(file);
+    setDocUploadErr(null);
+    setDocUploading(true);
+    try {
+      const result = await api.uploadAsset(file);
+      setDocURL(result.url);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      setDocUploadErr(msg);
+      setDocFile(null);
+    } finally {
+      setDocUploading(false);
+    }
+  }
+
+  function removeDocument() {
+    setDocFile(null);
+    setDocURL(null);
+    setDocUploadErr(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
   function handleSubmit() {
-    if (!isValid() || isLoading || !canAfford) return;
+    if (!isValid() || isLoading || !canAfford || docUploading) return;
     const parts = typedFields
       .filter((f) => values[f.key]?.trim())
       .map((f) => `${f.label}: ${values[f.key].trim()}`);
+    const promptText = parts.join('\n') || (docURL ? 'Analyse the uploaded document and generate the output.' : '');
     const payload: GeneratePayload = {
-      prompt: parts.join('\n'),
+      prompt: promptText,
+      ...(docURL ? { document_url: docURL } : {}),
       extra_params: {
         ...values,
         output_format: cfg.output_format,
@@ -219,12 +277,90 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
   return (
     <div className="space-y-5">
 
+      {/* ── Document upload zone (FEAT-01) — only for knowledge tools ── */}
+      {supportsDocUpload && (
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
+              Upload Document <span className="text-white/30 font-normal normal-case">(optional)</span>
+            </label>
+            <span className="text-white/25 text-[10px]">PDF, TXT, MD · max 50 MB</span>
+          </div>
+
+          {docFile ? (
+            /* Uploaded file pill */
+            <div className={cn(
+              'flex items-center gap-3 px-4 py-3 rounded-xl border',
+              docUploading
+                ? 'border-nexus-500/40 bg-nexus-900/30'
+                : docUploadErr
+                  ? 'border-red-500/40 bg-red-900/20'
+                  : 'border-green-500/40 bg-green-900/20',
+            )}>
+              {docUploading ? (
+                <Loader2 size={16} className="animate-spin text-nexus-400 flex-shrink-0" />
+              ) : docUploadErr ? (
+                <AlertCircle size={16} className="text-red-400 flex-shrink-0" />
+              ) : (
+                <FileText size={16} className="text-green-400 flex-shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-white/80 text-sm font-medium truncate">{docFile.name}</p>
+                <p className="text-white/35 text-[11px]">
+                  {docUploading ? 'Uploading…' : docUploadErr ? docUploadErr : `${(docFile.size / 1024).toFixed(0)} KB · Ready`}
+                </p>
+              </div>
+              {!docUploading && (
+                <button
+                  onClick={removeDocument}
+                  className="text-white/30 hover:text-white/70 transition-colors flex-shrink-0"
+                  title="Remove document"
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+          ) : (
+            /* Upload drop zone */
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border border-dashed border-white/15 hover:border-nexus-500/50 hover:bg-nexus-900/20 transition-all text-left group"
+            >
+              <Paperclip size={16} className="text-white/30 group-hover:text-nexus-400 transition-colors flex-shrink-0" />
+              <div>
+                <p className="text-white/45 text-sm group-hover:text-white/65 transition-colors">
+                  Attach a document for AI to analyse
+                </p>
+                <p className="text-white/25 text-[11px]">PDF, plain text, or Markdown</p>
+              </div>
+            </button>
+          )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+            onChange={handleDocumentSelect}
+            className="hidden"
+          />
+
+          {docURL && !docUploadErr && (
+            <p className="text-green-400/70 text-[11px] mt-1.5 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
+              Document uploaded — AI will analyse it as the primary source
+            </p>
+          )}
+        </div>
+      )}
+
       {/* ── Dynamic fields ── */}
       {typedFields.map((field, idx) => (
         <div key={field.key}>
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
             {field.label}
-            {field.required && <span className="text-red-400 ml-1">*</span>}
+            {field.required && !docURL && <span className="text-red-400 ml-1">*</span>}
+            {field.required && docURL && <span className="text-white/25 text-[10px] ml-1 font-normal">(optional with document)</span>}
           </label>
 
           {field.type === 'textarea' ? (
@@ -232,7 +368,7 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
               <textarea
                 value={values[field.key]}
                 onChange={(e) => setValue(field.key, e.target.value)}
-                placeholder={field.placeholder}
+                placeholder={docURL ? (field.placeholder ?? 'Add additional instructions (optional)…') : field.placeholder}
                 rows={field.rows ?? 4}
                 autoFocus={idx === 0}
                 className="nexus-input resize-none w-full text-sm leading-relaxed"
@@ -290,17 +426,19 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
       {/* ── Generate button ── */}
       <button
         onClick={handleSubmit}
-        disabled={!isValid() || isLoading || !canAfford}
+        disabled={!isValid() || isLoading || !canAfford || docUploading}
         className={cn(
           'w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all',
-          isValid() && !isLoading && canAfford
+          isValid() && !isLoading && canAfford && !docUploading
             ? 'bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-nexus-900/30'
             : 'bg-white/5 text-white/20 cursor-not-allowed',
         )}
       >
         {isLoading
           ? <><Loader2 size={15} className="animate-spin" /> Generating…</>
-          : <><Sparkles size={15} /> {btnLabel}</>
+          : docUploading
+            ? <><Loader2 size={15} className="animate-spin" /> Uploading document…</>
+            : <><Sparkles size={15} /> {btnLabel}</>
         }
       </button>
     </div>

@@ -14,6 +14,7 @@ import {
   Brain, Video, X, Info, Play, LayoutGrid, MessageSquare, History,
   Code2, Copy, Check, Download, RotateCcw, Zap, CreditCard,
   TrendingUp, Timer, ChevronDown, Lock, Activity,
+  Paperclip, AlertCircle,
 } from "lucide-react";
 import {
   MusicComposer, ImageCreator, ImageEditor,
@@ -1589,6 +1590,7 @@ function StudioPageInner() {
   };
   // Initialise all three session IDs once on mount
   const sessionIds = useRef<Record<ChatMode, string>>({ general: '', search: '', code: '' });
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   useEffect(() => {
     sessionIds.current = {
       general: getOrCreateSessionId('general'),
@@ -1597,6 +1599,47 @@ function StudioPageInner() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // BUG-05 fix: restore chat history for all 3 modes on page load
+  useEffect(() => {
+    if (historyLoaded) return;
+    const modes: ChatMode[] = ['general', 'search', 'code'];
+    Promise.allSettled(
+      modes.map((mode) =>
+        api.getChatHistory(mode).then((res) => ({ mode, res }))
+      )
+    ).then((results) => {
+      const updates: Partial<Record<ChatMode, Message[]>> = {};
+      for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+        const { mode, res } = result.value;
+        if (!res?.messages?.length) continue;
+        const restored: Message[] = res.messages.map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          ts: new Date(m.created_at).getTime(),
+          mode,
+        }));
+        if (res.session_id) {
+          sessionIds.current[mode] = res.session_id;
+          try { localStorage.setItem(`nexus_chat_session_${mode}`, res.session_id); } catch { /* ignore */ }
+        }
+        updates[mode] = restored;
+      }
+      if (Object.keys(updates).length > 0) {
+        setModeMessages((prev) => {
+          const next = { ...prev };
+          for (const [mode, msgs] of Object.entries(updates) as [ChatMode, Message[]][]) {
+            next[mode] = msgs;
+          }
+          return next;
+        });
+      }
+      setHistoryLoaded(true);
+    }).catch(() => setHistoryLoaded(true));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Current mode's session ID
   const sessionId = sessionIds.current[chatMode] || `sess_${chatMode}_${Date.now()}`;
   const searchParams    = useSearchParams();
@@ -1607,6 +1650,13 @@ function StudioPageInner() {
   const [chatUsage,      setChatUsage]      = useState<{ used: number; limit: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef       = useRef<HTMLInputElement>(null);
+  // FEAT-02: Chat attachment state
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
+  const [chatAttachFile,    setChatAttachFile]    = useState<File | null>(null);
+  const [chatAttachURL,     setChatAttachURL]     = useState<string | null>(null);
+  const [chatAttachType,    setChatAttachType]    = useState<'image' | 'document' | null>(null);
+  const [chatAttachLoading, setChatAttachLoading] = useState(false);
+  const [chatAttachError,   setChatAttachError]   = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -1661,19 +1711,63 @@ function StudioPageInner() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
 
+  const handleChatAttachSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isImage = file.type.startsWith('image/');
+    const isDoc   = file.type === 'application/pdf' || file.type === 'text/plain' || file.type === 'text/markdown' || file.name.endsWith('.pdf') || file.name.endsWith('.txt') || file.name.endsWith('.md');
+    if (!isImage && !isDoc) {
+      setChatAttachError('Only images, PDF, and TXT files are supported.');
+      return;
+    }
+    if (file.size > 50 * 1024 * 1024) { setChatAttachError('File must be under 50 MB.'); return; }
+    setChatAttachFile(file);
+    setChatAttachType(isImage ? 'image' : 'document');
+    setChatAttachError(null);
+    setChatAttachLoading(true);
+    try {
+      const result = await api.uploadAsset(file);
+      setChatAttachURL(result.url);
+    } catch (err: unknown) {
+      setChatAttachError(err instanceof Error ? err.message : 'Upload failed');
+      setChatAttachFile(null);
+      setChatAttachType(null);
+    } finally {
+      setChatAttachLoading(false);
+      if (chatFileInputRef.current) chatFileInputRef.current.value = '';
+    }
+  }, []);
+
+  const removeChatAttach = useCallback(() => {
+    setChatAttachFile(null);
+    setChatAttachURL(null);
+    setChatAttachType(null);
+    setChatAttachError(null);
+    if (chatFileInputRef.current) chatFileInputRef.current.value = '';
+  }, []);
+
   const handleChat = useCallback(async () => {
-    if (!input.trim() || sending) return;
-    const msg = input.trim();
+    if ((!input.trim() && !chatAttachURL) || sending) return;
+    const msg = input.trim() || (chatAttachType === 'image' ? 'What is in this image?' : 'Analyse this document.');
     const currentMode = chatMode;
+    const attachURL  = chatAttachURL;
+    const attachType = chatAttachType;
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: msg, ts: Date.now(), mode: currentMode }]);
+    setChatAttachFile(null); setChatAttachURL(null); setChatAttachType(null);
+    // Show user message with attachment indicator
+    const displayContent = attachURL
+      ? `${msg}${attachType === 'image' ? ' 📎 [image attached]' : ' 📎 [document attached]'}`
+      : msg;
+    setMessages((m) => [...m, { role: "user", content: displayContent, ts: Date.now(), mode: currentMode }]);
     setSending(true);
     try {
       // Route to correct tool based on mode
       let toolSlug: string | undefined;
       if (currentMode === 'search') toolSlug = 'web-search-ai';
       if (currentMode === 'code')   toolSlug = 'code-helper';
-      const resp = await api.sendChat(msg, sessionId, toolSlug) as { response: string; provider?: string; session_id?: string; message_count?: number };
+      const imageURL    = attachType === 'image'    ? (attachURL ?? undefined) : undefined;
+      const documentURL = attachType === 'document' ? (attachURL ?? undefined) : undefined;
+      const resp = await api.sendChat(msg, sessionId, toolSlug, imageURL, documentURL) as { response: string; provider?: string; session_id?: string; message_count?: number };
       // If backend returns a new session_id, update localStorage for this mode
       if (resp.session_id && resp.session_id !== sessionId) {
         sessionIds.current[currentMode] = resp.session_id;
@@ -1845,7 +1939,34 @@ function StudioPageInner() {
                 chatMode === 'code'   && 'bg-gray-950/60',
                 chatMode === 'search' && 'bg-sky-950/20',
               )}>
-                {messages.map((msg, i) => <ChatBubble key={i} msg={msg} />)}
+                {/* UX-03: History loading skeleton */}
+                {!historyLoaded && (
+                  <div className="space-y-3 animate-pulse">
+                    <div className="flex gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-white/5 flex-shrink-0" />
+                      <div className="space-y-1.5 flex-1">
+                        <div className="h-3 bg-white/5 rounded-full w-3/4" />
+                        <div className="h-3 bg-white/5 rounded-full w-1/2" />
+                      </div>
+                    </div>
+                    <div className="flex gap-2.5 justify-end">
+                      <div className="space-y-1.5">
+                        <div className="h-3 bg-white/5 rounded-full w-32" />
+                      </div>
+                      <div className="w-8 h-8 rounded-full bg-white/5 flex-shrink-0" />
+                    </div>
+                    <div className="flex gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-white/5 flex-shrink-0" />
+                      <div className="space-y-1.5 flex-1">
+                        <div className="h-3 bg-white/5 rounded-full w-5/6" />
+                        <div className="h-3 bg-white/5 rounded-full w-2/3" />
+                        <div className="h-3 bg-white/5 rounded-full w-1/3" />
+                      </div>
+                    </div>
+                    <p className="text-white/20 text-[10px] text-center pt-1">Restoring your conversation…</p>
+                  </div>
+                )}
+                {historyLoaded && messages.map((msg, i) => <ChatBubble key={i} msg={msg} />)}
                 {sending && (
                   <div className="flex gap-2.5">
                     <div className={cn(
@@ -1868,14 +1989,64 @@ function StudioPageInner() {
                 <div ref={messagesEndRef} />
               </div>
 
+              {/* Attachment preview pill (FEAT-02) */}
+              {chatAttachFile && (
+                <div className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs mt-2',
+                  chatAttachLoading ? 'border-nexus-500/40 bg-nexus-900/30 text-nexus-300'
+                  : chatAttachError  ? 'border-red-500/40 bg-red-900/20 text-red-300'
+                  :                    'border-green-500/40 bg-green-900/20 text-green-300',
+                )}>
+                  {chatAttachLoading
+                    ? <Loader2 size={12} className="animate-spin flex-shrink-0" />
+                    : chatAttachError
+                      ? <AlertCircle size={12} className="flex-shrink-0" />
+                      : chatAttachType === 'image'
+                        ? <ImageIcon size={12} className="flex-shrink-0" />
+                        : <FileText size={12} className="flex-shrink-0" />}
+                  <span className="truncate flex-1">
+                    {chatAttachLoading ? 'Uploading…' : chatAttachError ? chatAttachError : chatAttachFile.name}
+                  </span>
+                  {!chatAttachLoading && (
+                    <button onClick={removeChatAttach} className="flex-shrink-0 hover:text-white transition-colors">
+                      <X size={11} />
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Input row */}
               <div className="flex gap-2 mt-2">
+                {/* Attachment button (FEAT-02) */}
+                <button
+                  type="button"
+                  onClick={() => chatFileInputRef.current?.click()}
+                  disabled={sending || chatAttachLoading}
+                  title="Attach image or document"
+                  className={cn(
+                    'px-3 py-2.5 rounded-xl border transition-all flex-shrink-0',
+                    chatAttachURL && !chatAttachError
+                      ? 'border-green-500/50 bg-green-900/20 text-green-400'
+                      : 'border-white/10 text-white/30 hover:border-white/25 hover:text-white/55',
+                    (sending || chatAttachLoading) && 'opacity-40 cursor-not-allowed',
+                  )}
+                >
+                  {chatAttachLoading ? <Loader2 size={15} className="animate-spin" /> : <Paperclip size={15} />}
+                </button>
+                <input
+                  ref={chatFileInputRef}
+                  type="file"
+                  accept="image/*,.pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                  onChange={handleChatAttachSelect}
+                  className="hidden"
+                />
                 <input
                   ref={inputRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChat()}
                   placeholder={
+                    chatAttachURL ? 'Ask about the attached file… (or press Enter)' :
                     chatMode === 'search' ? 'Search the web — ask about news, prices, facts…' :
                     chatMode === 'code'   ? 'Describe what code you need or paste code to explain…' :
                                            'Ask Nexus anything…'
@@ -1888,10 +2059,10 @@ function StudioPageInner() {
                 />
                 <button
                   onClick={handleChat}
-                  disabled={sending || !input.trim()}
+                  disabled={sending || (!input.trim() && !chatAttachURL) || chatAttachLoading}
                   className={cn(
                     'px-4 py-3 rounded-xl transition-all',
-                    input.trim() && !sending
+                    (input.trim() || chatAttachURL) && !sending && !chatAttachLoading
                       ? chatMode === 'code'   ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:opacity-90 active:scale-95'
                       : chatMode === 'search' ? 'bg-gradient-to-r from-sky-600 to-blue-600 text-white hover:opacity-90 active:scale-95'
                       :                         'bg-gradient-to-r from-gold-500/80 to-amber-600 text-white hover:opacity-90 active:scale-95'

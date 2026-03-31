@@ -22,6 +22,7 @@ type UserRepository interface {
 	SetPointsExpiry(ctx context.Context, userID uuid.UUID, expiresAt interface{}) error
 
 	// Wallet (two-pool ledger)
+	CreateWallet(ctx context.Context, wallet *entities.Wallet) error // ARCH-03: create wallet row on user registration
 	GetWallet(ctx context.Context, userID uuid.UUID) (*entities.Wallet, error)
 	GetWalletForUpdate(ctx context.Context, userID uuid.UUID) (*entities.Wallet, error) // SELECT FOR UPDATE
 	UpdateWallet(ctx context.Context, wallet *entities.Wallet) error

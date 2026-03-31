@@ -108,23 +108,21 @@ func NewLLMOrchestrator(
 
 // ─── buildMemoryBlock constructs the [NEXUS MEMORY] context block ────────────
 
-func (o *LLMOrchestrator) buildMemoryBlock(ctx context.Context, uid uuid.UUID, sessionID string) string {
-	// 1. Fetch up to 3 past session summaries
-	summaries, _ := o.chatRepo.GetLastSummaries(ctx, uid, 3)
+func (o *LLMOrchestrator) buildMemoryBlock(ctx context.Context, uid uuid.UUID, sessionID, toolSlug string) string {
+	if toolSlug == "" {
+		toolSlug = "general"
+	}
+	// 1. Fetch up to 3 past session summaries scoped to this chat mode
+	summaries, _ := o.chatRepo.GetLastSummaries(ctx, uid, toolSlug, 3)
 
 	// 2. Fetch last 5 raw messages from the current session (if sessionID given)
 	var recentMsgs []repositories.ChatMessage
 	if sessionID != "" {
 		sid, err := uuid.Parse(sessionID)
 		if err == nil {
-			all, err := o.chatRepo.GetSessionMessages(ctx, sid)
-			if err == nil && len(all) > 0 {
-				// Take the last 5
-				start := len(all) - 5
-				if start < 0 {
-					start = 0
-				}
-				recentMsgs = all[start:]
+			msgs, err := o.chatRepo.GetRecentMessages(ctx, sid, 5)
+			if err == nil {
+				recentMsgs = msgs
 			}
 		}
 	}
@@ -261,7 +259,7 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 
 	// 2. Build session memory context
 	uid, _ := uuid.Parse(req.UserID)
-	memoryBlock := o.buildMemoryBlock(ctx, uid, req.SessionID)
+	memoryBlock := o.buildMemoryBlock(ctx, uid, req.SessionID, req.ToolSlug)
 
 	// 3. Build system prompt
 	// Determine system prompt based on tool slug (chat mode)
@@ -534,6 +532,29 @@ func (o *LLMOrchestrator) GetDailyChatCount(ctx context.Context, uid string) int
 // ─── SaveMessage ─────────────────────────────────────────────────────────────
 func (o *LLMOrchestrator) SaveMessage(ctx context.Context, sessionID uuid.UUID, role, content string) error {
 	return o.chatRepo.AppendMessage(ctx, sessionID, role, content)
+}
+
+// ─── GetChatHistory ──────────────────────────────────────────────────────────
+// GetChatHistory returns the active session ID and all messages for the given
+// user + toolSlug, so the frontend can restore the chat UI on page load.
+func (o *LLMOrchestrator) GetChatHistory(ctx context.Context, userID, toolSlug string) (sessionID string, messages []repositories.ChatMessage, err error) {
+	uid, parseErr := uuid.Parse(userID)
+	if parseErr != nil {
+		return "", nil, fmt.Errorf("invalid user id")
+	}
+	if toolSlug == "" {
+		toolSlug = "general"
+	}
+	sess, sessErr := o.chatRepo.GetActiveSession(ctx, uid, toolSlug)
+	if sessErr != nil {
+		// No active session — return empty history (not an error)
+		return "", nil, nil
+	}
+	msgs, msgErr := o.chatRepo.GetSessionMessages(ctx, sess.ID)
+	if msgErr != nil {
+		return sess.ID.String(), nil, nil
+	}
+	return sess.ID.String(), msgs, nil
 }
 
 // ─── GroqAdapter ─────────────────────────────────────────────────────────────
