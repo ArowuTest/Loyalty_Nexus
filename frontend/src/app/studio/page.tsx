@@ -1555,23 +1555,50 @@ function StudioPageInner() {
 
   const [activeTab,      setActiveTab]      = useState<"chat" | "tools" | "gallery">("tools");
   const [chatMode,        setChatMode]        = useState<ChatMode>('general');
-  const [messages,       setMessages]       = useState<Message[]>([{
-    role: "assistant",
-    content: "Hey! 👋 I'm Nexus AI — your personal AI assistant. I can help with business ideas, explain anything, draft content, and more. What's on your mind?",
-    ts: Date.now(),
-  }]);
+  // ── Per-mode isolated message histories ──────────────────────────────────
+  const WELCOME: Record<ChatMode, string> = {
+    general: "Hey! 👋 I'm Nexus AI — your personal AI assistant. I can help with business ideas, explain anything, draft content, and more. What's on your mind?",
+    search:  "🔍 Web Search is ready. Ask me anything — current news, prices, facts, or real-time data.",
+    code:    "💻 Code Helper is ready. Describe what you need or paste code to explain, debug, or improve.",
+  };
+  const [modeMessages, setModeMessages] = useState<Record<ChatMode, Message[]>>({
+    general: [{ role: "assistant", content: WELCOME.general, ts: Date.now() }],
+    search:  [{ role: "assistant", content: WELCOME.search,  ts: Date.now(), mode: 'search' }],
+    code:    [{ role: "assistant", content: WELCOME.code,    ts: Date.now(), mode: 'code'   }],
+  });
+  // Convenience alias for the active mode's messages
+  const messages    = modeMessages[chatMode];
+  const setMessages = (updater: Message[] | ((prev: Message[]) => Message[])) => {
+    setModeMessages((prev) => ({
+      ...prev,
+      [chatMode]: typeof updater === 'function' ? updater(prev[chatMode]) : updater,
+    }));
+  };
   const [input,          setInput]          = useState("");
   const [sending,        setSending]        = useState(false);
-  // Persist session ID across page loads for memory continuity
-  const [sessionId]                         = useState<string>(() => {
+  // Persist session IDs per chat mode for memory continuity
+  const getOrCreateSessionId = (mode: ChatMode): string => {
+    const key = `nexus_chat_session_${mode}`;
     try {
-      const stored = localStorage.getItem('nexus_chat_session');
+      const stored = localStorage.getItem(key);
       if (stored) return stored;
     } catch { /* ignore */ }
-    const fresh = `sess_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    try { localStorage.setItem('nexus_chat_session', fresh); } catch { /* ignore */ }
+    const fresh = `sess_${mode}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    try { localStorage.setItem(key, fresh); } catch { /* ignore */ }
     return fresh;
-  });
+  };
+  // Initialise all three session IDs once on mount
+  const sessionIds = useRef<Record<ChatMode, string>>({ general: '', search: '', code: '' });
+  useEffect(() => {
+    sessionIds.current = {
+      general: getOrCreateSessionId('general'),
+      search:  getOrCreateSessionId('search'),
+      code:    getOrCreateSessionId('code'),
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Current mode's session ID
+  const sessionId = sessionIds.current[chatMode] || `sess_${chatMode}_${Date.now()}`;
   const searchParams    = useSearchParams();
   const [selectedTool,   setSelectedTool]   = useState<Tool | null>(null);
   const [searchQuery,    setSearchQuery]    = useState("");
@@ -1647,9 +1674,10 @@ function StudioPageInner() {
       if (currentMode === 'search') toolSlug = 'web-search-ai';
       if (currentMode === 'code')   toolSlug = 'code-helper';
       const resp = await api.sendChat(msg, sessionId, toolSlug) as { response: string; provider?: string; session_id?: string; message_count?: number };
-      // If backend returns a new session_id, update localStorage
+      // If backend returns a new session_id, update localStorage for this mode
       if (resp.session_id && resp.session_id !== sessionId) {
-        try { localStorage.setItem('nexus_chat_session', resp.session_id); } catch { /* ignore */ }
+        sessionIds.current[currentMode] = resp.session_id;
+        try { localStorage.setItem(`nexus_chat_session_${currentMode}`, resp.session_id); } catch { /* ignore */ }
       }
       setMessages((m) => [...m, { role: "assistant", content: resp.response, provider: resp.provider, ts: Date.now(), mode: currentMode }]);
       // Update chat usage counter from response
@@ -1671,14 +1699,20 @@ function StudioPageInner() {
   }, [input, sending, sessionId, chatMode]);
 
   const handleClearChat = useCallback(() => {
-    // Clear session from localStorage so a fresh one starts
-    try { localStorage.removeItem('nexus_chat_session'); } catch { /* ignore */ }
+    // Clear only the current mode's session from localStorage
+    const key = `nexus_chat_session_${chatMode}`;
+    try { localStorage.removeItem(key); } catch { /* ignore */ }
+    // Mint a fresh session ID for this mode
+    const fresh = `sess_${chatMode}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    sessionIds.current[chatMode] = fresh;
+    try { localStorage.setItem(key, fresh); } catch { /* ignore */ }
     setMessages([{
       role: "assistant",
-      content: "Hey! 👋 I'm Nexus AI — your personal AI assistant. I can help with business ideas, explain anything, draft content, and more. What's on your mind?",
+      content: WELCOME[chatMode],
       ts: Date.now(),
+      mode: chatMode,
     }]);
-  }, []);
+  }, [chatMode]);
 
   const handleSummariseChat = useCallback(async () => {
     if (messages.length < 4) return;

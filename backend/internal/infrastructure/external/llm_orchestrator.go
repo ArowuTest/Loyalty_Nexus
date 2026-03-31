@@ -264,13 +264,29 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 	memoryBlock := o.buildMemoryBlock(ctx, uid, req.SessionID)
 
 	// 3. Build system prompt
-	systemPrompt := "You are Nexus, a helpful AI assistant for Loyalty Nexus subscribers in Nigeria. " +
-		"Be concise, practical and locally aware. You understand Nigerian English, culture, and context."
+	// Determine system prompt based on tool slug (chat mode)
+	var basePrompt string
+	switch req.ToolSlug {
+	case "web-search-ai":
+		basePrompt = "You are Nexus AI with real-time web search access. You are a helpful assistant for users in Nigeria. " +
+			"Provide current, accurate information. Be concise and locally aware of Nigerian context. " +
+			"Today's date is " + time.Now().UTC().Format("Monday, January 2, 2006") + "."
+	case "code-helper":
+		basePrompt = "You are Nexus Code, an expert programming assistant. " +
+			"Write clean, well-commented code. Explain your solution clearly. Format code blocks with proper markdown. " +
+			"Support all major languages. Be concise and practical."
+	default:
+		basePrompt = "You are Nexus AI, a helpful personal assistant for users in Nigeria. " +
+			"You can help with any topic: business ideas, general knowledge, content creation, advice, and more. " +
+			"Be concise, practical and locally aware. You understand Nigerian English, culture, and context. " +
+			"Today's date is " + time.Now().UTC().Format("Monday, January 2, 2006") + "."
+	}
+	systemPrompt := basePrompt
 	if memoryBlock != "" {
 		systemPrompt += "\n\n" + memoryBlock
 	}
 
-	// 4. Route: Groq → Gemini Flash-Lite → DeepSeek
+	// 4. Route: Gemini (primary) → Groq (fast fallback) → DeepSeek (overflow)
 	var (
 		text     string
 		provider LLMProvider
@@ -278,37 +294,40 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 	)
 
 	switch {
-	case dailyCount < o.groqDailyLimit:
-		text, err = o.groqClient.Complete(ctx, systemPrompt, req.Prompt)
+	case dailyCount < o.geminiDailyLimit:
+		// Primary: Gemini 2.0 Flash
+		text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
 		if err != nil {
-			log.Printf("[LLM] Groq failed (count=%d) → falling through to Gemini: %v", dailyCount, err)
-			go o.recordProviderUse(context.Background(), ProviderGroq, false, err.Error())
-			// Fall through to Gemini
-			text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
+			log.Printf("[LLM] Gemini failed (count=%d) → falling through to Groq: %v", dailyCount, err)
+			go o.recordProviderUse(context.Background(), ProviderGeminiLite, false, err.Error())
+			// Fallback: Groq
+			text, err = o.groqClient.Complete(ctx, systemPrompt, req.Prompt)
 			if err != nil {
-				log.Printf("[LLM] Gemini failed → DeepSeek: %v", err)
-				go o.recordProviderUse(context.Background(), ProviderGeminiLite, false, err.Error())
+				log.Printf("[LLM] Groq failed → DeepSeek: %v", err)
+				go o.recordProviderUse(context.Background(), ProviderGroq, false, err.Error())
 				text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
 				provider = ProviderDeepSeek
 			} else {
-				provider = ProviderGeminiLite
+				provider = ProviderGroq
 			}
-		} else {
-			provider = ProviderGroq
-		}
-
-	case dailyCount < o.geminiDailyLimit:
-		text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
-		if err != nil {
-			log.Printf("[LLM] Gemini failed (count=%d) → DeepSeek: %v", dailyCount, err)
-			go o.recordProviderUse(context.Background(), ProviderGeminiLite, false, err.Error())
-			text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
-			provider = ProviderDeepSeek
 		} else {
 			provider = ProviderGeminiLite
 		}
 
+	case dailyCount < o.groqDailyLimit:
+		// Secondary: Groq (fast)
+		text, err = o.groqClient.Complete(ctx, systemPrompt, req.Prompt)
+		if err != nil {
+			log.Printf("[LLM] Groq failed (count=%d) → DeepSeek: %v", dailyCount, err)
+			go o.recordProviderUse(context.Background(), ProviderGroq, false, err.Error())
+			text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
+			provider = ProviderDeepSeek
+		} else {
+			provider = ProviderGroq
+		}
+
 	default:
+		// Overflow: DeepSeek
 		text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
 		provider = ProviderDeepSeek
 	}
@@ -530,7 +549,7 @@ func NewGroqAdapter(apiKey string) *GroqAdapter {
 
 func (a *GroqAdapter) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	payload := map[string]interface{}{
-		"model": "llama-4-scout-17b-16e-instruct",
+		"model": "llama-3.3-70b-versatile",
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
@@ -579,7 +598,7 @@ func (a *GroqAdapter) Complete(ctx context.Context, systemPrompt, userPrompt str
 	return result.Choices[0].Message.Content, nil
 }
 
-// ─── GeminiAdapter (gemini-2.0-flash-lite) ───────────────────────────────────
+// ─── GeminiAdapter (gemini-2.0-flash) ───────────────────────────────────────
 
 type GeminiAdapter struct {
 	apiKey string
@@ -592,7 +611,7 @@ func NewGeminiAdapter(apiKey string) *GeminiAdapter {
 
 func (a *GeminiAdapter) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	url := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=%s",
+		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s",
 		a.apiKey,
 	)
 
