@@ -23,6 +23,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -39,6 +40,9 @@ func main() {
 	if dbURL == "" {
 		log.Fatal("[migrate] Neither MIGRATE_DATABASE_URL nor DATABASE_URL is set")
 	}
+	// golang-migrate's postgres driver only accepts "postgres://" scheme, not "postgresql://".
+	// Render's connection-info API returns "postgresql://" — normalise it here.
+	dbURL = strings.Replace(dbURL, "postgresql://", "postgres://", 1)
 	log.Printf("[migrate] Using database host from URL (first 40 chars): %.40s...", dbURL)
 
 	migrationsDir := os.Getenv("MIGRATIONS_DIR")
