@@ -693,21 +693,19 @@ function RegionalWarsWidget() {
 
 // ─── Main Dashboard Page ──────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const { setUser, setWallet } = useStore();
-
+  const { setUser, setWallet, wallet: storedWallet } = useStore();
   const fetcher = (key: string) => {
     if (key === "/user/profile")     return api.getProfile();
     if (key === "/user/wallet")      return api.getWallet();
     if (key === "/user/bonus-pulse") return api.getBonusPulseAwards();
     return Promise.resolve(null);
   };
-
   const { data: profile }   = useSWR("/user/profile",     fetcher, { onSuccess: (d: unknown) => setUser(d as Parameters<typeof setUser>[0]) });
   const { data: wallet }    = useSWR("/user/wallet",      fetcher, { onSuccess: (d: unknown) => setWallet(d as Parameters<typeof setWallet>[0]) });
   const { data: bonusData } = useSWR("/user/bonus-pulse", fetcher);
-
   const p = profile as { phone_number?: string; tier?: string; streak_count?: number; total_spins?: number; studio_use_count?: number } | undefined;
-  const w = wallet  as { pulse_points?: number; spin_credits?: number; lifetime_points?: number } | undefined;
+  // Use SWR data when available, fall back to persisted store value to avoid flash-to-zero
+  const w = (wallet ?? storedWallet) as { pulse_points?: number; spin_credits?: number; lifetime_points?: number } | undefined;
   const b = bonusData as { total_bonus?: number } | undefined;
 
   const tier        = (p?.tier ?? "BRONZE").toUpperCase();

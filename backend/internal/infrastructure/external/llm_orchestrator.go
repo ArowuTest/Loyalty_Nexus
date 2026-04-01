@@ -74,7 +74,7 @@ type UsageTracker interface {
 
 type LLMOrchestrator struct {
 	groqClient       LLMClient
-	geminiClient     LLMClient // gemini-2.0-flash-lite
+	geminiClient     LLMClient // gemini-2.5-flash
 	deepSeekClient   LLMClient
 	usageTracker     UsageTracker
 	chatRepo         repositories.ChatRepository
@@ -293,7 +293,7 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 
 	switch {
 	case dailyCount < o.geminiDailyLimit:
-		// Primary: Gemini 2.0 Flash
+		// Primary: Gemini 2.5 Flash
 		text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
 		if err != nil {
 			log.Printf("[LLM] Gemini failed (count=%d) → falling through to Groq: %v", dailyCount, err)
@@ -619,7 +619,7 @@ func (a *GroqAdapter) Complete(ctx context.Context, systemPrompt, userPrompt str
 	return result.Choices[0].Message.Content, nil
 }
 
-// ─── GeminiAdapter (gemini-2.0-flash) ───────────────────────────────────────
+// ─── GeminiAdapter (gemini-2.5-flash) ───────────────────────────────────────
 
 type GeminiAdapter struct {
 	apiKey string
@@ -632,7 +632,7 @@ func NewGeminiAdapter(apiKey string) *GeminiAdapter {
 
 func (a *GeminiAdapter) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	url := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s",
+		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s",
 		a.apiKey,
 	)
 

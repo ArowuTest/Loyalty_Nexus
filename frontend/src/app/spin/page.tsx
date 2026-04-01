@@ -10,6 +10,7 @@ import Link from "next/link";
 import { Zap, Trophy, RotateCcw, Gift, X, Sparkles, Loader2, History, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DailySpinProgress from "@/components/spin/DailySpinProgress";
+import { useStore } from "@/store/useStore";
 
 // ── Fallback segments used only if API is unavailable ──────────────────────
 const FALLBACK_SEGMENTS = [
@@ -72,11 +73,13 @@ export default function SpinPage() {
   const [outcome, setOutcome] = useState<SpinOutcome | null>(null);
   const [showResult, setShowResult] = useState(false);
 
-  // Wallet — shows spin credits
+  // Wallet — shows spin credits; fall back to persisted store value to avoid flash-to-zero
+  const storedWallet = useStore((s) => s.wallet);
   const { data: walletData, mutate: mutateWallet } = useSWR<Wallet>(
     "/user/wallet", () => api.getWallet() as Promise<Wallet>, { refreshInterval: 30000 }
   );
-  const spinCredits = walletData?.spin_credits ?? 0;
+  const effectiveWallet = walletData ?? (storedWallet as Wallet | null) ?? null;
+  const spinCredits = effectiveWallet?.spin_credits ?? 0;
 
   // Spin history
   const { data: historyData, mutate: mutateHistory } = useSWR(
@@ -191,7 +194,7 @@ export default function SpinPage() {
             <span className={cn(
               "text-2xl font-bold font-display",
               spinCredits > 0 ? "text-yellow-400" : "text-white/30"
-            )}>{walletData ? spinCredits : "—"}</span>
+            )}>{effectiveWallet ? spinCredits : "—"}</span>
             {spinCredits === 0 && (
               <span className="text-[10px] text-white/30 border border-white/10 rounded-full px-2 py-0.5">
                 Recharge to earn

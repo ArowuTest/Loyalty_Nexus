@@ -1550,8 +1550,9 @@ function StudioPageInner() {
   const { data: galleryData, mutate: mutateGallery }  = useSWR("/studio/gallery", fetchGallery, {
     refreshInterval: 15000,
   });
-  const user       = useStore((s) => s.user);
-  const wallet     = useStore((s) => s.wallet);
+  const user            = useStore((s) => s.user);
+  const wallet          = useStore((s) => s.wallet);
+  const isAuthenticated = useStore((s) => s.isAuthenticated);
   const userPoints = wallet?.pulse_points ?? 0;
 
   const tools   = toolsData?.tools   ?? [];
@@ -1603,6 +1604,14 @@ function StudioPageInner() {
   // Initialise all three session IDs once on mount
   const sessionIds = useRef<Record<ChatMode, string>>({ general: '', search: '', code: '' });
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  // Reset historyLoaded when user logs out so history reloads after next login
+  const prevAuthRef = useRef(false);
+  useEffect(() => {
+    if (prevAuthRef.current && !isAuthenticated) {
+      setHistoryLoaded(false);
+    }
+    prevAuthRef.current = isAuthenticated;
+  }, [isAuthenticated]);
   useEffect(() => {
     sessionIds.current = {
       general: getOrCreateSessionId('general'),
@@ -1613,8 +1622,10 @@ function StudioPageInner() {
   }, []);
 
   // BUG-05 fix: restore chat history for all 3 modes on page load
+  // Depends on isAuthenticated so it re-runs after login
   useEffect(() => {
     if (historyLoaded) return;
+    if (!isAuthenticated) return;
     const modes: ChatMode[] = ['general', 'search', 'code'];
     Promise.allSettled(
       modes.map((mode) =>
@@ -1650,7 +1661,7 @@ function StudioPageInner() {
       setHistoryLoaded(true);
     }).catch(() => setHistoryLoaded(true));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAuthenticated, historyLoaded]);
 
   // Current mode's session ID
   const sessionId = sessionIds.current[chatMode] || `sess_${chatMode}_${Date.now()}`;

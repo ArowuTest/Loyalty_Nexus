@@ -48,6 +48,7 @@ export const useStore = create<AppState>()(
       partialize: (state) => ({
         token: state.token,
         user: state.user,
+        wallet: state.wallet,
         isAuthenticated: state.isAuthenticated,
       }),
       onRehydrateStorage: () => (state) => {

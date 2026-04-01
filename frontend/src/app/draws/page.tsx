@@ -8,6 +8,7 @@ import { Ticket, Trophy, Clock, RefreshCw, Gift, Zap, ChevronDown, ChevronUp, Us
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
 import toast, { Toaster } from "react-hot-toast";
+import { useStore } from "@/store/useStore";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface Draw {
@@ -195,13 +196,15 @@ export default function DrawsPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState(Date.now());
 
-  // Fetch wallet to show user's personal draw entry count
+  // Fetch wallet to show user's personal draw entry count; fall back to persisted store value
+  const storedWallet = useStore((s) => s.wallet);
   const { data: walletData } = useSWR(
     "/user/wallet",
     () => api.getWallet() as Promise<{ draw_counter: number; spin_credits: number; pulse_points: number }>,
     { refreshInterval: 30000 }
   );
-  const myDrawEntries = walletData?.draw_counter ?? 0;
+  const effectiveWallet = walletData ?? (storedWallet as typeof walletData | null) ?? null;
+  const myDrawEntries = effectiveWallet?.draw_counter ?? 0;
 
   const fetchDraws = useCallback(async () => {
     setLoading(true);
@@ -267,7 +270,7 @@ export default function DrawsPage() {
             <p className={cn(
               "text-2xl font-bold font-display",
               myDrawEntries > 0 ? "text-nexus-300" : "text-white/30"
-            )}>{walletData ? myDrawEntries.toLocaleString() : "—"}</p>
+            )}>{effectiveWallet ? myDrawEntries.toLocaleString() : "—"}</p>
             {myDrawEntries === 0 && (
               <p className="text-[10px] text-white/30">Recharge to earn entries</p>
             )}
