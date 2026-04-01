@@ -93,7 +93,10 @@ class APIClient {
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    if (resp.status === 401) {
+    // Only treat 401 as a session expiry for authenticated (non-public) requests.
+    // Public endpoints like OTP verify return 401 for invalid codes — those should
+    // surface the actual error message, not trigger a forced logout.
+    if (resp.status === 401 && !isPublic) {
       this.clearToken();
       // Dispatch a soft event so the app can handle session expiry gracefully
       // (e.g., show the login modal) without a hard page reload that causes flicker.

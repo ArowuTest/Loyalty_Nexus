@@ -22,7 +22,7 @@ interface AuthModalProps {
 
 export default function AuthModal({ open, onClose }: AuthModalProps) {
   const router                    = useRouter();
-  const { setToken, setUser }     = useStore();
+  const { setToken, setUser, setWallet } = useStore();
   const [step, setStep]           = useState<Step>("phone");
   const [phone, setPhone]         = useState("");
   const [cc, setCc]               = useState("+234");
@@ -117,9 +117,14 @@ export default function AuthModal({ open, onClose }: AuthModalProps) {
       // Sync the API client token FIRST so subsequent requests are authenticated
       api.setToken(res.token);
       setToken(res.token);
-      // Fetch the user profile after login to populate the store
-      const profile = await api.getProfile() as { id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean };
+      // Pre-fetch both profile AND wallet in parallel so the dashboard shows
+      // real data immediately without a flash-to-zero on first load.
+      const [profile, wallet] = await Promise.all([
+        api.getProfile() as Promise<{ id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean }>,
+        api.getWallet() as Promise<{ pulse_points: number; spin_credits: number; lifetime_points: number }>,
+      ]);
       setUser(profile);
+      setWallet(wallet);
       setStep("success");
       setTimeout(() => {
         onClose();
@@ -133,7 +138,7 @@ export default function AuthModal({ open, onClose }: AuthModalProps) {
     } finally {
       setLoading(false);
     }
-  }, [fullPhone, setToken, setUser, onClose, router]);
+  }, [fullPhone, setToken, setUser, setWallet, onClose, router]);
 
   const handleResend = async () => {
     if (resendTimer > 0) return;
