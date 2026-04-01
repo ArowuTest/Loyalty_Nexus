@@ -355,18 +355,30 @@ function SessionBar({ userPoints }: { userPoints: number }) {
   const [chatInfo, setChatInfo] = useState<{ used: number; limit: number } | null>(null);
 
   useEffect(() => {
+    let iv: ReturnType<typeof setInterval>;
+    let emptyCount = 0;
     const fetchAll = async () => {
       try {
         const [sess, chat] = await Promise.all([
           (api as any).getSessionUsage(),
           (api as any).getChatUsage(),
         ]);
-        if (sess?.active) setSession(sess); else setSession(null);
+        const isActive = sess?.active && (sess.total_pts_used > 0 || sess.generation_count > 0);
+        if (isActive) {
+          setSession(sess);
+          emptyCount = 0;
+        } else {
+          setSession(null);
+          emptyCount++;
+          // Stop polling after 3 consecutive empty results — no active session
+          // The bar re-mounts naturally when the user triggers a generation
+          if (emptyCount >= 3) { clearInterval(iv); return; }
+        }
         if (chat?.limit != null) setChatInfo(chat);
       } catch { /* silent */ }
     };
     fetchAll();
-    const iv = setInterval(fetchAll, 10000);
+    iv = setInterval(fetchAll, 10000);
     return () => clearInterval(iv);
   }, []);
 

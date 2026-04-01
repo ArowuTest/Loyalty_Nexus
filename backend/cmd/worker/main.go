@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"loyalty-nexus/internal/application/services"
 	"loyalty-nexus/internal/infrastructure/config"
@@ -30,7 +31,10 @@ func main() {
 		err error
 	)
 	for attempt := 1; attempt <= 30; attempt++ {
-		db, err = gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
+		db, err = gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{
+			// Only log actual errors — suppresses noisy "record not found" from First() calls
+			Logger: logger.Default.LogMode(logger.Error),
+		})
 		if err == nil {
 			break
 		}
