@@ -418,10 +418,15 @@ func (h *StudioHandler) handleGeneralChat(w http.ResponseWriter, r *http.Request
 	}
 	// Increment daily chat counter and return count so frontend can display it
 	msgCount := h.llmOrch.IncrDailyChatCount(r.Context(), uid)
+	// Use the resolved session UUID from the LLM response (so frontend can persist it)
+	resolvedSession := resp.SessionID
+	if resolvedSession == "" {
+		resolvedSession = sessionID
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"response":      resp.Text,
 		"provider":      resp.Provider,
-		"session_id":    sessionID,
+		"session_id":    resolvedSession,
 		"message_count": msgCount,
 	})
 }

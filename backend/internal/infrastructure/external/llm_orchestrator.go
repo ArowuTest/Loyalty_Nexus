@@ -54,9 +54,10 @@ type LLMRequest struct {
 }
 
 type LLMResponse struct {
-	Text     string
-	Provider LLMProvider
-	Cached   bool // true if served from Redis cache
+	Text      string
+	Provider  LLMProvider
+	Cached    bool   // true if served from Redis cache
+	SessionID string // resolved UUID session ID (for frontend to persist)
 }
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
@@ -339,11 +340,33 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 	// 5. Post-success: increment usage counter & persist messages
 	_ = o.usageTracker.Increment(ctx, req.UserID)
 
+	// Resolve session UUID: if req.SessionID is already a valid UUID, use it;
+	// otherwise get-or-create a session in chat_sessions by (userID, toolSlug).
+	// This ensures messages are always persisted even when the frontend sends
+	// non-UUID session IDs like "sess_general_1234567890".
+	var resolvedSessionID string
 	if req.SessionID != "" {
-		sid, parseErr := uuid.Parse(req.SessionID)
-		if parseErr == nil {
+		if sid, parseErr := uuid.Parse(req.SessionID); parseErr == nil {
+			// Already a valid UUID — use it directly
 			_ = o.chatRepo.AppendMessage(ctx, sid, "user", req.Prompt)
 			_ = o.chatRepo.AppendMessage(ctx, sid, "assistant", text)
+			resolvedSessionID = sid.String()
+		} else {
+			// Not a UUID — resolve via chat_sessions table
+			toolSlug := req.ToolSlug
+			if toolSlug == "" {
+				toolSlug = "general"
+			}
+			sess, sessErr := o.chatRepo.GetActiveSession(ctx, uid, toolSlug)
+			if sessErr != nil {
+				// No active session — create one
+				sess, sessErr = o.chatRepo.CreateSession(ctx, uid, toolSlug)
+			}
+			if sessErr == nil && sess != nil {
+				_ = o.chatRepo.AppendMessage(ctx, sess.ID, "user", req.Prompt)
+				_ = o.chatRepo.AppendMessage(ctx, sess.ID, "assistant", text)
+				resolvedSessionID = sess.ID.String()
+			}
 		}
 	}
 
@@ -351,9 +374,10 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 	go o.recordProviderUse(context.Background(), provider, true, "")
 
 	return &LLMResponse{
-		Text:     text,
-		Provider: provider,
-		Cached:   false,
+		Text:      text,
+		Provider:  provider,
+		Cached:    false,
+		SessionID: resolvedSessionID,
 	}, nil
 }
 
@@ -425,17 +449,33 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 		return o.Chat(ctx, req)
 	}
 
-	// Persist messages to session
+	// Persist messages to session (same logic as Chat())
+	uid, _ := uuid.Parse(req.UserID)
+	var resolvedSessionID string
 	if req.SessionID != "" {
-		sid, parseErr := uuid.Parse(req.SessionID)
-		if parseErr == nil {
+		if sid, parseErr := uuid.Parse(req.SessionID); parseErr == nil {
 			_ = o.chatRepo.AppendMessage(ctx, sid, "user", req.Prompt)
 			_ = o.chatRepo.AppendMessage(ctx, sid, "assistant", text)
+			resolvedSessionID = sid.String()
+		} else {
+			toolSlug := req.ToolSlug
+			if toolSlug == "" {
+				toolSlug = "general"
+			}
+			sess, sessErr := o.chatRepo.GetActiveSession(ctx, uid, toolSlug)
+			if sessErr != nil {
+				sess, sessErr = o.chatRepo.CreateSession(ctx, uid, toolSlug)
+			}
+			if sessErr == nil && sess != nil {
+				_ = o.chatRepo.AppendMessage(ctx, sess.ID, "user", req.Prompt)
+				_ = o.chatRepo.AppendMessage(ctx, sess.ID, "assistant", text)
+				resolvedSessionID = sess.ID.String()
+			}
 		}
 	}
 	go o.recordProviderUse(context.Background(), providerName, true, "")
 
-	return &LLMResponse{Text: text, Provider: providerName}, nil
+	return &LLMResponse{Text: text, Provider: providerName, SessionID: resolvedSessionID}, nil
 }
 
 // callPollinationsChat is a shared helper for Pollinations OpenAI-compatible chat.
