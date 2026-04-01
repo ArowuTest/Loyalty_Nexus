@@ -1,7 +1,13 @@
 #!/bin/sh
-# entrypoint.sh — Starts the API binary.
-# Database migrations are handled by Render's preDeployCommand (/migrate up)
-# which runs before this container goes live. This script only starts the app.
+# entrypoint.sh — Runs database migrations then starts the API binary.
+# Migrations use DATABASE_URL (internal Render network — fast, no SSL needed).
+# If migrations fail the container exits non-zero and Render keeps the previous
+# healthy version live.
 
-echo "[entrypoint] Starting API..."
+set -e
+
+echo "[entrypoint] Running database migrations..."
+/migrate fix-and-up
+
+echo "[entrypoint] Migrations complete. Starting API..."
 exec /api

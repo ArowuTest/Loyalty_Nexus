@@ -15,11 +15,9 @@ services:
     dockerContext: .
     dockerBuildTarget: api
 
-    # Migrations run as a preDeployCommand — before the new container goes live.
-    # If any migration fails, Render aborts the deploy and keeps the previous
-    # healthy version live (zero-downtime guarantee).
-    # The entrypoint.sh only starts the API binary — no migration logic.
-    preDeployCommand: /migrate fix-and-up
+    # Migrations run inside entrypoint.sh using DATABASE_URL (internal Render
+    # private network — no SSL needed, fast). If migrations fail the container
+    # exits non-zero and Render keeps the previous healthy version live.
 
     # Render web services always bind on port 10000.
     # The Go API reads PORT env var and defaults to 8080 — we override here.
@@ -45,14 +43,6 @@ services:
         fromDatabase:
           name: loyalty-nexus-db
           property: connectionString
-      # MIGRATE_DATABASE_URL uses the external hostname + SSL — required for
-      # preDeployCommand which runs outside the private network
-      - key: MIGRATE_DATABASE_URL
-        fromDatabase:
-          name: loyalty-nexus-db
-          property: externalConnectionString
-
-
       # ── Redis ─────────────────────────────────────────────────────────────
       - key: REDIS_URL
         fromService:
