@@ -38,7 +38,18 @@ func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	devCode, err := h.authSvc.SendOTP(r.Context(), req.PhoneNumber, req.Purpose)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to send OTP"})
+		// Surface the actual error so the frontend can show a meaningful message.
+		// Rate-limit errors get 429; everything else gets 400 (client-side issue)
+		// or 500 for genuine server failures.
+		statusCode := http.StatusBadRequest
+		msg := err.Error()
+		if errors.Is(err, services.ErrRateLimitExceeded) {
+			statusCode = http.StatusTooManyRequests
+		} else if msg == "failed to save OTP" || msg == "failed to generate OTP" || msg == "failed to check rate limit" {
+			statusCode = http.StatusInternalServerError
+			msg = "failed to send OTP"
+		}
+		writeJSON(w, statusCode, map[string]string{"error": msg})
 		return
 	}
 	resp := map[string]interface{}{"message": "OTP sent"}

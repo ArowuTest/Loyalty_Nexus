@@ -25,10 +25,11 @@ import (
 )
 
 var (
-	ErrOTPNotFound = errors.New("OTP not found or already used")
-	ErrOTPExpired  = errors.New("OTP has expired")
-	ErrOTPInvalid  = errors.New("OTP code is incorrect")
-	ErrUserBanned  = errors.New("account is suspended")
+	ErrOTPNotFound        = errors.New("OTP not found or already used")
+	ErrOTPExpired         = errors.New("OTP has expired")
+	ErrOTPInvalid         = errors.New("OTP code is incorrect")
+	ErrUserBanned         = errors.New("account is suspended")
+	ErrRateLimitExceeded  = errors.New("rate limit exceeded: please try again later")
 )
 
 type AuthService struct {
@@ -74,7 +75,7 @@ func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) (strin
 		return "", fmt.Errorf("failed to check rate limit: %w", err)
 	}
 	if count >= 3 {
-		return "", errors.New("rate limit exceeded: please try again later")
+		return "", ErrRateLimitExceeded
 	}
 
 	// Generate 6-digit code using CSPRNG
