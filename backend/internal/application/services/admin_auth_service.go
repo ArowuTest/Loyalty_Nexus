@@ -310,16 +310,29 @@ func (s *AdminAuthService) MintIntegrationTestToken(adminID uuid.UUID) (string, 
 }
 
 func (s *AdminAuthService) seedDefaultAdmin() {
-	var count int64
-	s.db.Model(&entities.AdminUser{}).Count(&count)
-	if count > 0 {
-		return
-	}
 	email := os.Getenv("ADMIN_SEED_EMAIL")
 	password := os.Getenv("ADMIN_SEED_PASSWORD")
 	if email == "" || password == "" {
-		log.Println("[AdminAuth] No admins exist and ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD not set. " +
-			"Set these env vars to create the first super_admin on startup.")
+		log.Println("[AdminAuth] ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD not set — skipping admin seed.")
+		return
+	}
+
+	// If ADMIN_SEED_FORCE_RESET=true, update the password for the existing admin with this email.
+	if os.Getenv("ADMIN_SEED_FORCE_RESET") == "true" {
+		var admin entities.AdminUser
+		if err := s.db.Where("email = ?", email).First(&admin).Error; err == nil {
+			hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+			if err == nil {
+				s.db.Model(&admin).Update("password_hash", string(hashed))
+				log.Printf("[AdminAuth] ✅ Admin password force-reset for: %s", email)
+			}
+			return
+		}
+	}
+
+	var count int64
+	s.db.Model(&entities.AdminUser{}).Count(&count)
+	if count > 0 {
 		return
 	}
 	if _, err := s.CreateAdmin(context.Background(), email, password, "Platform Admin", entities.RoleSuperAdmin); err != nil {
