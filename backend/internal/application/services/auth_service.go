@@ -13,6 +13,7 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"strings"
 	"time"
 
 	"loyalty-nexus/internal/domain/entities"
@@ -24,19 +25,19 @@ import (
 )
 
 var (
-	ErrOTPNotFound   = errors.New("OTP not found or already used")
-	ErrOTPExpired    = errors.New("OTP has expired")
-	ErrOTPInvalid    = errors.New("OTP code is incorrect")
-	ErrUserBanned    = errors.New("account is suspended")
+	ErrOTPNotFound = errors.New("OTP not found or already used")
+	ErrOTPExpired  = errors.New("OTP has expired")
+	ErrOTPInvalid  = errors.New("OTP code is incorrect")
+	ErrUserBanned  = errors.New("account is suspended")
 )
 
 type AuthService struct {
-	authRepo    repositories.AuthRepository
-	userRepo    repositories.UserRepository
-	notifySvc   *NotificationService
-	cfg         *config.ConfigManager
-	jwtSecret   []byte
-	aesKey      []byte
+	authRepo  repositories.AuthRepository
+	userRepo  repositories.UserRepository
+	notifySvc *NotificationService
+	cfg       *config.ConfigManager
+	jwtSecret []byte
+	aesKey    []byte
 }
 
 func NewAuthService(
@@ -66,6 +67,16 @@ func NewAuthService(
 // so the API response can surface it for testing — empty string in production.
 // SMS failure is logged but does NOT fail the request; the OTP is already saved in the DB.
 func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) (string, error) {
+	// Rate limiting: max 3 requests per phone per 10 minutes
+	since := time.Now().Add(-10 * time.Minute)
+	count, err := s.authRepo.CountRecentOTPs(ctx, phone, since)
+	if err != nil {
+		return "", fmt.Errorf("failed to check rate limit: %w", err)
+	}
+	if count >= 3 {
+		return "", errors.New("rate limit exceeded: please try again later")
+	}
+
 	// Generate 6-digit code using CSPRNG
 	n, err := rand.Int(rand.Reader, big.NewInt(900000))
 	if err != nil {
@@ -106,6 +117,12 @@ func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) (strin
 	devCode := ""
 	if os.Getenv("ENVIRONMENT") != "production" {
 		devCode = code
+	} else {
+		// In production, allow whitelisted test phones to receive dev_otp
+		whitelist := os.Getenv("TEST_PHONE_WHITELIST")
+		if whitelist != "" && strings.Contains(whitelist, phone) {
+			devCode = code
+		}
 	}
 
 	// Deliver SMS — failure is non-fatal; OTP is already in the DB
@@ -202,15 +219,15 @@ func (s *AuthService) MintAdminToken(adminID uuid.UUID) (string, error) {
 
 func (s *AuthService) registerNewUser(ctx context.Context, phone string) (*entities.User, error) {
 	user := &entities.User{
-		ID:               uuid.New(),
-		PhoneNumber:      phone,
-		UserCode:         generateUserCode(),
-		Tier:             entities.TierBronze,
-		IsActive:         true,
-		DeviceType:       "smartphone",
-		KYCStatus:        "unverified",
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
+		ID:          uuid.New(),
+		PhoneNumber: phone,
+		UserCode:    generateUserCode(),
+		Tier:        entities.TierBronze,
+		IsActive:    true,
+		DeviceType:  "smartphone",
+		KYCStatus:   "unverified",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err

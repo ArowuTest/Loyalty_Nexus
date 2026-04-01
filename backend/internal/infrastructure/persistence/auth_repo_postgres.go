@@ -2,10 +2,11 @@ package persistence
 
 import (
 	"context"
-	"loyalty-nexus/internal/domain/entities"
-	"loyalty-nexus/internal/domain/repositories"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"loyalty-nexus/internal/domain/entities"
+	"loyalty-nexus/internal/domain/repositories"
+	"time"
 )
 
 type postgresAuthRepository struct{ db *gorm.DB }
@@ -38,6 +39,14 @@ func (r *postgresAuthRepository) ExpireOldOTPs(ctx context.Context) (int64, erro
 	result := r.db.WithContext(ctx).Table("auth_otps").
 		Where("status = 'pending' AND expires_at < NOW()").Update("status", "expired")
 	return result.RowsAffected, result.Error
+}
+
+func (r *postgresAuthRepository) CountRecentOTPs(ctx context.Context, phone string, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Table("auth_otps").
+		Where("phone_number = ? AND created_at >= ?", phone, since).
+		Count(&count).Error
+	return count, err
 }
 
 func (r *postgresAuthRepository) FindAdminByUsername(ctx context.Context, username string) (*entities.AdminUser, error) {

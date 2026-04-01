@@ -96,7 +96,7 @@ func newSvc(db *gorm.DB) *services.SpinService {
 	userRepo  := persistence.NewPostgresUserRepository(db)
 	txRepo    := persistence.NewPostgresTransactionRepository(db)
 	prizeRepo := persistence.NewPostgresPrizeRepository(db)
-	cfg       := config.NewConfigManager(db)
+	cfg       := config.NewConfigManagerNoRefresh(db)
 	return services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db)
 }
 
@@ -105,7 +105,7 @@ func newAdminHandler(db *gorm.DB) *handlers.AdminHandler {
 	userRepo  := persistence.NewPostgresUserRepository(db)
 	txRepo    := persistence.NewPostgresTransactionRepository(db)
 	prizeRepo := persistence.NewPostgresPrizeRepository(db)
-	cfg       := config.NewConfigManager(db)
+	cfg       := config.NewConfigManagerNoRefresh(db)
 	spinSvc   := services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db)
 	drawSvc   := services.NewDrawService(db)
 	fraudSvc      := services.NewFraudService(db)

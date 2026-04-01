@@ -47,6 +47,9 @@ func (m *mockAuthRepo) FindLatestPendingOTP(_ context.Context, phone, purpose st
 func (m *mockAuthRepo) MarkOTPUsed(_ context.Context, id uuid.UUID) error  { return nil }
 func (m *mockAuthRepo) ExpireOTP(_ context.Context, id uuid.UUID) error    { return nil }
 func (m *mockAuthRepo) ExpireOldOTPs(_ context.Context) (int64, error)     { return 0, nil }
+func (m *mockAuthRepo) CountRecentOTPs(_ context.Context, _ string, _ time.Time) (int64, error) {
+	return 0, nil
+}
 func (m *mockAuthRepo) FindAdminByUsername(_ context.Context, u string) (*entities.AdminUser, error) {
 	if a, ok := m.admins[u]; ok {
 		return a, nil

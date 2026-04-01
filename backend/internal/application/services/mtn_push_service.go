@@ -630,7 +630,8 @@ func normalisePhone(raw string) string {
 		// 10-digit without leading 0 — treat as 0XXXXXXXXXX
 		return "+234" + d
 	default:
-		return raw
+		// Unrecognised format — return empty string to signal invalid phone
+		return ""
 	}
 }
 

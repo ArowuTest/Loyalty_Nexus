@@ -79,6 +79,7 @@ func (w *LifecycleWorker) Run(ctx context.Context) {
 	go w.runEvery(ctx, 1*time.Hour,    "asset-expiry",       w.assetExpiryJobs)
 	go w.runEvery(ctx, 24*time.Hour,   "points-expiry",      w.pointsExpiryJobs)
 	go w.runEvery(ctx, 30*time.Minute, "otp-cleanup",        w.otpCleanup)
+	go w.runEvery(ctx, 1*time.Hour,    "admin-token-cleanup", w.adminTokenCleanup)
 	go w.runEvery(ctx, 5*time.Minute,  "fulfill-retry",      w.fulfillmentRetry)
 	go w.runEvery(ctx, 1*time.Hour,    "scheduled-draws",    w.RunScheduledDraws)
 	go w.runEvery(ctx, 10*time.Minute, "session-summarise",     w.sessionSummarise)
@@ -185,6 +186,20 @@ func (w *LifecycleWorker) otpCleanup(ctx context.Context) {
 	}
 	if expired > 0 {
 		log.Printf("[WORKER] otp-cleanup: expired %d old OTPs", expired)
+	}
+}
+
+func (w *LifecycleWorker) adminTokenCleanup(ctx context.Context) {
+	result := w.db.WithContext(ctx).Exec(`
+		DELETE FROM admin_refresh_tokens 
+		WHERE expires_at < NOW() OR revoked_at IS NOT NULL
+	`)
+	if result.Error != nil {
+		log.Printf("[WORKER] admin-token-cleanup failed: %v", result.Error)
+		return
+	}
+	if result.RowsAffected > 0 {
+		log.Printf("[WORKER] admin-token-cleanup: purged %d expired/revoked tokens", result.RowsAffected)
 	}
 }
 

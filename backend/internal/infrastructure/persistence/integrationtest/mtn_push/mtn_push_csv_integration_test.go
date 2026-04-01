@@ -255,14 +255,13 @@ func TestCSVUpload_InvalidRows(t *testing.T) {
 	if result.TotalRows != 4 {
 		t.Errorf("TotalRows: got %d, want 4", result.TotalRows)
 	}
-	// Production behaviour: NOTAPHONE is auto-created (not failed) because the service
-	// auto-creates users for any phone string. Only rows with bad date or bad amount fail.
-	// ProcessedRows=2 (goodPhone + NOTAPHONE), FailedRows=2 (bad date + bad amount).
-	if result.ProcessedRows != 2 {
-		t.Errorf("ProcessedRows: got %d, want 2 (goodPhone + NOTAPHONE auto-created)", result.ProcessedRows)
+	// NOTAPHONE fails phone normalisation (returns empty string) and is marked FAILED.
+	// ProcessedRows=1 (goodPhone), FailedRows=3 (NOTAPHONE + bad date + bad amount).
+	if result.ProcessedRows != 1 {
+		t.Errorf("ProcessedRows: got %d, want 1 (only goodPhone succeeds)", result.ProcessedRows)
 	}
-	if result.FailedRows != 2 {
-		t.Errorf("FailedRows: got %d, want 2 (bad date + bad amount)", result.FailedRows)
+	if result.FailedRows != 3 {
+		t.Errorf("FailedRows: got %d, want 3 (NOTAPHONE + bad date + bad amount)", result.FailedRows)
 	}
 	if result.Status != "PARTIAL" {
 		t.Errorf("Status: got %q, want PARTIAL", result.Status)
@@ -273,8 +272,8 @@ func TestCSVUpload_InvalidRows(t *testing.T) {
 	db.Table("mtn_push_csv_rows").
 		Where("upload_id = ? AND status = 'FAILED'", result.UploadID).
 		Count(&failedCount)
-	if failedCount != 2 {
-		t.Errorf("FAILED rows in DB: got %d, want 2 (bad date + bad amount)", failedCount)
+	if failedCount != 3 {
+		t.Errorf("FAILED rows in DB: got %d, want 3 (NOTAPHONE + bad date + bad amount)", failedCount)
 	}
 }
 
@@ -319,14 +318,13 @@ func TestCSVUpload_AllRowsFailed_StatusIsFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProcessCSVUpload: %v", err)
 	}
-	// Production behaviour: BADPHONE and ALSOBAD are auto-created as new users by the
-	// pipeline (the service creates users for any phone string). Both rows are processed
-	// successfully. Status is DONE when all rows are processed.
-	if result.Status != "DONE" {
-		t.Errorf("Status: got %q, want DONE (all rows auto-created and processed)", result.Status)
+	// Invalid MSISDNs (BADPHONE, ALSOBAD) fail phone normalisation and are marked FAILED.
+	// Status is FAILED when all rows fail.
+	if result.Status != "FAILED" {
+		t.Errorf("Status: got %q, want FAILED (all rows have invalid MSISDNs)", result.Status)
 	}
-	if result.ProcessedRows != 2 {
-		t.Errorf("ProcessedRows: got %d, want 2 (BADPHONE + ALSOBAD auto-created)", result.ProcessedRows)
+	if result.FailedRows != 2 {
+		t.Errorf("FailedRows: got %d, want 2 (BADPHONE + ALSOBAD both invalid)", result.FailedRows)
 	}
 }
 

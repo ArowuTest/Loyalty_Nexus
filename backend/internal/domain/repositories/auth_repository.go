@@ -2,8 +2,9 @@ package repositories
 
 import (
 	"context"
-	"loyalty-nexus/internal/domain/entities"
 	"github.com/google/uuid"
+	"loyalty-nexus/internal/domain/entities"
+	"time"
 )
 
 type AuthRepository interface {
@@ -12,6 +13,7 @@ type AuthRepository interface {
 	MarkOTPUsed(ctx context.Context, id uuid.UUID) error
 	ExpireOTP(ctx context.Context, id uuid.UUID) error
 	ExpireOldOTPs(ctx context.Context) (int64, error) // Called by cron worker
+	CountRecentOTPs(ctx context.Context, phone string, since time.Time) (int64, error)
 
 	// Admin
 	FindAdminByUsername(ctx context.Context, username string) (*entities.AdminUser, error)

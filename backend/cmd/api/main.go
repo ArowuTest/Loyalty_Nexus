@@ -281,6 +281,9 @@ func main() {
 		// ─── Routes (registered on the already-running mux) ─────────────────────
 		// /health is already registered above; register all other endpoints here.
 
+		// ─── Public Stats ─────────────────────────────────────────
+		mux.HandleFunc("GET /api/v1/stats", handlers.GetPublicStats(db))
+
 		// ─── Auth (public) ────────────────────────────────────────
 		mux.HandleFunc("POST /api/v1/auth/otp/send", authH.SendOTP)
 		mux.HandleFunc("POST /api/v1/auth/otp/verify", authH.VerifyOTP)

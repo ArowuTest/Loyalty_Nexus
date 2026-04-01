@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"loyalty-nexus/internal/presentation/http/middleware"
 )
 
 // NotificationHandler serves in-app notification endpoints.
@@ -35,7 +36,7 @@ type Notification struct {
 
 // ListNotifications GET /api/v1/notifications
 func (h *NotificationHandler) ListNotifications(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
+	userID := r.Context().Value(middleware.ContextUserID).(string)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 100 {
 		limit = 30
@@ -64,12 +65,14 @@ func (h *NotificationHandler) ListNotifications(w http.ResponseWriter, r *http.R
 		"unread_count":  unreadCount,
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil { log.Printf("[Notify] encode error: %v", encErr) }
+	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
+		log.Printf("[Notify] encode error: %v", encErr)
+	}
 }
 
 // MarkRead PATCH /api/v1/notifications/{id}/read
 func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
+	userID := r.Context().Value(middleware.ContextUserID).(string)
 	idStr := r.PathValue("id")
 	if _, err := uuid.Parse(idStr); err != nil {
 		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
@@ -84,18 +87,20 @@ func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 
 // MarkAllRead POST /api/v1/notifications/read-all
 func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
+	userID := r.Context().Value(middleware.ContextUserID).(string)
 	now := time.Now().UTC()
 	result := h.db.WithContext(r.Context()).Table("notifications").
 		Where("user_id = ? AND is_read = false", userID).
 		Updates(map[string]interface{}{"is_read": true, "read_at": now})
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(map[string]int64{"marked": result.RowsAffected}); encErr != nil { log.Printf("[Notify] encode error: %v", encErr) }
+	if encErr := json.NewEncoder(w).Encode(map[string]int64{"marked": result.RowsAffected}); encErr != nil {
+		log.Printf("[Notify] encode error: %v", encErr)
+	}
 }
 
 // RegisterPushToken POST /api/v1/notifications/push-token
 func (h *NotificationHandler) RegisterPushToken(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
+	userID := r.Context().Value(middleware.ContextUserID).(string)
 	var body struct {
 		Token    string `json:"token"`
 		Platform string `json:"platform"` // android | ios | web
@@ -126,7 +131,7 @@ func (h *NotificationHandler) RegisterPushToken(w http.ResponseWriter, r *http.R
 
 // GetPreferences GET /api/v1/notifications/preferences
 func (h *NotificationHandler) GetPreferences(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
+	userID := r.Context().Value(middleware.ContextUserID).(string)
 	var prefs map[string]interface{}
 	h.db.WithContext(r.Context()).Table("notification_preferences").
 		Where("user_id = ?", userID).
@@ -140,12 +145,14 @@ func (h *NotificationHandler) GetPreferences(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if encErr := json.NewEncoder(w).Encode(prefs); encErr != nil { log.Printf("[Notify] encode error: %v", encErr) }
+	if encErr := json.NewEncoder(w).Encode(prefs); encErr != nil {
+		log.Printf("[Notify] encode error: %v", encErr)
+	}
 }
 
 // UpdatePreferences PATCH /api/v1/notifications/preferences
 func (h *NotificationHandler) UpdatePreferences(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("user_id").(string)
+	userID := r.Context().Value(middleware.ContextUserID).(string)
 	var updates map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
