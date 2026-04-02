@@ -186,13 +186,25 @@ class APIClient {
 
   // ── Studio ────────────────────────────────────────────────────────────────
   getStudioTools() { return this.request("GET", "/studio/tools"); }
-  sendChat(message: string, sessionId?: string, toolSlug?: string, imageURL?: string, documentURL?: string) {
+  sendChat(
+    message: string,
+    sessionId?: string,
+    toolSlug?: string,
+    imageURL?: string,
+    documentURL?: string,
+    fileURL?: string,
+    linkURL?: string,
+    fileName?: string,
+  ) {
     return this.request("POST", "/studio/chat", {
       message,
       session_id:   sessionId,
       tool_slug:    toolSlug,
       ...(imageURL    ? { image_url:    imageURL    } : {}),
       ...(documentURL ? { document_url: documentURL } : {}),
+      ...(fileURL     ? { file_url:     fileURL     } : {}),
+      ...(linkURL     ? { link_url:     linkURL     } : {}),
+      ...(fileName    ? { file_name:    fileName    } : {}),
     });
   }
   generateTool(

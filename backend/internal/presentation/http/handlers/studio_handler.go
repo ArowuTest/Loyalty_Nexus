@@ -325,6 +325,9 @@ type chatRequest struct {
 	SessionID string   `json:"session_id,omitempty"`
 	ToolSlug  string   `json:"tool_slug,omitempty"` // "web-search-ai" | "code-helper" | "" (general)
 	History   []string `json:"history,omitempty"`
+	FileURL   string   `json:"file_url,omitempty"`  // pre-uploaded file URL (PDF, TXT, etc.) from /studio/upload
+	LinkURL   string   `json:"link_url,omitempty"`  // web URL or Google Drive link to read
+	FileName  string   `json:"file_name,omitempty"` // display name of the attached file
 }
 
 func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
@@ -336,13 +339,31 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── Session ID: if frontend doesn't send one, mint a new one ──────────
+	// ── Extract text from attached file or link ────────────────────────────
+	var attachedContext, attachedName string
+	extractor := external.NewTextExtractor()
+	if req.FileURL != "" {
+		if text, err := extractor.ExtractFromURL(r.Context(), req.FileURL); err == nil && text != "" {
+			attachedContext = text
+			attachedName = req.FileName
+			if attachedName == "" {
+				attachedName = "uploaded file"
+			}
+		}
+	} else if req.LinkURL != "" {
+		if text, err := extractor.ExtractFromURL(r.Context(), req.LinkURL); err == nil && text != "" {
+			attachedContext = text
+			attachedName = req.LinkURL
+		}
+	}
+
+	// ── Session ID: if frontend doesn't send one, mint a new one ──────────────
 	sessionID := req.SessionID
 	if sessionID == "" {
 		sessionID = "sess_" + uid[:8] + "_" + fmt.Sprintf("%d", timeNowUnix())
 	}
 
-	// ── Route by tool_slug ────────────────────────────────────────────────
+	// ── Route by tool_slug ─────────────────────────────────────────────────
 	// web-search-ai and code-helper are dispatched through AIStudioOrchestrator
 	// (which uses Pollinations gemini-search and Qwen-Coder respectively).
 	// All other slugs (including empty) use the standard LLMOrchestrator chain.
@@ -352,7 +373,7 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		tool, err := h.studioSvc.FindToolBySlug(r.Context(), req.ToolSlug)
 		if err != nil {
 			// Tool not found — graceful fallback to general chat
-			h.handleGeneralChat(w, r, uid, sessionID, req)
+			h.handleGeneralChat(w, r, uid, sessionID, req, attachedContext, attachedName)
 			return
 		}
 
@@ -377,15 +398,17 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 
 		// Free tool — call the AI studio orchestrator's text dispatcher inline
 		resp, err := h.llmOrch.ChatWithTool(r.Context(), external.LLMRequest{
-			UserID:    uid,
-			SessionID: sessionID,
-			Prompt:    req.Message,
-			History:   req.History,
-			ToolSlug:  req.ToolSlug,
+			UserID:          uid,
+			SessionID:       sessionID,
+			Prompt:          req.Message,
+			History:         req.History,
+			ToolSlug:        req.ToolSlug,
+			AttachedContext: attachedContext,
+			AttachedName:    attachedName,
 		})
 		if err != nil {
 			// Fallback to general chat on tool failure
-			h.handleGeneralChat(w, r, uid, sessionID, req)
+			h.handleGeneralChat(w, r, uid, sessionID, req, attachedContext, attachedName)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -397,18 +420,20 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 
 	default:
-		h.handleGeneralChat(w, r, uid, sessionID, req)
+		h.handleGeneralChat(w, r, uid, sessionID, req, attachedContext, attachedName)
 	}
 }
 
 // handleGeneralChat routes to the standard Gemini → Groq → DeepSeek cascade.
-func (h *StudioHandler) handleGeneralChat(w http.ResponseWriter, r *http.Request, uid, sessionID string, req chatRequest) {
+func (h *StudioHandler) handleGeneralChat(w http.ResponseWriter, r *http.Request, uid, sessionID string, req chatRequest, attachedContext, attachedName string) {
 	resp, err := h.llmOrch.Chat(r.Context(), external.LLMRequest{
-		UserID:    uid,
-		SessionID: sessionID,
-		Prompt:    req.Message,
-		History:   req.History,
-		ToolSlug:  req.ToolSlug,
+		UserID:          uid,
+		SessionID:       sessionID,
+		Prompt:          req.Message,
+		History:         req.History,
+		ToolSlug:        req.ToolSlug,
+		AttachedContext: attachedContext,
+		AttachedName:    attachedName,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{

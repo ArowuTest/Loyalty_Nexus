@@ -46,11 +46,13 @@ const (
 // ─── Request / Response ──────────────────────────────────────────────────────
 
 type LLMRequest struct {
-	UserID    string
-	SessionID string   // for session memory lookup
-	Prompt    string
-	History   []string
-	ToolSlug  string   // optional: "web-search-ai" | "code-helper" — routes to Pollinations
+	UserID          string
+	SessionID       string   // for session memory lookup
+	Prompt          string
+	History         []string
+	ToolSlug        string   // optional: "web-search-ai" | "code-helper" — routes to Pollinations
+	AttachedContext string   // extracted text from uploaded file or URL — injected into system prompt
+	AttachedName    string   // display name of the attached file/link (e.g. "business_plan.pdf")
 }
 
 type LLMResponse struct {
@@ -324,6 +326,19 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 			"- For analysis tasks: go beyond surface-level observations to provide genuine insight and actionable conclusions."
 	}
 	systemPrompt := basePrompt
+
+	// Inject attached file/link context if provided
+	if req.AttachedContext != "" {
+		name := req.AttachedName
+		if name == "" {
+			name = "attached document"
+		}
+		systemPrompt += "\n\n[ATTACHED DOCUMENT: " + name + "]\n" +
+			"The user has attached the following document for you to read and reason over. " +
+			"Use its content to answer their question accurately and specifically.\n\n" +
+			req.AttachedContext + "\n[END ATTACHED DOCUMENT]"
+	}
+
 	if memoryBlock != "" {
 		systemPrompt += "\n\n" + memoryBlock + "\n\n" +
 			"[MEMORY USAGE RULES]\n" +
@@ -472,6 +487,18 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 		providerName LLMProvider
 	)
 
+	// Build attached context block (shared across tool modes)
+	attachedBlock := ""
+	if req.AttachedContext != "" {
+		name := req.AttachedName
+		if name == "" {
+			name = "attached document"
+		}
+		attachedBlock = "\n\n[ATTACHED DOCUMENT: " + name + "]\n" +
+			"The user has attached the following document. Read it carefully and use its content to answer their question.\n\n" +
+			req.AttachedContext + "\n[END ATTACHED DOCUMENT]"
+	}
+
 	switch req.ToolSlug {
 	case "web-search-ai":
 			today := time.Now().UTC().Format("Monday, January 2, 2006")
@@ -493,7 +520,7 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 						"6. End with a **Sources** section listing 2-4 sources used (publication name + brief description).\n" +
 						"7. Keep total response under 450 words unless the user explicitly asks for more.\n" +
 						"8. If search results are unclear or outdated, say so honestly and provide your best knowledge with a caveat."},
-					{"role": "user", "content": req.Prompt},
+					{"role": "user", "content": req.Prompt + attachedBlock},
 				},
 				"search": true,
 				"stream": false,
@@ -520,7 +547,7 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 						"- Detect the programming language from context — never ask the user to specify it unless truly ambiguous.\n" +
 						"- Always include proper error handling, input validation, and edge case handling.\n" +
 						"- Write complete, runnable code — never use placeholder comments like '// TODO' or '// rest of code here'."},
-					{"role": "user", "content": req.Prompt},
+					{"role": "user", "content": req.Prompt + attachedBlock},
 				},
 			}
 		providerName = "POLLINATIONS_QWEN"

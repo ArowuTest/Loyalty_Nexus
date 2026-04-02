@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, User, Bot, Sparkles, ArrowLeft, Copy, Check, Download } from 'lucide-react';
+import { Send, User, Bot, Sparkles, ArrowLeft, Copy, Check, Download, Paperclip, Link2, X, FileText, Globe } from 'lucide-react';
 import Link from 'next/link';
 import api from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,7 @@ interface Message {
   content: string;
   timestamp: Date;
   provider?: string;
+  attachedName?: string; // display name of attached file/link for this message
 }
 
 // Session ID persisted in localStorage so the backend can reconstruct memory
@@ -214,23 +215,48 @@ const SUGGESTIONS = [
   "Summarise the key differences between WAEC and JAMB",
 ];
 
+// ─── Accepted file types ─────────────────────────────────────────────────────
+const ACCEPTED_FILE_TYPES = '.pdf,.txt,.md,.csv,.doc,.docx';
+const ACCEPTED_MIME_TYPES = [
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+];
+
 export default function NexusChat() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: "Hello! I'm **Nexus**, your personal AI assistant. I can help you with business, education, coding, writing, research, and much more.\n\nWhat would you like to work on today?",
+      content: "Hello! I'm **Nexus**, your personal AI assistant. I can help you with business, education, coding, writing, research, and much more.\n\nYou can also **attach a file** (PDF, TXT, DOCX) or **paste a link** (web page or Google Drive) and I'll read it for you.\n\nWhat would you like to work on today?",
       timestamp: new Date(),
     }
   ]);
-  const [input,     setInput]     = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [msgCount,  setMsgCount]  = useState(0);
-  const [msgLimit,  setMsgLimit]  = useState(20);
-  const [copiedMsg, setCopiedMsg] = useState<string | null>(null);
-  const sessionId = useRef<string>('');
+  const [input,        setInput]        = useState('');
+  const [isLoading,    setIsLoading]    = useState(false);
+  const [msgCount,     setMsgCount]     = useState(0);
+  const [msgLimit,     setMsgLimit]     = useState(20);
+  const [copiedMsg,    setCopiedMsg]    = useState<string | null>(null);
+
+  // File attachment state
+  const [attachedFile,    setAttachedFile]    = useState<File | null>(null);
+  const [attachedFileURL, setAttachedFileURL] = useState<string>('');
+  const [isUploading,     setIsUploading]     = useState(false);
+  const [uploadError,     setUploadError]     = useState<string>('');
+
+  // Link attachment state
+  const [showLinkInput, setShowLinkInput] = useState(false);
+  const [linkInput,     setLinkInput]     = useState('');
+  const [attachedLink,  setAttachedLink]  = useState<string>('');
+
+  const sessionId      = useRef<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef    = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef   = useRef<HTMLInputElement>(null);
+  const linkInputRef   = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     sessionId.current = getOrCreateSessionId();
@@ -253,23 +279,102 @@ export default function NexusChat() {
     ta.style.height = Math.min(ta.scrollHeight, 128) + 'px';
   }, [input]);
 
+  // Focus link input when shown
+  useEffect(() => {
+    if (showLinkInput) linkInputRef.current?.focus();
+  }, [showLinkInput]);
+
+  // ─── File upload handler ─────────────────────────────────────────────────
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate MIME type
+    if (!ACCEPTED_MIME_TYPES.includes(file.type) && !file.name.endsWith('.md') && !file.name.endsWith('.csv')) {
+      setUploadError('Unsupported file type. Please upload a PDF, TXT, DOCX, or CSV file.');
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setUploadError('File too large. Maximum size is 20 MB.');
+      return;
+    }
+
+    setUploadError('');
+    setAttachedFile(file);
+    setAttachedLink(''); // clear any link attachment
+    setIsUploading(true);
+
+    try {
+      const result = await api.uploadAsset(file);
+      setAttachedFileURL(result.url);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      setUploadError(msg);
+      setAttachedFile(null);
+      setAttachedFileURL('');
+    } finally {
+      setIsUploading(false);
+      // Reset file input so same file can be re-selected
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  function clearAttachment() {
+    setAttachedFile(null);
+    setAttachedFileURL('');
+    setAttachedLink('');
+    setUploadError('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  function confirmLink() {
+    const url = linkInput.trim();
+    if (!url) return;
+    setAttachedLink(url);
+    setAttachedFile(null);
+    setAttachedFileURL('');
+    setLinkInput('');
+    setShowLinkInput(false);
+  }
+
+  // ─── Send message ────────────────────────────────────────────────────────
   const handleSend = async (text?: string) => {
     const msg = (text ?? input).trim();
     if (!msg || isLoading) return;
+    if (isUploading) return; // wait for upload to finish
+
+    const displayName = attachedFile?.name ?? (attachedLink ? new URL(attachedLink.startsWith('http') ? attachedLink : 'https://' + attachedLink).hostname : undefined);
 
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: msg,
       timestamp: new Date(),
+      attachedName: displayName,
     };
 
     setMessages(prev => [...prev, userMsg]);
     setInput('');
+
+    // Capture and clear attachment before async call
+    const fileURL  = attachedFileURL;
+    const linkURL  = attachedLink;
+    const fileName = attachedFile?.name ?? '';
+    clearAttachment();
+
     setIsLoading(true);
 
     try {
-      const res = await api.sendChat(msg, sessionId.current) as {
+      const res = await api.sendChat(
+        msg,
+        sessionId.current,
+        undefined,   // toolSlug — general AI for standalone chat page
+        undefined,   // imageURL
+        undefined,   // documentURL
+        fileURL  || undefined,
+        linkURL  || undefined,
+        fileName || undefined,
+      ) as {
         response: string;
         provider?: string;
         session_id?: string;
@@ -309,8 +414,9 @@ export default function NexusChat() {
     });
   }
 
-  const remaining = Math.max(0, msgLimit - msgCount);
+  const remaining    = Math.max(0, msgLimit - msgCount);
   const showSuggestions = messages.length === 1;
+  const hasAttachment   = !!attachedFile || !!attachedLink;
 
   return (
     <div className="flex flex-col h-screen bg-black text-white max-w-screen-md mx-auto border-x border-white/5">
@@ -382,6 +488,13 @@ export default function NexusChat() {
 
             {/* Bubble */}
             <div className={cn('max-w-[82%] space-y-1', msg.role === 'user' && 'items-end flex flex-col')}>
+              {/* Attached file/link chip on user messages */}
+              {msg.role === 'user' && msg.attachedName && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white/8 border border-white/10 text-[10px] text-white/50 self-end mb-1">
+                  <FileText size={10} className="text-brand-gold flex-shrink-0" />
+                  <span className="truncate max-w-[180px]">{msg.attachedName}</span>
+                </div>
+              )}
               <div className={cn(
                 'px-4 py-3 rounded-2xl',
                 msg.role === 'user'
@@ -440,11 +553,115 @@ export default function NexusChat() {
 
       {/* Input Hub */}
       <footer className="p-4 pt-2 glass border-t border-white/5 sticky bottom-0">
+
+        {/* Attachment preview chip */}
+        {hasAttachment && (
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-brand-gold/10 border border-brand-gold/25 text-xs text-brand-gold flex-1 min-w-0">
+              {attachedFile
+                ? <FileText size={12} className="flex-shrink-0" />
+                : <Globe size={12} className="flex-shrink-0" />
+              }
+              <span className="truncate">
+                {attachedFile ? attachedFile.name : attachedLink}
+              </span>
+              {isUploading && (
+                <span className="ml-auto text-[10px] text-white/40 flex-shrink-0 animate-pulse">Uploading…</span>
+              )}
+              {!isUploading && attachedFileURL && (
+                <span className="ml-auto text-[10px] text-green-400 flex-shrink-0">✓ Ready</span>
+              )}
+            </div>
+            <button
+              onClick={clearAttachment}
+              className="p-1.5 rounded-lg text-white/30 hover:text-white/70 hover:bg-white/8 transition-colors flex-shrink-0"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        )}
+
+        {/* Upload error */}
+        {uploadError && (
+          <p className="text-[10px] text-red-400 mb-2 px-1">{uploadError}</p>
+        )}
+
+        {/* Link input popup */}
+        {showLinkInput && (
+          <div className="flex items-center gap-2 mb-2">
+            <input
+              ref={linkInputRef}
+              type="url"
+              placeholder="Paste a web URL or Google Drive link…"
+              value={linkInput}
+              onChange={e => setLinkInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') confirmLink();
+                if (e.key === 'Escape') { setShowLinkInput(false); setLinkInput(''); }
+              }}
+              className="flex-1 bg-white/5 border border-brand-gold/30 rounded-xl py-2.5 px-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-brand-gold/60 transition-all"
+            />
+            <button
+              onClick={confirmLink}
+              disabled={!linkInput.trim()}
+              className="px-3 py-2.5 rounded-xl text-xs font-bold bg-brand-gold/20 text-brand-gold border border-brand-gold/30 hover:bg-brand-gold/30 transition-colors disabled:opacity-40"
+            >
+              Attach
+            </button>
+            <button
+              onClick={() => { setShowLinkInput(false); setLinkInput(''); }}
+              className="p-2.5 rounded-xl text-white/30 hover:text-white/70 hover:bg-white/8 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
+        {/* Main input row */}
         <div className="relative group flex items-end gap-2">
+          {/* Paperclip — file upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ACCEPTED_FILE_TYPES}
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isLoading || remaining === 0}
+            title="Attach a file (PDF, TXT, DOCX)"
+            className={cn(
+              'w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mb-0.5 transition-all',
+              hasAttachment && attachedFile
+                ? 'bg-brand-gold/20 text-brand-gold border border-brand-gold/40'
+                : 'bg-white/5 text-slate-500 hover:text-white/70 hover:bg-white/10 border border-transparent',
+              (isLoading || remaining === 0) && 'opacity-40 cursor-not-allowed',
+            )}
+          >
+            <Paperclip size={15} />
+          </button>
+
+          {/* Link icon — paste a URL */}
+          <button
+            onClick={() => setShowLinkInput(v => !v)}
+            disabled={isLoading || remaining === 0}
+            title="Attach a web link or Google Drive URL"
+            className={cn(
+              'w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mb-0.5 transition-all',
+              (hasAttachment && attachedLink) || showLinkInput
+                ? 'bg-brand-gold/20 text-brand-gold border border-brand-gold/40'
+                : 'bg-white/5 text-slate-500 hover:text-white/70 hover:bg-white/10 border border-transparent',
+              (isLoading || remaining === 0) && 'opacity-40 cursor-not-allowed',
+            )}
+          >
+            <Link2 size={15} />
+          </button>
+
           <textarea
             ref={textareaRef}
             rows={1}
-            placeholder="Ask anything…"
+            placeholder={hasAttachment ? 'Ask about the attached file or link…' : 'Ask anything…'}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
@@ -455,10 +672,10 @@ export default function NexusChat() {
           />
           <button
             onClick={() => handleSend()}
-            disabled={!input.trim() || isLoading || remaining === 0}
+            disabled={!input.trim() || isLoading || remaining === 0 || isUploading}
             className={cn(
               'w-11 h-11 rounded-xl flex items-center justify-center transition-all flex-shrink-0 mb-0.5',
-              input.trim() && !isLoading && remaining > 0
+              input.trim() && !isLoading && remaining > 0 && !isUploading
                 ? 'gold-gradient text-black shadow-lg shadow-yellow-500/20 scale-100'
                 : 'bg-white/5 text-slate-600 scale-90 opacity-50',
             )}
@@ -466,7 +683,12 @@ export default function NexusChat() {
             <Send size={17} />
           </button>
         </div>
-        <p className="mt-2 text-[9px] text-center font-bold text-slate-600 uppercase tracking-[0.2em]">
+
+        {/* Supported formats hint */}
+        <p className="mt-1.5 text-[9px] text-center font-medium text-slate-700 uppercase tracking-[0.15em]">
+          Supports PDF · TXT · DOCX · Web links · Google Drive
+        </p>
+        <p className="mt-1 text-[9px] text-center font-bold text-slate-600 uppercase tracking-[0.2em]">
           {remaining > 0
             ? <>Free Daily Limit: <span className="text-brand-gold">{remaining} messages remaining</span></>
             : <span className="text-red-400">Daily limit reached — recharges reset tomorrow</span>}
