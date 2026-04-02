@@ -5,6 +5,20 @@ import AdminShell from "@/components/layout/AdminShell";
 import adminAPI, { BonusPulseAwardRecord, BonusPulseAwardResult } from "@/lib/api";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Normalise a Nigerian phone number to the bare 13-digit 234XXXXXXXXXX format
+ * that is stored in the database (no leading +).
+ * Accepts: 2348027000003 | +2348027000003 | 08027000003 | 8027000003
+ */
+function normalisePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, ""); // strip everything except digits
+  if (digits.startsWith("234") && digits.length === 13) return digits;          // already correct
+  if (digits.startsWith("0") && digits.length === 11) return "234" + digits.slice(1); // 0XX → 234XX
+  if (digits.length === 10) return "234" + digits;                               // 8XX → 234XX
+  return digits; // return as-is (may already be 234...)
+}
+
 function fmt(iso: string) {
   return new Date(iso).toLocaleString("en-NG", {
     dateStyle: "medium",
@@ -36,7 +50,7 @@ function AwardForm({ onSuccess }: { onSuccess: (r: BonusPulseAwardResult) => voi
     setLoading(true);
     try {
       const result = await adminAPI.awardBonusPulse({
-        phone_number: phone.trim(),
+        phone_number: normalisePhone(phone.trim()),
         points: pts,
         campaign: campaign.trim() || undefined,
         note: note.trim() || undefined,
