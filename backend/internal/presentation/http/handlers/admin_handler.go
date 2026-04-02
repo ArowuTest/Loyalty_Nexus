@@ -294,8 +294,11 @@ func (h *AdminHandler) AdjustPoints(w http.ResponseWriter, r *http.Request) {
 		phoneNumber = "unknown"
 	}
 	err := h.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec("UPDATE wallets SET pulse_points = pulse_points + ?, updated_at = ? WHERE user_id = ?",
-			body.Delta, now, body.UserID).Error; err != nil {
+		// Upsert wallet: create row if missing, otherwise increment
+		if err := tx.Exec(`INSERT INTO wallets (id, user_id, pulse_points, created_at, updated_at)
+			VALUES (gen_random_uuid(), ?, ?, ?, ?)
+			ON CONFLICT (user_id) DO UPDATE SET pulse_points = wallets.pulse_points + EXCLUDED.pulse_points, updated_at = EXCLUDED.updated_at`,
+			body.UserID, body.Delta, now, now).Error; err != nil {
 			return err
 		}
 		metaJSON, _ := json.Marshal(map[string]string{"admin_reason": body.Reason})
