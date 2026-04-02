@@ -2061,8 +2061,8 @@ function ToolDrawer({
                     </button>
                   </div>
 
-                  {/* Audio result */}
-                  {inlineResult.output_url && (inlineResult.output_type === "audio" || /\.(mp3|wav|ogg|m4a)/i.test(inlineResult.output_url)) && (
+                  {/* Audio result — use slug-based detection as primary, URL extension as fallback */}
+                  {inlineResult.output_url && (AUDIO_SLUGS.has(slug) || inlineResult.output_type === "audio" || /\.(mp3|wav|ogg|m4a)/i.test(inlineResult.output_url)) && (
                     <div className="p-4 space-y-3">
                       <AudioPlayer src={inlineResult.output_url} label={tool.name} />
                       <div className="flex gap-2">
@@ -2090,7 +2090,7 @@ function ToolDrawer({
                   )}
 
                   {/* Image result */}
-                  {inlineResult.output_url && (inlineResult.output_type === "image" || /\.(png|jpg|jpeg|webp|gif)/i.test(inlineResult.output_url)) && (
+                  {inlineResult.output_url && !AUDIO_SLUGS.has(slug) && !VIDEO_SLUGS.has(slug) && (IMAGE_SLUGS.has(slug) || inlineResult.output_type === "image" || /\.(png|jpg|jpeg|webp|gif)/i.test(inlineResult.output_url)) && (
                     <div className="p-4 space-y-3">
                       <div className="rounded-xl overflow-hidden border border-white/10">
                         <img
@@ -2124,7 +2124,7 @@ function ToolDrawer({
                   )}
 
                   {/* Video result */}
-                  {inlineResult.output_url && (inlineResult.output_type === "video" || /\.(mp4|webm|mov)/i.test(inlineResult.output_url)) && (
+                  {inlineResult.output_url && (VIDEO_SLUGS.has(slug) || inlineResult.output_type === "video" || /\.(mp4|webm|mov)/i.test(inlineResult.output_url)) && (
                     <div className="p-4 space-y-3">
                       <div className="rounded-xl overflow-hidden border border-white/10 bg-black">
                         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
@@ -2193,8 +2193,9 @@ function ToolDrawer({
                     </div>
                   )}
 
-                  {/* Fallback: URL-only result with unknown type */}
-                  {inlineResult.output_url && !inlineResult.output_type &&
+                  {/* Fallback: URL-only result with unknown type — only show if not already handled by slug sets */}
+                  {inlineResult.output_url && !AUDIO_SLUGS.has(slug) && !IMAGE_SLUGS.has(slug) && !VIDEO_SLUGS.has(slug) &&
+                    !inlineResult.output_type &&
                     !/\.(mp3|wav|ogg|m4a|png|jpg|jpeg|webp|gif|mp4|webm|mov)/i.test(inlineResult.output_url) && (
                     <div className="p-4">
                       <a
