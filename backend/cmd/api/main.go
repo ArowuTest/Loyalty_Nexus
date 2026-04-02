@@ -162,7 +162,8 @@ func main() {
 			('ussd_session_timeout_seconds', '120',  'USSD session TTL seconds'),
 			('min_recharge_naira',           '500',  'Min recharge for a spin'),
 			('spin_trigger_naira',           '1000', 'Naira per spin credit'),
-			('ai_chat_enabled',             'true',  'Enable AI chat feature')
+			('ai_chat_enabled',             'true',  'Enable AI chat feature'),
+			('studio_daily_gen_limit',       '50',   'Max AI Studio generations per user per day')
 		ON CONFLICT (key) DO NOTHING`)
 		log.Println("[BOOTSTRAP] ✓ all critical tables ensured")
 	}

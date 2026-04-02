@@ -156,17 +156,16 @@ func (h *AdminHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	updates := map[string]interface{}{
-		"value":      body.Value,
-		"updated_at": time.Now(),
+	desc := body.Description
+	if desc == "" {
+		desc = key
 	}
-	if body.Description != "" {
-		updates["description"] = body.Description
-	}
-	err := h.db.WithContext(r.Context()).
-		Table("network_configs").
-		Where("key = ?", key).
-		Updates(updates).Error
+	err := h.db.WithContext(r.Context()).Exec(
+		`INSERT INTO network_configs (id, key, value, description, updated_at)
+		 VALUES (gen_random_uuid(), ?, ?, ?, NOW())
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, description = COALESCE(NULLIF(EXCLUDED.description, ''), network_configs.description), updated_at = NOW()`,
+		key, body.Value, desc,
+	).Error
 	if err != nil {
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return
