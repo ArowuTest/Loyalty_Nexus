@@ -160,15 +160,17 @@ func (h *AdminHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if desc == "" {
 		desc = key
 	}
-	err := h.db.WithContext(r.Context()).Exec(
-		`INSERT INTO network_configs (id, key, value, description, updated_at)
-		 VALUES (gen_random_uuid(), ?, ?, ?, NOW())
-		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, description = COALESCE(NULLIF(EXCLUDED.description, ''), network_configs.description), updated_at = NOW()`,
-		key, body.Value, desc,
-	).Error
-	if err != nil {
+	// Use cfg.Set() which does an upsert AND immediately updates the in-memory cache
+	// so the new value is visible to all handlers without waiting for the 60s auto-refresh.
+	if err := h.cfg.Set(r.Context(), key, body.Value); err != nil {
 		jsonError(w, "update failed", http.StatusInternalServerError)
 		return
+	}
+	// Also update the description if provided (cfg.Set only handles key/value)
+	if desc != key {
+		h.db.WithContext(r.Context()).Exec(
+			`UPDATE network_configs SET description = ? WHERE key = ?`, desc, key,
+		)
 	}
 	jsonOK(w, map[string]string{"status": "ok", "key": key, "value": body.Value})
 }
