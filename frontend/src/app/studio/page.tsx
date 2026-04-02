@@ -225,6 +225,24 @@ const LANGUAGES = [
 
 const GENRE_CHIPS = ["Afrobeats","Gospel","Hip Hop","Amapiano","Jazz","Classical"] as const;
 
+// ─── Alias / duplicate slugs hidden from the tool grid ────────────────────────
+// These are backend aliases for canonical tools. We hide them to avoid clutter
+// and show only the ~28 canonical tools to users.
+const HIDDEN_ALIAS_SLUGS = new Set([
+  "my-ai-photo",         // alias → ai-photo
+  "background-remover",  // alias → bg-remover
+  "animate-my-photo",    // alias → animate-photo
+  "my-video-story",      // alias → animate-photo
+  "my-marketing-jingle", // alias → jingle
+  "my-podcast",          // alias → podcast
+  "local-translation",   // alias → translate
+  "voice-to-text",       // alias → transcribe
+  "text-to-speech",      // alias → narrate
+  "business-plan",       // alias → bizplan
+  "summary",             // alias → research-brief
+  "ai-chat",             // handled via Chat tab — not a standalone tool card
+]);
+
 // ─── Placeholders ─────────────────────────────────────────────────────────────
 const PLACEHOLDERS: Record<string, string> = {
   "ai-photo":           "A vibrant market scene in Lagos at golden hour, photorealistic…",
@@ -478,6 +496,148 @@ function CopyButton({ text, label = "Copy Code" }: { text: string; label?: strin
       {copied ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
       {copied ? "Copied!" : label}
     </button>
+  );
+}
+
+// ─── Download text as file button ───────────────────────────────────────────
+function DownloadTextButton({ text, filename = "nexus-output.txt", label = "Download .txt" }: { text: string; filename?: string; label?: string }) {
+  const handleDownload = () => {
+    try {
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success('File downloaded!');
+    } catch {
+      toast.error('Download failed');
+    }
+  };
+  return (
+    <button
+      onClick={handleDownload}
+      className="flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded-lg
+                 bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-all"
+    >
+      <Download size={11} /> {label}
+    </button>
+  );
+}
+
+// ─── Styled audio player ──────────────────────────────────────────────────────
+function AudioPlayer({ src, label = "Audio" }: { src: string; label?: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing,  setPlaying]  = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [current,  setCurrent]  = useState(0);
+
+  const fmt = (s: number) => {
+    if (!isFinite(s)) return '0:00';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  const togglePlay = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (playing) { a.pause(); setPlaying(false); }
+    else         { a.play().then(() => setPlaying(true)).catch(() => {}); }
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const a = audioRef.current;
+    if (!a || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct  = (e.clientX - rect.left) / rect.width;
+    a.currentTime = pct * duration;
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-[#1a1040]/80 to-[#0f0a2a]/60 border border-purple-500/20 rounded-2xl p-4 space-y-3">
+      {/* Waveform bars — Suno-style purple/violet gradient */}
+      <div className="flex items-end gap-0.5 h-10 px-1">
+        {Array.from({ length: 44 }, (_, i) => {
+          const h = 15 + Math.abs(Math.sin(i * 0.7 + 0.5) * 55 + Math.cos(i * 1.1) * 25);
+          const filled = progress > 0 && (i / 44) * 100 < progress;
+          const isActive = playing && filled;
+          return (
+            <div
+              key={i}
+              className={cn(
+                'flex-1 rounded-full transition-all duration-150',
+                isActive
+                  ? 'bg-gradient-to-t from-purple-600 to-violet-400'
+                  : filled
+                  ? 'bg-gradient-to-t from-purple-700/80 to-violet-500/60'
+                  : 'bg-white/10',
+              )}
+              style={{
+                height: `${Math.max(8, h)}%`,
+                transform: isActive ? 'scaleY(1.1)' : 'scaleY(1)',
+              }}
+            />
+          );
+        })}
+      </div>
+      {/* Progress bar — clickable */}
+      <div
+        className="h-1.5 w-full rounded-full bg-white/10 cursor-pointer overflow-hidden"
+        onClick={handleSeek}
+      >
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-purple-600 to-violet-400 transition-all duration-200"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      {/* Controls row */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={togglePlay}
+            className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-600 to-violet-500 flex items-center justify-center hover:opacity-90 active:scale-95 transition-all shadow-lg shadow-purple-900/40"
+          >
+            {playing
+              ? <span className="flex gap-0.5"><span className="w-1 h-3.5 bg-white rounded-full" /><span className="w-1 h-3.5 bg-white rounded-full" /></span>
+              : <Play size={14} className="text-white ml-0.5" />}
+          </button>
+          <div className="text-xs text-white/40 tabular-nums font-mono">
+            {fmt(current)} / {fmt(duration)}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-white/30 text-[10px] font-medium">{label}</span>
+          <a
+            href={src}
+            download
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-all"
+          >
+            <Download size={10} /> Download
+          </a>
+        </div>
+      </div>
+      {/* Hidden native audio element */}
+      <audio
+        ref={audioRef}
+        src={src}
+        onTimeUpdate={() => {
+          const a = audioRef.current;
+          if (!a) return;
+          setCurrent(a.currentTime);
+          setProgress(a.duration ? (a.currentTime / a.duration) * 100 : 0);
+        }}
+        onLoadedMetadata={() => { if (audioRef.current) setDuration(audioRef.current.duration); }}
+        onEnded={() => { setPlaying(false); setProgress(0); setCurrent(0); }}
+        className="hidden"
+      />
+    </div>
   );
 }
 
@@ -759,7 +919,7 @@ function ChatBubble({ msg }: { msg: Message }) {
   const mode   = msg.mode ?? 'general';
   const meta   = MODE_META[mode];
   return (
-    <div className={cn("flex gap-2.5", isUser && "flex-row-reverse")}>
+    <div className={cn("flex gap-2.5 group", isUser && "flex-row-reverse")}>
       <div className={cn(
         "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5",
         isUser ? "bg-gradient-to-br from-gold-500/20 to-amber-600/15"
@@ -778,7 +938,7 @@ function ChatBubble({ msg }: { msg: Message }) {
               ? "bg-gray-950/80 border border-green-500/15 rounded-2xl rounded-tl-sm"
               : mode === 'search'
               ? "bg-sky-950/40 border border-sky-500/15 rounded-2xl rounded-tl-sm"
-              : "bg-[rgb(32_38_68)] rounded-2xl rounded-tl-sm border border-white/5"
+              : "bg-[#1c1e2e] rounded-2xl rounded-tl-sm border border-white/[0.07] shadow-sm"
         )}>
           {isUser
             ? <p className="text-sm leading-relaxed">{msg.content}</p>
@@ -786,10 +946,24 @@ function ChatBubble({ msg }: { msg: Message }) {
           }
         </div>
         {!isUser && (
-          <p className="text-white/20 text-[9px] px-1 flex items-center gap-1">
-            {meta.label}
-            {msg.provider && <span>· {msg.provider}</span>}
-          </p>
+          <div className="flex items-center gap-2 px-1">
+            <p className="text-white/20 text-[9px] flex items-center gap-1">
+              {meta.label}
+              {msg.provider && <span>· {msg.provider}</span>}
+            </p>
+            {/* Quick actions for long AI responses */}
+            {msg.content.length > 200 && (
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() => navigator.clipboard.writeText(msg.content).then(() => toast.success('Copied!'))}
+                  className="text-white/20 hover:text-white/50 transition-colors"
+                  title="Copy response"
+                >
+                  <Copy size={9} />
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -821,7 +995,7 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
       whileHover={{ y: -2, scale: 1.01 }}
       whileTap={{ scale: 0.98 }}
       onClick={onClick}
-      className="w-full text-left group relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04] hover:border-white/20 hover:bg-white/[0.07] transition-all duration-200 flex flex-col"
+      className="w-full text-left group relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04] hover:border-white/20 hover:bg-white/[0.07] hover:shadow-card-hover transition-all duration-200 flex flex-col"
     >
       {/* Locked overlay */}
       {entryLocked && (
@@ -1044,9 +1218,20 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
     );
   }
 
+  // Colored left border accent per output type
+  const accentBorder = gen.status === 'failed'
+    ? 'border-l-2 border-l-red-500/50'
+    : isVideo  ? 'border-l-2 border-l-red-500/40'
+    : isAudio  ? 'border-l-2 border-l-purple-500/50'
+    : isImage  ? 'border-l-2 border-l-pink-500/40'
+    : isCode   ? 'border-l-2 border-l-lime-500/40'
+    : isWeb    ? 'border-l-2 border-l-sky-500/40'
+    : 'border-l-2 border-l-gold-500/30';
+
   return (
     <div className={cn(
       "glass border border-white/[0.08] p-4 space-y-3",
+      accentBorder,
       gen.status === "failed" && "border-red-500/15"
     )}>
       {/* Header row */}
@@ -1117,11 +1302,25 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
       {gen.status === "completed" && gen.output_url && (
         <div className="space-y-2 rounded-xl overflow-hidden">
           {isImage && !isVideo && (
-            <div className="space-y-2">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={gen.output_url} alt={gen.tool_name}
-                className="w-full rounded-xl object-cover max-h-80"
-                loading="lazy" />
+            <div className="space-y-3">
+              {/* Full-width image with rounded corners and subtle border — Midjourney-style */}
+              <div className="relative group overflow-hidden rounded-2xl border border-white/10">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={gen.output_url} alt={gen.tool_name}
+                  className="w-full object-contain max-h-[480px] bg-black/20"
+                  loading="lazy" />
+                {/* Hover overlay with quick actions — cinematic gradient */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3">
+                  <a href={gen.output_url} target="_blank" rel="noreferrer"
+                    className="text-white/80 hover:text-white text-[10px] flex items-center gap-1">
+                    <ExternalLink size={10} /> View full size
+                  </a>
+                  <a href={gen.output_url} download target="_blank" rel="noreferrer"
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-gold-500/80 hover:bg-gold-500 text-white font-semibold transition-all shadow-lg">
+                    <Download size={12} /> Download
+                  </a>
+                </div>
+              </div>
               {/* Vision tools may also return analysis text */}
               {gen.output_text && isVision && (
                 <div className="bg-violet-500/5 border border-violet-500/10 rounded-xl p-3">
@@ -1132,6 +1331,10 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                 <a href={gen.output_url} download target="_blank" rel="noreferrer"
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
                   <Download size={11} /> Download Image
+                </a>
+                <a href={gen.output_url} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
+                  <ExternalLink size={11} /> Open Full Size
                 </a>
                 {onRegenerate && (
                   <button onClick={() => onRegenerate(gen)}
@@ -1144,32 +1347,37 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
           )}
           {isAudio && !isVideo && (
             <div className="space-y-2">
-              <audio controls className="w-full mt-1" src={gen.output_url}>
-                Your browser does not support audio.
-              </audio>
-              <div className="flex gap-2">
-                <a href={gen.output_url} download target="_blank" rel="noreferrer"
+              <AudioPlayer src={gen.output_url!} label={gen.tool_name} />
+              {onRegenerate && (
+                <button onClick={() => onRegenerate(gen)}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
-                  <Download size={11} /> Download Audio
-                </a>
-                {onRegenerate && (
-                  <button onClick={() => onRegenerate(gen)}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
-                    <RotateCcw size={11} /> Regenerate
-                  </button>
-                )}
-              </div>
+                  <RotateCcw size={11} /> Regenerate
+                </button>
+              )}
             </div>
           )}
           {isVideo && (
-            <div className="space-y-2">
-              <video controls className="w-full rounded-xl max-h-64" src={gen.output_url}>
-                Your browser does not support video.
-              </video>
+            <div className="space-y-3">
+              {/* Inline video player — Runway-style */}
+              <div className="rounded-2xl overflow-hidden border border-white/10 bg-black">
+                <video
+                  controls
+                  className="w-full max-h-[360px] object-contain"
+                  src={gen.output_url}
+                  poster=""
+                  playsInline
+                >
+                  Your browser does not support video.
+                </video>
+              </div>
               <div className="flex gap-2">
                 <a href={gen.output_url} download target="_blank" rel="noreferrer"
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
-                  <Download size={11} /> Download Video
+                  <Download size={11} /> Download MP4
+                </a>
+                <a href={gen.output_url} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
+                  <ExternalLink size={11} /> Open Video
                 </a>
                 {onRegenerate && (
                   <button onClick={() => onRegenerate(gen)}
@@ -1200,7 +1408,12 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
               <div className="bg-white/5 rounded-xl p-3">
                 <RichMessage content={gen.output_text} mode="search" />
               </div>
-              <CopyButton text={gen.output_text} label="📋 Copy" />
+              <div className="flex gap-2">
+                <CopyButton text={gen.output_text} label="📋 Copy" />
+                {gen.output_text.length > 200 && (
+                  <DownloadTextButton text={gen.output_text} filename="web-search-result.txt" label="⬇ Download" />
+                )}
+              </div>
             </div>
           )}
           {isVision && (
@@ -1208,14 +1421,22 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
               <div className="bg-violet-500/5 border border-violet-500/10 rounded-xl p-3">
                 <RichMessage content={gen.output_text} mode="general" />
               </div>
-              <CopyButton text={gen.output_text} label="📋 Copy Analysis" />
+              <div className="flex gap-2">
+                <CopyButton text={gen.output_text} label="📋 Copy Analysis" />
+                {gen.output_text.length > 200 && (
+                  <DownloadTextButton text={gen.output_text} filename="image-analysis.txt" label="⬇ Download" />
+                )}
+              </div>
             </div>
           )}
           {isCode && (
             <div className="relative">
               <div className="flex items-center justify-between bg-gray-900/80 px-3 py-1.5 rounded-t-xl border border-white/10 border-b-0">
                 <span className="text-xs text-white/40 font-mono">Code output</span>
-                <CopyButton text={gen.output_text} />
+                <div className="flex gap-1.5">
+                  <CopyButton text={gen.output_text} />
+                  <DownloadTextButton text={gen.output_text} filename="code-output.txt" label="⬇ .txt" />
+                </div>
               </div>
               <pre className="bg-gray-950 text-green-300 text-xs font-mono p-4 rounded-b-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed">
                 <code>{gen.output_text}</code>
@@ -1260,8 +1481,15 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
               <div className="bg-white/5 rounded-xl p-3">
                 <RichMessage content={gen.output_text} mode="general" />
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <CopyButton text={gen.output_text} label="📋 Copy Text" />
+                {gen.output_text.length > 200 && (
+                  <DownloadTextButton
+                    text={gen.output_text}
+                    filename={`${gen.tool_slug || 'nexus'}-output.txt`}
+                    label="⬇ Download .txt"
+                  />
+                )}
                 {onRegenerate && (
                   <button onClick={() => onRegenerate(gen)}
                     className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
@@ -1855,8 +2083,10 @@ function StudioPageInner() {
     try { localStorage.setItem("nexus_studio_intro_dismissed", "true"); } catch { /* ignore */ }
   }, []);
 
-  const categories    = [...new Set(tools.map((t) => t.category))];
-  const filteredTools = tools.filter((t) => {
+  // Canonical tools — excludes alias/duplicate slugs for a cleaner grid
+  const canonicalTools = tools.filter((t) => !HIDDEN_ALIAS_SLUGS.has(t.slug));
+  const categories    = [...new Set(canonicalTools.map((t) => t.category))];
+  const filteredTools = canonicalTools.filter((t) => {
     const matchesSearch = !searchQuery ||
       t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.description.toLowerCase().includes(searchQuery.toLowerCase());
@@ -2000,7 +2230,7 @@ function StudioPageInner() {
             </div>
             <div>
               <h1 className="text-xl font-bold font-display text-white leading-tight">Nexus AI Studio</h1>
-              <p className="text-white/40 text-xs">{tools.length} AI-powered tools</p>
+              <p className="text-white/40 text-xs">{canonicalTools.length || tools.length} AI-powered tools</p>
             </div>
           </div>
         </div>
@@ -2022,7 +2252,7 @@ function StudioPageInner() {
         <div className="glass border border-white/[0.08] p-1 flex gap-1">
           {([
             { key: "chat",    label: "Chat",    icon: <MessageSquare size={14} />, badge: undefined as number | undefined },
-            { key: "tools",   label: "Tools",   icon: <LayoutGrid size={14} />,   badge: tools.length as number | undefined },
+            { key: "tools",   label: "Tools",   icon: <LayoutGrid size={14} />,   badge: (canonicalTools.length || tools.length) as number | undefined },
             { key: "gallery", label: "Gallery", icon: <History size={14} />,      badge: (pendingCount || undefined) as number | undefined },
           ]).map(({ key, label, icon, badge }) => (
             <button
@@ -2031,8 +2261,8 @@ function StudioPageInner() {
               className={cn(
                 "flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5",
                 activeTab === key
-                  ? "bg-gradient-to-r from-gold-500/80 to-amber-600 text-white shadow"
-                  : "text-white/40 hover:text-white/70"
+                  ? "bg-gradient-to-r from-gold-500/80 to-amber-600 text-white shadow-gold-glow-sm"
+                  : "text-white/40 hover:text-white/70 hover:bg-white/5"
               )}
             >
               {icon}{label}
@@ -2068,8 +2298,8 @@ function StudioPageInner() {
                     className={cn(
                       'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all',
                       chatMode === m.id
-                        ? `bg-gradient-to-r ${m.color} text-white shadow-sm`
-                        : 'bg-white/5 text-white/40 hover:bg-white/8 hover:text-white/65',
+                        ? `bg-gradient-to-r ${m.color} text-white shadow-md`
+                        : 'bg-white/[0.04] text-white/40 hover:bg-white/[0.08] hover:text-white/70 border border-white/[0.06]',
                     )}
                   >
                     {m.icon} {m.label}
@@ -2097,9 +2327,13 @@ function StudioPageInner() {
 
               {/* Messages window */}
               <div className={cn(
-                'glass border border-white/[0.08] h-[380px] overflow-y-auto p-4 space-y-4 scroll-smooth',
-                chatMode === 'code'   && 'bg-gray-950/60',
-                chatMode === 'search' && 'bg-sky-950/20',
+                'glass overflow-y-auto p-4 space-y-4 scroll-smooth border',
+                'h-[calc(100vh-520px)] min-h-[400px] max-h-[700px]',
+                chatMode === 'code'
+                  ? 'bg-gray-950/70 border-green-500/10'
+                  : chatMode === 'search'
+                  ? 'bg-sky-950/25 border-sky-500/10'
+                  : 'border-white/[0.08]',
               )}>
                 {/* UX-03: History loading skeleton */}
                 {!historyLoaded && (
@@ -2129,6 +2363,57 @@ function StudioPageInner() {
                   </div>
                 )}
                 {historyLoaded && messages.map((msg, i) => <ChatBubble key={i} msg={msg} />)}
+                {/* Suggested prompts — shown only when chat is empty (welcome message only) */}
+                {historyLoaded && messages.length <= 1 && !sending && (() => {
+                  const SUGGESTIONS: Record<ChatMode, string[]> = {
+                    general: [
+                      "Write a business plan for a food delivery startup in Lagos",
+                      "Explain blockchain in simple terms",
+                      "Give me 5 social media post ideas for a fashion brand",
+                      "What are the best ways to save money in Nigeria?",
+                    ],
+                    search: [
+                      "What is the current price of Bitcoin today?",
+                      "Latest news in Nigeria today",
+                      "Current USD to Naira exchange rate",
+                      "What are the best smartphones under ₦200,000?",
+                    ],
+                    code: [
+                      "Write a Python function to validate a Nigerian phone number",
+                      "Create a REST API endpoint in Node.js for user login",
+                      "Explain the difference between async/await and Promises",
+                      "Write a SQL query to find duplicate records in a table",
+                    ],
+                  };
+                  const prompts = SUGGESTIONS[chatMode];
+                  const modeColor = chatMode === 'code'
+                    ? 'border-green-500/25 bg-green-950/20 hover:border-green-500/50 hover:bg-green-950/40'
+                    : chatMode === 'search'
+                    ? 'border-sky-500/25 bg-sky-950/20 hover:border-sky-500/50 hover:bg-sky-950/40'
+                    : 'border-gold-500/20 bg-amber-950/20 hover:border-gold-500/40 hover:bg-amber-950/40';
+                  const modeText = chatMode === 'code' ? 'text-green-300/80 hover:text-green-200'
+                    : chatMode === 'search' ? 'text-sky-300/80 hover:text-sky-200'
+                    : 'text-white/60 hover:text-white/90';
+                  return (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-white/20 text-[10px] uppercase tracking-wider px-1">Try asking…</p>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {prompts.map((p, i) => (
+                          <button
+                            key={i}
+                            onClick={() => { setInput(p); inputRef.current?.focus(); }}
+                            className={cn(
+                              'text-left text-xs px-3 py-2 rounded-xl border transition-all leading-relaxed',
+                              modeColor, modeText,
+                            )}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {sending && (
                   <div className="flex gap-2.5">
                     <div className={cn(
@@ -2233,8 +2518,10 @@ function StudioPageInner() {
                                            'Ask Nexus anything…'
                   }
                   className={cn(
-                    'glass border border-white/[0.10] rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-gold-500/40 flex-1 text-sm',
-                    chatMode === 'code'   && 'font-mono',
+                    'glass border border-white/[0.10] rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none flex-1 text-sm transition-colors',
+                    chatMode === 'code'   ? 'font-mono focus:border-green-500/50' :
+                    chatMode === 'search' ? 'focus:border-sky-500/50' :
+                                           'focus:border-gold-500/40',
                   )}
                   disabled={sending}
                 />
@@ -2291,8 +2578,8 @@ function StudioPageInner() {
                     className={cn(
                       "flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-all font-medium",
                       !activeCategory
-                        ? "bg-gold-500/15 text-gold-500 border-gold-500/30"
-                        : "text-white/50 border-white/10 hover:text-white/80"
+                        ? "bg-gold-500/20 text-gold-400 border-gold-500/40 shadow-gold-glow-sm"
+                        : "text-white/50 border-white/10 hover:text-white/80 hover:border-white/25 hover:bg-white/5"
                     )}
                   >
                     All
@@ -2305,7 +2592,9 @@ function StudioPageInner() {
                         onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
                         className={cn(
                           "flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-all font-medium flex items-center gap-1",
-                          activeCategory === cat ? cfg.badge : "text-white/50 border-white/10 hover:text-white/80"
+                          activeCategory === cat
+                            ? cn(cfg.badge, 'shadow-sm')
+                            : "text-white/50 border-white/10 hover:text-white/80 hover:border-white/25 hover:bg-white/5"
                         )}
                       >
                         {cfg.icon}
