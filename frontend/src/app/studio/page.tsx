@@ -1735,7 +1735,13 @@ function renderTemplate(
   // Cast Tool → StudioTool-compatible shape (same fields, Tool just omits icon)
   const t = tool as unknown as import("../../types/studio").StudioTool;
   const props = { tool: t, onSubmit, isLoading, userPoints };
-  switch (tool.ui_template) {
+  // Normalise to kebab-case so both DB PascalCase (e.g. "MusicComposer")
+  // and kebab-case (e.g. "music-composer") values match correctly.
+  const rawTpl = tool.ui_template ?? "";
+  const tpl = rawTpl
+    .replace(/([A-Z])/g, (m: string, c: string, i: number) => (i > 0 ? "-" : "") + c.toLowerCase())
+    .replace(/^-/, "");
+  switch (tpl) {
     case "music-composer":  return <MusicComposer  {...props} />;
     case "image-creator":   return <ImageCreator   {...props} />;
     case "image-editor":    return <ImageEditor    {...props} />;
