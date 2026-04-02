@@ -135,7 +135,11 @@ const VISION_SLUGS = new Set(["image-analyser","ask-my-photo"]);
 const WEB_SLUGS    = new Set(["web-search-ai"]);
 const JSON_SLUGS   = new Set(["quiz","mindmap","slide-deck"]);
 // Document tools that should offer PDF + Markdown download
-const DOC_EXPORT_SLUGS = new Set(["bizplan","business-plan","study-guide","research-brief","deep-research-brief","summary"]);
+const DOC_EXPORT_SLUGS = new Set([
+  "bizplan", "business-plan", "business-plan-summary",
+  "study-guide", "research-brief", "deep-research-brief",
+  "slide-deck", "infographic", "summary"
+]);
 
 function getOutputType(slug: string): { label: string; emoji: string; noun: string } {
   if (VIDEO_SLUGS.has(slug))  return { label: "Video MP4",  emoji: "🎬", noun: "video" };
