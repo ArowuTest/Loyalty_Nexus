@@ -157,7 +157,7 @@ function getToolContext(slug: string) {
     showVocals:    true,
     showStructure: true,
     defaultDur:    30,
-    promptLabel:   'Describe your music',
+    promptLabel:   'Music Style & Direction',
     promptHint:    'e.g. Upbeat Afrobeats love song, female vocals, summer vibes, catchy chorus hook…',
     accentColor:   'amber',
   };
@@ -199,8 +199,8 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
   // BG Music scene
   const [bgScene, setBgScene] = useState('');
 
-  // UI toggles
-  const [showLyricsBox, setShowLyricsBox] = useState(false);
+  // UI toggles — lyrics always open for song-creator
+  const [showLyricsBox, setShowLyricsBox] = useState(ctx.mode === 'song-creator');
   const [showInspo,     setShowInspo]     = useState(false);
   const [showAdvanced,  setShowAdvanced]  = useState(false);
 
@@ -449,7 +449,7 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
 
       {/* ── Prompt ── */}
       <div>
-        <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center justify-between mb-1">
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
             {ctx.promptLabel}
           </label>
@@ -460,6 +460,11 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
             <Shuffle size={11} /> Surprise me
           </button>
         </div>
+        {ctx.mode === 'song-creator' && (
+          <p className="text-white/30 text-[10px] mb-1.5">
+            Describe the <span className="text-amber-400/70 font-medium">vibe, genre &amp; feel</span> — not the words. For your actual lyrics, use the section below.
+          </p>
+        )}
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -705,30 +710,45 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
 
       {/* ── Lyrics editor (song-creator with vocals only) ── */}
       {ctx.showLyrics && (mode !== 'song-creator' || vocals) && (
-        <div>
-          <button
-            onClick={() => setShowLyricsBox((v) => !v)}
-            className="flex items-center gap-2 text-white/40 text-xs font-medium hover:text-white/70 transition-colors"
-          >
-            <Music size={13} />
-            Add your own lyrics (optional)
-            {showLyricsBox ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-          </button>
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+
+          {/* Header row */}
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-white/70 text-[11px] uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                <Music size={12} className="text-amber-400" />
+                Your Lyrics
+                <span className="text-white/25 normal-case font-normal text-[10px]">(optional)</span>
+              </label>
+              <p className="text-white/30 text-[10px] mt-0.5">
+                Paste your verses, chorus and bridge here — the AI will sing them exactly as written.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowLyricsBox((v) => !v)}
+              className="text-white/25 hover:text-white/50 transition-colors"
+            >
+              {showLyricsBox ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+          </div>
 
           {showLyricsBox && (
-            <div className="mt-2 space-y-2">
+            <>
               {/* Section tag quick-insert helpers */}
-              <div className="flex flex-wrap gap-1.5">
-                {LYRIC_SECTION_TAGS.map((tag) => (
-                  <button
-                    key={tag}
-                    onClick={() => insertLyricTag(tag)}
-                    className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md border border-white/10 text-white/35 hover:border-amber-500/40 hover:text-amber-400 transition-all font-mono"
-                  >
-                    <Plus size={9} />
-                    {tag}
-                  </button>
-                ))}
+              <div>
+                <p className="text-white/25 text-[10px] mb-1.5">Click to insert section tags:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {LYRIC_SECTION_TAGS.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => insertLyricTag(tag)}
+                      className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md border border-white/10 text-white/40 hover:border-amber-500/40 hover:text-amber-400 transition-all font-mono"
+                    >
+                      <Plus size={9} />
+                      {tag}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <textarea
@@ -742,10 +762,23 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
                 className="nexus-input resize-none w-full text-sm leading-relaxed font-mono"
               />
               <p className="text-white/20 text-[10px]">
-                Use section tags like [Verse], [Chorus], [Bridge] to control song structure.
-                The AI will sing your lyrics exactly as written.
+                Leave blank to let the AI write its own lyrics based on your style direction above.
               </p>
-            </div>
+            </>
+          )}
+
+          {/* Collapsed preview when hidden */}
+          {!showLyricsBox && (
+            <button
+              onClick={() => setShowLyricsBox(true)}
+              className="w-full text-left text-xs text-white/30 hover:text-amber-400 transition-colors py-1"
+            >
+              {lyrics.trim() ? (
+                <span className="text-amber-400/70">✓ Lyrics added ({lyrics.trim().split('\n').length} lines) — click to edit</span>
+              ) : (
+                <span>+ Click to add your own lyrics…</span>
+              )}
+            </button>
           )}
         </div>
       )}
