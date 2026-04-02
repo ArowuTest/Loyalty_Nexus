@@ -900,3 +900,110 @@ func (a *DeepSeekAdapter) Complete(ctx context.Context, systemPrompt, userPrompt
 	}
 	return result.Choices[0].Message.Content, nil
 }
+
+// ─── GrokAdapter (xAI Grok for image/video generation) ──────────────────────
+
+type GrokAdapter struct {
+	apiKey string
+	client *http.Client
+}
+
+func NewGrokAdapter(apiKey string) *GrokAdapter {
+	return &GrokAdapter{apiKey: apiKey, client: &http.Client{Timeout: 90 * time.Second}}
+}
+
+// GenerateImage calls Grok's image generation API (grok-imagine-image or grok-imagine-image-pro)
+func (a *GrokAdapter) GenerateImage(ctx context.Context, prompt string, model string) (string, error) {
+	// model should be "grok-imagine-image" (standard, $0.02) or "grok-imagine-image-pro" ($0.07)
+	if model == "" {
+		model = "grok-imagine-image-pro" // default to pro for best quality
+	}
+
+	payload := map[string]interface{}{
+		"model":  model,
+		"prompt": prompt,
+		"n":      1, // generate 1 image
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("grok image marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.x.ai/v1/images/generations", bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("grok image new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("grok image http: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("grok image decode: %w", err)
+	}
+	if result.Error != nil {
+		return "", fmt.Errorf("grok image API error: %s", result.Error.Message)
+	}
+	if len(result.Data) == 0 {
+		return "", fmt.Errorf("grok image: no images returned")
+	}
+	return result.Data[0].URL, nil
+}
+
+// GenerateVideo calls Grok's video generation API (grok-imagine-video)
+func (a *GrokAdapter) GenerateVideo(ctx context.Context, prompt string) (string, error) {
+	payload := map[string]interface{}{
+		"model":  "grok-imagine-video",
+		"prompt": prompt,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("grok video marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.x.ai/v1/videos/generations", bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("grok video new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("grok video http: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Data []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("grok video decode: %w", err)
+	}
+	if result.Error != nil {
+		return "", fmt.Errorf("grok video API error: %s", result.Error.Message)
+	}
+	if len(result.Data) == 0 {
+		return "", fmt.Errorf("grok video: no videos returned")
+	}
+	return result.Data[0].URL, nil
+}

@@ -71,6 +71,8 @@ services:
         sync: false
       - key: DEEPSEEK_API_KEY
         sync: false
+      - key: XAI_API_KEY
+        sync: false
       - key: HF_TOKEN
         sync: false
       - key: HF_IMAGE_MODEL
@@ -218,6 +220,8 @@ services:
       - key: GROQ_API_KEY
         sync: false
       - key: GEMINI_API_KEY
+        sync: false
+      - key: XAI_API_KEY
         sync: false
       - key: HF_TOKEN
         sync: false

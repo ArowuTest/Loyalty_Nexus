@@ -139,6 +139,7 @@ type AIStudioOrchestrator struct {
 	httpClient *http.Client
 	llmOrch    *external.LLMOrchestrator // for provider health tracking
 	providerDB ProviderConfigStore       // optional DB-backed provider registry
+	grokClient *external.GrokAdapter     // xAI Grok for premium image/video generation
 }
 
 // ProviderConfigStore is the minimal interface the orchestrator needs
@@ -158,6 +159,14 @@ func NewAIStudioOrchestrator(
 	if storage == nil {
 		storage = external.NewAssetStorageFromEnv()
 	}
+	grokKey := os.Getenv("XAI_API_KEY")
+	var grokClient *external.GrokAdapter
+	if grokKey != "" {
+		grokClient = external.NewGrokAdapter(grokKey)
+		log.Printf("[AIStudio] Grok (xAI) adapter initialised — premium image/video enabled")
+	} else {
+		log.Printf("[AIStudio] XAI_API_KEY not set — Grok premium image/video disabled")
+	}
 	return &AIStudioOrchestrator{
 		cfg:        cfg,
 		studioRepo: studioRepo,
@@ -165,6 +174,7 @@ func NewAIStudioOrchestrator(
 		userRepo:   userRepo,
 		storage:    storage,
 		httpClient: &http.Client{Timeout: 120 * time.Second},
+		grokClient: grokClient,
 	}
 }
 
@@ -681,12 +691,21 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 		return o.dispatchBgRemover(ctx, prompt)
 
 	case "ai-photo-pro":
-		// GPT Image (gptimage model) — CostMicros: $0.02
+		// Tier 1: Grok Aurora (xAI) — #1 ranked image quality, $0.07/image
+		if o.grokClient != nil {
+			url, err := o.grokClient.GenerateImage(ctx, prompt, "grok-imagine-image-pro")
+			if err == nil {
+				return &studioProviderResult{OutputURL: url, Provider: "grok/aurora-pro", CostMicros: 70000}, nil
+			}
+			log.Printf("[AIStudio] Grok Aurora Pro failed for ai-photo-pro: %v — falling back", err)
+		}
+		// Tier 2: GPT Image (gptimage model) — CostMicros: $0.02
 		url, err := o.callPollinationsGPTImage(ctx, prompt, "gptimage")
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/gptimage", CostMicros: 20000}, nil
 		}
 		log.Printf("[AIStudio] GPTImage failed for ai-photo-pro: %v — falling back to FLUX", err)
+		// Tier 3: Pollinations FLUX (free fallback)
 		url, err = o.callPollinationsImage(ctx, prompt)
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
@@ -694,12 +713,21 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 		return nil, fmt.Errorf("ai-photo-pro: all providers failed")
 
 	case "ai-photo-max":
-		// GPT Image Large — CostMicros: $0.03
+		// Tier 1: Grok Aurora Pro (xAI) — #1 ranked image quality, $0.07/image
+		if o.grokClient != nil {
+			url, err := o.grokClient.GenerateImage(ctx, prompt, "grok-imagine-image-pro")
+			if err == nil {
+				return &studioProviderResult{OutputURL: url, Provider: "grok/aurora-pro", CostMicros: 70000}, nil
+			}
+			log.Printf("[AIStudio] Grok Aurora Pro failed for ai-photo-max: %v — falling back", err)
+		}
+		// Tier 2: GPT Image Large — CostMicros: $0.03
 		url, err := o.callPollinationsGPTImage(ctx, prompt, "gptimage-large")
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/gptimage-large", CostMicros: 30000}, nil
 		}
 		log.Printf("[AIStudio] GPTImage-large failed for ai-photo-max: %v — falling back", err)
+		// Tier 3: Pollinations FLUX (free fallback)
 		url, err = o.callPollinationsImage(ctx, prompt)
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
@@ -866,10 +894,21 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		return nil, fmt.Errorf("video-cinematic: all providers failed")
 	}
 
-	// video-veo: Google Veo 3.1 text-to-video (PAID, highest quality, 0.150/sec)
-	// Fallback: wan-fast FREE (not seedance — also paid)
+	// video-veo: Premium video generation with Grok (xAI) as Tier 1
+	// Tier 1: Grok Imagine Video (xAI) — $0.05/sec, top-tier quality
+	// Tier 2: Google Veo 3.1 (Pollinations) — $0.150/sec
+	// Tier 3: wan-fast (FREE)
 	if slug == "video-veo" {
 		prompt := o.enhanceVideoPrompt(ctx, env.Prompt)
+		// Tier 1: Grok Imagine Video (xAI) — $0.05/sec (~$2.50 for 5sec video)
+		if o.grokClient != nil {
+			vidURL, err := o.grokClient.GenerateVideo(ctx, prompt)
+			if err == nil {
+				return &studioProviderResult{OutputURL: vidURL, Provider: "grok/imagine-video", CostMicros: 250000}, nil
+			}
+			log.Printf("[AIStudio] Grok Imagine Video failed for video-veo: %v — trying Veo", err)
+		}
+		// Tier 2: Google Veo 3.1 (Pollinations) — $0.150/sec
 		vidURL, err := o.callPollinationsVeo(ctx, prompt)
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo", CostMicros: 400000}, nil
