@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Loader2, Sparkles, ArrowRight, Paperclip, X, FileText, AlertCircle } from 'lucide-react';
+import {
+  Loader2, Sparkles, ArrowRight, Paperclip, X, FileText,
+  AlertCircle, BookOpen, HelpCircle, GitBranch, Briefcase,
+  Presentation, BarChart2, Mic, Globe, ChevronDown, ChevronUp,
+} from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 import api from '@/lib/api';
@@ -17,26 +21,38 @@ const DEFAULT_FIELDS = [
 
 // ─── Translate-specific language list ────────────────────────────────────────
 const TRANSLATE_LANGUAGES = [
-  { code: 'en',    label: 'English' },
-  { code: 'fr',    label: 'French' },
-  { code: 'es',    label: 'Spanish' },
-  { code: 'pt',    label: 'Portuguese' },
-  { code: 'de',    label: 'German' },
-  { code: 'ar',    label: 'Arabic' },
-  { code: 'zh',    label: 'Chinese' },
-  { code: 'sw',    label: 'Swahili' },
-  { code: 'yo',    label: 'Yoruba' },
-  { code: 'ha',    label: 'Hausa' },
-  { code: 'ig',    label: 'Igbo' },
-  { code: 'pcm',   label: 'Nigerian Pidgin' },
-  { code: 'af',    label: 'Afrikaans' },
+  { code: 'en',  label: 'English',          flag: '🇬🇧' },
+  { code: 'fr',  label: 'French',           flag: '🇫🇷' },
+  { code: 'es',  label: 'Spanish',          flag: '🇪🇸' },
+  { code: 'pt',  label: 'Portuguese',       flag: '🇵🇹' },
+  { code: 'de',  label: 'German',           flag: '🇩🇪' },
+  { code: 'ar',  label: 'Arabic',           flag: '🇸🇦' },
+  { code: 'zh',  label: 'Chinese',          flag: '🇨🇳' },
+  { code: 'sw',  label: 'Swahili',          flag: '🌍' },
+  { code: 'yo',  label: 'Yoruba',           flag: '🇳🇬' },
+  { code: 'ha',  label: 'Hausa',            flag: '🇳🇬' },
+  { code: 'ig',  label: 'Igbo',             flag: '🇳🇬' },
+  { code: 'pcm', label: 'Nigerian Pidgin',  flag: '🇳🇬' },
+  { code: 'af',  label: 'Afrikaans',        flag: '🇿🇦' },
 ];
 
-// ─── Slugs that support document upload (FEAT-01) ─────────────────────────────
+// ─── Slugs that support document upload ──────────────────────────────────────
 const DOCUMENT_UPLOAD_SLUGS = new Set([
   'study-guide', 'quiz', 'mindmap', 'research-brief',
   'bizplan', 'slide-deck', 'infographic', 'podcast',
 ]);
+
+// ─── Document type visual cards ──────────────────────────────────────────────
+const DOC_TYPE_CARDS: Record<string, { icon: React.ElementType; color: string; label: string; desc: string }> = {
+  'study-guide':    { icon: BookOpen,      color: 'from-blue-600/30 to-blue-700/20 border-blue-500/40 text-blue-200',    label: 'Study Guide',    desc: 'Structured learning notes' },
+  'quiz':           { icon: HelpCircle,    color: 'from-green-600/30 to-green-700/20 border-green-500/40 text-green-200', label: 'Quiz',           desc: 'Q&A with answers' },
+  'mindmap':        { icon: GitBranch,     color: 'from-purple-600/30 to-purple-700/20 border-purple-500/40 text-purple-200', label: 'Mind Map',   desc: 'Visual concept tree' },
+  'research-brief': { icon: Globe,         color: 'from-sky-600/30 to-sky-700/20 border-sky-500/40 text-sky-200',         label: 'Research Brief', desc: 'Summarised findings' },
+  'bizplan':        { icon: Briefcase,     color: 'from-amber-600/30 to-amber-700/20 border-amber-500/40 text-amber-200', label: 'Business Plan',  desc: 'Full business document' },
+  'slide-deck':     { icon: Presentation,  color: 'from-rose-600/30 to-rose-700/20 border-rose-500/40 text-rose-200',     label: 'Slide Deck',     desc: 'Presentation outline' },
+  'infographic':    { icon: BarChart2,     color: 'from-orange-600/30 to-orange-700/20 border-orange-500/40 text-orange-200', label: 'Infographic', desc: 'Visual data story' },
+  'podcast':        { icon: Mic,           color: 'from-teal-600/30 to-teal-700/20 border-teal-500/40 text-teal-200',     label: 'Podcast Script', desc: 'Conversational script' },
+};
 
 // ─── Translate layout ─────────────────────────────────────────────────────────
 function TranslateLayout({
@@ -79,8 +95,8 @@ function TranslateLayout({
             className="nexus-input w-full text-sm"
           >
             <option value="auto">Auto-detect</option>
-            {(languages as { code: string; label: string }[]).map((l) => (
-              <option key={l.code} value={l.code}>{l.label}</option>
+            {(languages as { code: string; label: string; flag?: string }[]).map((l) => (
+              <option key={l.code} value={l.code}>{l.flag ? `${l.flag} ` : ''}{l.label}</option>
             ))}
           </select>
         </div>
@@ -94,8 +110,8 @@ function TranslateLayout({
             onChange={(e) => setTargetLang(e.target.value)}
             className="nexus-input w-full text-sm"
           >
-            {(languages as { code: string; label: string }[]).map((l) => (
-              <option key={l.code} value={l.code}>{l.label}</option>
+            {(languages as { code: string; label: string; flag?: string }[]).map((l) => (
+              <option key={l.code} value={l.code}>{l.flag ? `${l.flag} ` : ''}{l.label}</option>
             ))}
           </select>
         </div>
@@ -168,20 +184,22 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
   const supportsDocUpload = DOCUMENT_UPLOAD_SLUGS.has(tool.slug);
+  const docTypeCard = DOC_TYPE_CARDS[tool.slug ?? ''];
 
-  // ── Document upload state (FEAT-01) ──────────────────────────────────────
+  // ── Document upload state ──────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [docFile,       setDocFile]       = useState<File | null>(null);
-  const [docURL,        setDocURL]        = useState<string | null>(null);
-  const [docUploading,  setDocUploading]  = useState(false);
-  const [docUploadErr,  setDocUploadErr]  = useState<string | null>(null);
+  const [docFile,      setDocFile]      = useState<File | null>(null);
+  const [docURL,       setDocURL]       = useState<string | null>(null);
+  const [docUploading, setDocUploading] = useState(false);
+  const [docUploadErr, setDocUploadErr] = useState<string | null>(null);
+  const [showFields,   setShowFields]   = useState(true);
 
   // If this is the translate tool, render dedicated layout
   if (tool.slug === 'translate') {
     return <TranslateLayout tool={tool} onSubmit={onSubmit} isLoading={isLoading} canAfford={canAfford} />;
   }
 
-  // ── Generic field-driven layout ──────────────────────────────────────────
+  // ── Generic field-driven layout ────────────────────────────────────────────
 
   type FieldDef = {
     key: string;
@@ -203,7 +221,6 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
   });
 
   function isValid(): boolean {
-    // If a document is uploaded, the prompt field is optional (document provides context)
     if (docURL) return true;
     return typedFields.every((f) => !f.required || (values[f.key]?.trim().length ?? 0) >= 3);
   }
@@ -212,7 +229,6 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
     const allowed = ['application/pdf', 'text/plain', 'text/markdown'];
     const ext = file.name.toLowerCase();
     const isAllowed = allowed.includes(file.type) || ext.endsWith('.pdf') || ext.endsWith('.txt') || ext.endsWith('.md');
@@ -268,16 +284,34 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
     setValues((prev) => ({ ...prev, [key]: val }));
   }
 
-  // Button label based on output type
   const btnLabel =
-    cfg.output_format === 'document' ? 'Generate Document →'
-    : cfg.output_format === 'audio'  ? 'Generate Audio →'
-    : 'Generate →';
+    cfg.output_format === 'document' ? 'Generate Document'
+    : cfg.output_format === 'audio'  ? 'Generate Audio'
+    : 'Generate';
 
   return (
     <div className="space-y-5">
 
-      {/* ── Document upload zone (FEAT-01) — only for knowledge tools ── */}
+      {/* ── Document type visual card header ── */}
+      {docTypeCard && (
+        <div className={cn(
+          'flex items-center gap-3 rounded-xl border px-4 py-3 bg-gradient-to-r',
+          docTypeCard.color,
+        )}>
+          <docTypeCard.icon size={20} className="flex-shrink-0" />
+          <div>
+            <p className="font-bold text-sm">{docTypeCard.label}</p>
+            <p className="text-[11px] opacity-70">{docTypeCard.desc}</p>
+          </div>
+          {cfg.output_format && (
+            <span className="ml-auto text-[10px] font-bold uppercase tracking-wider opacity-60 border border-current rounded-full px-2 py-0.5">
+              {cfg.output_format}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ── Document upload zone ── */}
       {supportsDocUpload && (
         <div>
           <div className="flex items-center justify-between mb-1.5">
@@ -288,7 +322,6 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
           </div>
 
           {docFile ? (
-            /* Uploaded file pill */
             <div className={cn(
               'flex items-center gap-3 px-4 py-3 rounded-xl border',
               docUploading
@@ -311,17 +344,12 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
                 </p>
               </div>
               {!docUploading && (
-                <button
-                  onClick={removeDocument}
-                  className="text-white/30 hover:text-white/70 transition-colors flex-shrink-0"
-                  title="Remove document"
-                >
+                <button onClick={removeDocument} className="text-white/30 hover:text-white/70 transition-colors flex-shrink-0" title="Remove document">
                   <X size={15} />
                 </button>
               )}
             </div>
           ) : (
-            /* Upload drop zone */
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -354,8 +382,18 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
         </div>
       )}
 
-      {/* ── Dynamic fields ── */}
-      {typedFields.map((field, idx) => (
+      {/* ── Dynamic fields (collapsible when doc uploaded) ── */}
+      {docURL && typedFields.length > 0 && (
+        <button
+          onClick={() => setShowFields((v) => !v)}
+          className="flex items-center gap-2 text-white/35 text-xs font-medium hover:text-white/60 transition-colors w-full"
+        >
+          {showFields ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          {showFields ? 'Hide' : 'Show'} additional instructions (optional)
+        </button>
+      )}
+
+      {(!docURL || showFields) && typedFields.map((field, idx) => (
         <div key={field.key}>
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
             {field.label}
@@ -401,46 +439,31 @@ export default function KnowledgeDoc({ tool, onSubmit, isLoading, userPoints }: 
         </div>
       ))}
 
-      {/* ── Output format badge ── */}
-      {cfg.output_format && (
-        <div className="flex items-center gap-2">
-          <span className="text-white/35 text-xs">Output:</span>
-          <span className={cn(
-            'text-xs px-2.5 py-1 rounded-full font-semibold',
-            cfg.output_format === 'document' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-            : cfg.output_format === 'audio'  ? 'bg-green-500/20 text-green-300 border border-green-500/30'
-            :                                  'bg-white/10 text-white/50 border border-white/15',
-          )}>
-            {cfg.output_format === 'document' ? '📄 Document'
-              : cfg.output_format === 'audio' ? '🎙 Audio'
-              : '📝 Text'}
-          </span>
-        </div>
-      )}
-
-      {/* ── Output hint ── */}
-      {cfg.output_hint && (
-        <p className="text-white/30 text-xs leading-relaxed">{cfg.output_hint}</p>
-      )}
-
       {/* ── Generate button ── */}
       <button
         onClick={handleSubmit}
         disabled={!isValid() || isLoading || !canAfford || docUploading}
         className={cn(
-          'w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all',
+          'w-full py-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all',
           isValid() && !isLoading && canAfford && !docUploading
             ? 'bg-gradient-to-r from-nexus-600 to-purple-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-nexus-900/30'
             : 'bg-white/5 text-white/20 cursor-not-allowed',
         )}
       >
-        {isLoading
-          ? <><Loader2 size={15} className="animate-spin" /> Generating…</>
-          : docUploading
-            ? <><Loader2 size={15} className="animate-spin" /> Uploading document…</>
-            : <><Sparkles size={15} /> {btnLabel}</>
-        }
+        {isLoading ? (
+          <><Loader2 size={15} className="animate-spin" /> Generating…</>
+        ) : docUploading ? (
+          <><Loader2 size={15} className="animate-spin" /> Uploading document…</>
+        ) : (
+          <><Sparkles size={15} /> {btnLabel}</>
+        )}
       </button>
+
+      {!tool.is_free && (
+        <p className="text-white/20 text-[11px] text-center -mt-2">
+          {tool.point_cost} PulsePoints per generation · {userPoints} available
+        </p>
+      )}
     </div>
   );
 }

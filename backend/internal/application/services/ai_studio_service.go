@@ -486,27 +486,31 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 		return nil, fmt.Errorf("ai-photo-dream: all providers failed")
 
 	case "photo-editor":
-		// Kontext image-to-image editing — CostMicros: $0.015
-		// NOTE: kontext is currently OFF on Pollinations monitor (40% success, 2520 5xx errors).
-		// Fallback chain: kontext → p-image-edit (Pruna, 98.1% success) → gptimage-large (generate from prompt)
-		// Frontend sends: { prompt: instruction, image_url: imgURL } via buildEnrichedPrompt
+		// Image-to-image editing — upgraded provider chain (2025-04)
+		// Tier 1: p-image-edit (Pruna/Pollinations, 98.1% success) — fast, reliable
+		// Tier 2: FAL.ai FLUX.1 Kontext Pro — highest quality image editing
+		// Tier 3: GPT-Image-Large — generate from instruction prompt (100% success, no source image)
+		// Frontend sends: { prompt: instruction, image_url: imgURL }
 		imgURL := env.ImageURL
 		instruction := env.Prompt
 		if imgURL == "" {
 			return nil, fmt.Errorf("photo-editor: image_url is required")
 		}
-		// Tier 1: kontext (FLUX.1 Kontext) — best quality image editing, currently OFF
-		url, err := o.callPollinationsKontext(ctx, imgURL, instruction)
-		if err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "pollinations/kontext", CostMicros: 15000}, nil
-		}
-		log.Printf("[AIStudio] Kontext failed for photo-editor: %v — trying p-image-edit", err)
-		// Tier 2: p-image-edit (Pruna) — image-to-image editing, 98.1% success
-		url, err = o.callPollinationsKontextAlt(ctx, imgURL, instruction)
+		// Tier 1: p-image-edit (Pruna) — image-to-image editing, 98.1% success
+		url, err := o.callPollinationsKontextAlt(ctx, imgURL, instruction)
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/p-image-edit", CostMicros: 10000}, nil
 		}
-		log.Printf("[AIStudio] p-image-edit failed for photo-editor: %v — falling back to gptimage-large", err)
+		log.Printf("[AIStudio] p-image-edit failed for photo-editor: %v — trying FAL kontext", err)
+		// Tier 2: FAL.ai FLUX.1 Kontext Pro — best quality, paid
+		falKey := os.Getenv("FAL_API_KEY")
+		if falKey != "" {
+			url, err = o.callFALImageEdit(ctx, falKey, imgURL, instruction)
+			if err == nil {
+				return &studioProviderResult{OutputURL: url, Provider: "fal/flux-kontext", CostMicros: 20000}, nil
+			}
+			log.Printf("[AIStudio] FAL kontext failed for photo-editor: %v — falling back to gptimage-large", err)
+		}
 		// Tier 3: gptimage-large — generate from instruction prompt (no source image, 100% success)
 		url, err = o.callPollinationsGPTImage(ctx, instruction, "gptimage-large")
 		if err == nil {
@@ -1243,6 +1247,43 @@ func (o *AIStudioOrchestrator) callFALFlux(ctx context.Context, falKey, prompt s
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Images) == 0 {
 		return "", fmt.Errorf("FAL parse: empty images")
+	}
+	return parsed.Images[0].URL, nil
+}
+
+// callFALImageEdit calls FAL.AI FLUX.1 Kontext Pro for image-to-image editing.
+func (o *AIStudioOrchestrator) callFALImageEdit(ctx context.Context, falKey, imageURL, instruction string) (string, error) {
+	payload := map[string]interface{}{
+		"prompt":        instruction,
+		"image_url":     imageURL,
+		"num_images":    1,
+		"output_format": "jpeg",
+		"guidance_scale": 3.5,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://fal.run/fal-ai/flux-pro/kontext", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Key "+falKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("FAL image-edit %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+	var parsed struct {
+		Images []struct {
+			URL string `json:"url"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Images) == 0 {
+		return "", fmt.Errorf("FAL image-edit parse: empty images")
 	}
 	return parsed.Images[0].URL, nil
 }

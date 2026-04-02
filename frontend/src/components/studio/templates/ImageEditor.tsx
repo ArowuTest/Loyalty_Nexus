@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Loader2, Upload, X, ImageIcon, Sparkles } from 'lucide-react';
+import { Loader2, Upload, X, ImageIcon, Sparkles, Sliders, ChevronDown, ChevronUp } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 
@@ -16,17 +16,27 @@ const DEFAULT_EDIT_SUGGESTIONS = [
   'Upscale & enhance sharpness',
   'Change background to a beach',
   'Add professional studio lighting',
+  'Add a cinematic film grain',
+  'Make it look like a comic book',
+];
+
+const STRENGTH_LEVELS = [
+  { label: 'Subtle',   value: 0.3, desc: 'Light touch' },
+  { label: 'Moderate', value: 0.6, desc: 'Balanced'    },
+  { label: 'Strong',   value: 0.8, desc: 'Bold change' },
+  { label: 'Max',      value: 1.0, desc: 'Full rework' },
 ];
 
 export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
   const cfg             = tool.ui_config ?? {};
-  // Quick-edit chips from DB config, falling back to defaults
   const editSuggestions = cfg.edit_suggestions ?? DEFAULT_EDIT_SUGGESTIONS;
 
   const [imageUrl,    setImageUrl]    = useState('');
   const [imageFile,   setImageFile]   = useState<File | null>(null);
   const [preview,     setPreview]     = useState<string | null>(null);
   const [editPrompt,  setEditPrompt]  = useState('');
+  const [strength,    setStrength]    = useState(0.6);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
@@ -60,6 +70,9 @@ export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: T
     const payload: GeneratePayload = {
       prompt:    editPrompt.trim(),
       image_url: finalUrl,
+      extra_params: {
+        strength,
+      },
     };
     onSubmit(payload);
   }
@@ -110,28 +123,37 @@ export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: T
             />
           </>
         ) : (
-          /* Image preview — original preserved */
+          /* Before/After split preview */
           <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/30">
             <img
               src={preview ?? imageUrl}
               alt="Original"
               className="w-full max-h-52 object-cover"
             />
+            {/* Overlay labels */}
+            <div className="absolute inset-0 flex pointer-events-none">
+              <div className="flex-1 flex items-end justify-start p-2">
+                <div className="flex items-center gap-1.5 bg-black/70 rounded-full px-2.5 py-1">
+                  <ImageIcon size={11} className="text-white/60" />
+                  <span className="text-white/60 text-[11px]">Original</span>
+                </div>
+              </div>
+              <div className="flex-1 flex items-end justify-end p-2">
+                <div className="flex items-center gap-1 bg-purple-600/80 rounded-full px-2.5 py-1">
+                  <Sparkles size={11} className="text-white" />
+                  <span className="text-white text-[11px] font-medium">AI Edit</span>
+                </div>
+              </div>
+            </div>
             <button
               onClick={clearImage}
               className="absolute top-2 right-2 p-1.5 bg-black/70 rounded-full text-white/60 hover:text-white transition-colors"
             >
               <X size={14} />
             </button>
-            {/* "Original" label */}
-            <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-black/70 rounded-full px-2.5 py-1">
-              <ImageIcon size={11} className="text-white/60" />
-              <span className="text-white/60 text-[11px]">Original · {imageFile?.name ?? 'URL'}</span>
-            </div>
-            {/* "→ Edited" hint */}
-            <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-purple-600/70 rounded-full px-2.5 py-1">
-              <span className="text-white text-[11px] font-medium">→ AI Edit</span>
-            </div>
+            <p className="text-white/30 text-[11px] px-3 py-1.5 bg-black/40">
+              {imageFile?.name ?? 'URL'} · {imageFile ? `${(imageFile.size / 1024).toFixed(0)} KB` : 'External'}
+            </p>
           </div>
         )}
       </div>
@@ -146,9 +168,9 @@ export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: T
             </label>
           </div>
 
-          {/* Quick-edit chips (from ui_config) */}
+          {/* Quick-edit chips */}
           <div className="flex flex-wrap gap-1.5 mb-2">
-            {editSuggestions.map((s: string) => (
+            {(editSuggestions as string[]).map((s) => (
               <button
                 key={s}
                 onClick={() => setEditPrompt(s)}
@@ -172,6 +194,49 @@ export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: T
             autoFocus
             className="nexus-input resize-none w-full text-sm leading-relaxed"
           />
+
+          {/* ── Advanced: Strength slider ── */}
+          <button
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="flex items-center gap-1.5 text-white/30 text-xs hover:text-white/55 transition-colors mt-2"
+          >
+            <Sliders size={11} />
+            Advanced settings
+            {showAdvanced ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+          </button>
+
+          {showAdvanced && (
+            <div className="mt-3 space-y-3 p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Edit Strength</label>
+                  <span className="text-white/40 text-xs font-medium">
+                    {STRENGTH_LEVELS.find((s) => s.value === strength)?.label ?? 'Custom'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {STRENGTH_LEVELS.map((s) => (
+                    <button
+                      key={s.value}
+                      onClick={() => setStrength(s.value)}
+                      className={cn(
+                        'flex flex-col items-center gap-0.5 py-2 rounded-xl border text-xs font-medium transition-all',
+                        strength === s.value
+                          ? 'bg-purple-600/25 border-purple-500/60 text-purple-200'
+                          : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/65',
+                      )}
+                    >
+                      <span className="font-bold">{s.label}</span>
+                      <span className="text-[9px] opacity-60">{s.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-white/20 text-[11px] mt-1.5">
+                  Higher strength = more dramatic changes, less resemblance to original
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -180,7 +245,7 @@ export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: T
         onClick={handleSubmit}
         disabled={!isValid || isLoading || !canAfford}
         className={cn(
-          'w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all',
+          'w-full py-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all',
           isValid && !isLoading && canAfford
             ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-purple-900/30'
             : 'bg-white/5 text-white/20 cursor-not-allowed',
@@ -188,9 +253,15 @@ export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: T
       >
         {isLoading
           ? <><Loader2 size={15} className="animate-spin" /> Editing image…</>
-          : <><Sparkles size={15} /> Apply Edit →</>
+          : <><Sparkles size={15} /> Apply Edit</>
         }
       </button>
+
+      {!tool.is_free && (
+        <p className="text-white/20 text-[11px] text-center -mt-2">
+          {tool.point_cost} PulsePoints per generation · {userPoints} available
+        </p>
+      )}
     </div>
   );
 }
