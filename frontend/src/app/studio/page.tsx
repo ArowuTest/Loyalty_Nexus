@@ -1767,6 +1767,8 @@ function ToolDrawer({
   const [showConfirm,    setShowConfirm]    = useState(false);
   const [generating,     setGenerating]     = useState(false);
   const [genStartedAt,   setGenStartedAt]   = useState<number | null>(null);
+  // Inline result — set when polling returns completed, shown directly in drawer
+  const [inlineResult,   setInlineResult]   = useState<{ output_url?: string; output_text?: string; output_type?: string } | null>(null);
 
   const cfg        = catCfg(tool.category);
   const slug       = tool.slug;
@@ -1792,37 +1794,49 @@ function ToolDrawer({
     if (!pendingPayload) return;
     setGenerating(true);
     setGenStartedAt(Date.now());
+    setInlineResult(null);
+    setShowConfirm(false);
     try {
       const res = await api.generateTool(tool.id, pendingPayload) as { generation_id: string; status: string };
-      toast.success("⚡ Generating… check Gallery tab for result.");
-      onClose();
       if (res?.generation_id) {
         const genId = res.generation_id;
         let attempts = 0;
         const poll = setInterval(async () => {
           attempts++;
-          if (attempts > 60) { clearInterval(poll); return; }
+          if (attempts > 90) { clearInterval(poll); setGenerating(false); return; }
           try {
-            const status = await api.getGenerationStatus(genId) as { status: string };
-            if (status?.status === "completed" || status?.status === "failed") {
+            const status = await api.getGenerationStatus(genId) as {
+              status: string;
+              output_url?: string;
+              output_text?: string;
+              output_type?: string;
+            };
+            if (status?.status === "completed") {
               clearInterval(poll);
+              setGenerating(false);
+              setGenStartedAt(null);
+              setInlineResult({
+                output_url:  status.output_url,
+                output_text: status.output_text,
+                output_type: status.output_type,
+              });
+              onGenerated?.(); // refresh Gallery in background
+            } else if (status?.status === "failed") {
+              clearInterval(poll);
+              setGenerating(false);
+              setGenStartedAt(null);
+              toast.error(`${tool.name} failed. Points refunded automatically.`);
               onGenerated?.();
-              if (status.status === "completed") {
-                toast.success(`✅ ${tool.name} ready! Check Gallery.`, { duration: 5000 });
-              } else {
-                toast.error(`${tool.name} failed. Points refunded automatically.`);
-              }
             }
-          } catch { clearInterval(poll); }
+          } catch { clearInterval(poll); setGenerating(false); }
         }, 2000);
       } else {
-        setTimeout(() => onGenerated?.(), 5000);
+        // Synchronous / free tool — refresh gallery after short delay
+        setTimeout(() => { onGenerated?.(); setGenerating(false); }, 3000);
       }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to start generation");
-    } finally {
       setGenerating(false);
-      setShowConfirm(false);
     }
   };
 
@@ -1992,22 +2006,221 @@ function ToolDrawer({
                 )}
               </div>
 
-              {/* Live generating indicator */}
+              {/* ── Inline generating indicator ── */}
               {generating && genStartedAt && (
                 <motion.div
                   initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center justify-between bg-gold-500/5 border border-gold-500/15 rounded-xl px-4 py-3"
+                  className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3"
                 >
-                  <div className="flex items-center gap-2 text-gold-400 text-sm">
-                    <Loader2 size={14} className="animate-spin" />
-                    <span>Generating your {outType.noun}…</span>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-amber-400 text-sm font-medium">
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Generating your {outType.noun}…</span>
+                    </div>
+                    <ElapsedTimer startedAt={genStartedAt} />
                   </div>
-                  <ElapsedTimer startedAt={genStartedAt} />
+                  {/* Animated waveform bars */}
+                  <div className="flex items-end gap-[3px] h-8 px-1">
+                    {Array.from({ length: 28 }).map((_, i) => (
+                      <div
+                        key={i}
+                        className="flex-1 rounded-full bg-amber-400/40"
+                        style={{
+                          height: `${30 + Math.sin(i * 0.7) * 20}%`,
+                          animation: `pulse 1.2s ease-in-out ${(i * 0.06).toFixed(2)}s infinite alternate`,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  {meta && (
+                    <p className="text-white/30 text-[10px] text-center">
+                      Usually ready in {meta.time} · Points refunded automatically if it fails
+                    </p>
+                  )}
                 </motion.div>
               )}
 
-              {/* Time estimate row */}
-              {meta && !generating && (
+              {/* ── Inline result panel ── */}
+              {inlineResult && !generating && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  className="rounded-2xl border border-green-500/25 bg-green-500/5 overflow-hidden"
+                >
+                  {/* Result header */}
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-green-500/15">
+                    <div className="flex items-center gap-2 text-green-400 text-sm font-semibold">
+                      <CheckCircle2 size={14} />
+                      <span>{tool.name} ready!</span>
+                    </div>
+                    <button
+                      onClick={() => setInlineResult(null)}
+                      className="text-white/30 hover:text-white/60 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  {/* Audio result */}
+                  {inlineResult.output_url && (inlineResult.output_type === "audio" || /\.(mp3|wav|ogg|m4a)/i.test(inlineResult.output_url)) && (
+                    <div className="p-4 space-y-3">
+                      <AudioPlayer src={inlineResult.output_url} label={tool.name} />
+                      <div className="flex gap-2">
+                        <a
+                          href={inlineResult.output_url}
+                          download
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                     bg-green-500/15 border border-green-500/25 text-green-300
+                                     text-sm font-semibold hover:bg-green-500/25 transition-colors"
+                        >
+                          <Download size={14} /> Download MP3
+                        </a>
+                        <button
+                          onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                     bg-white/5 border border-white/10 text-white/60
+                                     text-sm font-semibold hover:bg-white/10 transition-colors"
+                        >
+                          <RefreshCw size={14} /> Generate Again
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Image result */}
+                  {inlineResult.output_url && (inlineResult.output_type === "image" || /\.(png|jpg|jpeg|webp|gif)/i.test(inlineResult.output_url)) && (
+                    <div className="p-4 space-y-3">
+                      <div className="rounded-xl overflow-hidden border border-white/10">
+                        <img
+                          src={inlineResult.output_url}
+                          alt={tool.name}
+                          className="w-full object-cover"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <a
+                          href={inlineResult.output_url}
+                          download
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                     bg-green-500/15 border border-green-500/25 text-green-300
+                                     text-sm font-semibold hover:bg-green-500/25 transition-colors"
+                        >
+                          <Download size={14} /> Download Image
+                        </a>
+                        <button
+                          onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                     bg-white/5 border border-white/10 text-white/60
+                                     text-sm font-semibold hover:bg-white/10 transition-colors"
+                        >
+                          <RefreshCw size={14} /> Generate Again
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Video result */}
+                  {inlineResult.output_url && (inlineResult.output_type === "video" || /\.(mp4|webm|mov)/i.test(inlineResult.output_url)) && (
+                    <div className="p-4 space-y-3">
+                      <div className="rounded-xl overflow-hidden border border-white/10 bg-black">
+                        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                        <video
+                          src={inlineResult.output_url}
+                          controls
+                          autoPlay
+                          loop
+                          className="w-full"
+                          style={{ maxHeight: 280 }}
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <a
+                          href={inlineResult.output_url}
+                          download
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                     bg-green-500/15 border border-green-500/25 text-green-300
+                                     text-sm font-semibold hover:bg-green-500/25 transition-colors"
+                        >
+                          <Download size={14} /> Download Video
+                        </a>
+                        <button
+                          onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                     bg-white/5 border border-white/10 text-white/60
+                                     text-sm font-semibold hover:bg-white/10 transition-colors"
+                        >
+                          <RefreshCw size={14} /> Generate Again
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Text result */}
+                  {inlineResult.output_text && !inlineResult.output_url && (
+                    <div className="p-4 space-y-3">
+                      <div className="rounded-xl bg-white/5 border border-white/10 p-4 max-h-72 overflow-y-auto">
+                        <pre className="text-white/80 text-xs leading-relaxed whitespace-pre-wrap font-sans">
+                          {inlineResult.output_text}
+                        </pre>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(inlineResult.output_text ?? "");
+                            toast.success("Copied to clipboard!");
+                          }}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                     bg-green-500/15 border border-green-500/25 text-green-300
+                                     text-sm font-semibold hover:bg-green-500/25 transition-colors"
+                        >
+                          <Copy size={14} /> Copy Text
+                        </button>
+                        <button
+                          onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                     bg-white/5 border border-white/10 text-white/60
+                                     text-sm font-semibold hover:bg-white/10 transition-colors"
+                        >
+                          <RefreshCw size={14} /> Generate Again
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Fallback: URL-only result with unknown type */}
+                  {inlineResult.output_url && !inlineResult.output_type &&
+                    !/\.(mp3|wav|ogg|m4a|png|jpg|jpeg|webp|gif|mp4|webm|mov)/i.test(inlineResult.output_url) && (
+                    <div className="p-4">
+                      <a
+                        href={inlineResult.output_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-center gap-2 py-2.5 rounded-xl w-full
+                                   bg-green-500/15 border border-green-500/25 text-green-300
+                                   text-sm font-semibold hover:bg-green-500/25 transition-colors"
+                      >
+                        <ExternalLink size={14} /> View Result
+                      </a>
+                    </div>
+                  )}
+
+                  {/* Gallery note */}
+                  <div className="px-4 pb-3">
+                    <p className="text-white/25 text-[10px] text-center">
+                      A copy has been saved to your Gallery
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Time estimate row — only shown when idle and no result yet */}
+              {meta && !generating && !inlineResult && (
                 <div className="flex items-center justify-between px-1">
                   <span className="text-white/25 text-[11px] flex items-center gap-1">
                     <Clock size={10} /> Usually ready in {meta.time}
@@ -3125,7 +3338,7 @@ function StudioPageInner() {
             tool={selectedTool}
             onClose={() => setSelectedTool(null)}
             userPoints={userPoints}
-            onGenerated={() => { mutateGallery(); setActiveTab("gallery"); }}
+            onGenerated={() => { mutateGallery(); }}
           />
         )}
       </AnimatePresence>
