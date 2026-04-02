@@ -1173,7 +1173,14 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 		if audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, false); err == nil {
 			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic", CostMicros: 100000}, nil
 		}
-		return nil, fmt.Errorf("song-creator: all providers failed")
+		// Tier 3: HuggingFace MusicGen-small (FREE — uses HF_TOKEN already required for image gen)
+		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
+			if audioURL, err := o.callHFMusicGen(ctx, hfKey, prompt, 30); err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "huggingface/musicgen-small", CostMicros: 0}, nil
+			}
+			log.Printf("[AIStudio] HF MusicGen failed for song-creator: skipping")
+		}
+		return nil, fmt.Errorf("song-creator: all providers failed — configure ELEVENLABS_API_KEY, POLLINATIONS_SECRET_KEY, or HF_TOKEN")
 
 	case "instrumental":
 		// Instrumental track (no vocals).
@@ -1190,7 +1197,14 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 		if audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, true); err == nil {
 			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic-instrumental", CostMicros: 100000}, nil
 		}
-		return nil, fmt.Errorf("instrumental: all providers failed")
+		// Tier 3: HuggingFace MusicGen-small (FREE — uses HF_TOKEN already required for image gen)
+		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
+			if audioURL, err := o.callHFMusicGen(ctx, hfKey, prompt+" instrumental only, no vocals", 30); err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "huggingface/musicgen-small", CostMicros: 0}, nil
+			}
+			log.Printf("[AIStudio] HF MusicGen failed for instrumental: skipping")
+		}
+		return nil, fmt.Errorf("instrumental: all providers failed — configure ELEVENLABS_API_KEY, POLLINATIONS_SECRET_KEY, or HF_TOKEN")
 
 	case "jingle", "my-marketing-jingle":
 		// Premium: ElevenLabs Sound Generation (works on free tier)
@@ -1240,7 +1254,14 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 			}
 			log.Printf("[AIStudio] Pollinations ElevenMusic also failed for bg-music: %v", err)
 		}
-		return nil, fmt.Errorf("background music unavailable: configure ELEVENLABS_API_KEY (primary) or MUBERT_API_KEY")
+		// Last resort: HuggingFace MusicGen-small (FREE — uses HF_TOKEN already required for image gen)
+		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
+			if audioURL, err := o.callHFMusicGen(ctx, hfKey, prompt, 30); err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "huggingface/musicgen-small", CostMicros: 0}, nil
+			}
+			log.Printf("[AIStudio] HF MusicGen also failed for bg-music")
+		}
+		return nil, fmt.Errorf("background music unavailable: configure ELEVENLABS_API_KEY, MUBERT_API_KEY, POLLINATIONS_SECRET_KEY, or HF_TOKEN")
 	}
 }
 
@@ -2009,7 +2030,7 @@ func (o *AIStudioOrchestrator) callGoogleTranslate(ctx context.Context, apiKey, 
 // This is FREE — it uses the same HF_TOKEN already required for image generation.
 // Model: facebook/musicgen-small (best quality/speed for short clips)
 // Returns a public CDN URL to the uploaded MP3.
-func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt string, durationSecs int) (string, error) { //nolint:unused
+func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt string, durationSecs int) (string, error) {
 	// HF Inference API for audio generation.
 	// HF deprecated api-inference.huggingface.co (410 Gone) — use router instead.
 	apiURL := "https://router.huggingface.co/hf-inference/models/facebook/musicgen-small"
@@ -2298,16 +2319,16 @@ func (o *AIStudioOrchestrator) callMubert(ctx context.Context, apiKey, prompt st
 	return result.Data.Tasks[0].MusicURL, nil
 }
 
-// callElevenLabsMusic calls ElevenLabs for music/sound generation.
+// callElevenLabsMusic calls the ElevenLabs Music Generation API for full songs and instrumentals.
+// Correct endpoint: POST /v1/music-generation (NOT /v1/sound-generation which is for sound effects).
+// Docs: https://elevenlabs.io/docs/api-reference/music-generation
 func (o *AIStudioOrchestrator) callElevenLabsMusic(ctx context.Context, apiKey, prompt string) (string, error) {
 	payload := map[string]interface{}{
-		"text":     prompt,
-		"duration_seconds": 30,
-		"prompt_influence": 0.3,
+		"prompt": prompt,
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.elevenlabs.io/v1/sound-generation", bytes.NewReader(body))
+		"https://api.elevenlabs.io/v1/music-generation", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
