@@ -305,10 +305,10 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 			return &studioProviderResult{OutputText: text, Provider: "pollinations/gemini-search", CostMicros: 0}, nil
 		}
 		log.Printf("[AIStudio] Pollinations web-search failed: %v — falling back", err)
-		webSys := "You are Nexus AI, an intelligent assistant for Nigerian and African users. " +
+		webSys := "You are Nexus AI, a world-class intelligent assistant with comprehensive global knowledge. " +
 			"Web search is temporarily unavailable, but answer from your knowledge with depth and accuracy. " +
 			"Structure your answer clearly: direct answer first, then supporting details. " +
-			"Use Nigerian/African context where relevant. Be specific with facts, numbers, and examples."
+			"Be specific with facts, numbers, and examples. Include local context naturally when the query suggests it."
 		fallbackText, fErr := o.callGeminiFlash(ctx, webSys, fmt.Sprintf("(Web search unavailable — answer from knowledge) %s", prompt))
 		if fErr == nil {
 			return &studioProviderResult{OutputText: fallbackText, Provider: "gemini-flash/nosearch", CostMicros: 0}, nil
@@ -403,10 +403,10 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 
 // buildTextPrompts returns (systemPrompt, userPrompt) for each tool slug.
 func buildTextPrompts(slug, input string) (system, user string) {
-	nexusSys := "You are Nexus AI, a world-class AI assistant built specifically for Nigerian and African users. " +
-		"You are deeply knowledgeable about Nigerian business, education, culture, finance (CBN, NGX, FIRS, CAC), and daily life. " +
+	nexusSys := "You are Nexus AI, a world-class AI assistant with comprehensive global knowledge. " +
+		"You are deeply knowledgeable across all domains: business, education, science, technology, culture, finance, law, health, and the arts. " +
 		"Always produce thorough, accurate, well-structured responses that provide genuine value. " +
-		"Use Nigerian context, examples, and currency (Naira) wherever relevant."
+		"When the user's context or query suggests Nigerian or African relevance, naturally incorporate local insights, examples, and context."
 
 	switch slug {
 	case "web-search-ai":
@@ -434,7 +434,7 @@ Brief introduction to the topic (2-3 sentences).
 ## Key Concepts
 For each major concept:
 - **Concept Name**: Clear definition
-- Real-world example (preferably Nigerian/African context)
+		- Real-world example with clear, relatable context
 - Why it matters
 
 ## Detailed Explanations
@@ -450,7 +450,7 @@ Bullet-point cheat sheet of the 10 most important facts/formulas/concepts.
 ## Further Study
 3 recommended areas to explore for deeper understanding.
 
-Make it thorough enough for WAEC, JAMB, university, or professional exam preparation.`, input)
+	Make it thorough enough for any major exam (WAEC, JAMB, A-Level, SAT, university, or professional certification).`, input)
 
 	case "quiz":
 		return nexusSys + " You are an expert quiz designer who creates challenging, educational assessments.",
@@ -458,8 +458,7 @@ Make it thorough enough for WAEC, JAMB, university, or professional exam prepara
 
 Requirements:
 - Mix difficulty: 3 easy, 4 medium, 3 hard
-- Include Nigerian/African context where relevant
-- Each question must have 4 distinct options (no obviously wrong answers)
+		- Each question must have 4 distinct options (no obviously wrong answers)
 - Explanations must be educational, not just restate the answer
 
 Return ONLY valid JSON array, no markdown, no extra text:
@@ -473,8 +472,7 @@ Requirements:
 - Central topic should be concise (2-4 words)
 - Include 5-7 main branches covering all key aspects
 - Each branch should have 3-5 sub-branches with specific, actionable items
-- Include Nigerian/African context where relevant
-- Sub-branches should be specific facts, examples, or action items — not vague categories
+		- Sub-branches should be specific facts, examples, or action items — not vague categories
 
 Return ONLY valid JSON, no markdown, no extra text:
 {"center": "...", "branches": [{"label": "...", "color": "#hex", "children": [{"label": "...", "children": [{"label": "..."}]}]}]}
@@ -489,7 +487,7 @@ Use these colors for branches: #f59e0b, #3b82f6, #10b981, #8b5cf6, #ef4444, #06b
 3-4 sentences capturing the most important findings and their significance.
 
 ## Background & Context
-Historical context, current state, and why this topic matters — especially in the Nigerian/African context.
+	Historical context, current state, and why this topic matters globally and locally.
 
 ## Key Findings
 7-10 specific, evidence-based findings with data points, statistics, and examples where possible.
@@ -497,7 +495,7 @@ Historical context, current state, and why this topic matters — especially in 
 ## Market & Industry Analysis
 - Market size and growth trends (with specific figures)
 - Key players and competitive landscape
-- Nigerian/African market dynamics
+		- Regional market dynamics (include Nigerian/African context where applicable)
 - Opportunities and challenges
 
 ## Expert Perspectives
@@ -520,11 +518,9 @@ Requirements:
 - Each slide should have a strong, action-oriented title
 - Bullets should be concise (max 8 words each), not full sentences
 - Speaker notes should be 2-3 sentences of talking points
-- Include a strong opening hook and a clear call-to-action on the final slide
-- Nigerian/African context where relevant
-
-Return ONLY valid JSON, no markdown, no extra text:
-{"title": "...", "subtitle": "...", "slides": [{"number": 1, "title": "...", "bullets": ["...", "...", "..."], "speaker_notes": "..."}]}`, input)
+- Include a strong opening hook and a clear call-to-action on the final sl
+	Return ONLY valid JSON, no markdown, no extra text:
+	{"title": "...", "subtitle": "...", "slides": [{"number": 1, "title": "...", "bullets": ["...", "...", "..."], "speaker_notes": "..."}]}`, input)
 
 	case "infographic":
 		return nexusSys + " You are an expert data visualisation designer who creates insightful, visually compelling infographics.",
@@ -535,7 +531,7 @@ Requirements:
 - Mix stat-heavy sections (with specific numbers/percentages) and insight sections (with bullet points)
 - Stats must be real, specific, and verifiable — not made up
 - Points must be concise, punchy, and genuinely insightful (under 12 words)
-- Nigerian/African data and context where available
+		- Use real, globally verifiable data; include Nigerian/African data where available and relevant
 
 Return ONLY valid JSON, no markdown, no code blocks:
 {"title": "Main Title", "subtitle": "Brief compelling description", "sections": [{"heading": "Section Title", "icon": "chart", "stat": "42%%", "stat_label": "Label for the stat", "points": ["Key point 1", "Key point 2", "Key point 3"]}]}
@@ -544,7 +540,7 @@ icon must be one of: chart, data, stats, info, tip, warning, check, star, money,
 stat and stat_label are optional — only include when there is a real, meaningful number`, input)
 
 	case "bizplan":
-		return nexusSys + " You are a top-tier business consultant and MBA with deep expertise in Nigerian and African markets.",
+		return nexusSys + " You are a top-tier business consultant and MBA with global expertise across all industries and markets.",
 			fmt.Sprintf(`Write a comprehensive, investor-ready business plan for: %s
 
 ## Executive Summary
@@ -554,7 +550,7 @@ Compelling 3-paragraph overview: the problem, the solution, and the opportunity.
 Mission statement, vision, core values, and what makes this business unique.
 
 ## Market Analysis
-- Target market size and demographics (Nigerian/African context)
+		- Target market size and demographics (with specific figures; include Nigerian/African context if relevant)
 - Market trends and growth drivers
 - Competitive landscape (name specific competitors)
 - Competitive advantage and positioning
@@ -586,7 +582,7 @@ Top 5 risks and specific mitigation strategies.
 ## Conclusion & Call to Action
 Why now, why this team, and what's the ask.
 
-Use Nigerian Naira (₦) for all financial figures. Be specific, realistic, and actionable.`, input)
+	Use the appropriate currency for the market described (default to Nigerian Naira ₦ if the context is Nigerian). Be specific, realistic, and actionable.`, input)
 
 	default:
 		return nexusSys,
@@ -595,8 +591,7 @@ Use Nigerian Naira (₦) for all financial figures. Be specific, realistic, and 
 Provide:
 - A clear, direct answer or output
 - Supporting details, examples, and context
-- Nigerian/African relevance where applicable
-- Practical takeaways the user can act on immediately`, input)
+		- Practical takeaways the user can act on immediately`, input)
 	}
 }
 
@@ -950,9 +945,9 @@ func (o *AIStudioOrchestrator) dispatchTranslate(ctx context.Context, env prompt
 
 	// Fallback: use Gemini for translation
 	prompt := fmt.Sprintf("Translate the following text to %s. Return ONLY the translation, no explanation, no commentary, no quotation marks around the result:\n\n%s", targetLang, text)
-	transSys := "You are a professional translator with native-level fluency in all major world languages and Nigerian languages (Yoruba, Igbo, Hausa, Pidgin English). " +
-		"Preserve the original tone, style, and meaning precisely. " +
-		"For Nigerian Pidgin, use authentic Lagos/Nigerian Pidgin expressions. " +
+	transSys := "You are a professional translator with native-level fluency in all major world languages, including French, Spanish, Arabic, Chinese, German, Portuguese, Swahili, Yoruba, Igbo, Hausa, and Nigerian Pidgin English. " +
+		"Preserve the original tone, style, register, and meaning precisely — do not paraphrase or summarise. " +
+		"For idiomatic expressions, find the natural equivalent in the target language rather than a literal translation. " +
 		"Return ONLY the translated text — no explanations, no notes, no quotation marks."
 	translated, err := o.callGeminiFlash(ctx, transSys, prompt)
 	if err == nil {
@@ -1144,23 +1139,23 @@ func (o *AIStudioOrchestrator) assemblePodcast(ctx context.Context, topic string
 	scriptPrompt := fmt.Sprintf(`Create a podcast script with two hosts (Nexus and Ade) discussing: %s
 
 Format:
-NEXUS: [intro greeting, introduce topic]
-ADE: [react, add context relevant to Nigeria]
-NEXUS: [key point 1 with explanation]
-ADE: [question or real-world Nigerian example]
-NEXUS: [key point 2]
-ADE: [personal story or practical application]
-NEXUS: [key point 3 + actionable takeaway]
-ADE: [closing thoughts]
+NEXUS: [intro greeting, introduce topic with a compelling hook]
+ADE: [react with curiosity, add a relatable angle or question]
+NEXUS: [key point 1 with clear explanation and example]
+ADE: [follow-up question or real-world application]
+NEXUS: [key point 2 with deeper insight]
+ADE: [personal perspective or practical takeaway]
+NEXUS: [key point 3 + actionable advice]
+ADE: [closing thoughts and reflection]
 NEXUS: [outro, mention Loyalty Nexus]
 
-Make it conversational, engaging, and relevant to Nigerian users. Total length: 400-600 words.`, topic)
+Make it conversational, engaging, and genuinely educational. Total length: 400-600 words.`, topic)
 
-	podcastSys := "You are a talented podcast script writer and storyteller for a Nigerian audience. " +
+	podcastSys := "You are a talented podcast script writer and storyteller. " +
 		"You write in a warm, conversational, and engaging style that feels natural when spoken aloud. " +
 		"Nexus is the knowledgeable, enthusiastic host. Ade is the relatable, curious co-host who asks great questions. " +
-		"Use Nigerian English naturally — occasional Pidgin phrases are welcome but keep it accessible. " +
-		"Make the content educational, entertaining, and genuinely useful for Nigerian listeners."
+		"Write in clear, accessible English that any global listener can enjoy. When the topic has Nigerian or African relevance, naturally weave in local context and examples. " +
+		"Make the content educational, entertaining, and genuinely useful."
 	script, err := o.callGeminiFlash(ctx, podcastSys, scriptPrompt)
 	if err != nil {
 		// Fallback to Groq
@@ -2255,12 +2250,13 @@ func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug string, 
 	} else {
 		fallbackQ = fmt.Sprintf("Regarding this image at %s — %s", imageURL, question)
 	}
-	visionSys := "You are Nexus Vision, an expert image analyst with deep knowledge of visual content, photography, design, and Nigerian/African visual culture. " +
+	visionSys := "You are Nexus Vision, an expert image analyst with deep knowledge of visual content, photography, design, art, and global cultural contexts. " +
 		"Analyse images with precision and depth. Describe what you see comprehensively: objects, people, text, colours, composition, mood, and context. " +
 		"For documents or text in images, extract and transcribe the text accurately. " +
-		"For products or items, identify them and provide relevant information. " +
-		"For scenes or places, identify the location type and cultural context where possible. " +
-		"Always structure your response clearly and provide genuinely useful insights."
+		"For products or items, identify them and provide relevant information including brand, model, or category. " +
+		"For scenes or places, identify the location type, architectural style, and cultural context where possible. " +
+		"For artworks, identify the style, period, and likely influence. " +
+		"Always structure your response clearly and provide genuinely useful, actionable insights."
 	text, err = o.callGeminiFlash(ctx, visionSys, fallbackQ)
 	if err == nil {
 		return &studioProviderResult{OutputText: text, Provider: "gemini-flash/vision", CostMicros: 0}, nil
