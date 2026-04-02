@@ -420,7 +420,7 @@ func buildTextPrompts(slug, input string) (system, user string) {
 			"You always wrap code in fenced code blocks with the correct language tag. " +
 			"You include error handling in all examples. " +
 			"You detect the language from context and never ask unless truly ambiguous.",
-			fmt.Sprintf("%s", input)
+			input
 
 	case "study-guide":
 		return nexusSys + " You are an expert educator who creates comprehensive, exam-ready study materials.",
@@ -2569,88 +2569,6 @@ func (o *AIStudioOrchestrator) callPollinationsGPTImage(ctx context.Context, pro
 		return o.uploadOrDataURI(ctx, imgBytes, "image/png", key), nil
 	}
 	return "", fmt.Errorf("Pollinations GPTImage: no url or b64_json in response")
-}
-
-// callPollinationsKontext performs image-to-image editing via Pollinations Kontext.
-// Downloads the source image, then sends it as multipart to the edits endpoint.
-func (o *AIStudioOrchestrator) callPollinationsKontext(ctx context.Context, imageURL, instruction string) (string, error) {
-	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
-	if sk == "" {
-		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
-	}
-
-	// Step 1: Download source image
-	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("Kontext: build download request: %w", err)
-	}
-	dlResp, err := o.httpClient.Do(dlReq)
-	if err != nil {
-		return "", fmt.Errorf("Kontext: download image: %w", err)
-	}
-	defer dlResp.Body.Close()
-	imgBytes, err := io.ReadAll(dlResp.Body)
-	if err != nil || len(imgBytes) < 500 {
-		return "", fmt.Errorf("Kontext: image download failed or too small")
-	}
-
-	// Step 2: Build multipart body
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	_ = mw.WriteField("model", "kontext")
-	_ = mw.WriteField("prompt", instruction)
-	fw, err := mw.CreateFormFile("image", "source.png")
-	if err != nil {
-		return "", err
-	}
-	if _, err = fw.Write(imgBytes); err != nil {
-		return "", err
-	}
-	mw.Close()
-
-	// Step 3: POST to edits endpoint
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://gen.pollinations.ai/v1/images/edits", &buf)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+sk)
-	req.Header.Set("User-Agent", "NexusAI/1.0")
-
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("Pollinations Kontext request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Pollinations Kontext %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
-	}
-
-	var parsed struct {
-		Data []struct {
-			URL     string `json:"url"`
-			B64JSON string `json:"b64_json"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Data) == 0 {
-		return "", fmt.Errorf("Pollinations Kontext parse: empty data")
-	}
-	item := parsed.Data[0]
-	if item.URL != "" {
-		return item.URL, nil
-	}
-	if item.B64JSON != "" {
-		outBytes, err := base64.StdEncoding.DecodeString(item.B64JSON)
-		if err != nil {
-			return "", fmt.Errorf("Pollinations Kontext b64 decode: %w", err)
-		}
-		key := fmt.Sprintf("studio/photo-editor/kontext_%d.png", time.Now().UnixNano())
-		return o.uploadOrDataURI(ctx, outBytes, "image/png", key), nil
-	}
-	return "", fmt.Errorf("Pollinations Kontext: no url or b64_json in response")
 }
 
 // callPollinationsKontextAlt performs image-to-image editing via Pollinations p-image-edit (Pruna).
