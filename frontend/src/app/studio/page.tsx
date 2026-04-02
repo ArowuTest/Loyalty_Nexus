@@ -133,7 +133,7 @@ const VIDEO_SLUGS  = new Set(["animate-photo","video-premium","video-cinematic",
 const CODE_SLUGS   = new Set(["code-helper"]);
 const VISION_SLUGS = new Set(["image-analyser","ask-my-photo"]);
 const WEB_SLUGS    = new Set(["web-search-ai"]);
-const JSON_SLUGS   = new Set(["quiz","mindmap","slide-deck"]);
+const JSON_SLUGS   = new Set(["quiz","quiz-me","mindmap","mind-map","slide-deck"]);
 // Document tools that should offer PDF + Markdown download
 const DOC_EXPORT_SLUGS = new Set([
   "bizplan", "business-plan", "business-plan-summary",
@@ -1610,7 +1610,7 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                 <span className="text-white/50 text-xs font-medium uppercase tracking-wider">Result</span>
                 <CopyButton text={gen.output_text} label="📋 Copy JSON" />
               </div>
-              {gen.tool_slug === "quiz" ? renderQuiz(gen.output_text) : (
+              {(gen.tool_slug === "quiz" || gen.tool_slug === "quiz-me") ? renderQuiz(gen.output_text) : (
                 <pre className="bg-gray-950 text-white/60 text-xs font-mono p-3 rounded-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
                   {gen.output_text}
                 </pre>
