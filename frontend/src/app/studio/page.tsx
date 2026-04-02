@@ -2046,9 +2046,17 @@ function StudioPageInner() {
     refreshInterval: 15000,
   });
   const user            = useStore((s) => s.user);
-  const wallet          = useStore((s) => s.wallet);
+  const storedWallet    = useStore((s) => s.wallet);
+  const setWallet       = useStore((s) => s.setWallet);
   const isAuthenticated = useStore((s) => s.isAuthenticated);
-  const userPoints = wallet?.pulse_points ?? 0;
+  // Always fetch fresh wallet balance on Studio load
+  const { data: freshWallet } = useSWR(
+    isAuthenticated ? "/user/wallet" : null,
+    () => import("@/lib/api").then(m => m.api.getWallet()),
+    { onSuccess: (d) => setWallet(d as Parameters<typeof setWallet>[0]), refreshInterval: 30000 }
+  );
+  const wallet = freshWallet ?? storedWallet;
+  const userPoints = (wallet as { pulse_points?: number } | null)?.pulse_points ?? 0;
 
   const tools   = toolsData?.tools   ?? [];
   const gallery = galleryData?.items ?? [];
