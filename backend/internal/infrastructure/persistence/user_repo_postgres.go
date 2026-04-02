@@ -3,12 +3,25 @@ package persistence
 import (
 	"context"
 	"fmt"
+	"strings"
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// phoneVariants returns both the canonical form and its +/no-+ counterpart so
+// that a lookup succeeds regardless of how the number was stored in the DB.
+func phoneVariants(phone string) []string {
+	phone = strings.TrimSpace(phone)
+	if strings.HasPrefix(phone, "+") {
+		// e.g. +2348027000003  →  also try 2348027000003
+		return []string{phone, phone[1:]}
+	}
+	// e.g. 2348027000003  →  also try +2348027000003
+	return []string{phone, "+" + phone}
+}
 
 type postgresUserRepository struct {
 	db *gorm.DB
@@ -28,7 +41,8 @@ func (r *postgresUserRepository) FindByID(ctx context.Context, id uuid.UUID) (*e
 
 func (r *postgresUserRepository) FindByPhoneNumber(ctx context.Context, phone string) (*entities.User, error) {
 	var user entities.User
-	if err := r.db.WithContext(ctx).Where("phone_number = ?", phone).First(&user).Error; err != nil {
+	variants := phoneVariants(phone)
+	if err := r.db.WithContext(ctx).Where("phone_number IN ?", variants).First(&user).Error; err != nil {
 		return nil, err
 	}
 	return &user, nil
@@ -36,7 +50,8 @@ func (r *postgresUserRepository) FindByPhoneNumber(ctx context.Context, phone st
 
 func (r *postgresUserRepository) ExistsByPhoneNumber(ctx context.Context, phone string) (bool, error) {
 	var count int64
-	err := r.db.WithContext(ctx).Table("users").Where("phone_number = ?", phone).Count(&count).Error
+	variants := phoneVariants(phone)
+	err := r.db.WithContext(ctx).Table("users").Where("phone_number IN ?", variants).Count(&count).Error
 	return count > 0, err
 }
 
