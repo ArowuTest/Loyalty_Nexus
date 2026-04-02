@@ -1190,8 +1190,29 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 	switch slug {
 	case "song-creator":
 		// Full song with vocals.
-		// NOTE: Pollinations elevenmusic is currently OFF (45.9% success). ElevenLabs direct is primary.
-		// Tier 1: ElevenLabs Music direct API (professional quality, ~$0.045/song)
+		// Tier 1: Suno AI (best-in-class quality, 2 takes per generation)
+		if sunoKey := os.Getenv("SUNO_API_KEY"); sunoKey != "" {
+			// Extract style and title from envelope extras for richer Suno output
+			sunoStyle := ""
+			sunoTitle := "My Song"
+			if env.Extra != nil {
+				if s, ok := env.Extra["genre"].(string); ok && s != "" {
+					sunoStyle = s
+				}
+				if t, ok := env.Extra["title"].(string); ok && t != "" {
+					sunoTitle = t
+				}
+			}
+			if sunoStyle == "" {
+				sunoStyle = "Pop"
+			}
+			audioURL, err := o.callSunoMusic(ctx, sunoKey, prompt, sunoStyle, sunoTitle, false)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "suno-ai", CostMicros: 50000}, nil
+			}
+			log.Printf("[AIStudio] Suno failed for song-creator: %v — trying ElevenLabs", err)
+		}
+		// Tier 2: ElevenLabs Music direct API (professional quality, ~$0.045/song)
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
 			if err == nil {
@@ -1199,23 +1220,37 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 			}
 			log.Printf("[AIStudio] ElevenLabs Music failed for song-creator: %v — trying Pollinations", err)
 		}
-		// Tier 2: Pollinations ElevenMusic (currently OFF, kept as secondary in case it recovers)
+		// Tier 3: Pollinations ElevenMusic (kept as secondary in case it recovers)
 		if audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, false); err == nil {
 			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic", CostMicros: 100000}, nil
 		}
-		// Tier 3: HuggingFace MusicGen-small (FREE — uses HF_TOKEN already required for image gen)
+		// Tier 4: HuggingFace MusicGen-small (FREE — uses HF_TOKEN already required for image gen)
 		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
 			if audioURL, err := o.callHFMusicGen(ctx, hfKey, prompt, 30); err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "huggingface/musicgen-small", CostMicros: 0}, nil
 			}
 			log.Printf("[AIStudio] HF MusicGen failed for song-creator: skipping")
 		}
-		return nil, fmt.Errorf("song-creator: all providers failed — configure ELEVENLABS_API_KEY, POLLINATIONS_SECRET_KEY, or HF_TOKEN")
+		return nil, fmt.Errorf("song-creator: all providers failed — configure SUNO_API_KEY, ELEVENLABS_API_KEY, POLLINATIONS_SECRET_KEY, or HF_TOKEN")
 
 	case "instrumental":
 		// Instrumental track (no vocals).
-		// NOTE: Pollinations elevenmusic is currently OFF (45.9% success). ElevenLabs direct is primary.
-		// Tier 1: ElevenLabs Music direct API
+		// Tier 1: Suno AI (best-in-class instrumental quality)
+		if sunoKey := os.Getenv("SUNO_API_KEY"); sunoKey != "" {
+			sunoStyle := "Instrumental"
+			sunoTitle := "Instrumental Track"
+			if env.Extra != nil {
+				if s, ok := env.Extra["genre"].(string); ok && s != "" {
+					sunoStyle = s + " Instrumental"
+				}
+			}
+			audioURL, err := o.callSunoMusic(ctx, sunoKey, prompt, sunoStyle, sunoTitle, true)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "suno-ai", CostMicros: 50000}, nil
+			}
+			log.Printf("[AIStudio] Suno failed for instrumental: %v — trying ElevenLabs", err)
+		}
+		// Tier 2: ElevenLabs Music direct API
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
 			if err == nil {
@@ -1223,21 +1258,36 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 			}
 			log.Printf("[AIStudio] ElevenLabs Music failed for instrumental: %v — trying Pollinations", err)
 		}
-		// Tier 2: Pollinations ElevenMusic (currently OFF, kept as secondary in case it recovers)
+		// Tier 3: Pollinations ElevenMusic (kept as secondary in case it recovers)
 		if audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, true); err == nil {
 			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic-instrumental", CostMicros: 100000}, nil
 		}
-		// Tier 3: HuggingFace MusicGen-small (FREE — uses HF_TOKEN already required for image gen)
+		// Tier 4: HuggingFace MusicGen-small (FREE — uses HF_TOKEN already required for image gen)
 		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
 			if audioURL, err := o.callHFMusicGen(ctx, hfKey, prompt+" instrumental only, no vocals", 30); err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "huggingface/musicgen-small", CostMicros: 0}, nil
 			}
 			log.Printf("[AIStudio] HF MusicGen failed for instrumental: skipping")
 		}
-		return nil, fmt.Errorf("instrumental: all providers failed — configure ELEVENLABS_API_KEY, POLLINATIONS_SECRET_KEY, or HF_TOKEN")
+		return nil, fmt.Errorf("instrumental: all providers failed — configure SUNO_API_KEY, ELEVENLABS_API_KEY, POLLINATIONS_SECRET_KEY, or HF_TOKEN")
 
 	case "jingle", "my-marketing-jingle":
-		// Premium: ElevenLabs Sound Generation (works on free tier)
+		// Tier 1: Suno AI (best for branded jingles with lyrics)
+		if sunoKey := os.Getenv("SUNO_API_KEY"); sunoKey != "" {
+			sunoStyle := "Jingle, Catchy, Upbeat"
+			sunoTitle := "Brand Jingle"
+			if env.Extra != nil {
+				if s, ok := env.Extra["genre"].(string); ok && s != "" {
+					sunoStyle = s + ", Jingle, Catchy"
+				}
+			}
+			audioURL, err := o.callSunoMusic(ctx, sunoKey, prompt, sunoStyle, sunoTitle, false)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL, Provider: "suno-ai", CostMicros: 50000}, nil
+			}
+			log.Printf("[AIStudio] Suno failed for jingle: %v — trying ElevenLabs", err)
+		}
+		// Tier 2: ElevenLabs Music
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
 			if err == nil {
@@ -1245,7 +1295,7 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 			}
 			log.Printf("[AIStudio] ElevenLabs Music failed for jingle: %v — trying Pollinations TTS", err)
 		}
-		// Fallback: Pollinations TTS with upbeat voice for jingle-style output
+		// Tier 3: Pollinations TTS with upbeat voice for jingle-style output
 		if audioURL, err := o.callPollinationsTTS(ctx, prompt, "onyx"); err == nil {
 			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/tts-jingle", CostMicros: 0}, nil
 		}
@@ -2347,6 +2397,123 @@ func (o *AIStudioOrchestrator) callMubert(ctx context.Context, apiKey, prompt st
 		return "", fmt.Errorf("Mubert: no track URL in response")
 	}
 	return result.Data.Tasks[0].MusicURL, nil
+}
+
+// callSunoMusic calls the sunoapi.org third-party proxy for Suno AI music generation.
+// Each request returns 2 audio tracks. We poll until status == "SUCCESS" (up to 4 minutes).
+// Requires SUNO_API_KEY env var. Docs: https://docs.sunoapi.org/suno-api/generate-music
+//
+// Request: POST https://api.sunoapi.org/api/v1/generate
+// Poll:    GET  https://api.sunoapi.org/api/v1/generate/record-info?taskId=...
+func (o *AIStudioOrchestrator) callSunoMusic(ctx context.Context, apiKey, prompt, style, title string, instrumental bool) (string, error) {
+	// Build request payload
+	payload := map[string]interface{}{
+		"customMode":   true,
+		"instrumental": instrumental,
+		"model":        "V4_5ALL",
+		"prompt":       prompt,
+		"style":        style,
+		"title":        title,
+		"callBackUrl":  "https://example.com/noop", // required field; we poll instead
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("suno: marshal error: %w", err)
+	}
+
+	// Use a long-timeout client for Suno (2-3 min generation time)
+	sunoClient := &http.Client{Timeout: 300 * time.Second}
+
+	// Step 1: Submit generation task
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.sunoapi.org/api/v1/generate", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("suno: request build error: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := sunoClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("suno: submit error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var submitResp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			TaskID string `json:"taskId"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&submitResp); err != nil {
+		return "", fmt.Errorf("suno: decode submit response: %w", err)
+	}
+	if submitResp.Code != 200 || submitResp.Data.TaskID == "" {
+		return "", fmt.Errorf("suno: submit failed code=%d msg=%s", submitResp.Code, submitResp.Msg)
+	}
+	taskID := submitResp.Data.TaskID
+	log.Printf("[AIStudio] Suno task submitted: %s", taskID)
+
+	// Step 2: Poll until SUCCESS (up to 4 minutes, 10-second intervals)
+	pollURL := "https://api.sunoapi.org/api/v1/generate/record-info?taskId=" + url.QueryEscape(taskID)
+	deadline := time.Now().Add(4 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(10 * time.Second)
+
+		pollReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		if err != nil {
+			return "", fmt.Errorf("suno: poll request build: %w", err)
+		}
+		pollReq.Header.Set("Authorization", "Bearer "+apiKey)
+
+		pollResp, err := sunoClient.Do(pollReq)
+		if err != nil {
+			log.Printf("[AIStudio] Suno poll error (will retry): %v", err)
+			continue
+		}
+
+		var statusResp struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+			Data struct {
+				TaskID string `json:"taskId"`
+				Status string `json:"status"`
+				Response struct {
+					SunoData []struct {
+						ID       string  `json:"id"`
+						AudioURL string  `json:"audioUrl"`
+						Title    string  `json:"title"`
+						Duration float64 `json:"duration"`
+					} `json:"sunoData"`
+				} `json:"response"`
+				ErrorMessage string `json:"errorMessage"`
+			} `json:"data"`
+		}
+		if err := json.NewDecoder(pollResp.Body).Decode(&statusResp); err != nil {
+			pollResp.Body.Close()
+			log.Printf("[AIStudio] Suno poll decode error (will retry): %v", err)
+			continue
+		}
+		pollResp.Body.Close()
+
+		switch statusResp.Data.Status {
+		case "SUCCESS", "FIRST_SUCCESS":
+			// Return the first audio URL from the two generated tracks
+			if len(statusResp.Data.Response.SunoData) > 0 {
+				audioURL := statusResp.Data.Response.SunoData[0].AudioURL
+				if audioURL != "" {
+					log.Printf("[AIStudio] Suno SUCCESS — audioUrl: %s", audioURL)
+					return audioURL, nil
+				}
+			}
+		case "CREATE_TASK_FAILED", "GENERATE_AUDIO_FAILED":
+			return "", fmt.Errorf("suno: generation failed: %s", statusResp.Data.ErrorMessage)
+		default:
+			log.Printf("[AIStudio] Suno status: %s — polling...", statusResp.Data.Status)
+		}
+	}
+	return "", fmt.Errorf("suno: timed out waiting for generation (taskId=%s)", taskID)
 }
 
 // callElevenLabsMusic calls the ElevenLabs Music Generation API for full songs and instrumentals.
