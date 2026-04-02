@@ -112,12 +112,22 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "slide-deck":         { time: "~10 sec",  output: "10-slide presentation outline", tip: "Add audience type: 'investors', 'students', 'clients'" },
   "infographic":        { time: "~8 sec",   output: "Data layout structure",         tip: "Include statistics or data points in your prompt" },
   "podcast":            { time: "~90 sec",  output: "2-host AI podcast audio",       tip: "Give a clear topic — the AI writes the full script" },
+  // Alias slugs — map to same meta as their canonical counterparts
+  "my-ai-photo":         { time: "~8 sec",   output: "1024×1024 image",               tip: "Add style words: 'photorealistic', 'vibrant', 'cinematic'" },
+  "background-remover":  { time: "~5 sec",   output: "Transparent PNG",               tip: "Works best with clear subject vs background" },
+  "animate-my-photo":    { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
+  "my-video-story":      { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
+  "my-marketing-jingle": { time: "~25 sec",  output: "AI music jingle",               tip: "Add brand name and target emotion in prompt" },
+  "my-podcast":          { time: "~90 sec",  output: "2-host AI podcast audio",       tip: "Give a clear topic — the AI writes the full script" },
+  "local-translation":   { time: "~3 sec",   output: "Translated text",               tip: "Format: type your text, select target language" },
+  "voice-to-text":       { time: "~6 sec",   output: "Text transcript",               tip: "Paste a direct link to an MP3 or WAV file" },
+  "text-to-speech":      { time: "~4 sec",   output: "MP3 audio file",                tip: "Keep text under 500 words for best quality" },
 };
 
 // ─── Output type helpers ──────────────────────────────────────────────────────
-const IMAGE_SLUGS  = new Set(["ai-photo","ai-photo-pro","ai-photo-max","ai-photo-dream","photo-editor","animate-photo","infographic"]);
-const AUDIO_SLUGS  = new Set(["narrate","narrate-pro","bg-music","jingle","song-creator","instrumental","transcribe","transcribe-african","podcast"]);
-const VIDEO_SLUGS  = new Set(["animate-photo","video-premium","video-cinematic","video-veo"]);
+const IMAGE_SLUGS  = new Set(["ai-photo","ai-photo-pro","ai-photo-max","ai-photo-dream","photo-editor","animate-photo","my-ai-photo","background-remover","bg-remover"]);
+const AUDIO_SLUGS  = new Set(["narrate","narrate-pro","bg-music","jingle","my-marketing-jingle","song-creator","instrumental","transcribe","transcribe-african","podcast","my-podcast"]);
+const VIDEO_SLUGS  = new Set(["animate-photo","video-premium","video-cinematic","video-veo","animate-my-photo","my-video-story"]);
 const CODE_SLUGS   = new Set(["code-helper"]);
 const VISION_SLUGS = new Set(["image-analyser","ask-my-photo"]);
 const WEB_SLUGS    = new Set(["web-search-ai"]);
@@ -904,6 +914,73 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
   );
 }
 
+// ─── Infographic renderer ───────────────────────────────────────────────────
+function renderInfographic(text: string) {
+  // Try to parse as JSON first
+  let data: { title?: string; subtitle?: string; sections?: { heading?: string; icon?: string; points?: string[]; stat?: string; stat_label?: string }[] } | null = null;
+  try {
+    const raw = JSON.parse(text);
+    if (raw && typeof raw === 'object') data = raw;
+  } catch { /* not JSON — render as rich text */ }
+
+  if (!data || !data.sections) {
+    // Fallback: render as formatted markdown-like text
+    return (
+      <div className="bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 rounded-2xl p-4 space-y-3">
+        <div className="flex items-center gap-2 text-amber-300 text-xs font-semibold">
+          <LayoutGrid size={12} /> Infographic
+        </div>
+        <div className="text-white/80 text-sm leading-relaxed whitespace-pre-wrap">{text}</div>
+      </div>
+    );
+  }
+
+  const ICONS: Record<string, string> = {
+    chart: '📊', data: '📈', stats: '📉', info: 'ℹ️', tip: '💡', warning: '⚠️',
+    check: '✅', star: '⭐', money: '💰', people: '👥', time: '⏱️', globe: '🌍',
+    phone: '📱', idea: '🧠', growth: '🚀', default: '🔹',
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Title block */}
+      {(data.title || data.subtitle) && (
+        <div className="bg-gradient-to-r from-amber-500/15 to-gold-500/10 border border-amber-500/20 rounded-2xl p-4 text-center">
+          {data.title && <h3 className="text-white font-bold text-base">{data.title}</h3>}
+          {data.subtitle && <p className="text-white/55 text-xs mt-1">{data.subtitle}</p>}
+        </div>
+      )}
+      {/* Sections grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {data.sections?.map((sec, i) => (
+          <div key={i} className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">{ICONS[sec.icon ?? ''] ?? ICONS.default}</span>
+              {sec.heading && <span className="text-white/90 text-xs font-semibold">{sec.heading}</span>}
+            </div>
+            {sec.stat && (
+              <div className="text-center py-1">
+                <div className="text-2xl font-bold text-amber-300">{sec.stat}</div>
+                {sec.stat_label && <div className="text-white/40 text-[10px] mt-0.5">{sec.stat_label}</div>}
+              </div>
+            )}
+            {Array.isArray(sec.points) && sec.points.length > 0 && (
+              <ul className="space-y-1">
+                {sec.points.map((pt, pi) => (
+                  <li key={pi} className="text-white/65 text-[11px] flex items-start gap-1.5">
+                    <span className="text-amber-400 mt-0.5 flex-shrink-0">•</span>
+                    <span>{pt}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Status pill ─────────────────────────────────────────────────────────────
 function StatusPill({ status }: { status: Generation["status"] }) {
   const config = {
@@ -921,13 +998,14 @@ function StatusPill({ status }: { status: Generation["status"] }) {
 
 // ─── Generation card ──────────────────────────────────────────────────────────
 function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?: (gen: Generation) => void }) {
-  const isImage  = IMAGE_SLUGS.has(gen.tool_slug);
-  const isAudio  = AUDIO_SLUGS.has(gen.tool_slug);
-  const isVideo  = VIDEO_SLUGS.has(gen.tool_slug);
-  const isCode   = CODE_SLUGS.has(gen.tool_slug);
-  const isVision = VISION_SLUGS.has(gen.tool_slug);
-  const isWeb    = WEB_SLUGS.has(gen.tool_slug);
-  const isJson   = JSON_SLUGS.has(gen.tool_slug);
+  const isImage       = IMAGE_SLUGS.has(gen.tool_slug);
+  const isAudio       = AUDIO_SLUGS.has(gen.tool_slug);
+  const isVideo       = VIDEO_SLUGS.has(gen.tool_slug);
+  const isCode        = CODE_SLUGS.has(gen.tool_slug);
+  const isVision      = VISION_SLUGS.has(gen.tool_slug);
+  const isWeb         = WEB_SLUGS.has(gen.tool_slug);
+  const isJson        = JSON_SLUGS.has(gen.tool_slug);
+  const isInfographic = gen.tool_slug === 'infographic';
   const meta     = TOOL_META[gen.tool_slug];
   const outType  = getOutputType(gen.tool_slug);
 
@@ -1144,7 +1222,21 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
               </pre>
             </div>
           )}
-          {isJson && !isCode && (
+          {isInfographic && (
+            <div className="space-y-2">
+              {renderInfographic(gen.output_text)}
+              <div className="flex gap-2">
+                <CopyButton text={gen.output_text} label="📋 Copy" />
+                {onRegenerate && (
+                  <button onClick={() => onRegenerate(gen)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
+                    <RotateCcw size={11} /> Regenerate
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {isJson && !isCode && !isInfographic && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-white/50 text-xs font-medium uppercase tracking-wider">Result</span>
@@ -1163,7 +1255,7 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
               )}
             </div>
           )}
-          {!isWeb && !isVision && !isCode && !isJson && (
+          {!isWeb && !isVision && !isCode && !isJson && !isInfographic && (
             <div className="space-y-2">
               <div className="bg-white/5 rounded-xl p-3">
                 <RichMessage content={gen.output_text} mode="general" />
@@ -1681,6 +1773,53 @@ function StudioPageInner() {
   const [chatAttachLoading, setChatAttachLoading] = useState(false);
   const [chatAttachError,   setChatAttachError]   = useState<string | null>(null);
 
+  // FEAT-03: Voice-to-text mic recording state
+  const [micRecording,    setMicRecording]    = useState(false);
+  const [micTranscribing, setMicTranscribing] = useState(false);
+  const mediaRecorderRef  = useRef<MediaRecorder | null>(null);
+  const audioChunksRef    = useRef<Blob[]>([]);
+
+  const handleMicToggle = useCallback(async () => {
+    if (micRecording) {
+      // Stop recording
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setMicRecording(false);
+        setMicTranscribing(true);
+        try {
+          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const file = new File([blob], 'voice.webm', { type: 'audio/webm' });
+          const uploaded = await api.uploadAsset(file);
+          const resp = await api.sendChat(
+            `Please transcribe this audio and use it as my message: ${uploaded.url}`,
+            sessionIds.current[chatMode] || `sess_${chatMode}_${Date.now()}`,
+            undefined, undefined, undefined
+          ) as { response: string };
+          // Extract transcription from response and put it in the input
+          const transcribed = resp.response.replace(/^(transcription:|here is the transcription:|the transcription is:)/i, '').trim();
+          setInput((prev) => prev ? `${prev} ${transcribed}` : transcribed);
+        } catch {
+          toast.error('Voice transcription failed. Please try again.');
+        } finally {
+          setMicTranscribing(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setMicRecording(true);
+    } catch {
+      toast.error('Microphone access denied. Please allow mic access in your browser.');
+    }
+  }, [micRecording, chatMode]);
+
   useEffect(() => {
     try {
       const dismissed = localStorage.getItem("nexus_studio_intro_dismissed");
@@ -2055,6 +2194,25 @@ function StudioPageInner() {
                   )}
                 >
                   {chatAttachLoading ? <Loader2 size={15} className="animate-spin" /> : <Paperclip size={15} />}
+                </button>
+
+                {/* Mic button (FEAT-03) */}
+                <button
+                  type="button"
+                  onClick={handleMicToggle}
+                  disabled={sending || chatAttachLoading || micTranscribing}
+                  title={micRecording ? 'Stop recording' : 'Voice input'}
+                  className={cn(
+                    'px-3 py-2.5 rounded-xl border transition-all flex-shrink-0',
+                    micRecording
+                      ? 'border-red-500/60 bg-red-900/30 text-red-400 animate-pulse'
+                      : micTranscribing
+                      ? 'border-amber-500/50 bg-amber-900/20 text-amber-400'
+                      : 'border-white/10 text-white/30 hover:border-white/25 hover:text-white/55',
+                    (sending || chatAttachLoading || micTranscribing) && !micRecording && 'opacity-40 cursor-not-allowed',
+                  )}
+                >
+                  {micTranscribing ? <Loader2 size={15} className="animate-spin" /> : <Mic size={15} />}
                 </button>
                 <input
                   ref={chatFileInputRef}

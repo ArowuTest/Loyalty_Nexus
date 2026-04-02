@@ -103,6 +103,19 @@ var slugCategory = map[string]studioToolCat{
 	"instrumental":    catMusic,
 	"video-cinematic": catVideo,
 	"video-veo":       catVideo,
+	// ── Alias slugs (DB tool names that map to existing dispatch logic) ──────
+	"my-marketing-jingle":  catMusic,  // alias for jingle
+	"text-to-speech":       catVoice,  // alias for narrate
+	"local-translation":    catVoice,  // alias for translate
+	"deep-research-brief":  catText,   // alias for research-brief
+	"mind-map":             catText,   // alias for mindmap
+	"quiz-me":              catText,   // alias for quiz
+	"my-ai-photo":          catImage,  // alias for ai-photo
+	"my-video-story":       catVideo,  // alias for animate-photo
+	"my-podcast":           catComposite, // alias for podcast
+	"background-remover":   catImage,  // alias for bg-remover
+	"animate-my-photo":     catVideo,  // alias for animate-photo
+	"business-plan-summary": catText,  // alias for bizplan
 }
 
 // ─── Provider result ──────────────────────────────────────────────────────────
@@ -300,6 +313,20 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 		return nil, fmt.Errorf("web-search-ai: all providers failed: %v / %v", err, fErr)
 	}
 
+	// Handle alias slugs by remapping to canonical slugs
+	switch slug {
+	case "deep-research-brief":
+		slug = "research-brief"
+	case "mind-map":
+		slug = "mindmap"
+	case "quiz-me":
+		slug = "quiz"
+	case "my-podcast":
+		slug = "podcast"
+	case "business-plan-summary":
+		slug = "bizplan"
+	}
+
 	// code-helper: primary via Pollinations Qwen3-Coder, fallback to Gemini Flash
 	if slug == "code-helper" {
 		codeSys := "You are an expert programmer. Write clean, well-commented code. Explain your solution briefly."
@@ -393,7 +420,7 @@ func buildTextPrompts(slug, input string) (system, user string) {
 			"Create a slide deck outline for: %s\n\nReturn as JSON:\n{\"title\": \"...\", \"slides\": [{\"number\": 1, \"title\": \"...\", \"bullets\": [\"...\"], \"speaker_notes\": \"...\"}]}\n\nCreate 10-12 slides. Return ONLY the JSON.", input)
 	case "infographic":
 		return base, fmt.Sprintf(
-			"Create an infographic content structure for: %s\n\nReturn as JSON:\n{\"title\": \"...\", \"subtitle\": \"...\", \"sections\": [{\"heading\": \"...\", \"stats\": [{\"label\": \"...\", \"value\": \"...\"}], \"bullets\": [\"...\"]}]}\n\nReturn ONLY the JSON.", input)
+			"Create a rich infographic data structure about: %s\n\nReturn ONLY valid JSON in this exact format (no markdown, no code blocks):\n{\"title\": \"Main Title\", \"subtitle\": \"Brief description\", \"sections\": [{\"heading\": \"Section Title\", \"icon\": \"chart\", \"stat\": \"42%%\", \"stat_label\": \"Label for the stat\", \"points\": [\"Key point 1\", \"Key point 2\", \"Key point 3\"]}]}\n\nRules:\n- icon must be one of: chart, data, stats, info, tip, warning, check, star, money, people, time, globe, phone, idea, growth\n- Include 4-6 sections with a mix of stat sections and bullet-point sections\n- stat and stat_label are optional — only include when there is a meaningful number/percentage\n- points should be concise (under 12 words each)\n- Return ONLY the JSON object, nothing else", input)
 	case "bizplan":
 		return base, fmt.Sprintf(
 			"Write a complete business plan for: %s\n\nSections:\n1. Executive Summary\n2. Company Description & Vision\n3. Market Analysis (target market, competition, Nigerian market context)\n4. Products/Services\n5. Marketing & Sales Strategy\n6. Operations Plan\n7. Financial Projections (3-year)\n8. Funding Requirements\n\nBe specific and actionable.", input)
@@ -407,6 +434,13 @@ func buildTextPrompts(slug, input string) (system, user string) {
 
 func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	prompt := env.Prompt
+	// Remap alias slugs to canonical ones
+	switch slug {
+	case "my-ai-photo":
+		slug = "ai-photo"
+	case "background-remover":
+		slug = "bg-remover"
+	}
 	switch slug {
 	case "bg-remover":
 		return o.dispatchBgRemover(ctx, prompt)
@@ -563,6 +597,12 @@ func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL s
 //   animate-photo    → FAL LTX-Video → wan-fast FREE → p-video FREE (ltx-2 was OFF — replaced)
 
 func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
+	// Remap alias slugs to canonical ones
+	switch slug {
+	case "animate-my-photo", "my-video-story":
+		slug = "animate-photo"
+	}
+
 	// video-cinematic: high-quality cinematic image-to-video
 	// Primary: wan-fast (Wan 2.2) — FREE, 15 pollen input, ~50s, image-to-video
 	// Fallback: ltx-2 (LTX-2)   — FREE, 15 pollen input, NEW model
@@ -677,7 +717,7 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 
 func (o *AIStudioOrchestrator) dispatchVoiceOrTranslate(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	switch slug {
-	case "translate":
+	case "translate", "local-translation":
 		return o.dispatchTranslate(ctx, env)
 	case "transcribe":
 		return o.dispatchTranscribe(ctx, env.Prompt) // prompt holds audioURL for transcription
@@ -685,6 +725,12 @@ func (o *AIStudioOrchestrator) dispatchVoiceOrTranslate(ctx context.Context, slu
 		return o.dispatchTranscribeAfrican(ctx, env)
 	case "narrate-pro":
 		return o.dispatchNarratorPro(ctx, env)
+	case "text-to-speech":
+		// text-to-speech is an alias for narrate — use voice_id if set
+		if env.VoiceID != "" {
+			return o.dispatchNarratorPro(ctx, env)
+		}
+		return o.dispatchTTS(ctx, env.Prompt)
 	default: // narrate
 		// Use voice_id from envelope if set, else fall back to generic TTS
 		if env.VoiceID != "" {
@@ -851,16 +897,20 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 		}
 		return nil, fmt.Errorf("instrumental: all providers failed")
 
-	case "jingle":
-		// Premium: ElevenLabs Music (professional quality, ~₦450/jingle)
+	case "jingle", "my-marketing-jingle":
+		// Premium: ElevenLabs Sound Generation (works on free tier)
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
 			if err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-music", CostMicros: 45000}, nil
 			}
-			log.Printf("[AIStudio] ElevenLabs Music failed: %v", err)
+			log.Printf("[AIStudio] ElevenLabs Music failed for jingle: %v — trying Pollinations TTS", err)
 		}
-		return nil, fmt.Errorf("marketing jingle requires ELEVENLABS_API_KEY")
+		// Fallback: Pollinations TTS with upbeat voice for jingle-style output
+		if audioURL, err := o.callPollinationsTTS(ctx, prompt, "onyx"); err == nil {
+			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/tts-jingle", CostMicros: 0}, nil
+		}
+		return nil, fmt.Errorf("jingle generation failed: all providers unavailable")
 
 	default: // bg-music
 		// ── DB-first ────────────────────────────────────────────────────────────────────────
@@ -903,7 +953,7 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 
 func (o *AIStudioOrchestrator) dispatchComposite(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	switch slug {
-	case "podcast":
+	case "podcast", "my-podcast":
 		return o.assemblePodcast(ctx, env.Prompt)
 	default:
 		return o.dispatchText(ctx, slug, env)
