@@ -51,6 +51,18 @@ func main() {
 			log.Printf("[health] encode error: %v", err)
 		}
 	})
+	// Root path handler — returns 200 so Render's load balancer health probe
+	// does not log a 404 when it probes GET /.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{"service": "Loyalty Nexus API", "status": "ok", "version": "1.0.0"}); err != nil {
+			log.Printf("[root] encode error: %v", err)
+		}
+	})
 	srv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      middleware.CORS(middleware.RequestLogger(mux)),
