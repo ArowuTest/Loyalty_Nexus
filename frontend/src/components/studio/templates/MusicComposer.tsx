@@ -192,6 +192,10 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
   const [instruments,       setInstruments]       = useState('');
   const [negativePrompt,    setNegativePrompt]    = useState('');
 
+  // Song-creator specific
+  const [songTitle,    setSongTitle]    = useState('');
+  const [vocalGender,  setVocalGender]  = useState<'female' | 'male' | 'mixed'>('female');
+
   // Jingle-specific
   const [brandName,    setBrandName]    = useState('');
   const [jingleUseCase, setJingleUseCase] = useState('');
@@ -272,16 +276,20 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
       style_tags:      selectedTags.length > 0 ? selectedTags : undefined,
       negative_prompt: negativePrompt.trim() || undefined,
       extra_params: {
-        bpm:        bpm ?? 'auto',
-        energy:     ENERGY_LABELS[energy],
-        mood:       selectedMood ?? undefined,
-        key:        selectedKey !== 'Any' ? selectedKey : undefined,
-        structure:  selectedStructure !== 'Auto' ? selectedStructure : undefined,
-        instruments: instruments.trim() || undefined,
-        brand_name:  brandName.trim() || undefined,
+        bpm:          bpm ?? 'auto',
+        energy:       ENERGY_LABELS[energy],
+        mood:         selectedMood ?? undefined,
+        key:          selectedKey !== 'Any' ? selectedKey : undefined,
+        structure:    selectedStructure !== 'Auto' ? selectedStructure : undefined,
+        instruments:  instruments.trim() || undefined,
+        brand_name:   brandName.trim() || undefined,
         jingle_use_case: jingleUseCase || undefined,
-        bg_scene:    bgScene || undefined,
-        tool_mode:   mode,
+        bg_scene:     bgScene || undefined,
+        tool_mode:    mode,
+        // Suno-native fields
+        genre:        selectedTags.length > 0 ? selectedTags[0] : undefined,
+        title:        songTitle.trim() || undefined,
+        vocal_gender: (mode === 'song-creator' && vocals) ? vocalGender : undefined,
       },
     };
     onSubmit(payload);
@@ -444,6 +452,52 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
               🎹 Instrumental
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ── Song Title + Vocal Gender (song-creator only) ── */}
+      {mode === 'song-creator' && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+          {/* Song Title */}
+          <div>
+            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
+              Song Title <span className="text-white/25 normal-case font-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={songTitle}
+              onChange={(e) => setSongTitle(e.target.value)}
+              placeholder="e.g. Lagos Love Story"
+              maxLength={80}
+              className="nexus-input w-full text-sm"
+            />
+          </div>
+
+          {/* Vocal Gender — only shown when vocals are on */}
+          {vocals && (
+            <div>
+              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
+                Vocal Gender
+              </label>
+              <div className="flex rounded-xl overflow-hidden border border-white/10 h-[42px]">
+                {(['female', 'male', 'mixed'] as const).map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => setVocalGender(g)}
+                    className={cn(
+                      'flex-1 flex items-center justify-center text-xs font-semibold transition-all capitalize',
+                      vocalGender === g
+                        ? 'bg-amber-500 text-black'
+                        : 'text-white/50 hover:text-white/80',
+                    )}
+                  >
+                    {g === 'female' ? '♀ Female' : g === 'male' ? '♂ Male' : '⚥ Mixed'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -285,6 +285,7 @@ func (h *StudioHandler) GetGenerationStatus(w http.ResponseWriter, r *http.Reque
 		"status":          gen.Status,
 		"tool_slug":       gen.ToolSlug,
 		"output_url":      gen.OutputURL,
+		"output_url_2":    gen.OutputURL2,
 		"output_text":     gen.OutputText,
 		"provider":        gen.Provider,
 		"points_deducted": gen.PointsDeducted,

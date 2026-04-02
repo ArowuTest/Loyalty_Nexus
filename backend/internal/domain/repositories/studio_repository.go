@@ -49,7 +49,7 @@ type StudioRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status, outputURL, errMsg string) error
 
 	// CompleteGeneration persists all result fields in a single UPDATE.
-	CompleteGeneration(ctx context.Context, id uuid.UUID, status, outputURL, outputText, provider string, costMicros, durationMs int) error
+	CompleteGeneration(ctx context.Context, id uuid.UUID, status, outputURL, outputURL2, outputText, provider string, costMicros, durationMs int) error
 
 	// ─── User gallery ─────────────────────────────────────────────────────────
 

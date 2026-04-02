@@ -1768,7 +1768,7 @@ function ToolDrawer({
   const [generating,     setGenerating]     = useState(false);
   const [genStartedAt,   setGenStartedAt]   = useState<number | null>(null);
   // Inline result — set when polling returns completed, shown directly in drawer
-  const [inlineResult,   setInlineResult]   = useState<{ output_url?: string; output_text?: string; output_type?: string } | null>(null);
+  const [inlineResult,   setInlineResult]   = useState<{ output_url?: string; output_url_2?: string; output_text?: string; output_type?: string } | null>(null);
 
   const cfg        = catCfg(tool.category);
   const slug       = tool.slug;
@@ -1808,6 +1808,7 @@ function ToolDrawer({
             const status = await api.getGenerationStatus(genId) as {
               status: string;
               output_url?: string;
+              output_url_2?: string;
               output_text?: string;
               output_type?: string;
             };
@@ -1816,9 +1817,10 @@ function ToolDrawer({
               setGenerating(false);
               setGenStartedAt(null);
               setInlineResult({
-                output_url:  status.output_url,
-                output_text: status.output_text,
-                output_type: status.output_type,
+                output_url:   status.output_url,
+                output_url_2: status.output_url_2,
+                output_text:  status.output_text,
+                output_type:  status.output_type,
               });
               onGenerated?.(); // refresh Gallery in background
             } else if (status?.status === "failed") {
@@ -2064,28 +2066,52 @@ function ToolDrawer({
                   {/* Audio result — use slug-based detection as primary, URL extension as fallback */}
                   {inlineResult.output_url && (AUDIO_SLUGS.has(slug) || inlineResult.output_type === "audio" || /\.(mp3|wav|ogg|m4a)/i.test(inlineResult.output_url)) && (
                     <div className="p-4 space-y-3">
-                      <AudioPlayer src={inlineResult.output_url} label={tool.name} />
-                      <div className="flex gap-2">
+                      {/* Track A — always shown */}
+                      <div className="space-y-1.5">
+                        {inlineResult.output_url_2 && (
+                          <p className="text-xs font-semibold text-white/50 uppercase tracking-wider px-1">Version A</p>
+                        )}
+                        <AudioPlayer src={inlineResult.output_url} label={tool.name} />
                         <a
                           href={inlineResult.output_url}
                           download
                           target="_blank"
                           rel="noreferrer"
-                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
-                                     bg-green-500/15 border border-green-500/25 text-green-300
-                                     text-sm font-semibold hover:bg-green-500/25 transition-colors"
+                          className="flex items-center justify-center gap-2 py-2 rounded-xl
+                                     bg-green-500/10 border border-green-500/20 text-green-300
+                                     text-xs font-semibold hover:bg-green-500/20 transition-colors w-full"
                         >
-                          <Download size={14} /> Download MP3
+                          <Download size={12} /> Download Version A
                         </a>
-                        <button
-                          onClick={() => { setInlineResult(null); setPendingPayload(null); }}
-                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
-                                     bg-white/5 border border-white/10 text-white/60
-                                     text-sm font-semibold hover:bg-white/10 transition-colors"
-                        >
-                          <RefreshCw size={14} /> Generate Again
-                        </button>
                       </div>
+
+                      {/* Track B — only shown when Suno returns a second take */}
+                      {inlineResult.output_url_2 && (
+                        <div className="space-y-1.5 pt-2 border-t border-white/10">
+                          <p className="text-xs font-semibold text-white/50 uppercase tracking-wider px-1">Version B</p>
+                          <AudioPlayer src={inlineResult.output_url_2} label={`${tool.name} (B)`} />
+                          <a
+                            href={inlineResult.output_url_2}
+                            download
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center justify-center gap-2 py-2 rounded-xl
+                                       bg-purple-500/10 border border-purple-500/20 text-purple-300
+                                       text-xs font-semibold hover:bg-purple-500/20 transition-colors w-full"
+                          >
+                            <Download size={12} /> Download Version B
+                          </a>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                        className="flex items-center justify-center gap-2 py-2.5 rounded-xl w-full
+                                   bg-white/5 border border-white/10 text-white/60
+                                   text-sm font-semibold hover:bg-white/10 transition-colors"
+                      >
+                        <RefreshCw size={14} /> Generate Again
+                      </button>
                     </div>
                   )}
 

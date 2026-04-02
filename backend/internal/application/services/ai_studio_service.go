@@ -126,6 +126,7 @@ var slugCategory = map[string]studioToolCat{
 
 type studioProviderResult struct {
 	OutputURL  string // CDN URL or data URI for binary outputs
+	OutputURL2 string // second audio track (Suno returns 2 takes)
 	OutputText string // for text-generation tools (study guide, bizplan, etc.)
 	Provider   string // e.g. "gemini-flash", "fal.ai/flux"
 	CostMicros int    // fractional cost in µUSD for accounting
@@ -1206,9 +1207,16 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 			if sunoStyle == "" {
 				sunoStyle = "Pop"
 			}
-			audioURL, err := o.callSunoMusic(ctx, sunoKey, prompt, sunoStyle, sunoTitle, false)
+			// Extract vocal gender from envelope extras (female/male/mixed)
+			sunoVocalGender := "female" // default
+			if env.Extra != nil {
+				if vg, ok := env.Extra["vocal_gender"].(string); ok && vg != "" {
+					sunoVocalGender = vg
+				}
+			}
+			audioURL1, audioURL2, err := o.callSunoMusic(ctx, sunoKey, prompt, sunoStyle, sunoTitle, sunoVocalGender, false)
 			if err == nil {
-				return &studioProviderResult{OutputURL: audioURL, Provider: "suno-ai", CostMicros: 50000}, nil
+				return &studioProviderResult{OutputURL: audioURL1, OutputURL2: audioURL2, Provider: "suno-ai", CostMicros: 50000}, nil
 			}
 			log.Printf("[AIStudio] Suno failed for song-creator: %v — trying ElevenLabs", err)
 		}
@@ -1244,9 +1252,9 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 					sunoStyle = s + " Instrumental"
 				}
 			}
-			audioURL, err := o.callSunoMusic(ctx, sunoKey, prompt, sunoStyle, sunoTitle, true)
+			audioURL1, audioURL2, err := o.callSunoMusic(ctx, sunoKey, prompt, sunoStyle, sunoTitle, "", true)
 			if err == nil {
-				return &studioProviderResult{OutputURL: audioURL, Provider: "suno-ai", CostMicros: 50000}, nil
+				return &studioProviderResult{OutputURL: audioURL1, OutputURL2: audioURL2, Provider: "suno-ai", CostMicros: 50000}, nil
 			}
 			log.Printf("[AIStudio] Suno failed for instrumental: %v — trying ElevenLabs", err)
 		}
@@ -1281,9 +1289,9 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 					sunoStyle = s + ", Jingle, Catchy"
 				}
 			}
-			audioURL, err := o.callSunoMusic(ctx, sunoKey, prompt, sunoStyle, sunoTitle, false)
+			audioURL1, audioURL2, err := o.callSunoMusic(ctx, sunoKey, prompt, sunoStyle, sunoTitle, "", false)
 			if err == nil {
-				return &studioProviderResult{OutputURL: audioURL, Provider: "suno-ai", CostMicros: 50000}, nil
+				return &studioProviderResult{OutputURL: audioURL1, OutputURL2: audioURL2, Provider: "suno-ai", CostMicros: 50000}, nil
 			}
 			log.Printf("[AIStudio] Suno failed for jingle: %v — trying ElevenLabs", err)
 		}
@@ -2405,7 +2413,7 @@ func (o *AIStudioOrchestrator) callMubert(ctx context.Context, apiKey, prompt st
 //
 // Request: POST https://api.sunoapi.org/api/v1/generate
 // Poll:    GET  https://api.sunoapi.org/api/v1/generate/record-info?taskId=...
-func (o *AIStudioOrchestrator) callSunoMusic(ctx context.Context, apiKey, prompt, style, title string, instrumental bool) (string, error) {
+func (o *AIStudioOrchestrator) callSunoMusic(ctx context.Context, apiKey, prompt, style, title, vocalGender string, instrumental bool) (string, string, error) {
 	// Build request payload
 	payload := map[string]interface{}{
 		"customMode":   true,
@@ -2416,9 +2424,14 @@ func (o *AIStudioOrchestrator) callSunoMusic(ctx context.Context, apiKey, prompt
 		"title":        title,
 		"callBackUrl":  "https://example.com/noop", // required field; we poll instead
 	}
+	// Add vocal gender for non-instrumental tracks
+	if !instrumental && vocalGender != "" {
+		payload["vocalGender"] = vocalGender
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("suno: marshal error: %w", err)
+		return "", "", fmt.Errorf("suno: marshal error: %w", err)
 	}
 
 	// Use a long-timeout client for Suno (2-3 min generation time)
@@ -2428,14 +2441,14 @@ func (o *AIStudioOrchestrator) callSunoMusic(ctx context.Context, apiKey, prompt
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://api.sunoapi.org/api/v1/generate", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("suno: request build error: %w", err)
+		return "", "", fmt.Errorf("suno: request build error: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := sunoClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("suno: submit error: %w", err)
+		return "", "", fmt.Errorf("suno: submit error: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -2447,10 +2460,10 @@ func (o *AIStudioOrchestrator) callSunoMusic(ctx context.Context, apiKey, prompt
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&submitResp); err != nil {
-		return "", fmt.Errorf("suno: decode submit response: %w", err)
+		return "", "", fmt.Errorf("suno: decode submit response: %w", err)
 	}
 	if submitResp.Code != 200 || submitResp.Data.TaskID == "" {
-		return "", fmt.Errorf("suno: submit failed code=%d msg=%s", submitResp.Code, submitResp.Msg)
+		return "", "", fmt.Errorf("suno: submit failed code=%d msg=%s", submitResp.Code, submitResp.Msg)
 	}
 	taskID := submitResp.Data.TaskID
 	log.Printf("[AIStudio] Suno task submitted: %s", taskID)
@@ -2461,10 +2474,10 @@ func (o *AIStudioOrchestrator) callSunoMusic(ctx context.Context, apiKey, prompt
 	for time.Now().Before(deadline) {
 		time.Sleep(10 * time.Second)
 
-		pollReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
-		if err != nil {
-			return "", fmt.Errorf("suno: poll request build: %w", err)
-		}
+			pollReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+			if err != nil {
+				return "", "", fmt.Errorf("suno: poll request build: %w", err)
+			}
 		pollReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 		pollResp, err := sunoClient.Do(pollReq)
@@ -2497,23 +2510,27 @@ func (o *AIStudioOrchestrator) callSunoMusic(ctx context.Context, apiKey, prompt
 		}
 		pollResp.Body.Close()
 
-		switch statusResp.Data.Status {
-		case "SUCCESS", "FIRST_SUCCESS":
-			// Return the first audio URL from the two generated tracks
-			if len(statusResp.Data.Response.SunoData) > 0 {
-				audioURL := statusResp.Data.Response.SunoData[0].AudioURL
-				if audioURL != "" {
-					log.Printf("[AIStudio] Suno SUCCESS — audioUrl: %s", audioURL)
-					return audioURL, nil
+			switch statusResp.Data.Status {
+			case "SUCCESS", "FIRST_SUCCESS":
+				// Return both audio URLs from the two generated tracks
+				if len(statusResp.Data.Response.SunoData) > 0 {
+					audioURL1 := statusResp.Data.Response.SunoData[0].AudioURL
+					audioURL2 := ""
+					if len(statusResp.Data.Response.SunoData) > 1 {
+						audioURL2 = statusResp.Data.Response.SunoData[1].AudioURL
+					}
+					if audioURL1 != "" {
+						log.Printf("[AIStudio] Suno SUCCESS — track1: %s track2: %s", audioURL1, audioURL2)
+						return audioURL1, audioURL2, nil
+					}
 				}
+			case "CREATE_TASK_FAILED", "GENERATE_AUDIO_FAILED":
+				return "", "", fmt.Errorf("suno: generation failed: %s", statusResp.Data.ErrorMessage)
+			default:
+				log.Printf("[AIStudio] Suno status: %s — polling...", statusResp.Data.Status)
 			}
-		case "CREATE_TASK_FAILED", "GENERATE_AUDIO_FAILED":
-			return "", fmt.Errorf("suno: generation failed: %s", statusResp.Data.ErrorMessage)
-		default:
-			log.Printf("[AIStudio] Suno status: %s — polling...", statusResp.Data.Status)
-		}
 	}
-	return "", fmt.Errorf("suno: timed out waiting for generation (taskId=%s)", taskID)
+	return "", "", fmt.Errorf("suno: timed out waiting for generation (taskId=%s)", taskID)
 }
 
 // callElevenLabsMusic calls the ElevenLabs Music Generation API for full songs and instrumentals.
@@ -3072,7 +3089,7 @@ func (o *AIStudioOrchestrator) uploadOrDataURI(ctx context.Context, data []byte,
 // ─── Completion helpers ───────────────────────────────────────────────────────
 
 func (o *AIStudioOrchestrator) complete(ctx context.Context, gen *entities.AIGeneration, r *studioProviderResult) error {
-	return o.studioSvc.CompleteGeneration(ctx, gen.ID, r.OutputURL, r.OutputText, r.Provider, r.CostMicros, r.DurationMs)
+	return o.studioSvc.CompleteGeneration(ctx, gen.ID, r.OutputURL, r.OutputURL2, r.OutputText, r.Provider, r.CostMicros, r.DurationMs)
 }
 
 // ─── Utility ─────────────────────────────────────────────────────────────────

@@ -78,8 +78,9 @@ type AIGeneration struct {
 	ToolSlug       string    `json:"tool_slug"     gorm:"column:tool_slug;default:''"`
 	Prompt         string    `json:"prompt"        gorm:"column:prompt"`
 	Status         string    `json:"status"        gorm:"column:status"` // pending | processing | completed | failed
-	OutputURL      string    `json:"output_url,omitempty"    gorm:"column:output_url;default:''"`
-	OutputText     string    `json:"output_text,omitempty"   gorm:"column:output_text;default:''"`
+	OutputURL      string    `json:"output_url,omitempty"     gorm:"column:output_url;default:'"`
+	OutputURL2     string    `json:"output_url_2,omitempty"   gorm:"column:output_url_2;default:'"`
+	OutputText     string    `json:"output_text,omitempty"    gorm:"column:output_text;default:'"`
 	ErrorMessage   string    `json:"error_message,omitempty" gorm:"column:error_message;default:''"`
 	Provider       string    `json:"provider,omitempty"      gorm:"column:provider;default:''"`
 	CostMicros     int       `json:"cost_micros"   gorm:"column:cost_micros;default:0"`

@@ -124,20 +124,21 @@ func (r *postgresStudioRepository) UpdateStatus(ctx context.Context, id uuid.UUI
 func (r *postgresStudioRepository) CompleteGeneration(
 	ctx context.Context,
 	id uuid.UUID,
-	status, outputURL, outputText, provider string,
+	status, outputURL, outputURL2, outputText, provider string,
 	costMicros, durationMs int,
 ) error {
 	return r.db.WithContext(ctx).
 		Model(&entities.AIGeneration{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
-			"status":      status,
-			"output_url":  outputURL,
-			"output_text": outputText,
-			"provider":    provider,
-			"cost_micros": costMicros,
-			"duration_ms": durationMs,
-			"updated_at":  time.Now(),
+			"status":       status,
+			"output_url":   outputURL,
+			"output_url_2": outputURL2,
+			"output_text":  outputText,
+			"provider":     provider,
+			"cost_micros":  costMicros,
+			"duration_ms":  durationMs,
+			"updated_at":   time.Now(),
 		}).Error
 }
 

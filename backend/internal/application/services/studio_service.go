@@ -230,10 +230,10 @@ func (s *StudioService) RequestGeneration(
 func (s *StudioService) CompleteGeneration(
 	ctx context.Context,
 	genID uuid.UUID,
-	outputURL, outputText, provider string,
+	outputURL, outputURL2, outputText, provider string,
 	costMicros, durationMs int,
 ) error {
-	if err := s.studioRepo.CompleteGeneration(ctx, genID, "completed", outputURL, outputText, provider, costMicros, durationMs); err != nil {
+	if err := s.studioRepo.CompleteGeneration(ctx, genID, "completed", outputURL, outputURL2, outputText, provider, costMicros, durationMs); err != nil {
 		return err
 	}
 
