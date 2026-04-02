@@ -319,7 +319,14 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 	}
 	systemPrompt := basePrompt
 	if memoryBlock != "" {
-		systemPrompt += "\n\n" + memoryBlock
+		systemPrompt += "\n\n" + memoryBlock + "\n\n" +
+			"[MEMORY USAGE RULES]\n" +
+			"- The [NEXUS MEMORY] block above contains SUMMARIES of past sessions — NOT the full content of previous responses.\n" +
+			"- Do NOT claim to have the full text of any previous response. You only have a summary.\n" +
+			"- Do NOT say 'I already drafted this for you' or 'I created this in our previous session' — you cannot re-share something you only have a summary of.\n" +
+			"- DO use the memory context to personalise your response (e.g., 'I see you've been working on a food delivery startup — here's a fresh detailed plan:').\n" +
+			"- ALWAYS generate a complete, fresh, full-length answer to the user's current request.\n" +
+			"[END MEMORY USAGE RULES]"
 	}
 
 	// 4. Route: Gemini (primary) → Groq (fast fallback) → DeepSeek (overflow)
