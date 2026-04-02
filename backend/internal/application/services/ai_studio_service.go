@@ -305,8 +305,11 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 			return &studioProviderResult{OutputText: text, Provider: "pollinations/gemini-search", CostMicros: 0}, nil
 		}
 		log.Printf("[AIStudio] Pollinations web-search failed: %v — falling back", err)
-		base := "You are Nexus AI, a helpful assistant for Nigerian users. Be clear, practical, and culturally aware."
-		fallbackText, fErr := o.callGeminiFlash(ctx, base, fmt.Sprintf("(Search unavailable) Answer as best you can: %s", prompt))
+		webSys := "You are Nexus AI, an intelligent assistant for Nigerian and African users. " +
+			"Web search is temporarily unavailable, but answer from your knowledge with depth and accuracy. " +
+			"Structure your answer clearly: direct answer first, then supporting details. " +
+			"Use Nigerian/African context where relevant. Be specific with facts, numbers, and examples."
+		fallbackText, fErr := o.callGeminiFlash(ctx, webSys, fmt.Sprintf("(Web search unavailable — answer from knowledge) %s", prompt))
 		if fErr == nil {
 			return &studioProviderResult{OutputText: fallbackText, Provider: "gemini-flash/nosearch", CostMicros: 0}, nil
 		}
@@ -329,14 +332,18 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 
 	// code-helper: primary via Pollinations Qwen3-Coder, fallback to Gemini Flash
 	if slug == "code-helper" {
-		codeSys := "You are an expert programmer. Write clean, well-commented code. Explain your solution briefly."
+		codeSys := "You are Nexus Code, a world-class software engineer and programming mentor. " +
+			"Write production-quality, clean, well-commented code. " +
+			"Always wrap code in fenced code blocks with the correct language tag (e.g. ```python, ```javascript). " +
+			"Explain the key logic in 2-4 bullet points after the code. " +
+			"Include error handling in all examples. " +
+			"If debugging, quote the problematic line, explain why it's wrong, then show the fix."
 		text, err := o.callPollinationsQwenCoder(ctx, codeSys, prompt)
 		if err == nil {
 			return &studioProviderResult{OutputText: text, Provider: "pollinations/qwen-coder", CostMicros: 0}, nil
 		}
 		log.Printf("[AIStudio] Pollinations Qwen-Coder failed: %v — falling back", err)
-		base := "You are an expert programmer. Write clean, well-commented code. Explain your solution briefly."
-		fallbackText, fErr := o.callGeminiFlash(ctx, base, prompt)
+		fallbackText, fErr := o.callGeminiFlash(ctx, codeSys, prompt)
 		if fErr == nil {
 			return &studioProviderResult{OutputText: fallbackText, Provider: "gemini-flash/code", CostMicros: 0}, nil
 		}
@@ -396,36 +403,200 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 
 // buildTextPrompts returns (systemPrompt, userPrompt) for each tool slug.
 func buildTextPrompts(slug, input string) (system, user string) {
-	base := "You are Nexus AI, a helpful assistant for Nigerian users. Be clear, practical, and culturally aware."
+	nexusSys := "You are Nexus AI, a world-class AI assistant built specifically for Nigerian and African users. " +
+		"You are deeply knowledgeable about Nigerian business, education, culture, finance (CBN, NGX, FIRS, CAC), and daily life. " +
+		"Always produce thorough, accurate, well-structured responses that provide genuine value. " +
+		"Use Nigerian context, examples, and currency (Naira) wherever relevant."
+
 	switch slug {
 	case "web-search-ai":
-		return base, fmt.Sprintf("Search the web and answer: %s", input)
+		return nexusSys + " You have real-time web search access. Always cite your sources naturally.",
+			fmt.Sprintf("Search the web and provide a comprehensive, well-structured answer to: %s", input)
+
 	case "code-helper":
-		return "You are an expert programmer. Write clean, well-commented code. Explain your solution briefly.",
-			fmt.Sprintf("Help me with the following coding task: %s", input)
+		return "You are Nexus Code, a world-class software engineer and programming mentor. " +
+			"You write production-quality, clean, well-commented code in any language. " +
+			"You explain every solution clearly with the key logic highlighted. " +
+			"You always wrap code in fenced code blocks with the correct language tag. " +
+			"You include error handling in all examples. " +
+			"You detect the language from context and never ask unless truly ambiguous.",
+			fmt.Sprintf("%s", input)
+
 	case "study-guide":
-		return base, fmt.Sprintf(
-			"Create a comprehensive study guide for: %s\n\nInclude:\n- Key concepts with clear definitions\n- Real-world examples relevant to Nigerian context\n- Practice questions with answers\n- Quick revision summary\n\nFormat with clear headings.", input)
+		return nexusSys + " You are an expert educator who creates comprehensive, exam-ready study materials.",
+			fmt.Sprintf(`Create a comprehensive, exam-ready study guide for: %s
+
+Structure your guide as follows:
+
+## Overview
+Brief introduction to the topic (2-3 sentences).
+
+## Key Concepts
+For each major concept:
+- **Concept Name**: Clear definition
+- Real-world example (preferably Nigerian/African context)
+- Why it matters
+
+## Detailed Explanations
+In-depth coverage of each subtopic with examples, diagrams described in text, and analogies.
+
+## Practice Questions
+5 short-answer questions with model answers.
+3 essay-style questions with outline answers.
+
+## Quick Revision Summary
+Bullet-point cheat sheet of the 10 most important facts/formulas/concepts.
+
+## Further Study
+3 recommended areas to explore for deeper understanding.
+
+Make it thorough enough for WAEC, JAMB, university, or professional exam preparation.`, input)
+
 	case "quiz":
-		return base, fmt.Sprintf(
-			"Create 10 quiz questions with answers about: %s\n\nReturn as JSON array:\n[{\"question\": \"...\", \"options\": [\"A) ...\", \"B) ...\", \"C) ...\", \"D) ...\"], \"answer\": \"A\", \"explanation\": \"...\"}]\n\nReturn ONLY the JSON, no extra text.", input)
+		return nexusSys + " You are an expert quiz designer who creates challenging, educational assessments.",
+			fmt.Sprintf(`Create 10 high-quality quiz questions about: %s
+
+Requirements:
+- Mix difficulty: 3 easy, 4 medium, 3 hard
+- Include Nigerian/African context where relevant
+- Each question must have 4 distinct options (no obviously wrong answers)
+- Explanations must be educational, not just restate the answer
+
+Return ONLY valid JSON array, no markdown, no extra text:
+[{"question": "...", "options": ["A) ...", "B) ...", "C) ...", "D) ..."], "answer": "A", "explanation": "Detailed explanation of why this is correct and why others are wrong."}]`, input)
+
 	case "mindmap":
-		return base, fmt.Sprintf(
-			"Create a detailed mind map for: %s\n\nReturn as JSON:\n{\"center\": \"...\", \"branches\": [{\"label\": \"...\", \"children\": [{\"label\": \"...\"}]}]}\n\nReturn ONLY the JSON.", input)
+		return nexusSys + " You are an expert at creating rich, comprehensive mind maps for learning and planning.",
+			fmt.Sprintf(`Create a detailed, comprehensive mind map for: %s
+
+Requirements:
+- Central topic should be concise (2-4 words)
+- Include 5-7 main branches covering all key aspects
+- Each branch should have 3-5 sub-branches with specific, actionable items
+- Include Nigerian/African context where relevant
+- Sub-branches should be specific facts, examples, or action items — not vague categories
+
+Return ONLY valid JSON, no markdown, no extra text:
+{"center": "...", "branches": [{"label": "...", "color": "#hex", "children": [{"label": "...", "children": [{"label": "..."}]}]}]}
+
+Use these colors for branches: #f59e0b, #3b82f6, #10b981, #8b5cf6, #ef4444, #06b6d4, #f97316`, input)
+
 	case "research-brief":
-		return base, fmt.Sprintf(
-			"Write a comprehensive research brief about: %s\n\nSections:\n1. Executive Summary (3 sentences)\n2. Background & Context\n3. Key Findings (5 bullet points)\n4. Market/Industry Data (with specific figures where available)\n5. Recommendations\n6. Conclusion\n\nBe specific and data-driven.", input)
+		return nexusSys + " You are a senior research analyst who produces rigorous, data-driven research briefs.",
+			fmt.Sprintf(`Write a comprehensive, professional research brief about: %s
+
+## Executive Summary
+3-4 sentences capturing the most important findings and their significance.
+
+## Background & Context
+Historical context, current state, and why this topic matters — especially in the Nigerian/African context.
+
+## Key Findings
+7-10 specific, evidence-based findings with data points, statistics, and examples where possible.
+
+## Market & Industry Analysis
+- Market size and growth trends (with specific figures)
+- Key players and competitive landscape
+- Nigerian/African market dynamics
+- Opportunities and challenges
+
+## Expert Perspectives
+Summarise what leading experts, institutions, or reports say about this topic.
+
+## Strategic Recommendations
+5 specific, actionable recommendations with rationale.
+
+## Conclusion
+Synthesis of findings and forward-looking outlook.
+
+Be specific, cite real data and examples, and make it genuinely useful for decision-making.`, input)
+
 	case "slide-deck":
-		return base, fmt.Sprintf(
-			"Create a slide deck outline for: %s\n\nReturn as JSON:\n{\"title\": \"...\", \"slides\": [{\"number\": 1, \"title\": \"...\", \"bullets\": [\"...\"], \"speaker_notes\": \"...\"}]}\n\nCreate 10-12 slides. Return ONLY the JSON.", input)
+		return nexusSys + " You are an expert presentation designer who creates compelling, professional slide decks.",
+			fmt.Sprintf(`Create a professional, compelling slide deck for: %s
+
+Requirements:
+- 12-15 slides covering the topic comprehensively
+- Each slide should have a strong, action-oriented title
+- Bullets should be concise (max 8 words each), not full sentences
+- Speaker notes should be 2-3 sentences of talking points
+- Include a strong opening hook and a clear call-to-action on the final slide
+- Nigerian/African context where relevant
+
+Return ONLY valid JSON, no markdown, no extra text:
+{"title": "...", "subtitle": "...", "slides": [{"number": 1, "title": "...", "bullets": ["...", "...", "..."], "speaker_notes": "..."}]}`, input)
+
 	case "infographic":
-		return base, fmt.Sprintf(
-			"Create a rich infographic data structure about: %s\n\nReturn ONLY valid JSON in this exact format (no markdown, no code blocks):\n{\"title\": \"Main Title\", \"subtitle\": \"Brief description\", \"sections\": [{\"heading\": \"Section Title\", \"icon\": \"chart\", \"stat\": \"42%%\", \"stat_label\": \"Label for the stat\", \"points\": [\"Key point 1\", \"Key point 2\", \"Key point 3\"]}]}\n\nRules:\n- icon must be one of: chart, data, stats, info, tip, warning, check, star, money, people, time, globe, phone, idea, growth\n- Include 4-6 sections with a mix of stat sections and bullet-point sections\n- stat and stat_label are optional — only include when there is a meaningful number/percentage\n- points should be concise (under 12 words each)\n- Return ONLY the JSON object, nothing else", input)
+		return nexusSys + " You are an expert data visualisation designer who creates insightful, visually compelling infographics.",
+			fmt.Sprintf(`Create a rich, data-packed infographic about: %s
+
+Requirements:
+- 5-6 sections covering different aspects of the topic
+- Mix stat-heavy sections (with specific numbers/percentages) and insight sections (with bullet points)
+- Stats must be real, specific, and verifiable — not made up
+- Points must be concise, punchy, and genuinely insightful (under 12 words)
+- Nigerian/African data and context where available
+
+Return ONLY valid JSON, no markdown, no code blocks:
+{"title": "Main Title", "subtitle": "Brief compelling description", "sections": [{"heading": "Section Title", "icon": "chart", "stat": "42%%", "stat_label": "Label for the stat", "points": ["Key point 1", "Key point 2", "Key point 3"]}]}
+
+icon must be one of: chart, data, stats, info, tip, warning, check, star, money, people, time, globe, phone, idea, growth
+stat and stat_label are optional — only include when there is a real, meaningful number`, input)
+
 	case "bizplan":
-		return base, fmt.Sprintf(
-			"Write a complete business plan for: %s\n\nSections:\n1. Executive Summary\n2. Company Description & Vision\n3. Market Analysis (target market, competition, Nigerian market context)\n4. Products/Services\n5. Marketing & Sales Strategy\n6. Operations Plan\n7. Financial Projections (3-year)\n8. Funding Requirements\n\nBe specific and actionable.", input)
+		return nexusSys + " You are a top-tier business consultant and MBA with deep expertise in Nigerian and African markets.",
+			fmt.Sprintf(`Write a comprehensive, investor-ready business plan for: %s
+
+## Executive Summary
+Compelling 3-paragraph overview: the problem, the solution, and the opportunity.
+
+## Company Description & Vision
+Mission statement, vision, core values, and what makes this business unique.
+
+## Market Analysis
+- Target market size and demographics (Nigerian/African context)
+- Market trends and growth drivers
+- Competitive landscape (name specific competitors)
+- Competitive advantage and positioning
+
+## Products & Services
+Detailed description of offerings, pricing strategy, and value proposition.
+
+## Marketing & Sales Strategy
+- Customer acquisition channels (digital, traditional, referral)
+- Brand positioning and messaging
+- Sales funnel and conversion strategy
+- Social media and content strategy
+
+## Operations Plan
+- Business model and revenue streams
+- Key processes and workflows
+- Team structure and key hires needed
+- Technology and tools required
+
+## Financial Projections (3-Year)
+- Year 1, 2, 3 revenue projections with assumptions
+- Cost structure and break-even analysis
+- Key financial metrics (CAC, LTV, gross margin)
+- Funding requirements and use of funds
+
+## Risk Analysis & Mitigation
+Top 5 risks and specific mitigation strategies.
+
+## Conclusion & Call to Action
+Why now, why this team, and what's the ask.
+
+Use Nigerian Naira (₦) for all financial figures. Be specific, realistic, and actionable.`, input)
+
 	default:
-		return base, fmt.Sprintf("Generate comprehensive, well-structured content about: %s", input)
+		return nexusSys,
+			fmt.Sprintf(`Generate comprehensive, well-structured, genuinely useful content about: %s
+
+Provide:
+- A clear, direct answer or output
+- Supporting details, examples, and context
+- Nigerian/African relevance where applicable
+- Practical takeaways the user can act on immediately`, input)
 	}
 }
 
@@ -778,8 +949,12 @@ func (o *AIStudioOrchestrator) dispatchTranslate(ctx context.Context, env prompt
 	}
 
 	// Fallback: use Gemini for translation
-	prompt := fmt.Sprintf("Translate the following text to %s. Return ONLY the translation, no explanation:\n\n%s", targetLang, text)
-	translated, err := o.callGeminiFlash(ctx, "You are a professional translator.", prompt)
+	prompt := fmt.Sprintf("Translate the following text to %s. Return ONLY the translation, no explanation, no commentary, no quotation marks around the result:\n\n%s", targetLang, text)
+	transSys := "You are a professional translator with native-level fluency in all major world languages and Nigerian languages (Yoruba, Igbo, Hausa, Pidgin English). " +
+		"Preserve the original tone, style, and meaning precisely. " +
+		"For Nigerian Pidgin, use authentic Lagos/Nigerian Pidgin expressions. " +
+		"Return ONLY the translated text — no explanations, no notes, no quotation marks."
+	translated, err := o.callGeminiFlash(ctx, transSys, prompt)
 	if err == nil {
 		return &studioProviderResult{OutputText: translated, Provider: "gemini/translate", CostMicros: 0}, nil
 	}
@@ -981,14 +1156,15 @@ NEXUS: [outro, mention Loyalty Nexus]
 
 Make it conversational, engaging, and relevant to Nigerian users. Total length: 400-600 words.`, topic)
 
-	script, err := o.callGeminiFlash(ctx,
-		"You are a podcast script writer for a Nigerian audience. Create engaging, educational content.",
-		scriptPrompt)
+	podcastSys := "You are a talented podcast script writer and storyteller for a Nigerian audience. " +
+		"You write in a warm, conversational, and engaging style that feels natural when spoken aloud. " +
+		"Nexus is the knowledgeable, enthusiastic host. Ade is the relatable, curious co-host who asks great questions. " +
+		"Use Nigerian English naturally — occasional Pidgin phrases are welcome but keep it accessible. " +
+		"Make the content educational, entertaining, and genuinely useful for Nigerian listeners."
+	script, err := o.callGeminiFlash(ctx, podcastSys, scriptPrompt)
 	if err != nil {
 		// Fallback to Groq
-		script, err = o.callGroqLlama4(ctx,
-			"You are a podcast script writer for a Nigerian audience.",
-			scriptPrompt)
+		script, err = o.callGroqLlama4(ctx, podcastSys, scriptPrompt)
 		if err != nil {
 			return nil, fmt.Errorf("podcast script generation failed: %w", err)
 		}
@@ -2079,7 +2255,13 @@ func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug string, 
 	} else {
 		fallbackQ = fmt.Sprintf("Regarding this image at %s — %s", imageURL, question)
 	}
-	text, err = o.callGeminiFlash(ctx, "You are a helpful image analysis assistant.", fallbackQ)
+	visionSys := "You are Nexus Vision, an expert image analyst with deep knowledge of visual content, photography, design, and Nigerian/African visual culture. " +
+		"Analyse images with precision and depth. Describe what you see comprehensively: objects, people, text, colours, composition, mood, and context. " +
+		"For documents or text in images, extract and transcribe the text accurately. " +
+		"For products or items, identify them and provide relevant information. " +
+		"For scenes or places, identify the location type and cultural context where possible. " +
+		"Always structure your response clearly and provide genuinely useful insights."
+	text, err = o.callGeminiFlash(ctx, visionSys, fallbackQ)
 	if err == nil {
 		return &studioProviderResult{OutputText: text, Provider: "gemini-flash/vision", CostMicros: 0}, nil
 	}

@@ -838,6 +838,31 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
   );
 }
 
+// ─── Language colour map for code blocks ────────────────────────────────────
+const LANG_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
+  python:     { bg: 'bg-blue-500/20',   text: 'text-blue-300',   dot: 'bg-blue-400' },
+  javascript: { bg: 'bg-yellow-500/20', text: 'text-yellow-300', dot: 'bg-yellow-400' },
+  typescript: { bg: 'bg-blue-600/20',   text: 'text-blue-200',   dot: 'bg-blue-300' },
+  js:         { bg: 'bg-yellow-500/20', text: 'text-yellow-300', dot: 'bg-yellow-400' },
+  ts:         { bg: 'bg-blue-600/20',   text: 'text-blue-200',   dot: 'bg-blue-300' },
+  html:       { bg: 'bg-orange-500/20', text: 'text-orange-300', dot: 'bg-orange-400' },
+  css:        { bg: 'bg-sky-500/20',    text: 'text-sky-300',    dot: 'bg-sky-400' },
+  sql:        { bg: 'bg-cyan-500/20',   text: 'text-cyan-300',   dot: 'bg-cyan-400' },
+  bash:       { bg: 'bg-green-500/20',  text: 'text-green-300',  dot: 'bg-green-400' },
+  sh:         { bg: 'bg-green-500/20',  text: 'text-green-300',  dot: 'bg-green-400' },
+  go:         { bg: 'bg-teal-500/20',   text: 'text-teal-300',   dot: 'bg-teal-400' },
+  rust:       { bg: 'bg-orange-600/20', text: 'text-orange-200', dot: 'bg-orange-300' },
+  java:       { bg: 'bg-red-500/20',    text: 'text-red-300',    dot: 'bg-red-400' },
+  kotlin:     { bg: 'bg-purple-500/20', text: 'text-purple-300', dot: 'bg-purple-400' },
+  swift:      { bg: 'bg-orange-500/20', text: 'text-orange-300', dot: 'bg-orange-400' },
+  dart:       { bg: 'bg-sky-600/20',    text: 'text-sky-200',    dot: 'bg-sky-300' },
+  json:       { bg: 'bg-amber-500/20',  text: 'text-amber-300',  dot: 'bg-amber-400' },
+  yaml:       { bg: 'bg-pink-500/20',   text: 'text-pink-300',   dot: 'bg-pink-400' },
+  markdown:   { bg: 'bg-white/10',      text: 'text-white/60',   dot: 'bg-white/40' },
+  md:         { bg: 'bg-white/10',      text: 'text-white/60',   dot: 'bg-white/40' },
+};
+const DEFAULT_LANG_COLOR = { bg: 'bg-white/8', text: 'text-white/40', dot: 'bg-white/30' };
+
 // ─── Markdown / code renderer for chat bubbles ──────────────────────────────
 function RichMessage({ content, mode }: { content: string; mode: ChatMode }) {
   const [copied, setCopied] = useState<number | null>(null);
@@ -853,51 +878,116 @@ function RichMessage({ content, mode }: { content: string; mode: ChatMode }) {
   const parts = content.split(/(```[\s\S]*?```)/g);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       {parts.map((part, i) => {
         if (part.startsWith('```')) {
           const firstNewline = part.indexOf('\n');
-          const lang = part.slice(3, firstNewline).trim() || 'code';
+          const lang = part.slice(3, firstNewline).trim().toLowerCase() || 'code';
           const code = part.slice(firstNewline + 1, part.lastIndexOf('```')).trim();
+          const lc   = LANG_COLORS[lang] ?? DEFAULT_LANG_COLOR;
+          const lines = code.split('\n');
           return (
-            <div key={i} className="rounded-xl overflow-hidden border border-white/10">
-              <div className="flex items-center justify-between px-3 py-1.5 bg-white/5">
-                <span className="text-[10px] font-mono text-white/40 uppercase tracking-wider">{lang}</span>
+            <div key={i} className="rounded-xl overflow-hidden border border-white/[0.12] shadow-lg shadow-black/30">
+              {/* VS Code-style header bar */}
+              <div className="flex items-center justify-between px-3 py-2 bg-[#0d0d14] border-b border-white/[0.08]">
+                <div className="flex items-center gap-2">
+                  {/* Traffic-light dots */}
+                  <div className="flex gap-1">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500/60" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/60" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-green-500/60" />
+                  </div>
+                  {/* Language badge */}
+                  <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider', lc.bg, lc.text)}>
+                    <span className={cn('inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle', lc.dot)} />
+                    {lang}
+                  </span>
+                  <span className="text-white/20 text-[10px]">{lines.length} line{lines.length !== 1 ? 's' : ''}</span>
+                </div>
                 <button
                   onClick={() => copyCode(code, i)}
-                  className="flex items-center gap-1 text-[10px] text-white/40 hover:text-white/70 transition-colors"
+                  className="flex items-center gap-1 text-[10px] text-white/35 hover:text-white/70 transition-colors px-2 py-1 rounded-lg hover:bg-white/[0.06]"
                 >
                   {copied === i ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
                   {copied === i ? 'Copied!' : 'Copy'}
                 </button>
               </div>
-              <pre className="bg-gray-950 text-green-200 text-[11px] font-mono p-4 overflow-x-auto whitespace-pre leading-relaxed max-h-72 overflow-y-auto">
-                <code>{code}</code>
-              </pre>
+              {/* Code body with line numbers */}
+              <div className="bg-[#0a0a10] overflow-x-auto max-h-80 overflow-y-auto">
+                <table className="w-full text-[11px] font-mono leading-relaxed">
+                  <tbody>
+                    {lines.map((line, li) => (
+                      <tr key={li} className="hover:bg-white/[0.02]">
+                        <td className="select-none text-right pr-4 pl-3 py-0 text-white/20 w-8 border-r border-white/[0.05] align-top pt-0.5">
+                          {li + 1}
+                        </td>
+                        <td className="pl-4 pr-3 py-0 text-green-100/85 whitespace-pre align-top pt-0.5">
+                          {line || ' '}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           );
         }
-        // Plain text: render inline bold (**text**) and backtick `code`
+        // Plain text: render inline bold (**text**), `code`, bullet lists, and numbered lists
         const lines = part.split('\n');
         return (
-          <div key={i} className="space-y-1.5">
+          <div key={i} className="space-y-1">
             {lines.map((line, j) => {
               if (!line.trim()) return <div key={j} className="h-1" />;
+              // Heading lines: ## or ###
+              if (line.startsWith('### ')) {
+                return <p key={j} className="text-white font-bold text-sm mt-2 mb-0.5">{line.slice(4)}</p>;
+              }
+              if (line.startsWith('## ')) {
+                return <p key={j} className="text-white font-bold text-base mt-3 mb-1">{line.slice(3)}</p>;
+              }
+              if (line.startsWith('# ')) {
+                return <p key={j} className="text-white font-bold text-lg mt-3 mb-1">{line.slice(2)}</p>;
+              }
+              // Bullet list
+              const isBullet = /^[-*•]\s/.test(line);
+              const isNumbered = /^\d+\.\s/.test(line);
+              const textContent = isBullet ? line.replace(/^[-*•]\s/, '') : isNumbered ? line.replace(/^\d+\.\s/, '') : line;
               // Inline formatting: **bold** and `code`
-              const chunks = line.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+              const chunks = textContent.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+              const rendered = chunks.map((chunk, k) => {
+                if (chunk.startsWith('**') && chunk.endsWith('**'))
+                  return <strong key={k} className="text-white font-semibold">{chunk.slice(2, -2)}</strong>;
+                if (chunk.startsWith('`') && chunk.endsWith('`'))
+                  return <code key={k} className={cn(
+                    'text-[11px] font-mono px-1.5 py-0.5 rounded',
+                    mode === 'code' ? 'bg-green-900/40 text-green-200' : 'bg-white/10 text-amber-200'
+                  )}>{chunk.slice(1, -1)}</code>;
+                return chunk;
+              });
+              if (isBullet) return (
+                <div key={j} className="flex items-start gap-2">
+                  <span className={cn('mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0',
+                    mode === 'search' ? 'bg-sky-400' : mode === 'code' ? 'bg-green-400' : 'bg-gold-400'
+                  )} />
+                  <p className={cn('text-sm leading-relaxed flex-1', mode === 'code' ? 'text-green-100/90' : 'text-white/85')}>{rendered}</p>
+                </div>
+              );
+              if (isNumbered) {
+                const num = line.match(/^(\d+)\./)?.[1];
+                return (
+                  <div key={j} className="flex items-start gap-2">
+                    <span className={cn('flex-shrink-0 w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center mt-0.5',
+                      mode === 'search' ? 'bg-sky-500/20 text-sky-300' : mode === 'code' ? 'bg-green-500/20 text-green-300' : 'bg-gold-500/15 text-gold-400'
+                    )}>{num}</span>
+                    <p className={cn('text-sm leading-relaxed flex-1', mode === 'code' ? 'text-green-100/90' : 'text-white/85')}>{rendered}</p>
+                  </div>
+                );
+              }
               return (
                 <p key={j} className={cn(
                   'text-sm leading-relaxed',
                   mode === 'code' ? 'text-green-100/90' : 'text-white/85',
-                )}>
-                  {chunks.map((chunk, k) => {
-                    if (chunk.startsWith('**') && chunk.endsWith('**'))
-                      return <strong key={k} className="text-white font-semibold">{chunk.slice(2, -2)}</strong>;
-                    if (chunk.startsWith('`') && chunk.endsWith('`'))
-                      return <code key={k} className="bg-white/10 text-green-300 text-[11px] font-mono px-1.5 py-0.5 rounded">{chunk.slice(1, -1)}</code>;
-                    return chunk;
-                  })}
-                </p>
+                )}>{rendered}</p>
               );
             })}
           </div>
