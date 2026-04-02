@@ -26,6 +26,8 @@ import type { UITemplate, UIConfig } from "../../types/studio";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { downloadCode, getExtensionForLanguage } from "./code-download-utils";
+import { downloadAsPDF, downloadAsMarkdown, DOCUMENT_TOOL_SLUGS } from "./pdf-utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Tool {
@@ -132,6 +134,8 @@ const CODE_SLUGS   = new Set(["code-helper"]);
 const VISION_SLUGS = new Set(["image-analyser","ask-my-photo"]);
 const WEB_SLUGS    = new Set(["web-search-ai"]);
 const JSON_SLUGS   = new Set(["quiz","mindmap","slide-deck"]);
+// Document tools that should offer PDF + Markdown download
+const DOC_EXPORT_SLUGS = new Set(["bizplan","business-plan","study-guide","research-brief","deep-research-brief","summary"]);
 
 function getOutputType(slug: string): { label: string; emoji: string; noun: string } {
   if (VIDEO_SLUGS.has(slug))  return { label: "Video MP4",  emoji: "🎬", noun: "video" };
@@ -866,12 +870,20 @@ const DEFAULT_LANG_COLOR = { bg: 'bg-white/8', text: 'text-white/40', dot: 'bg-w
 // ─── Markdown / code renderer for chat bubbles ──────────────────────────────
 function RichMessage({ content, mode }: { content: string; mode: ChatMode }) {
   const [copied, setCopied] = useState<number | null>(null);
+  const [downloaded, setDownloaded] = useState<number | null>(null);
 
   function copyCode(text: string, idx: number) {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(idx);
       setTimeout(() => setCopied(null), 1800);
     });
+  }
+
+  function handleDownloadCode(code: string, lang: string, idx: number) {
+    const ext = getExtensionForLanguage(lang);
+    downloadCode(code, lang, `code.${ext}`);
+    setDownloaded(idx);
+    setTimeout(() => setDownloaded(null), 2000);
   }
 
   // Split by fenced code blocks ```lang\n...code...\n```
@@ -886,6 +898,7 @@ function RichMessage({ content, mode }: { content: string; mode: ChatMode }) {
           const code = part.slice(firstNewline + 1, part.lastIndexOf('```')).trim();
           const lc   = LANG_COLORS[lang] ?? DEFAULT_LANG_COLOR;
           const lines = code.split('\n');
+          const ext  = getExtensionForLanguage(lang);
           return (
             <div key={i} className="rounded-xl overflow-hidden border border-white/[0.12] shadow-lg shadow-black/30">
               {/* VS Code-style header bar */}
@@ -904,13 +917,24 @@ function RichMessage({ content, mode }: { content: string; mode: ChatMode }) {
                   </span>
                   <span className="text-white/20 text-[10px]">{lines.length} line{lines.length !== 1 ? 's' : ''}</span>
                 </div>
-                <button
-                  onClick={() => copyCode(code, i)}
-                  className="flex items-center gap-1 text-[10px] text-white/35 hover:text-white/70 transition-colors px-2 py-1 rounded-lg hover:bg-white/[0.06]"
-                >
-                  {copied === i ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
-                  {copied === i ? 'Copied!' : 'Copy'}
-                </button>
+                {/* Action buttons: Copy + Download */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => copyCode(code, i)}
+                    className="flex items-center gap-1 text-[10px] text-white/35 hover:text-white/70 transition-colors px-2 py-1 rounded-lg hover:bg-white/[0.06]"
+                  >
+                    {copied === i ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
+                    {copied === i ? 'Copied!' : 'Copy'}
+                  </button>
+                  <button
+                    onClick={() => handleDownloadCode(code, lang, i)}
+                    className="flex items-center gap-1 text-[10px] text-white/35 hover:text-white/70 transition-colors px-2 py-1 rounded-lg hover:bg-white/[0.06]"
+                    title={`Download as .${ext}`}
+                  >
+                    {downloaded === i ? <Check size={10} className="text-green-400" /> : <Download size={10} />}
+                    {downloaded === i ? 'Saved!' : `.${ext}`}
+                  </button>
+                </div>
               </div>
               {/* Code body with line numbers */}
               <div className="bg-[#0a0a10] overflow-x-auto max-h-80 overflow-y-auto">
@@ -1041,15 +1065,33 @@ function ChatBubble({ msg }: { msg: Message }) {
               {meta.label}
               {msg.provider && <span>· {msg.provider}</span>}
             </p>
-            {/* Quick actions for long AI responses */}
+            {/* Quick actions for long AI responses — always visible for accessibility */}
             {msg.content.length > 200 && (
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   onClick={() => navigator.clipboard.writeText(msg.content).then(() => toast.success('Copied!'))}
-                  className="text-white/20 hover:text-white/50 transition-colors"
+                  className="text-white/20 hover:text-white/50 transition-colors p-1 rounded"
                   title="Copy response"
                 >
                   <Copy size={9} />
+                </button>
+                <button
+                  onClick={() => {
+                    const blob = new Blob([msg.content], { type: 'text/plain;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `nexus-${mode}-response.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    toast.success('Response downloaded!');
+                  }}
+                  className="text-white/20 hover:text-white/50 transition-colors p-1 rounded"
+                  title="Download response as text file"
+                >
+                  <Download size={9} />
                 </button>
               </div>
             )}
@@ -1519,20 +1561,31 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
               </div>
             </div>
           )}
-          {isCode && (
-            <div className="relative">
-              <div className="flex items-center justify-between bg-gray-900/80 px-3 py-1.5 rounded-t-xl border border-white/10 border-b-0">
-                <span className="text-xs text-white/40 font-mono">Code output</span>
-                <div className="flex gap-1.5">
-                  <CopyButton text={gen.output_text} />
-                  <DownloadTextButton text={gen.output_text} filename="code-output.txt" label="⬇ .txt" />
+          {isCode && (() => {
+            // Detect language from first code fence in output
+            const codeMatch = gen.output_text.match(/```(\w+)?\n/);
+            const detectedLang = codeMatch?.[1]?.toLowerCase() || 'code';
+            const ext = getExtensionForLanguage(detectedLang);
+            return (
+              <div className="relative">
+                <div className="flex items-center justify-between bg-gray-900/80 px-3 py-1.5 rounded-t-xl border border-white/10 border-b-0">
+                  <span className="text-xs text-white/40 font-mono">Code output · {detectedLang}</span>
+                  <div className="flex gap-1.5">
+                    <CopyButton text={gen.output_text} />
+                    <button
+                      onClick={() => downloadCode(gen.output_text ?? '', detectedLang, `code.${ext}`)}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                    >
+                      <Download size={11} /> .{ext}
+                    </button>
+                  </div>
                 </div>
+                <pre className="bg-gray-950 text-green-300 text-xs font-mono p-4 rounded-b-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed">
+                  <code>{gen.output_text}</code>
+                </pre>
               </div>
-              <pre className="bg-gray-950 text-green-300 text-xs font-mono p-4 rounded-b-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed">
-                <code>{gen.output_text}</code>
-              </pre>
-            </div>
-          )}
+            );
+          })()}
           {isInfographic && (
             <div className="space-y-2">
               {renderInfographic(gen.output_text)}
@@ -1566,29 +1619,57 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
               )}
             </div>
           )}
-          {!isWeb && !isVision && !isCode && !isJson && !isInfographic && (
-            <div className="space-y-2">
-              <div className="bg-white/5 rounded-xl p-3">
-                <RichMessage content={gen.output_text} mode="general" />
+          {!isWeb && !isVision && !isCode && !isJson && !isInfographic && (() => {
+            const isDocExport = DOC_EXPORT_SLUGS.has(gen.tool_slug);
+            // Extract display prompt for PDF header
+            let displayPrompt = gen.prompt || '';
+            try {
+              const env = JSON.parse(gen.prompt || '{}');
+              if (env?.prompt) displayPrompt = env.prompt;
+            } catch { /* plain text */ }
+            return (
+              <div className="space-y-2">
+                <div className="bg-white/5 rounded-xl p-3">
+                  <RichMessage content={gen.output_text} mode="general" />
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <CopyButton text={gen.output_text} label="📋 Copy" />
+                  {isDocExport ? (
+                    <>
+                      {/* PDF download — opens print dialog */}
+                      <button
+                        onClick={() => downloadAsPDF(gen.output_text ?? '', gen.tool_slug, gen.tool_name, displayPrompt)}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 hover:text-orange-200 border border-orange-500/20 transition-all font-semibold"
+                      >
+                        <Download size={11} /> Save as PDF
+                      </button>
+                      {/* Markdown download */}
+                      <button
+                        onClick={() => downloadAsMarkdown(gen.output_text ?? '', gen.tool_slug, gen.tool_name, displayPrompt)}
+                        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all"
+                      >
+                        <Download size={11} /> .md
+                      </button>
+                    </>
+                  ) : (
+                    gen.output_text.length > 200 && (
+                      <DownloadTextButton
+                        text={gen.output_text}
+                        filename={`${gen.tool_slug || 'nexus'}-output.txt`}
+                        label="⬇ Download .txt"
+                      />
+                    )
+                  )}
+                  {onRegenerate && (
+                    <button onClick={() => onRegenerate(gen)}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
+                      <RotateCcw size={11} /> Regenerate
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="flex gap-2 flex-wrap">
-                <CopyButton text={gen.output_text} label="📋 Copy Text" />
-                {gen.output_text.length > 200 && (
-                  <DownloadTextButton
-                    text={gen.output_text}
-                    filename={`${gen.tool_slug || 'nexus'}-output.txt`}
-                    label="⬇ Download .txt"
-                  />
-                )}
-                {onRegenerate && (
-                  <button onClick={() => onRegenerate(gen)}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
-                    <RotateCcw size={11} /> Regenerate
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       )}
 
