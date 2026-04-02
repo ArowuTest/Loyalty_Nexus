@@ -116,6 +116,10 @@ var slugCategory = map[string]studioToolCat{
 	"background-remover":   catImage,  // alias for bg-remover
 	"animate-my-photo":     catVideo,  // alias for animate-photo
 	"business-plan-summary": catText,  // alias for bizplan
+	// ── Free chat tools ──────────────────────────────────────────────────────
+	"ask-nexus":  catText, // free conversational AI
+	"nexus-chat": catText, // free Gemini Flash chat
+	"voice-to-plan": catText, // voice-to-business-plan
 }
 
 // ─── Provider result ──────────────────────────────────────────────────────────
@@ -338,6 +342,10 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 		slug = "podcast"
 	case "business-plan-summary":
 		slug = "bizplan"
+	case "ask-nexus", "nexus-chat":
+		slug = "ask-nexus" // both use the same free conversational AI path
+	case "voice-to-plan":
+		slug = "voice-to-plan"
 	}
 
 	// code-helper: primary via Pollinations Qwen3-Coder, fallback to Gemini Flash
@@ -594,14 +602,15 @@ Why now, why this team, and what's the ask.
 
 	Use the appropriate currency for the market described (default to Nigerian Naira ₦ if the context is Nigerian). Be specific, realistic, and actionable.`, input)
 
+	case "ask-nexus":
+		return nexusSys + " You are a helpful, knowledgeable conversational AI. Respond naturally and thoroughly.",
+			input
+	case "voice-to-plan":
+		return nexusSys + " You are an expert business consultant who transforms spoken ideas into structured business plans.",
+			fmt.Sprintf(`Transform this spoken idea or voice note into a structured, actionable business plan:\n\n%s\n\nProvide:\n## Business Concept\nClear one-paragraph description.\n## Target Market\nWho are the customers and what problem does this solve?\n## Revenue Model\nHow will this make money?\n## Key Activities\n3-5 core activities needed to launch.\n## Resources Needed\nCapital, team, technology, partnerships.\n## Next Steps\n5 immediate actions to take this week.`, input)
 	default:
 		return nexusSys,
-			fmt.Sprintf(`Generate comprehensive, well-structured, genuinely useful content about: %s
-
-Provide:
-- A clear, direct answer or output
-- Supporting details, examples, and context
-		- Practical takeaways the user can act on immediately`, input)
+			fmt.Sprintf(`Generate comprehensive, well-structured, genuinely useful content about: %s\n\nProvide:\n- A clear, direct answer or output\n- Supporting details, examples, and context\n- Practical takeaways the user can act on immediately`, input)
 	}
 }
 
