@@ -595,11 +595,80 @@ Provide:
 	}
 }
 
+// ─── Prompt Enhancement ──────────────────────────────────────────────────────
+// enhanceImagePrompt takes a user's simple image description and expands it into
+// a rich, professional-quality prompt using Midjourney/DALL-E 3 best practices.
+// Falls back to the original prompt if Gemini is unavailable.
+func (o *AIStudioOrchestrator) enhanceImagePrompt(ctx context.Context, slug, userPrompt string) string {
+	// Skip enhancement for very long prompts (user likely already wrote a detailed prompt)
+	if len(userPrompt) > 200 {
+		return userPrompt
+	}
+	// Skip for bg-remover and photo-editor (they use image URLs, not text prompts)
+	if slug == "bg-remover" || slug == "photo-editor" {
+		return userPrompt
+	}
+
+	// Style guidance per slug
+	styleGuide := "photorealistic, ultra-detailed, professional photography"
+	switch slug {
+	case "ai-photo-dream":
+		styleGuide = "dreamlike, surreal, painterly, ethereal atmosphere, soft lighting"
+	case "ai-photo-pro":
+		styleGuide = "professional photography, studio quality, sharp focus, perfect lighting, commercial grade"
+	case "ai-photo-max":
+		styleGuide = "ultra-high resolution, photorealistic, cinematic, award-winning photography, 8K"
+	}
+
+	sys := "You are an expert AI image prompt engineer specialising in Midjourney, DALL-E 3, and Stable Diffusion. " +
+		"Your job is to take a user's simple image description and expand it into a rich, detailed, professional-quality prompt. " +
+		"Add: specific lighting (golden hour, studio, cinematic, rim light), composition (rule of thirds, close-up, wide angle, aerial), " +
+		"quality modifiers (ultra-detailed, 8K, sharp focus, photorealistic), mood/atmosphere, and relevant style tags. " +
+		"Keep the core subject and intent exactly as the user described. " +
+		"Return ONLY the enhanced prompt — no explanation, no quotes, no preamble. Maximum 150 words."
+
+	userMsg := fmt.Sprintf("Style target: %s\n\nUser's prompt: %s\n\nEnhanced prompt:", styleGuide, userPrompt)
+
+	enhanced, err := o.callGeminiFlash(ctx, sys, userMsg)
+	if err != nil || len(enhanced) < 10 {
+		log.Printf("[AIStudio] enhanceImagePrompt failed: %v — using original", err)
+		return userPrompt
+	}
+	return enhanced
+}
+
+// enhanceVideoPrompt takes a user's simple video description and expands it into
+// a rich, cinematic prompt using Runway/Pika/Veo best practices.
+func (o *AIStudioOrchestrator) enhanceVideoPrompt(ctx context.Context, userPrompt string) string {
+	// Skip enhancement for very long prompts
+	if len(userPrompt) > 200 {
+		return userPrompt
+	}
+
+	sys := "You are an expert AI video prompt engineer specialising in Runway, Pika, Veo, and Wan. " +
+		"Your job is to take a user's simple video description and expand it into a rich, cinematic prompt. " +
+		"Add: camera movement (slow zoom, pan left, dolly forward, aerial tracking shot), " +
+		"cinematic quality (cinematic lighting, film grain, shallow depth of field, 4K), " +
+		"motion description (gentle breeze, flowing, dynamic, slow motion), " +
+		"atmosphere (golden hour, dramatic clouds, neon lights, misty morning). " +
+		"Keep the core subject and intent exactly as the user described. " +
+		"Return ONLY the enhanced prompt — no explanation, no quotes, no preamble. Maximum 100 words."
+
+	userMsg := fmt.Sprintf("User's video prompt: %s\n\nCinematic enhanced prompt:", userPrompt)
+
+	enhanced, err := o.callGeminiFlash(ctx, sys, userMsg)
+	if err != nil || len(enhanced) < 10 {
+		log.Printf("[AIStudio] enhanceVideoPrompt failed: %v — using original", err)
+		return userPrompt
+	}
+	return enhanced
+}
+
 // ─── Image dispatch ────────────────────────────────────────────────────────────
 // Handles: ai-photo, bg-remover, ai-photo-pro, ai-photo-max, ai-photo-dream, photo-editor
 
 func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
-	prompt := env.Prompt
+	prompt := o.enhanceImagePrompt(ctx, slug, env.Prompt)
 	// Remap alias slugs to canonical ones
 	switch slug {
 	case "my-ai-photo":
@@ -778,7 +847,7 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 	// Fallback: ltx-2 (LTX-2)   — FREE, 15 pollen input, NEW model
 	if slug == "video-cinematic" {
 		imgURL := env.ImageURL
-		motionPrompt := env.Prompt
+		motionPrompt := o.enhanceVideoPrompt(ctx, env.Prompt)
 		if imgURL == "" {
 			return nil, fmt.Errorf("video-cinematic: image_url is required")
 		}
@@ -800,7 +869,7 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 	// video-veo: Google Veo 3.1 text-to-video (PAID, highest quality, 0.150/sec)
 	// Fallback: wan-fast FREE (not seedance — also paid)
 	if slug == "video-veo" {
-		prompt := env.Prompt
+		prompt := o.enhanceVideoPrompt(ctx, env.Prompt)
 		vidURL, err := o.callPollinationsVeo(ctx, prompt)
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo", CostMicros: 400000}, nil
@@ -867,14 +936,18 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 
 	// Tier 2: Pollinations wan-fast / Wan 2.2 — FREE, 91.4% success
 	// NOTE: seedance is PAID (1.8 pollen/M) — never use as a free fallback
-	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, "animate this image with subtle cinematic motion", 180); err == nil {
+	motionDesc := o.enhanceVideoPrompt(ctx, env.Prompt)
+	if motionDesc == "" {
+		motionDesc = "animate this image with subtle cinematic motion, smooth camera movement, natural lighting"
+	}
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, motionDesc, 180); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 	} else {
 		log.Printf("[AIStudio] Pollinations wan-fast failed: %v — trying p-video", err)
 	}
 
 	// Tier 3: Pollinations p-video (Pruna) — FREE, 100% success (ltx-2 was OFF, replaced)
-	if videoURL, err := o.callPollinationsVideoModel(ctx, "p-video", imageURL, "animate this image with subtle cinematic motion", 180); err == nil {
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "p-video", imageURL, motionDesc, 180); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 	} else {
 		log.Printf("[AIStudio] Pollinations p-video failed: %v", err)
