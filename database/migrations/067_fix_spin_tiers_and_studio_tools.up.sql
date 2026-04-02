@@ -164,7 +164,7 @@ VALUES
 -- ── MUSIC TOOLS ──────────────────────────────────────────────────────────────
 (gen_random_uuid(), 'Background Music',   'bg-music',           'Generate background music for videos and content.',                    'Create', 75,  'pollinations', 'musicgen',          true, false, '🎵', 50, 20, 'MusicComposer', NOW(), NOW()),
 (gen_random_uuid(), 'Jingle Maker',       'jingle',             'Create catchy jingles for your brand or product.',                     'Create', 100, 'pollinations', 'musicgen',          true, false, '🎶', 51, 25, 'MusicComposer', NOW(), NOW()),
-(gen_random_uuid(), 'Song Creator',       'song-creator',       'Generate full songs with lyrics and vocals.',                          'Create', 200, 'pollinations', 'elevenmusicgen',    true, false, '🎸', 52, 50, 'MusicComposer', NOW(), NOW()),
+(gen_random_uuid(), 'Song/Music Composer',  'song-creator',       'Generate full songs with lyrics and vocals.',                          'Create', 200, 'pollinations', 'elevenmusicgen',    true, false, '🎸', 52, 50, 'MusicComposer', NOW(), NOW()),
 (gen_random_uuid(), 'Instrumental',       'instrumental',       'Generate instrumental music in any genre.',                            'Create', 150, 'pollinations', 'elevenmusicgen',    true, false, '🎹', 53, 35, 'MusicComposer', NOW(), NOW()),
 -- ── VIDEO TOOLS ──────────────────────────────────────────────────────────────
 (gen_random_uuid(), 'Animate Photo',      'animate-photo',      'Bring still photos to life with AI animation.',                        'Create', 100, 'pollinations', 'wan-fast',          true, false, '🎬', 60, 25, 'VideoAnimator', NOW(), NOW()),

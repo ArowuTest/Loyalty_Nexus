@@ -143,7 +143,7 @@ VALUES
  '🎹', 29, true, NOW(), NOW()),
 
 (gen_random_uuid(),
- 'Song Creator',       'song-creator',
+ 'Song/Music Composer',  'song-creator',
  'Generate a full AI song with vocals — any genre',
  'Create', 30, 'pollinations', 'elevenmusic',
  '🎵', 28, true, NOW(), NOW()),
