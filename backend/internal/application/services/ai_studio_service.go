@@ -1156,7 +1156,37 @@ func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, audioURL 
 // ─── Music dispatch ───────────────────────────────────────────────────────────
 
 func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
+	// ── Enrich prompt with all music-specific envelope fields ──────────────────
+	// This matches Suno/Udio behaviour: key, structure, instruments, negative
+	// prompt, and user lyrics are all forwarded to the AI provider.
 	prompt := env.Prompt
+
+	// Musical key (e.g. "C major", "F# minor")
+	if env.Extra != nil {
+		if key, ok := env.Extra["key"].(string); ok && key != "" && key != "Any" {
+			prompt += fmt.Sprintf(" Key of %s.", key)
+		}
+		// Song structure preset (e.g. "Verse-Chorus-Verse-Chorus-Bridge-Chorus")
+		if structure, ok := env.Extra["structure"].(string); ok && structure != "" && structure != "Auto" {
+			prompt += fmt.Sprintf(" Song structure: %s.", structure)
+		}
+		// Instrument focus (e.g. "guitar, piano, light percussion")
+		if instruments, ok := env.Extra["instruments"].(string); ok && instruments != "" {
+			prompt += fmt.Sprintf(" Featured instruments: %s.", instruments)
+		}
+	}
+
+	// Negative prompt — what to avoid (e.g. "no drums", "no distortion")
+	if env.NegativePrompt != "" {
+		prompt += fmt.Sprintf(" Avoid: %s.", env.NegativePrompt)
+	}
+
+	// User-supplied lyrics — appended last so the AI treats them as lyric content.
+	// Supports Suno-style section tags: [Verse], [Chorus], [Bridge], [Outro].
+	if env.Lyrics != "" {
+		prompt += fmt.Sprintf("\n\nLyrics:\n%s", env.Lyrics)
+	}
+
 	switch slug {
 	case "song-creator":
 		// Full song with vocals.
