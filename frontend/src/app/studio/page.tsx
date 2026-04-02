@@ -14,7 +14,7 @@ import {
   Brain, Video, X, Info, Play, LayoutGrid, MessageSquare, History,
   Code2, Copy, Check, Download, RotateCcw, Zap, CreditCard,
   TrendingUp, Timer, ChevronDown, Lock, Activity,
-  Paperclip, AlertCircle,
+  Paperclip, AlertCircle, Search, Plus,
 } from "lucide-react";
 import {
   MusicComposer, ImageCreator, ImageEditor,
@@ -2220,120 +2220,242 @@ function StudioPageInner() {
         }}
       />
 
-      <div className="max-w-5xl mx-auto px-4 md:px-6 py-5 space-y-4 pb-24">
+      {/* ── Full-viewport Studio shell ── */}
+      <div className="flex h-[calc(100vh-57px)] overflow-hidden">
 
-        {/* ── Header ── */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-gold-500/80 to-amber-600 flex items-center justify-center shadow-lg shadow-black/40">
-              <Brain size={20} className="text-white" />
+        {/* ═══════════════════════════════════════════════════════════════════
+            LEFT SIDEBAR — ChatGPT/Claude style
+            Hidden on mobile (shown as bottom tab bar instead)
+        ════════════════════════════════════════════════════════════════════ */}
+        <aside className="hidden md:flex flex-col w-[260px] flex-shrink-0 border-r border-white/[0.07] overflow-y-auto"
+          style={{ background: "rgba(10,11,18,0.97)" }}>
+
+          {/* Studio brand */}
+          <div className="px-4 pt-5 pb-3 flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-gold-500/80 to-amber-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-black/40">
+              <Brain size={16} className="text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold font-display text-white leading-tight">Nexus AI Studio</h1>
-              <p className="text-white/40 text-xs">{canonicalTools.length || tools.length} AI-powered tools</p>
+              <p className="text-white font-bold text-sm leading-tight">Nexus AI Studio</p>
+              <p className="text-white/30 text-[10px]">{canonicalTools.length} tools available</p>
             </div>
           </div>
-        </div>
 
-        {/* ── Wallet Bar ── */}
-        <WalletBar userPoints={userPoints} />
+          {/* Wallet + session bars */}
+          <div className="px-3 pb-3 space-y-2">
+            <WalletBar userPoints={userPoints} />
+            <SessionBar userPoints={userPoints} />
+          </div>
 
-        {/* ── Session Utilisation Bar ── */}
-        <SessionBar userPoints={userPoints} />
-
-        {/* ── How It Works banner ── */}
-        <AnimatePresence>
-          {!introDismissed && (
-            <HowItWorksBanner onDismiss={handleDismissIntro} />
-          )}
-        </AnimatePresence>
-
-        {/* ── Tab bar ── */}
-        <div className="glass border border-white/[0.08] p-1 flex gap-1">
-          {([
-            { key: "chat",    label: "Chat",    icon: <MessageSquare size={14} />, badge: undefined as number | undefined },
-            { key: "tools",   label: "Tools",   icon: <LayoutGrid size={14} />,   badge: (canonicalTools.length || tools.length) as number | undefined },
-            { key: "gallery", label: "Gallery", icon: <History size={14} />,      badge: (pendingCount || undefined) as number | undefined },
-          ]).map(({ key, label, icon, badge }) => (
+          {/* New Chat button */}
+          <div className="px-3 pb-3">
             <button
-              key={key}
-              onClick={() => setActiveTab(key as "chat" | "tools" | "gallery")}
-              className={cn(
-                "flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5",
-                activeTab === key
-                  ? "bg-gradient-to-r from-gold-500/80 to-amber-600 text-white shadow-gold-glow-sm"
-                  : "text-white/40 hover:text-white/70 hover:bg-white/5"
-              )}
+              onClick={() => { setActiveTab("chat"); handleClearChat(); }}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-white/10 text-white/60 hover:text-white hover:border-white/20 hover:bg-white/[0.04] transition-all text-sm font-medium"
             >
-              {icon}{label}
-              {badge !== undefined && (
-                <span className={cn(
-                  "ml-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center",
-                  activeTab === key ? "bg-white/20 text-white" : "bg-white/10 text-white/50"
-                )}>
-                  {badge}
-                </span>
-              )}
+              <Plus size={15} /> New chat
             </button>
-          ))}
-        </div>
+          </div>
 
-        {/* ── Tab content ── */}
-        <AnimatePresence mode="wait">
+          {/* Navigation */}
+          <nav className="px-2 space-y-0.5 flex-1">
+            {([
+              { key: "chat",    label: "Chat",    icon: <MessageSquare size={15} />, badge: undefined as number | undefined },
+              { key: "tools",   label: "AI Tools", icon: <LayoutGrid size={15} />,   badge: canonicalTools.length as number | undefined },
+              { key: "gallery", label: "Gallery",  icon: <History size={15} />,      badge: (pendingCount || undefined) as number | undefined },
+            ]).map(({ key, label, icon, badge }) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key as "chat" | "tools" | "gallery")}
+                className={cn(
+                  "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all text-left",
+                  activeTab === key
+                    ? "bg-white/[0.08] text-white border border-white/[0.10]"
+                    : "text-white/40 hover:text-white/70 hover:bg-white/[0.04]"
+                )}
+              >
+                <span className={cn(activeTab === key ? "text-gold-400" : "")}>{icon}</span>
+                <span className="flex-1">{label}</span>
+                {badge !== undefined && (
+                  <span className={cn(
+                    "text-[9px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center",
+                    activeTab === key ? "bg-gold-500/20 text-gold-300" : "bg-white/8 text-white/35"
+                  )}>
+                    {badge}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
 
-          {/* ── CHAT ── */}
+          {/* Chat mode quick-switch in sidebar */}
           {activeTab === "chat" && (
-            <motion.div key="chat" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-
-              {/* ── Chat mode switcher ── */}
-              <div className="flex gap-1.5 mb-3">
+            <div className="px-3 pt-3 pb-2">
+              <p className="text-white/20 text-[9px] uppercase tracking-widest px-1 mb-1.5">Mode</p>
+              <div className="space-y-0.5">
                 {([
-                  { id: 'general', label: 'General',    icon: <Brain size={12} />,  color: 'from-gold-500/80 to-amber-600',    badge: 'Free' },
-                  { id: 'search',  label: 'Web Search', icon: <Globe size={12} />,  color: 'from-sky-600 to-blue-600',        badge: 'Free' },
-                  { id: 'code',    label: 'Code',       icon: <Code2 size={12} />,  color: 'from-green-600 to-emerald-600',   badge: 'Free' },
+                  { id: 'general', label: 'General AI',  icon: <Brain size={13} />,  color: 'text-gold-400',  activeBg: 'bg-gold-500/10 border-gold-500/20' },
+                  { id: 'search',  label: 'Web Search',  icon: <Globe size={13} />,  color: 'text-sky-400',   activeBg: 'bg-sky-500/10 border-sky-500/20' },
+                  { id: 'code',    label: 'Code Helper', icon: <Code2 size={13} />,  color: 'text-green-400', activeBg: 'bg-green-500/10 border-green-500/20' },
                 ] as const).map((m) => (
                   <button
                     key={m.id}
                     onClick={() => setChatMode(m.id)}
                     className={cn(
-                      'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold transition-all',
+                      'w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-all border',
                       chatMode === m.id
-                        ? `bg-gradient-to-r ${m.color} text-white shadow-md`
-                        : 'bg-white/[0.04] text-white/40 hover:bg-white/[0.08] hover:text-white/70 border border-white/[0.06]',
+                        ? cn(m.activeBg, m.color)
+                        : 'border-transparent text-white/35 hover:text-white/60 hover:bg-white/[0.03]',
                     )}
                   >
+                    <span className={chatMode === m.id ? m.color : ''}>{m.icon}</span>
+                    {m.label}
+                    {chatMode === m.id && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-current opacity-70" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Bottom: How It Works */}
+          <div className="px-3 pb-4 mt-auto pt-3 border-t border-white/[0.05]">
+            <AnimatePresence>
+              {!introDismissed && (
+                <HowItWorksBanner onDismiss={handleDismissIntro} />
+              )}
+            </AnimatePresence>
+            <p className="text-white/15 text-[10px] text-center mt-2">Points deducted per generation</p>
+          </div>
+        </aside>
+
+        {/* ═══════════════════════════════════════════════════════════════════
+            MAIN CONTENT AREA — full height, scrollable
+        ════════════════════════════════════════════════════════════════════ */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+
+          {/* Mobile-only top bar */}
+          <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-white/[0.07]"
+            style={{ background: "rgba(10,11,18,0.97)" }}>
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-gold-500/80 to-amber-600 flex items-center justify-center">
+                <Brain size={14} className="text-white" />
+              </div>
+              <span className="text-white font-bold text-sm">Nexus AI Studio</span>
+            </div>
+            <WalletBar userPoints={userPoints} />
+          </div>
+
+          {/* Mobile tab bar */}
+          <div className="md:hidden flex border-b border-white/[0.07] px-2 pt-2 gap-1"
+            style={{ background: "rgba(10,11,18,0.97)" }}>
+            {([
+              { key: "chat",    label: "Chat",    icon: <MessageSquare size={13} /> },
+              { key: "tools",   label: "Tools",   icon: <LayoutGrid size={13} /> },
+              { key: "gallery", label: "Gallery", icon: <History size={13} /> },
+            ]).map(({ key, label, icon }) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key as "chat" | "tools" | "gallery")}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold transition-all border-b-2 -mb-px",
+                  activeTab === key
+                    ? "border-gold-500 text-gold-400"
+                    : "border-transparent text-white/40 hover:text-white/70"
+                )}
+              >
+                {icon} {label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Tab content ── */}
+          <div className="flex-1 overflow-hidden">
+          <AnimatePresence mode="wait">
+
+          {/* ── CHAT ── */}
+          {activeTab === "chat" && (
+            <motion.div key="chat" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="flex flex-col h-full">
+
+              {/* ── Chat header bar (desktop) ── */}
+              <div className={cn(
+                'hidden md:flex items-center justify-between px-6 py-3 border-b flex-shrink-0',
+                chatMode === 'code'   ? 'border-green-500/10 bg-gray-950/30' :
+                chatMode === 'search' ? 'border-sky-500/10 bg-sky-950/10' :
+                                        'border-white/[0.06]'
+              )}>
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    'w-8 h-8 rounded-xl flex items-center justify-center',
+                    chatMode === 'code'   ? 'bg-green-600/20' :
+                    chatMode === 'search' ? 'bg-sky-600/20' :
+                                           'bg-gradient-to-br from-gold-500/20 to-amber-600/10'
+                  )}>
+                    {chatMode === 'code'   ? <Code2 size={15} className="text-green-300" /> :
+                     chatMode === 'search' ? <Globe size={15} className="text-sky-300" /> :
+                                            <Brain size={15} className="text-gold-400" />}
+                  </div>
+                  <div>
+                    <p className="text-white font-semibold text-sm">
+                      {chatMode === 'general' ? 'Nexus AI — General Assistant' :
+                       chatMode === 'search'  ? 'Nexus AI — Web Search' :
+                                               'Nexus AI — Code Helper'}
+                    </p>
+                    <p className="text-white/30 text-[10px]">
+                      {chatMode === 'general' ? 'Business, ideas, content, advice · Free' :
+                       chatMode === 'search'  ? 'Live internet · Current news, prices, real-time data · Free' :
+                                               'Qwen Coder · Write, explain, debug any language · Free'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {chatUsage && (
+                    <span className="text-white/25 text-[10px] flex items-center gap-1 bg-white/[0.04] px-2.5 py-1 rounded-full border border-white/[0.06]">
+                      <MessageSquare size={8} />
+                      {chatUsage.used}/{chatUsage.limit} msgs
+                    </span>
+                  )}
+                  <button
+                    onClick={handleClearChat}
+                    className="text-white/25 hover:text-white/60 transition-colors p-1.5 rounded-lg hover:bg-white/[0.05]"
+                    title="New chat"
+                  >
+                    <RotateCcw size={13} />
+                  </button>
+                  <button
+                    onClick={handleSummariseChat}
+                    disabled={messages.length < 4}
+                    className="text-white/25 hover:text-white/60 transition-colors p-1.5 rounded-lg hover:bg-white/[0.05] disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Summarise chat"
+                  >
+                    <Sparkles size={13} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Mobile mode switcher */}
+              <div className="md:hidden flex gap-1 px-3 py-2 border-b border-white/[0.06]">
+                {([
+                  { id: 'general', label: 'General', icon: <Brain size={11} />,  color: 'from-gold-500/80 to-amber-600' },
+                  { id: 'search',  label: 'Search',  icon: <Globe size={11} />,  color: 'from-sky-600 to-blue-600' },
+                  { id: 'code',    label: 'Code',    icon: <Code2 size={11} />,  color: 'from-green-600 to-emerald-600' },
+                ] as const).map((m) => (
+                  <button key={m.id} onClick={() => setChatMode(m.id)}
+                    className={cn(
+                      'flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-semibold transition-all',
+                      chatMode === m.id ? `bg-gradient-to-r ${m.color} text-white` : 'text-white/40 hover:text-white/70',
+                    )}>
                     {m.icon} {m.label}
-                    {chatMode === m.id && (
-                      <span className="text-[9px] bg-white/20 px-1.5 py-0.5 rounded-full">{m.badge}</span>
-                    )}
                   </button>
                 ))}
               </div>
 
-              {/* Mode description strip */}
-              <div className="flex items-center justify-between mb-2 px-1">
-                <p className="text-white/30 text-[10px]">
-                  {chatMode === 'general' && '🤖 General assistant — business, ideas, content, advice'}
-                  {chatMode === 'search'  && '🔍 Live internet — current news, prices, real-time data'}
-                  {chatMode === 'code'    && '💻 Qwen Coder — write, explain, debug any programming language'}
-                </p>
-                {chatUsage && (
-                  <span className="text-white/25 text-[10px] flex items-center gap-1">
-                    <MessageSquare size={8} />
-                    {chatUsage.used}/{chatUsage.limit}
-                  </span>
-                )}
-              </div>
-
-              {/* Messages window */}
+              {/* Messages window — flex-1 fills remaining height */}
               <div className={cn(
-                'glass overflow-y-auto p-4 space-y-4 scroll-smooth border',
-                'h-[calc(100vh-520px)] min-h-[400px] max-h-[700px]',
-                chatMode === 'code'
-                  ? 'bg-gray-950/70 border-green-500/10'
-                  : chatMode === 'search'
-                  ? 'bg-sky-950/25 border-sky-500/10'
-                  : 'border-white/[0.08]',
+                'flex-1 overflow-y-auto px-4 md:px-8 py-4 space-y-4 scroll-smooth',
+                chatMode === 'code'   ? 'bg-gray-950/40' :
+                chatMode === 'search' ? 'bg-sky-950/10' :
+                                        '',
               )}>
                 {/* UX-03: History loading skeleton */}
                 {!historyLoaded && (
@@ -2436,143 +2558,154 @@ function StudioPageInner() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Attachment preview pill (FEAT-02) */}
-              {chatAttachFile && (
+              {/* ── Sticky bottom input bar — Claude/ChatGPT style ── */}
+              <div className={cn(
+                'flex-shrink-0 border-t px-4 md:px-8 py-4',
+                chatMode === 'code'   ? 'border-green-500/10 bg-gray-950/30' :
+                chatMode === 'search' ? 'border-sky-500/10 bg-sky-950/10' :
+                                        'border-white/[0.06]'
+              )}>
+                {/* Attachment preview pill */}
+                {chatAttachFile && (
+                  <div className={cn(
+                    'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs mb-3',
+                    chatAttachLoading ? 'border-nexus-500/40 bg-nexus-900/30 text-nexus-300'
+                    : chatAttachError  ? 'border-red-500/40 bg-red-900/20 text-red-300'
+                    :                    'border-green-500/40 bg-green-900/20 text-green-300',
+                  )}>
+                    {chatAttachLoading
+                      ? <Loader2 size={12} className="animate-spin flex-shrink-0" />
+                      : chatAttachError
+                        ? <AlertCircle size={12} className="flex-shrink-0" />
+                        : chatAttachType === 'image'
+                          ? <ImageIcon size={12} className="flex-shrink-0" />
+                          : <FileText size={12} className="flex-shrink-0" />}
+                    <span className="truncate flex-1">
+                      {chatAttachLoading ? 'Uploading…' : chatAttachError ? chatAttachError : chatAttachFile.name}
+                    </span>
+                    {!chatAttachLoading && (
+                      <button onClick={removeChatAttach} className="flex-shrink-0 hover:text-white transition-colors">
+                        <X size={11} />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Main input row */}
                 <div className={cn(
-                  'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs mt-2',
-                  chatAttachLoading ? 'border-nexus-500/40 bg-nexus-900/30 text-nexus-300'
-                  : chatAttachError  ? 'border-red-500/40 bg-red-900/20 text-red-300'
-                  :                    'border-green-500/40 bg-green-900/20 text-green-300',
+                  'flex items-end gap-2 rounded-2xl border px-3 py-2',
+                  chatMode === 'code'   ? 'border-green-500/20 bg-gray-950/60' :
+                  chatMode === 'search' ? 'border-sky-500/20 bg-sky-950/30' :
+                                          'border-white/[0.12] bg-white/[0.03]'
                 )}>
-                  {chatAttachLoading
-                    ? <Loader2 size={12} className="animate-spin flex-shrink-0" />
-                    : chatAttachError
-                      ? <AlertCircle size={12} className="flex-shrink-0" />
-                      : chatAttachType === 'image'
-                        ? <ImageIcon size={12} className="flex-shrink-0" />
-                        : <FileText size={12} className="flex-shrink-0" />}
-                  <span className="truncate flex-1">
-                    {chatAttachLoading ? 'Uploading…' : chatAttachError ? chatAttachError : chatAttachFile.name}
-                  </span>
-                  {!chatAttachLoading && (
-                    <button onClick={removeChatAttach} className="flex-shrink-0 hover:text-white transition-colors">
-                      <X size={11} />
+                  {/* Attachment + mic buttons */}
+                  <div className="flex gap-1 flex-shrink-0 pb-0.5">
+                    <button
+                      type="button"
+                      onClick={() => chatFileInputRef.current?.click()}
+                      disabled={sending || chatAttachLoading}
+                      title="Attach image or document"
+                      className={cn(
+                        'p-2 rounded-xl transition-all',
+                        chatAttachURL && !chatAttachError
+                          ? 'text-green-400 bg-green-900/20'
+                          : 'text-white/30 hover:text-white/60 hover:bg-white/[0.05]',
+                        (sending || chatAttachLoading) && 'opacity-40 cursor-not-allowed',
+                      )}
+                    >
+                      {chatAttachLoading ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
                     </button>
-                  )}
+                    <button
+                      type="button"
+                      onClick={handleMicToggle}
+                      disabled={sending || chatAttachLoading || micTranscribing}
+                      title={micRecording ? 'Stop recording' : 'Voice input'}
+                      className={cn(
+                        'p-2 rounded-xl transition-all',
+                        micRecording ? 'text-red-400 bg-red-900/20 animate-pulse' :
+                        micTranscribing ? 'text-amber-400 bg-amber-900/20' :
+                        'text-white/30 hover:text-white/60 hover:bg-white/[0.05]',
+                        (sending || chatAttachLoading || micTranscribing) && !micRecording && 'opacity-40 cursor-not-allowed',
+                      )}
+                    >
+                      {micTranscribing ? <Loader2 size={16} className="animate-spin" /> : <Mic size={16} />}
+                    </button>
+                  </div>
+
+                  <input
+                    ref={chatFileInputRef}
+                    type="file"
+                    accept="image/*,.pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                    onChange={handleChatAttachSelect}
+                    className="hidden"
+                  />
+
+                  {/* Text input */}
+                  <input
+                    ref={inputRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChat()}
+                    placeholder={
+                      chatAttachURL ? 'Ask about the attached file… (or press Enter)' :
+                      chatMode === 'search' ? 'Search the web — news, prices, facts…' :
+                      chatMode === 'code'   ? 'Describe what you need or paste code…' :
+                                             'Message Nexus AI…'
+                    }
+                    className={cn(
+                      'flex-1 bg-transparent text-white placeholder:text-white/25 focus:outline-none text-sm py-1.5',
+                      chatMode === 'code' ? 'font-mono' : '',
+                    )}
+                    disabled={sending}
+                  />
+
+                  {/* Send button */}
+                  <button
+                    onClick={handleChat}
+                    disabled={sending || (!input.trim() && !chatAttachURL) || chatAttachLoading}
+                    className={cn(
+                      'flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all',
+                      (input.trim() || chatAttachURL) && !sending && !chatAttachLoading
+                        ? chatMode === 'code'   ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:opacity-90 active:scale-95'
+                        : chatMode === 'search' ? 'bg-gradient-to-r from-sky-600 to-blue-600 text-white hover:opacity-90 active:scale-95'
+                        :                         'bg-gradient-to-r from-gold-500/80 to-amber-600 text-white hover:opacity-90 active:scale-95'
+                        : 'bg-white/5 text-white/20 cursor-not-allowed',
+                    )}
+                  >
+                    {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                  </button>
                 </div>
-              )}
 
-              {/* Input row */}
-              <div className="flex gap-2 mt-2">
-                {/* Attachment button (FEAT-02) */}
-                <button
-                  type="button"
-                  onClick={() => chatFileInputRef.current?.click()}
-                  disabled={sending || chatAttachLoading}
-                  title="Attach image or document"
-                  className={cn(
-                    'px-3 py-2.5 rounded-xl border transition-all flex-shrink-0',
-                    chatAttachURL && !chatAttachError
-                      ? 'border-green-500/50 bg-green-900/20 text-green-400'
-                      : 'border-white/10 text-white/30 hover:border-white/25 hover:text-white/55',
-                    (sending || chatAttachLoading) && 'opacity-40 cursor-not-allowed',
-                  )}
-                >
-                  {chatAttachLoading ? <Loader2 size={15} className="animate-spin" /> : <Paperclip size={15} />}
-                </button>
-
-                {/* Mic button (FEAT-03) */}
-                <button
-                  type="button"
-                  onClick={handleMicToggle}
-                  disabled={sending || chatAttachLoading || micTranscribing}
-                  title={micRecording ? 'Stop recording' : 'Voice input'}
-                  className={cn(
-                    'px-3 py-2.5 rounded-xl border transition-all flex-shrink-0',
-                    micRecording
-                      ? 'border-red-500/60 bg-red-900/30 text-red-400 animate-pulse'
-                      : micTranscribing
-                      ? 'border-amber-500/50 bg-amber-900/20 text-amber-400'
-                      : 'border-white/10 text-white/30 hover:border-white/25 hover:text-white/55',
-                    (sending || chatAttachLoading || micTranscribing) && !micRecording && 'opacity-40 cursor-not-allowed',
-                  )}
-                >
-                  {micTranscribing ? <Loader2 size={15} className="animate-spin" /> : <Mic size={15} />}
-                </button>
-                <input
-                  ref={chatFileInputRef}
-                  type="file"
-                  accept="image/*,.pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                  onChange={handleChatAttachSelect}
-                  className="hidden"
-                />
-                <input
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChat()}
-                  placeholder={
-                    chatAttachURL ? 'Ask about the attached file… (or press Enter)' :
-                    chatMode === 'search' ? 'Search the web — ask about news, prices, facts…' :
-                    chatMode === 'code'   ? 'Describe what code you need or paste code to explain…' :
-                                           'Ask Nexus anything…'
-                  }
-                  className={cn(
-                    'glass border border-white/[0.10] rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none flex-1 text-sm transition-colors',
-                    chatMode === 'code'   ? 'font-mono focus:border-green-500/50' :
-                    chatMode === 'search' ? 'focus:border-sky-500/50' :
-                                           'focus:border-gold-500/40',
-                  )}
-                  disabled={sending}
-                />
-                <button
-                  onClick={handleChat}
-                  disabled={sending || (!input.trim() && !chatAttachURL) || chatAttachLoading}
-                  className={cn(
-                    'px-4 py-3 rounded-xl transition-all',
-                    (input.trim() || chatAttachURL) && !sending && !chatAttachLoading
-                      ? chatMode === 'code'   ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:opacity-90 active:scale-95'
-                      : chatMode === 'search' ? 'bg-gradient-to-r from-sky-600 to-blue-600 text-white hover:opacity-90 active:scale-95'
-                      :                         'bg-gradient-to-r from-gold-500/80 to-amber-600 text-white hover:opacity-90 active:scale-95'
-                      : 'bg-white/5 text-white/20 cursor-not-allowed',
-                  )}
-                >
-                  {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                </button>
-              </div>
-
-              {/* Footer actions */}
-              <div className="flex items-center justify-between mt-2 px-0.5">
-                <button
-                  onClick={handleSummariseChat}
-                  disabled={messages.length < 4}
-                  className="text-white/25 hover:text-white/55 text-[10px] flex items-center gap-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <Sparkles size={9} /> Summarise chat
-                </button>
-                <button
-                  onClick={handleClearChat}
-                  className="text-white/25 hover:text-white/55 text-[10px] flex items-center gap-1 transition-colors"
-                >
-                  <RotateCcw size={9} /> New chat
-                </button>
+                {/* Hint text */}
+                <p className="text-white/15 text-[10px] text-center mt-2">
+                  {chatMode === 'general' ? 'Nexus AI · Powered by Gemini · Free to use' :
+                   chatMode === 'search'  ? 'Live web search · Real-time data · Free' :
+                                           'Qwen Coder · Supports all languages · Free'}
+                </p>
               </div>
             </motion.div>
           )}
 
           {/* ── TOOLS ── */}
           {activeTab === "tools" && (
-            <motion.div key="tools" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+            <motion.div key="tools" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="flex flex-col h-full">
 
-              {/* Search + category filters */}
-              <div className="space-y-2.5">
-                <input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search tools…"
-                  className="glass border border-white/[0.10] rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-gold-500/40 text-sm w-full"
-                />
-                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+              {/* Sticky search + filter header */}
+              <div className="flex-shrink-0 border-b border-white/[0.06] px-4 md:px-6 py-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+                    <input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder={`Search ${canonicalTools.length} AI tools…`}
+                      className="w-full glass border border-white/[0.10] rounded-xl pl-9 pr-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-gold-500/40 text-sm"
+                    />
+                  </div>
+                  <span className="text-white/25 text-xs whitespace-nowrap">{canonicalTools.length} tools</span>
+                </div>
+                <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
                   <button
                     onClick={() => setActiveCategory(null)}
                     className={cn(
@@ -2605,13 +2738,15 @@ function StudioPageInner() {
                 </div>
               </div>
 
-              {/* Per-generation model clarity banner */}
+              {/* Scrollable tools content */}
+              <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
+
+              {/* Per-generation pricing note */}
               <div className="flex items-center gap-2.5 glass border border-white/[0.08] p-3 border-gold-500/15">
                 <Zap size={13} className="text-gold-500 flex-shrink-0" />
                 <p className="text-white/45 text-xs leading-relaxed">
                   <span className="text-white/70 font-semibold">Per-generation pricing:</span>{" "}
-                  Points are deducted once each time you click Generate — you get 1 output.
-                  If generation fails, points are automatically refunded.
+                  Points deducted once per Generate click. Failed generations are auto-refunded.
                 </p>
               </div>
 
@@ -2717,59 +2852,75 @@ function StudioPageInner() {
                 })}
                 </>
               )}
+
+              {/* end scrollable tools content */}
+              </div>
             </motion.div>
           )}
 
           {/* ── GALLERY ── */}
           {activeTab === "gallery" && (
-            <motion.div key="gallery" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-3">
-              <div className="flex items-center justify-between">
+            <motion.div key="gallery" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="flex flex-col h-full">
+
+              {/* Gallery header */}
+              <div className="flex-shrink-0 flex items-center justify-between border-b border-white/[0.06] px-4 md:px-6 py-4">
                 <div>
-                  <p className="text-white/70 text-sm font-semibold">Your generations</p>
-                  <p className="text-white/30 text-[10px]">Points deducted per generation · Failed items auto-refunded</p>
+                  <p className="text-white font-semibold text-sm">Your Generations</p>
+                  <p className="text-white/30 text-[10px] mt-0.5">{gallery.length} items · Failed generations are auto-refunded</p>
                 </div>
-                <button onClick={() => mutateGallery()} className="text-white/30 hover:text-white/60 transition-colors p-1">
+                <button onClick={() => mutateGallery()}
+                  className="text-white/30 hover:text-white/60 transition-colors p-2 rounded-xl hover:bg-white/[0.04]">
                   <RefreshCw size={14} />
                 </button>
               </div>
 
-              {recentGens.length === 0 ? (
-                <div className="text-center py-14 glass border border-white/[0.08] space-y-3">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-gold-500/10 to-amber-600/5 border border-white/10 flex items-center justify-center mx-auto">
-                    <Play size={24} className="text-white/30" />
+              {/* Scrollable gallery grid */}
+              <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4">
+                {recentGens.length === 0 ? (
+                  <div className="text-center py-20 space-y-4">
+                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-gold-500/10 to-amber-600/5 border border-white/10 flex items-center justify-center mx-auto">
+                      <Play size={28} className="text-white/30" />
+                    </div>
+                    <div>
+                      <p className="text-white/50 text-base font-semibold">No generations yet</p>
+                      <p className="text-white/25 text-sm mt-1">Use a tool to create your first AI output</p>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab("tools")}
+                      className="btn-gold text-sm px-6 py-2.5 mx-auto flex items-center gap-1.5"
+                    >
+                      <Wand2 size={14} /> Browse AI Tools
+                    </button>
                   </div>
-                  <p className="text-white/40 text-sm font-medium">No generations yet</p>
-                  <p className="text-white/25 text-xs">Use a tool to create something amazing</p>
-                  <button
-                    onClick={() => setActiveTab("tools")}
-                    className="btn-gold text-sm px-5 py-2.5 mx-auto flex items-center gap-1.5"
-                  >
-                    <Wand2 size={14} /> Browse tools
-                  </button>
-                </div>
-              ) : (
-                recentGens.map((gen) => (
-                  <GenerationCard
-                    key={gen.id}
-                    gen={gen}
-                    onRegenerate={(g) => {
-                      const tool = tools.find((t) => t.slug === g.tool_slug);
-                      if (tool) { setSelectedTool(tool); setActiveTab("tools"); }
-                    }}
-                  />
-                ))
-              )}
-
-              {gallery.length > 8 && (
-                <a href="/studio/gallery" className="glass border border-white/[0.10] text-white/70 hover:text-white hover:border-white/20 transition-all rounded-xl font-black w-full py-3 text-sm flex items-center justify-center gap-2">
-                  View all {gallery.length} generations <ExternalLink size={13} />
-                </a>
-              )}
+                ) : (
+                  <div className="space-y-3">
+                    {recentGens.map((gen) => (
+                      <GenerationCard
+                        key={gen.id}
+                        gen={gen}
+                        onRegenerate={(g) => {
+                          const tool = tools.find((t) => t.slug === g.tool_slug);
+                          if (tool) { setSelectedTool(tool); setActiveTab("tools"); }
+                        }}
+                      />
+                    ))}
+                    {gallery.length > 8 && (
+                      <a href="/studio/gallery"
+                        className="glass border border-white/[0.10] text-white/70 hover:text-white hover:border-white/20 transition-all rounded-xl w-full py-3 text-sm flex items-center justify-center gap-2">
+                        View all {gallery.length} generations <ExternalLink size={13} />
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
             </motion.div>
           )}
 
-        </AnimatePresence>
-      </div>
+          </AnimatePresence>
+          </div>{/* end tab content */}
+        </div>{/* end main content area */}
+      </div>{/* end full-viewport shell */}
 
       {/* ── Tool drawer ── */}
       <AnimatePresence>
