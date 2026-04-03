@@ -1412,7 +1412,7 @@ function renderQuiz(text: string) {
 
 // ─── Slide-deck renderer (module-level so both GenerationCard and ToolDrawer can use it) ─────────────────
 function renderSlideDeck(text: string) {
-  let parsed: { title?: string; subtitle?: string; bullets?: string[]; notes?: string }[] | null = null;
+  let parsed: { title?: string; subtitle?: string; bullets?: string[]; notes?: string; speaker_notes?: string }[] | null = null;
   try {
     const raw = JSON.parse(text);
     if (Array.isArray(raw)) parsed = raw;
@@ -1444,9 +1444,9 @@ function renderSlideDeck(text: string) {
               ))}
             </ul>
           )}
-          {slide.notes && (
+          {(slide.speaker_notes || slide.notes) && (
             <p className="text-white/30 text-[11px] italic pl-8 border-t border-white/5 pt-2">
-              Speaker note: {slide.notes}
+              Speaker note: {slide.speaker_notes || slide.notes}
             </p>
           )}
         </div>

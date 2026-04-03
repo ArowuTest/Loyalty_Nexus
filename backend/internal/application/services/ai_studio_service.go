@@ -698,7 +698,12 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 	}
 	switch slug {
 	case "bg-remover":
-		return o.dispatchBgRemover(ctx, prompt)
+		// bg-remover needs the source image URL, not the text prompt
+		bgImgURL := env.ImageURL
+		if bgImgURL == "" {
+			bgImgURL = env.Prompt // legacy fallback: older rows stored imageURL in prompt
+		}
+		return o.dispatchBgRemover(ctx, bgImgURL)
 
 	case "ai-photo-pro":
 		// Tier 1: Grok Aurora (xAI) — #1 ranked image quality, $0.07/image
@@ -1012,7 +1017,7 @@ func (o *AIStudioOrchestrator) dispatchVoiceOrTranslate(ctx context.Context, slu
 	case "translate", "local-translation":
 		return o.dispatchTranslate(ctx, env)
 	case "transcribe":
-		return o.dispatchTranscribe(ctx, env.Prompt) // prompt holds audioURL for transcription
+		return o.dispatchTranscribe(ctx, env) // env.Prompt = audioURL, env.Language = language code
 	case "transcribe-african":
 		return o.dispatchTranscribeAfrican(ctx, env)
 	case "narrate-pro":
@@ -1125,23 +1130,26 @@ func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*s
 	return nil, fmt.Errorf("TTS unavailable: configure GOOGLE_CLOUD_TTS_KEY or ELEVENLABS_API_KEY")
 }
 
-func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, audioURL string) (*studioProviderResult, error) {
-	// ── DB-first ─────────────────────────────────────────────────────────────
+func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
+	audioURL := env.Prompt // audioURL is stored in the prompt field for transcribe
+	lang := strings.ToLower(strings.TrimSpace(env.Language))
+	if lang == "" {
+		lang = "en"
+	}
+	// ── DB-first ─────────────────────────────────────────────────────────────────────────────
 	in := providerInput{AudioURL: audioURL}
 	if _, text, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryTranscribe, in); err == nil {
 		return &studioProviderResult{OutputText: text, Provider: "db/" + usedSlug, CostMicros: cost}, nil
 	}
-
-	// ── Hardcoded fallback chain ──────────────────────────────────────────────
-	// Primary: AssemblyAI (free $50 credit on signup)
+	// ── Hardcoded fallback chain ─────────────────────────────────────────────────────────────────────────────
+	// Primary: AssemblyAI (free $50 credit on signup) — supports language_code
 	if aaiKey := os.Getenv("ASSEMBLY_AI_KEY"); aaiKey != "" {
-		text, err := o.callAssemblyAI(ctx, aaiKey, audioURL)
+		text, err := o.callAssemblyAIWithLang(ctx, aaiKey, audioURL, lang)
 		if err == nil {
 			return &studioProviderResult{OutputText: text, Provider: "assemblyai", CostMicros: 25}, nil
 		}
 		log.Printf("[AIStudio] AssemblyAI failed: %v", err)
 	}
-
 	// Fallback: Groq Whisper-large-v3 (fast, cheap)
 	if groqKey := os.Getenv("GROQ_API_KEY"); groqKey != "" {
 		text, err := o.callGroqWhisper(ctx, groqKey, audioURL)
@@ -1150,7 +1158,6 @@ func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, audioURL 
 		}
 		log.Printf("[AIStudio] Groq Whisper failed: %v", err)
 	}
-
 	return nil, fmt.Errorf("transcription unavailable: configure ASSEMBLY_AI_KEY or GROQ_API_KEY")
 }
 
@@ -2005,6 +2012,63 @@ func (o *AIStudioOrchestrator) callAssemblyAI(ctx context.Context, apiKey, audio
 	return "", fmt.Errorf("AssemblyAI: transcription timed out after 5 minutes")
 }
 
+// callAssemblyAIWithLang is like callAssemblyAI but forwards the language_code to AssemblyAI.
+func (o *AIStudioOrchestrator) callAssemblyAIWithLang(ctx context.Context, apiKey, audioURL, lang string) (string, error) {
+	submitPayload := map[string]interface{}{
+		"audio_url":     audioURL,
+		"language_code": lang,
+		"speech_models": []string{"universal-2"},
+	}
+	body, _ := json.Marshal(submitPayload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.assemblyai.com/v2/transcript", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("AssemblyAI submit: %w", err)
+	}
+	defer resp.Body.Close()
+	var jobResp struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&jobResp); err != nil {
+		return "", fmt.Errorf("AssemblyAI submit parse: %w", err)
+	}
+	if jobResp.ID == "" {
+		return "", fmt.Errorf("AssemblyAI: no job ID returned")
+	}
+	pollURL := "https://api.assemblyai.com/v2/transcript/" + jobResp.ID
+	deadline := time.Now().Add(5 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(3 * time.Second)
+		pollReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		pollReq.Header.Set("Authorization", apiKey)
+		pollResp, err := o.httpClient.Do(pollReq)
+		if err != nil {
+			continue
+		}
+		var result struct {
+			Status string `json:"status"`
+			Text   string `json:"text"`
+			Error  string `json:"error"`
+		}
+		_ = json.NewDecoder(pollResp.Body).Decode(&result)
+		pollResp.Body.Close()
+		switch result.Status {
+		case "completed":
+			return result.Text, nil
+		case "error":
+			return "", fmt.Errorf("AssemblyAI error: %s", result.Error)
+		}
+	}
+	return "", fmt.Errorf("AssemblyAI: timeout waiting for transcript")
+}
+
 // callGroqWhisper uses Groq's Whisper for transcription (fast fallback).
 func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audioURL string) (string, error) {
 	// Groq Whisper requires multipart/form-data with a binary file upload.
@@ -2282,6 +2346,53 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 		return "", fmt.Errorf("Pollinations TTS: response too small")
 	}
 
+	fileName := fmt.Sprintf("studio/narrate/pollinations_%d.mp3", time.Now().UnixNano())
+	publicURL, err := o.storage.Upload(ctx, fileName, audioBytes, "audio/mpeg")
+	if err != nil {
+		encoded64 := base64.StdEncoding.EncodeToString(audioBytes)
+		return "data:audio/mpeg;base64," + encoded64, nil
+	}
+	return publicURL, nil
+}
+
+// callPollinationsTTSWithSpeed is like callPollinationsTTS but forwards the speed parameter.
+// Speed 0.25–4.0; 1.0 = normal. Falls back to callPollinationsTTS if speed is default.
+func (o *AIStudioOrchestrator) callPollinationsTTSWithSpeed(ctx context.Context, text, voice string, speed float64) (string, error) {
+	if speed <= 0 || speed == 1.0 {
+		return o.callPollinationsTTS(ctx, text, voice)
+	}
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured (required since 2026-03-26)")
+	}
+	payload := map[string]interface{}{
+		"model": "tts-1",
+		"input": text,
+		"voice": voice,
+		"speed": speed,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/v1/audio/speech", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+	req.Header.Set("Authorization", "Bearer "+sk)
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations TTS request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Pollinations TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 100))
+	}
+	audioBytes, err := io.ReadAll(resp.Body)
+	if err != nil || len(audioBytes) < 500 {
+		return "", fmt.Errorf("Pollinations TTS: response too small")
+	}
 	fileName := fmt.Sprintf("studio/narrate/pollinations_%d.mp3", time.Now().UnixNano())
 	publicURL, err := o.storage.Upload(ctx, fileName, audioBytes, "audio/mpeg")
 	if err != nil {
@@ -2672,7 +2783,15 @@ func (o *AIStudioOrchestrator) dispatchNarratorPro(ctx context.Context, env prom
 	text := env.Prompt
 
 	// Use callPollinationsTTS — already implemented, uses POLLINATIONS_SECRET_KEY when set
-	audioURL, err := o.callPollinationsTTS(ctx, text, voice)
+	// Read speed from extra_params (sent by VoiceStudio when show_speed_control is true)
+	speed := 1.0
+	if env.Extra != nil {
+		if s, ok := env.Extra["speed"].(float64); ok && s > 0 {
+			speed = s
+		}
+	}
+	// Use callPollinationsTTSWithSpeed — supports speed parameter
+	audioURL, err := o.callPollinationsTTSWithSpeed(ctx, text, voice, speed)
 	if err == nil {
 		return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/tts-" + voice, CostMicros: 0}, nil
 	}
