@@ -2133,62 +2133,6 @@ func (o *AIStudioOrchestrator) callAssemblyAI(ctx context.Context, apiKey, audio
 }
 
 // callAssemblyAIWithLang is like callAssemblyAI but forwards the language_code to AssemblyAI.
-func (o *AIStudioOrchestrator) callAssemblyAIWithLang(ctx context.Context, apiKey, audioURL, lang string) (string, error) {
-	submitPayload := map[string]interface{}{
-		"audio_url":     audioURL,
-		"language_code": lang,
-		"speech_models": []string{"universal-2"},
-	}
-	body, _ := json.Marshal(submitPayload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.assemblyai.com/v2/transcript", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("AssemblyAI submit: %w", err)
-	}
-	defer resp.Body.Close()
-	var jobResp struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&jobResp); err != nil {
-		return "", fmt.Errorf("AssemblyAI submit parse: %w", err)
-	}
-	if jobResp.ID == "" {
-		return "", fmt.Errorf("AssemblyAI: no job ID returned")
-	}
-	pollURL := "https://api.assemblyai.com/v2/transcript/" + jobResp.ID
-	deadline := time.Now().Add(5 * time.Minute)
-	for time.Now().Before(deadline) {
-		time.Sleep(3 * time.Second)
-		pollReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
-		pollReq.Header.Set("Authorization", apiKey)
-		pollResp, err := o.httpClient.Do(pollReq)
-		if err != nil {
-			continue
-		}
-		var result struct {
-			Status string `json:"status"`
-			Text   string `json:"text"`
-			Error  string `json:"error"`
-		}
-		_ = json.NewDecoder(pollResp.Body).Decode(&result)
-		pollResp.Body.Close()
-		switch result.Status {
-		case "completed":
-			return result.Text, nil
-		case "error":
-			return "", fmt.Errorf("AssemblyAI error: %s", result.Error)
-		}
-	}
-	return "", fmt.Errorf("AssemblyAI: timeout waiting for transcript")
-}
-
 // callGroqWhisper uses Groq's Whisper for transcription (fast fallback).
 func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audioURL string) (string, error) {
 	// Groq Whisper requires multipart/form-data with a binary file upload.
@@ -2495,51 +2439,6 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 
 // callPollinationsTTSWithSpeed is like callPollinationsTTS but forwards the speed parameter.
 // Speed 0.25–4.0; 1.0 = normal. Falls back to callPollinationsTTS if speed is default.
-func (o *AIStudioOrchestrator) callPollinationsTTSWithSpeed(ctx context.Context, text, voice string, speed float64) (string, error) {
-	if speed <= 0 || speed == 1.0 {
-		return o.callPollinationsTTS(ctx, text, voice)
-	}
-	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
-	if sk == "" {
-		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured (required since 2026-03-26)")
-	}
-	payload := map[string]interface{}{
-		"model": "tts-1",
-		"input": text,
-		"voice": voice,
-		"speed": speed,
-	}
-	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://gen.pollinations.ai/v1/audio/speech", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "NexusAI/1.0")
-	req.Header.Set("Authorization", "Bearer "+sk)
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("Pollinations TTS request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Pollinations TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 100))
-	}
-	audioBytes, err := io.ReadAll(resp.Body)
-	if err != nil || len(audioBytes) < 500 {
-		return "", fmt.Errorf("Pollinations TTS: response too small")
-	}
-	fileName := fmt.Sprintf("studio/narrate/pollinations_%d.mp3", time.Now().UnixNano())
-	publicURL, err := o.storage.Upload(ctx, fileName, audioBytes, "audio/mpeg")
-	if err != nil {
-		encoded64 := base64.StdEncoding.EncodeToString(audioBytes)
-		return "data:audio/mpeg;base64," + encoded64, nil
-	}
-	return publicURL, nil
-}
-
 // callPollinationsTTSFull generates speech with speed, format, and language support.
 func (o *AIStudioOrchestrator) callPollinationsTTSFull(ctx context.Context, text, voice string, speed float64, format, lang string) (string, error) {
 	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
