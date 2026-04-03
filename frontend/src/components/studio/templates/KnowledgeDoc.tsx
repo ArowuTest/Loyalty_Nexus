@@ -5,6 +5,7 @@ import {
   Loader2, Sparkles, ArrowRight, Paperclip, X, FileText,
   AlertCircle, BookOpen, HelpCircle, GitBranch, Briefcase,
   Presentation, BarChart2, Mic, Globe, ChevronDown, ChevronUp,
+  FileSearch, Headphones, Network, MessageSquare, Mic2, ClipboardList,
 } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
@@ -40,6 +41,9 @@ const TRANSLATE_LANGUAGES = [
 const DOCUMENT_UPLOAD_SLUGS = new Set([
   'study-guide', 'quiz', 'mindmap', 'research-brief',
   'bizplan', 'slide-deck', 'infographic', 'podcast',
+  // Extended: additional tools that benefit from document upload
+  'business-plan-summary', 'deep-research-brief', 'mind-map',
+  'my-podcast', 'quiz-me', 'voice-to-plan',
 ]);
 
 // ─── Document type visual cards ──────────────────────────────────────────────
@@ -51,7 +55,14 @@ const DOC_TYPE_CARDS: Record<string, { icon: React.ElementType; color: string; l
   'bizplan':        { icon: Briefcase,     color: 'from-amber-600/30 to-amber-700/20 border-amber-500/40 text-amber-200', label: 'Business Plan',  desc: 'Full business document' },
   'slide-deck':     { icon: Presentation,  color: 'from-rose-600/30 to-rose-700/20 border-rose-500/40 text-rose-200',     label: 'Slide Deck',     desc: 'Presentation outline' },
   'infographic':    { icon: BarChart2,     color: 'from-orange-600/30 to-orange-700/20 border-orange-500/40 text-orange-200', label: 'Infographic', desc: 'Visual data story' },
-  'podcast':        { icon: Mic,           color: 'from-teal-600/30 to-teal-700/20 border-teal-500/40 text-teal-200',     label: 'Podcast Script', desc: 'Conversational script' },
+  'podcast':              { icon: Mic,           color: 'from-teal-600/30 to-teal-700/20 border-teal-500/40 text-teal-200',       label: 'Podcast Script',       desc: 'Conversational script' },
+  // Extended cards
+  'business-plan-summary': { icon: ClipboardList,  color: 'from-amber-600/30 to-amber-700/20 border-amber-500/40 text-amber-200',   label: 'Business Plan',        desc: 'Upload plan to summarise' },
+  'deep-research-brief':   { icon: FileSearch,     color: 'from-sky-600/30 to-sky-700/20 border-sky-500/40 text-sky-200',           label: 'Research Brief',       desc: 'Upload papers or notes' },
+  'mind-map':              { icon: Network,        color: 'from-purple-600/30 to-purple-700/20 border-purple-500/40 text-purple-200', label: 'Mind Map',             desc: 'Upload document to map' },
+  'my-podcast':            { icon: Headphones,     color: 'from-teal-600/30 to-teal-700/20 border-teal-500/40 text-teal-200',       label: 'Podcast',              desc: 'Upload source material' },
+  'quiz-me':               { icon: MessageSquare,  color: 'from-green-600/30 to-green-700/20 border-green-500/40 text-green-200',   label: 'Quiz Me',              desc: 'Upload study material' },
+  'voice-to-plan':         { icon: Mic2,           color: 'from-indigo-600/30 to-indigo-700/20 border-indigo-500/40 text-indigo-200', label: 'Voice to Plan',       desc: 'Upload voice notes' },
 };
 
 // ─── Translate layout ─────────────────────────────────────────────────────────
