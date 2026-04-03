@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, User, Bot, Sparkles, ArrowLeft, Copy, Check, Download, Paperclip, Link2, X, FileText, Globe } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Send, User, Bot, Sparkles, ArrowLeft, Copy, Check, Download, Paperclip, Link2, X, FileText, Globe, Mic, MicOff, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import api from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -226,6 +226,9 @@ const ACCEPTED_MIME_TYPES = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ];
 
+// ─── Mic recording states ────────────────────────────────────────────────────
+type MicState = 'idle' | 'recording' | 'transcribing' | 'error';
+
 export default function NexusChat() {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -251,6 +254,13 @@ export default function NexusChat() {
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [linkInput,     setLinkInput]     = useState('');
   const [attachedLink,  setAttachedLink]  = useState<string>('');
+
+  // ─── Mic / voice-to-text state ───────────────────────────────────────────
+  const [micState,    setMicState]    = useState<MicState>('idle');
+  const [micError,    setMicError]    = useState<string>('');
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef   = useRef<Blob[]>([]);
+  const micStreamRef     = useRef<MediaStream | null>(null);
 
   const sessionId      = useRef<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -283,6 +293,13 @@ export default function NexusChat() {
   useEffect(() => {
     if (showLinkInput) linkInputRef.current?.focus();
   }, [showLinkInput]);
+
+  // Cleanup mic stream on unmount
+  useEffect(() => {
+    return () => {
+      micStreamRef.current?.getTracks().forEach(t => t.stop());
+    };
+  }, []);
 
   // ─── File upload handler ─────────────────────────────────────────────────
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -335,6 +352,109 @@ export default function NexusChat() {
     setAttachedFileURL('');
     setLinkInput('');
     setShowLinkInput(false);
+  }
+
+  // ─── Mic recording handlers ──────────────────────────────────────────────
+  const startRecording = useCallback(async () => {
+    setMicError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/ogg';
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        // Stop all mic tracks
+        stream.getTracks().forEach(t => t.stop());
+        micStreamRef.current = null;
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (audioBlob.size < 1000) {
+          setMicState('idle');
+          setMicError('Recording too short — please try again.');
+          return;
+        }
+
+        setMicState('transcribing');
+        try {
+          // Upload audio blob to CDN
+          const audioFile = new File([audioBlob], `voice_${Date.now()}.webm`, { type: mimeType });
+          const { url: audioURL } = await api.uploadAsset(audioFile);
+
+          // Transcribe using the transcribe-african tool (supports Yoruba, Igbo, Hausa, Pidgin, English)
+          const genRes = await api.generateBySlug('transcribe-african', {
+            prompt: audioURL,
+            language: 'en',
+          }) as { generation_id: string };
+
+          // Poll for result
+          let transcript = '';
+          const deadline = Date.now() + 60_000;
+          while (Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, 1500));
+            const status = await api.getGenerationStatus(genRes.generation_id) as {
+              status: string; output_text?: string; error_message?: string;
+            };
+            if (status.status === 'completed') {
+              transcript = status.output_text ?? '';
+              break;
+            }
+            if (status.status === 'failed') {
+              throw new Error(status.error_message ?? 'Transcription failed');
+            }
+          }
+
+          if (!transcript) throw new Error('No transcript returned');
+
+          // Append to existing input (in case user had already typed something)
+          setInput(prev => prev ? `${prev} ${transcript}` : transcript);
+          setMicState('idle');
+          // Focus textarea so user can review / edit before sending
+          setTimeout(() => textareaRef.current?.focus(), 100);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Transcription failed';
+          setMicError(msg);
+          setMicState('error');
+          setTimeout(() => { setMicState('idle'); setMicError(''); }, 4000);
+        }
+      };
+
+      recorder.start(250); // collect chunks every 250 ms
+      setMicState('recording');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Microphone access denied';
+      setMicError(msg.includes('Permission') || msg.includes('denied') || msg.includes('NotAllowed')
+        ? 'Microphone permission denied — please allow access in your browser settings.'
+        : msg);
+      setMicState('error');
+      setTimeout(() => { setMicState('idle'); setMicError(''); }, 4000);
+    }
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+  }, []);
+
+  function handleMicClick() {
+    if (micState === 'recording') {
+      stopRecording();
+    } else if (micState === 'idle' || micState === 'error') {
+      startRecording();
+    }
   }
 
   // ─── Send message ────────────────────────────────────────────────────────
@@ -414,9 +534,15 @@ export default function NexusChat() {
     });
   }
 
-  const remaining    = Math.max(0, msgLimit - msgCount);
+  const remaining      = Math.max(0, msgLimit - msgCount);
   const showSuggestions = messages.length === 1;
   const hasAttachment   = !!attachedFile || !!attachedLink;
+  const isBusy          = isLoading || isUploading || micState === 'transcribing';
+
+  // Mic button appearance
+  const micIsRecording    = micState === 'recording';
+  const micIsTranscribing = micState === 'transcribing';
+  const micIsError        = micState === 'error';
 
   return (
     <div className="flex flex-col h-screen bg-black text-white max-w-screen-md mx-auto border-x border-white/5">
@@ -586,6 +712,26 @@ export default function NexusChat() {
           <p className="text-[10px] text-red-400 mb-2 px-1">{uploadError}</p>
         )}
 
+        {/* Mic status banners */}
+        {micState === 'recording' && (
+          <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/25">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+            <span className="text-[11px] text-red-300 font-medium flex-1">Recording… tap mic to stop</span>
+          </div>
+        )}
+        {micState === 'transcribing' && (
+          <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl bg-brand-gold/8 border border-brand-gold/20">
+            <Loader2 size={12} className="text-brand-gold animate-spin flex-shrink-0" />
+            <span className="text-[11px] text-brand-gold/80 font-medium flex-1">Transcribing your voice…</span>
+          </div>
+        )}
+        {micState === 'error' && micError && (
+          <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20">
+            <MicOff size={12} className="text-red-400 flex-shrink-0" />
+            <span className="text-[11px] text-red-300 flex-1">{micError}</span>
+          </div>
+        )}
+
         {/* Link input popup */}
         {showLinkInput && (
           <div className="flex items-center gap-2 mb-2">
@@ -629,14 +775,14 @@ export default function NexusChat() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading || remaining === 0}
+            disabled={isBusy || remaining === 0}
             title="Attach a file (PDF, TXT, DOCX)"
             className={cn(
               'w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mb-0.5 transition-all',
               hasAttachment && attachedFile
                 ? 'bg-brand-gold/20 text-brand-gold border border-brand-gold/40'
                 : 'bg-white/5 text-slate-500 hover:text-white/70 hover:bg-white/10 border border-transparent',
-              (isLoading || remaining === 0) && 'opacity-40 cursor-not-allowed',
+              (isBusy || remaining === 0) && 'opacity-40 cursor-not-allowed',
             )}
           >
             <Paperclip size={15} />
@@ -645,37 +791,70 @@ export default function NexusChat() {
           {/* Link icon — paste a URL */}
           <button
             onClick={() => setShowLinkInput(v => !v)}
-            disabled={isLoading || remaining === 0}
+            disabled={isBusy || remaining === 0}
             title="Attach a web link or Google Drive URL"
             className={cn(
               'w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mb-0.5 transition-all',
               (hasAttachment && attachedLink) || showLinkInput
                 ? 'bg-brand-gold/20 text-brand-gold border border-brand-gold/40'
                 : 'bg-white/5 text-slate-500 hover:text-white/70 hover:bg-white/10 border border-transparent',
-              (isLoading || remaining === 0) && 'opacity-40 cursor-not-allowed',
+              (isBusy || remaining === 0) && 'opacity-40 cursor-not-allowed',
             )}
           >
             <Link2 size={15} />
           </button>
 
+          {/* ── Mic button — voice to text ─────────────────────────────────── */}
+          <button
+            onClick={handleMicClick}
+            disabled={micIsTranscribing || remaining === 0 || isLoading}
+            title={micIsRecording ? 'Stop recording' : 'Speak your message'}
+            className={cn(
+              'w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mb-0.5 transition-all',
+              micIsRecording
+                ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse'
+                : micIsTranscribing
+                  ? 'bg-brand-gold/10 text-brand-gold/50 border border-brand-gold/20 cursor-wait'
+                  : micIsError
+                    ? 'bg-red-500/10 text-red-400/60 border border-red-500/20'
+                    : 'bg-white/5 text-slate-500 hover:text-white/70 hover:bg-white/10 border border-transparent',
+              (micIsTranscribing || remaining === 0 || isLoading) && 'opacity-40 cursor-not-allowed',
+            )}
+          >
+            {micIsTranscribing
+              ? <Loader2 size={15} className="animate-spin" />
+              : micIsRecording
+                ? <MicOff size={15} />
+                : <Mic size={15} />
+            }
+          </button>
+
           <textarea
             ref={textareaRef}
             rows={1}
-            placeholder={hasAttachment ? 'Ask about the attached file or link…' : 'Ask anything…'}
+            placeholder={
+              micIsRecording    ? 'Listening…' :
+              micIsTranscribing ? 'Transcribing…' :
+              hasAttachment     ? 'Ask about the attached file or link…' :
+              'Ask anything… or tap the mic to speak'
+            }
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
-            disabled={remaining === 0}
-            className="flex-1 bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-5 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-brand-gold/30 focus:bg-white/10 transition-all resize-none overflow-hidden disabled:opacity-40"
+            disabled={remaining === 0 || micIsRecording || micIsTranscribing}
+            className={cn(
+              'flex-1 bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-5 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-brand-gold/30 focus:bg-white/10 transition-all resize-none overflow-hidden disabled:opacity-40',
+              micIsRecording && 'border-red-500/30 bg-red-500/5',
+            )}
           />
           <button
             onClick={() => handleSend()}
-            disabled={!input.trim() || isLoading || remaining === 0 || isUploading}
+            disabled={!input.trim() || isBusy || remaining === 0}
             className={cn(
               'w-11 h-11 rounded-xl flex items-center justify-center transition-all flex-shrink-0 mb-0.5',
-              input.trim() && !isLoading && remaining > 0 && !isUploading
+              input.trim() && !isBusy && remaining > 0
                 ? 'gold-gradient text-black shadow-lg shadow-yellow-500/20 scale-100'
                 : 'bg-white/5 text-slate-600 scale-90 opacity-50',
             )}
@@ -686,7 +865,7 @@ export default function NexusChat() {
 
         {/* Supported formats hint */}
         <p className="mt-1.5 text-[9px] text-center font-medium text-slate-700 uppercase tracking-[0.15em]">
-          Supports PDF · TXT · DOCX · Web links · Google Drive
+          Supports PDF · TXT · DOCX · Web links · Google Drive · Voice
         </p>
         <p className="mt-1 text-[9px] text-center font-bold text-slate-600 uppercase tracking-[0.2em]">
           {remaining > 0
