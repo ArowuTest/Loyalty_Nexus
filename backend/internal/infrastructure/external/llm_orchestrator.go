@@ -1039,15 +1039,21 @@ func (a *GrokAdapter) GenerateVideo(ctx context.Context, req GrokVideoRequest) (
 	}
 
 	// ── Step 1: Submit generation request ────────────────────────────────────
+	// Select the correct endpoint based on mode:
+	//   /v1/videos/extensions  → video extension (Extend=true)
+	//   /v1/videos/generations → all other modes (text, image, reference, edit)
+	submitEndpoint := "https://api.x.ai/v1/videos/generations"
+	if req.Extend && req.VideoURL != "" {
+		submitEndpoint = "https://api.x.ai/v1/videos/extensions"
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("grok video marshal: %w", err)
 	}
-
 	// Use a long-lived client for the initial request (up to 30s)
 	initClient := &http.Client{Timeout: 30 * time.Second}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.x.ai/v1/videos/generations", bytes.NewBuffer(body))
+		submitEndpoint, bytes.NewBuffer(body))
 	if err != nil {
 		return "", fmt.Errorf("grok video new request: %w", err)
 	}
