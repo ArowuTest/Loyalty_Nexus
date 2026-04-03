@@ -114,14 +114,19 @@ func (s *BonusPulseService) AwardBonusPulse(ctx context.Context, req AwardBonusP
 		// When creating fresh, seed spin_credits from the users table so the
 		// wallet reflects any credits the user already earned before the wallet
 		// row was first created.
-		var wallet entities.Wallet
-		createResult := dbTx.Where(entities.Wallet{UserID: user.ID}).FirstOrCreate(&wallet, entities.Wallet{
-			UserID:      user.ID,
-			SpinCredits: user.SpinCredits,
-		})
-		if createResult.Error != nil {
-			return fmt.Errorf("ensure wallet: %w", createResult.Error)
+		// Use raw INSERT ON CONFLICT DO NOTHING to safely ensure the wallet row
+		// exists without risking a duplicate-key error. GORM's FirstOrCreate is
+		// not safe inside a transaction because it does SELECT then INSERT as two
+		// separate statements with no atomicity guarantee.
+		if err := dbTx.Exec(`
+			INSERT INTO wallets (user_id, pulse_points, spin_credits, lifetime_points,
+				recharge_counter, spin_draw_counter, spin_counter, draw_counter,
+				pulse_counter, daily_recharge_kobo, daily_spins_awarded, updated_at)
+			VALUES (?, 0, ?, 0, 0, 0, 0, 0, 0, 0, 0, NOW())
+			ON CONFLICT (user_id) DO NOTHING`, user.ID, user.SpinCredits).Error; err != nil {
+			return fmt.Errorf("ensure wallet: %w", err)
 		}
+		var wallet entities.Wallet
 		// Now lock the wallet row to prevent concurrent balance races.
 		if err := dbTx.
 			Clauses(clause.Locking{Strength: "UPDATE"}).

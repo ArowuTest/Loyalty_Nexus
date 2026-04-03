@@ -1966,11 +1966,12 @@ func (h *AdminHandler) AwardBonusPulse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve admin display name for the audit trail.
+	// Note: users table has no full_name column — use phone_number as display name.
 	var adminName string
 	if dbErr := h.db.WithContext(ctx).
 		Table("users").
 		Where("id = ?", adminID).
-		Select("COALESCE(full_name, phone_number, id::text)").
+		Select("COALESCE(phone_number, id::text)").
 		Scan(&adminName).Error; dbErr != nil || adminName == "" {
 		adminName = adminID.String()
 	}
