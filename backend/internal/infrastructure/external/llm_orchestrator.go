@@ -912,17 +912,29 @@ func NewGrokAdapter(apiKey string) *GrokAdapter {
 	return &GrokAdapter{apiKey: apiKey, client: &http.Client{Timeout: 90 * time.Second}}
 }
 
-// GenerateImage calls Grok's image generation API (grok-imagine-image or grok-imagine-image-pro)
-func (a *GrokAdapter) GenerateImage(ctx context.Context, prompt string, model string) (string, error) {
-	// model should be "grok-imagine-image" (standard, $0.02) or "grok-imagine-image-pro" ($0.07)
-	if model == "" {
-		model = "grok-imagine-image-pro" // default to pro for best quality
+// GenerateImage calls Grok Aurora image generation API.
+// Official docs: https://docs.x.ai/developers/model-capabilities/images/generation
+// The only valid model is "grok-imagine-image".
+// resolution: "2k" = $0.07/image (high quality), "1k" = $0.02/image (standard).
+// The second parameter accepts "2k", "1k", or legacy model-name strings which are mapped to resolution.
+func (a *GrokAdapter) GenerateImage(ctx context.Context, prompt string, resolution string) (string, error) {
+	// Normalise legacy model-name strings to resolution values
+	switch resolution {
+	case "", "grok-imagine-image-pro":
+		resolution = "2k" // high quality, $0.07/image
+	case "grok-imagine-image":
+		resolution = "1k" // standard, $0.02/image
+	case "1k", "2k":
+		// already correct
+	default:
+		resolution = "2k" // safe default
 	}
 
 	payload := map[string]interface{}{
-		"model":  model,
-		"prompt": prompt,
-		"n":      1, // generate 1 image
+		"model":      "grok-imagine-image",
+		"prompt":     prompt,
+		"n":          1, // generate 1 image
+		"resolution": resolution,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

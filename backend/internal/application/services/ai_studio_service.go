@@ -760,11 +760,11 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 	case "ai-photo-pro":
 		// Tier 1: Grok Aurora (xAI) — #1 ranked image quality, $0.07/image
 		if o.grokClient != nil {
-			url, err := o.grokClient.GenerateImage(ctx, prompt, "grok-imagine-image-pro")
+			url, err := o.grokClient.GenerateImage(ctx, prompt, "2k") // 2k = $0.07/image, highest quality
 			if err == nil {
-				return &studioProviderResult{OutputURL: url, Provider: "grok/aurora-pro", CostMicros: 70000}, nil
+				return &studioProviderResult{OutputURL: url, Provider: "grok/aurora-2k", CostMicros: 70000}, nil
 			}
-			log.Printf("[AIStudio] Grok Aurora Pro failed for ai-photo-pro: %v — falling back", err)
+			log.Printf("[AIStudio] Grok Aurora 2k failed for ai-photo-pro: %v — falling back", err)
 		}
 		// Tier 2: GPT Image (gptimage model) — CostMicros: $0.02
 		url, err := o.callPollinationsGPTImage(ctx, prompt, "gptimage", env.AspectRatio)
@@ -782,11 +782,11 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 	case "ai-photo-max":
 		// Tier 1: Grok Aurora Pro (xAI) — #1 ranked image quality, $0.07/image
 		if o.grokClient != nil {
-			url, err := o.grokClient.GenerateImage(ctx, prompt, "grok-imagine-image-pro")
+			url, err := o.grokClient.GenerateImage(ctx, prompt, "2k") // 2k = $0.07/image, highest quality
 			if err == nil {
-				return &studioProviderResult{OutputURL: url, Provider: "grok/aurora-pro", CostMicros: 70000}, nil
+				return &studioProviderResult{OutputURL: url, Provider: "grok/aurora-2k", CostMicros: 70000}, nil
 			}
-			log.Printf("[AIStudio] Grok Aurora Pro failed for ai-photo-max: %v — falling back", err)
+			log.Printf("[AIStudio] Grok Aurora 2k failed for ai-photo-max: %v — falling back", err)
 		}
 		// Tier 2: GPT Image Large — CostMicros: $0.03
 		quality := "standard"
