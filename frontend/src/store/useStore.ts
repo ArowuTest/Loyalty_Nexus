@@ -5,6 +5,8 @@ import { api } from "@/lib/api";
 interface User {
   id: string;
   phone_number: string;
+  display_name?: string;
+  email?: string;
   tier: string;
   streak_count: number;
   is_active: boolean;

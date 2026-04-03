@@ -15,6 +15,8 @@ import (
 type User struct {
 	ID                    uuid.UUID  `db:"id"                     gorm:"column:id;primaryKey;default:gen_random_uuid()"  json:"id"`
 	PhoneNumber           string     `db:"phone_number"            gorm:"column:phone_number"             json:"phone_number"`
+	DisplayName           string     `db:"display_name"            gorm:"column:display_name"             json:"display_name,omitempty"`
+	Email                 string     `db:"email"                   gorm:"column:email"                    json:"email,omitempty"`
 	UserCode              string     `db:"user_code"               gorm:"column:user_code"                json:"user_code"`
 	State                 string     `db:"state"                   gorm:"column:state"                    json:"state"`
 	Tier                  string     `db:"tier"                    gorm:"column:tier"                     json:"tier"`

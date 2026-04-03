@@ -323,6 +323,7 @@ func main() {
 
 		// User profile & wallet
 		mux.Handle("GET /api/v1/user/profile", auth(http.HandlerFunc(userH.GetProfile)))
+		mux.Handle("PATCH /api/v1/user/profile", auth(http.HandlerFunc(userH.UpdateProfile)))
 		mux.Handle("GET /api/v1/user/wallet", auth(http.HandlerFunc(userH.GetWallet)))
 		mux.Handle("POST /api/v1/user/momo/request", auth(http.HandlerFunc(userH.RequestMoMoLink)))
 		mux.Handle("POST /api/v1/user/profile/state", auth(http.HandlerFunc(userH.UpdateProfileState)))

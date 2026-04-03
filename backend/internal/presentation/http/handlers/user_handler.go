@@ -135,10 +135,10 @@ func (h *UserHandler) GetPassportURLs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"apple":  urls.ApplePKPassURL,
-		"google": urls.GoogleWalletURL,
-		"apple_signed": urls.IsAppleSigned,
-		"google_configured": urls.IsGoogleConfigured,
+		"apple":              urls.ApplePKPassURL,
+		"google":             urls.GoogleWalletURL,
+		"apple_signed":       urls.IsAppleSigned,
+		"google_configured":  urls.IsGoogleConfigured,
 	})
 }
 
@@ -185,4 +185,46 @@ func (h *UserHandler) UpdateProfileState(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// UpdateProfile handles PATCH /api/v1/user/profile
+// Allows users to update their display_name and email address.
+func (h *UserHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uid)
+
+	var req struct {
+		DisplayName string `json:"display_name"`
+		Email       string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	// Fetch current user
+	user, err := h.userRepo.FindByID(r.Context(), userID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+
+	// Apply only the fields that were provided
+	if req.DisplayName != "" {
+		user.DisplayName = req.DisplayName
+	}
+	if req.Email != "" {
+		user.Email = req.Email
+	}
+
+	if err := h.userRepo.Update(r.Context(), user); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":       "updated",
+		"display_name": user.DisplayName,
+		"email":        user.Email,
+	})
 }

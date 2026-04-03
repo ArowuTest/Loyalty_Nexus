@@ -1,20 +1,21 @@
 "use client";
 
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useStore } from "@/store/useStore";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Zap, Wand2, Gift, Ticket, Settings, LogOut, Shield, Bell, Trophy
+  LayoutDashboard, Zap, Wand2, Gift, Trophy, Bell,
+  User, Settings, LogOut, ChevronDown,
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", icon: LayoutDashboard, label: "Home"   },
-  { href: "/spin",      icon: Zap,             label: "Wheel Spin"   },
-  { href: "/studio",    icon: Wand2,           label: "AI Studio" },
-  { href: "/wars",      icon: Trophy,          label: "Wars"   },
-  { href: "/prizes",    icon: Gift,            label: "Prizes" },
+  { href: "/dashboard", icon: LayoutDashboard, label: "Home"       },
+  { href: "/spin",      icon: Zap,             label: "Wheel Spin" },
+  { href: "/studio",    icon: Wand2,           label: "AI Studio"  },
+  { href: "/wars",      icon: Trophy,          label: "Wars"       },
+  { href: "/prizes",    icon: Gift,            label: "Prizes"     },
 ];
 
 const TIER_COLORS: Record<string, string> = {
@@ -24,38 +25,56 @@ const TIER_ICONS: Record<string, string> = {
   BRONZE: "🥉", SILVER: "🥈", GOLD: "🥇", PLATINUM: "💎", DIAMOND: "💠",
 };
 
+/** Generates initials from display_name or last 2 digits of phone */
+function getInitials(user: { display_name?: string; phone_number?: string } | null): string {
+  if (!user) return "?";
+  if (user.display_name?.trim()) {
+    const parts = user.display_name.trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return (user.phone_number ?? "").slice(-2) || "?";
+}
+
 export default function AppShell({ children }: { children: ReactNode }) {
-  const router = useRouter();
+  const router   = useRouter();
   const pathname = usePathname();
   const { isAuthenticated, _hasHydrated, logout, user } = useStore();
   const tier      = (user?.tier ?? "BRONZE").toUpperCase();
   const tierColor = TIER_COLORS[tier] ?? "#CD7F32";
-  const tierIcon  = TIER_ICONS[tier]  ?? "🥉";
+
+  // Profile dropdown
+  const [dropOpen, setDropOpen] = useState(false);
+  const dropRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Only redirect once the Zustand persist store has finished rehydrating
-    // from localStorage. Without this guard, the redirect fires before the
-    // stored token is read, causing a spurious logout on every hard reload.
-    if (_hasHydrated && !isAuthenticated) {
-      router.push("/");
+    function handleOutside(e: MouseEvent) {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node)) {
+        setDropOpen(false);
+      }
     }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, []);
+
+  useEffect(() => {
+    if (_hasHydrated && !isAuthenticated) router.push("/");
   }, [_hasHydrated, isAuthenticated, router]);
 
   useEffect(() => {
-    // Listen for the soft session-expired event dispatched by the API client
-    // when a 401 is received. This replaces the hard window.location.href redirect
-    // that was causing the dashboard to crash and flicker.
-    const handleSessionExpired = () => {
-      logout();
-      router.push("/");
-    };
+    const handleSessionExpired = () => { logout(); router.push("/"); };
     window.addEventListener("nexus:session-expired", handleSessionExpired);
     return () => window.removeEventListener("nexus:session-expired", handleSessionExpired);
   }, [logout, router]);
 
-  // Show nothing until hydration is complete to avoid a flash of the landing page
   if (!_hasHydrated) return null;
   if (!isAuthenticated) return null;
+
+  const initials    = getInitials(user);
+  const displayName = user?.display_name?.trim() || user?.phone_number || "";
+  const email       = user?.email?.trim() || "";
+
+  const handleLogout = () => { setDropOpen(false); logout(); router.push("/"); };
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "var(--surface-0)" }}>
@@ -70,10 +89,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
           borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}
       >
-        {/* Logo */}
+        {/* Logo → landing page */}
         <Link href="/" className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.25)" }}>
+          <div
+            className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.25)" }}
+          >
             <Zap size={16} style={{ color: "var(--gold)" }} />
           </div>
           <span className="font-black text-[15px] text-white tracking-tight">Loyalty Nexus</span>
@@ -103,21 +124,98 @@ export default function AppShell({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
+
+        {/* Right side */}
         <div className="flex items-center gap-3">
-          <span className={cn("tier-badge", `tier-${user?.tier || "BRONZE"}`)}>{user?.tier || "BRONZE"}</span>
-          <Link href="/notifications" className="text-[rgb(130_140_180)] hover:text-white transition-colors">
+          {/* Tier badge */}
+          <span className={cn("tier-badge", `tier-${user?.tier || "BRONZE"}`)}>
+            {TIER_ICONS[tier]} {tier}
+          </span>
+
+          {/* Notifications */}
+          <Link href="/notifications" className="text-white/40 hover:text-white transition-colors">
             <Bell size={18} />
           </Link>
-          <Link href="/settings" className="text-[rgb(130_140_180)] hover:text-white transition-colors">
-            <Settings size={18} />
-          </Link>
-          <button
-            onClick={() => { logout(); router.push("/"); }}
-            className="w-8 h-8 rounded-xl flex items-center justify-center text-white/40 hover:text-red-400 transition-colors"
-            style={{ border: "1px solid rgba(255,255,255,0.07)" }}
-          >
-            <LogOut size={15} />
-          </button>
+
+          {/* Profile avatar + dropdown */}
+          <div className="relative" ref={dropRef}>
+            <button
+              onClick={() => setDropOpen((v) => !v)}
+              className="flex items-center gap-1.5 px-2 py-1.5 rounded-xl transition-all hover:bg-white/[0.06]"
+              style={{ border: "1px solid rgba(255,255,255,0.08)" }}
+              aria-label="Open profile menu"
+            >
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black flex-shrink-0"
+                style={{ background: `${tierColor}22`, border: `1.5px solid ${tierColor}55`, color: tierColor }}
+              >
+                {initials}
+              </div>
+              <ChevronDown
+                size={13}
+                className={cn("text-white/40 transition-transform duration-200", dropOpen && "rotate-180")}
+              />
+            </button>
+
+            {/* Dropdown */}
+            {dropOpen && (
+              <div
+                className="absolute right-0 mt-2 w-64 rounded-2xl overflow-hidden shadow-2xl z-50"
+                style={{
+                  background: "rgba(18,20,28,0.98)",
+                  border: "1px solid rgba(255,255,255,0.10)",
+                  backdropFilter: "blur(24px)",
+                }}
+              >
+                {/* User info */}
+                <div className="px-4 py-4 border-b" style={{ borderColor: "rgba(255,255,255,0.07)" }}>
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center text-[14px] font-black flex-shrink-0"
+                      style={{ background: `${tierColor}22`, border: `2px solid ${tierColor}55`, color: tierColor }}
+                    >
+                      {initials}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-white font-bold text-[13px] truncate">{displayName}</p>
+                      {email
+                        ? <p className="text-white/40 text-[11px] truncate">{email}</p>
+                        : <p className="text-white/25 text-[11px] italic">No email set</p>
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                {/* Menu items */}
+                <div className="py-1.5">
+                  <Link
+                    href="/profile"
+                    onClick={() => setDropOpen(false)}
+                    className="flex items-center gap-3 px-4 py-2.5 text-[13px] text-white/70 hover:text-white hover:bg-white/[0.05] transition-all"
+                  >
+                    <User size={15} className="flex-shrink-0" />
+                    Edit Profile
+                  </Link>
+                  <Link
+                    href="/settings"
+                    onClick={() => setDropOpen(false)}
+                    className="flex items-center gap-3 px-4 py-2.5 text-[13px] text-white/70 hover:text-white hover:bg-white/[0.05] transition-all"
+                  >
+                    <Settings size={15} className="flex-shrink-0" />
+                    Settings
+                  </Link>
+                  <div className="my-1 mx-3" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }} />
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-red-400/80 hover:text-red-400 hover:bg-red-500/[0.06] transition-all"
+                  >
+                    <LogOut size={15} className="flex-shrink-0" />
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -148,6 +246,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
             </Link>
           );
         })}
+        {/* Profile icon — mobile */}
+        <Link
+          href="/profile"
+          className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-[52px]"
+          style={{ color: pathname === "/profile" ? "var(--gold)" : "rgba(255,255,255,0.35)" }}
+        >
+          <User size={20} />
+          <span className="text-[9px] font-black uppercase tracking-wide">Profile</span>
+        </Link>
       </nav>
     </div>
   );
