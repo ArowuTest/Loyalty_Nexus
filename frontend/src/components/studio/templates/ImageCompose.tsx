@@ -4,8 +4,9 @@
  * ImageCompose.tsx — Whisk-style multi-reference image composition
  *
  * Allows users to upload up to three reference images (subject, scene, style)
- * and write a composition prompt. The backend routes this to Flux Pro 1.1 Ultra
- * using the subject image as image_url and the prompt to describe the composition.
+ * and write a composition prompt. The backend routes this to Grok Aurora
+ * (grok-imagine-image) as Tier 1, which accepts up to 5 reference images natively
+ * via the image_urls array. FAL Flux Pro 1.1 Ultra is used as a fallback.
  *
  * This mirrors Google Whisk's core UX: pick a character, pick a scene, pick a
  * style, and let the AI compose them into a new image.
@@ -180,7 +181,7 @@ export default function ImageCompose({ tool, onSubmit, isLoading, userPoints }: 
         <div>
           <p className="text-purple-200/80 text-xs font-medium">Whisk-style composition</p>
           <p className="text-purple-200/45 text-[11px] mt-0.5 leading-relaxed">
-            Upload a <span className="text-purple-300">subject</span> (required), an optional <span className="text-blue-300">scene</span>, and an optional <span className="text-pink-300">style</span> reference. Then describe how to compose them.
+            Upload a <span className="text-purple-300">subject</span> (required), an optional <span className="text-blue-300">scene</span>, and an optional <span className="text-pink-300">style</span> reference. All three images are sent to <span className="text-purple-300 font-medium">Grok Aurora</span> for true multi-image composition.
           </p>
         </div>
       </div>
@@ -323,7 +324,7 @@ export default function ImageCompose({ tool, onSubmit, isLoading, userPoints }: 
       {subjectReady && (
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <label className="text-white/40 text-[11px] font-semibold uppercase tracking-wider">Subject Influence</label>
+            <label className="text-white/40 text-[11px] font-semibold uppercase tracking-wider">Reference Influence</label>
             <span className="text-white/40 text-[11px] font-mono">{Math.round(refStrength * 100)}%</span>
           </div>
           <input

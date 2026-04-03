@@ -963,6 +963,70 @@ func (a *GrokAdapter) GenerateImage(ctx context.Context, prompt string, model st
 	return result.Data[0].URL, nil
 }
 
+// ComposeImages calls Grok Aurora (grok-imagine-image) with up to 5 reference images
+// for Whisk-style subject+scene+style composition.
+// API: POST /v1/images/generations with image_urls array (up to 5 images).
+// Docs: https://docs.x.ai/developers/model-capabilities/images/generation#editing-with-multiple-images
+func (a *GrokAdapter) ComposeImages(ctx context.Context, prompt string, imageURLs []string, aspectRatio string) (string, error) {
+	if len(imageURLs) == 0 {
+		return "", fmt.Errorf("grok compose: at least one image URL required")
+	}
+	// Cap at 5 (API limit for multi-image editing)
+	if len(imageURLs) > 5 {
+		imageURLs = imageURLs[:5]
+	}
+	if prompt == "" {
+		prompt = "Compose these reference images into a single cohesive image"
+	}
+	payload := map[string]interface{}{
+		"model":      "grok-imagine-image",
+		"prompt":     prompt,
+		"image_urls": imageURLs,
+		"n":          1,
+	}
+	if aspectRatio != "" {
+		payload["aspect_ratio"] = aspectRatio
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("grok compose marshal: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.x.ai/v1/images/generations", bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("grok compose new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("grok compose http: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("grok compose %d: %s", resp.StatusCode, truncateGrokStr(string(raw), 300))
+	}
+	var result struct {
+		Data []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return "", fmt.Errorf("grok compose decode: %w", err)
+	}
+	if result.Error != nil {
+		return "", fmt.Errorf("grok compose API error: %s", result.Error.Message)
+	}
+	if len(result.Data) == 0 || result.Data[0].URL == "" {
+		return "", fmt.Errorf("grok compose: no image URL in response")
+	}
+	return result.Data[0].URL, nil
+}
+
 // GrokVideoRequest holds all parameters for a Grok Imagine video generation call.
 // Exactly one of the mode fields should be set:
 //   - TextToVideo:      prompt only (no image/video URL)

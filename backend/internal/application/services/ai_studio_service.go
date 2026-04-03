@@ -702,18 +702,38 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 		slug = "bg-remover"
 	}
 
-	// ── image-compose: Whisk-style multi-reference composition ───────────────
-	// Uses Flux Pro 1.1 Ultra with subject image_url + optional scene/style refs
+	// image-compose: Whisk-style multi-reference composition
+	// Tier 1: Grok Aurora (grok-imagine-image) — true multi-image editing, up to 5 reference images
+	//         Sends subject + scene + style images as image_urls array. $0.02/image.
+	// Tier 2: FAL Flux Pro 1.1 Ultra — single image_url reference fallback
 	if slug == "image-compose" {
-		falKey := os.Getenv("FAL_API_KEY")
-		if falKey == "" {
-			return nil, fmt.Errorf("image-compose: FAL_API_KEY not configured")
-		}
 		subjectURL := env.ImageURL
 		if subjectURL == "" {
 			return nil, fmt.Errorf("image-compose: subject image_url is required")
 		}
-		// Read extra params
+		// Collect all reference images: subject first, then scene, then style
+		imageURLs := []string{subjectURL}
+		if sceneURL, ok := env.Extra["scene_image_url"].(string); ok && sceneURL != "" {
+			imageURLs = append(imageURLs, sceneURL)
+		}
+		if styleURL, ok := env.Extra["style_image_url"].(string); ok && styleURL != "" {
+			imageURLs = append(imageURLs, styleURL)
+		}
+
+		// Tier 1: Grok Aurora — true multi-image composition
+		if o.grokClient != nil {
+			if imgURL, err := o.grokClient.ComposeImages(ctx, prompt, imageURLs, env.AspectRatio); err == nil {
+				return &studioProviderResult{OutputURL: imgURL, Provider: "grok/aurora-compose", CostMicros: 2000 * len(imageURLs)}, nil
+			} else {
+				log.Printf("[AIStudio] Grok Aurora compose failed for image-compose: %v — falling back to FAL Flux Ultra", err)
+			}
+		}
+
+		// Tier 2: FAL Flux Pro 1.1 Ultra fallback (subject image only)
+		falKey := os.Getenv("FAL_API_KEY")
+		if falKey == "" {
+			return nil, fmt.Errorf("image-compose: both Grok and FAL unavailable (no FAL_API_KEY)")
+		}
 		numImages := 1
 		if n, ok := env.Extra["num_images"].(float64); ok && n >= 1 && n <= 4 {
 			numImages = int(n)
@@ -722,21 +742,10 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 		if s, ok := env.Extra["image_prompt_strength"].(float64); ok && s > 0 && s <= 1.0 {
 			imgStrength = s
 		}
-		// Enrich prompt with scene/style context from extra params
-		compositePrompt := prompt
-		if sceneURL, ok := env.Extra["scene_image_url"].(string); ok && sceneURL != "" {
-			compositePrompt += " Scene reference image provided."
-			_ = sceneURL // stored for future multi-image API support
-		}
-		if styleURL, ok := env.Extra["style_image_url"].(string); ok && styleURL != "" {
-			compositePrompt += " Style reference image provided."
-			_ = styleURL
-		}
-		urls, err := o.callFALFluxUltra(ctx, falKey, compositePrompt, subjectURL, imgStrength, numImages, env.AspectRatio)
+		urls, err := o.callFALFluxUltra(ctx, falKey, prompt, subjectURL, imgStrength, numImages, env.AspectRatio)
 		if err != nil {
 			return nil, fmt.Errorf("image-compose: %w", err)
 		}
-		// Return first URL; multi-image handled by OutputURLs in future
 		return &studioProviderResult{OutputURL: urls[0], Provider: "fal/flux-pro-ultra", CostMicros: 40000 * numImages}, nil
 	}
 	switch slug {
