@@ -17,7 +17,7 @@ import {
   Paperclip, AlertCircle, Search, Plus,
 } from "lucide-react";
 import {
-  MusicComposer, ImageCreator, ImageEditor,
+  MusicComposer, ImageCreator, ImageEditor, ImageCompose,
   VideoCreator, VideoAnimator, VideoMultiScene, VoiceStudio,
   Transcribe, VisionAsk, KnowledgeDoc,
 } from "../../components/studio/templates";
@@ -1868,6 +1868,7 @@ function renderTemplate(
     case "music-composer":  return <MusicComposer  {...props} />;
     case "image-creator":   return <ImageCreator   {...props} />;
     case "image-editor":    return <ImageEditor    {...props} />;
+    case "image-compose":   return <ImageCompose   {...props} />;
     case "video-creator":   return <VideoCreator   {...props} />;
     case "video-animator":      return <VideoAnimator      {...props} />;
     case "video-multi-scene":  return <VideoMultiScene  {...props} />;

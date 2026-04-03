@@ -11,7 +11,7 @@ INSERT INTO studio_tools (
     category,
     icon,
     ui_template,
-    points_cost,
+    point_cost,
     min_tier,
     is_active,
     sort_order,
@@ -46,7 +46,7 @@ ON CONFLICT (slug) DO UPDATE SET
     name        = EXCLUDED.name,
     description = EXCLUDED.description,
     ui_template = EXCLUDED.ui_template,
-    points_cost = EXCLUDED.points_cost,
+    point_cost  = EXCLUDED.point_cost,
     min_tier    = EXCLUDED.min_tier,
     is_active   = EXCLUDED.is_active,
     ui_config   = EXCLUDED.ui_config;

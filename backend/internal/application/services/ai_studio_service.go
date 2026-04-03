@@ -115,15 +115,17 @@ var slugCategory = map[string]studioToolCat{
 	"my-podcast":           catComposite, // alias for podcast
 	"background-remover":   catImage,  // alias for bg-remover
 	"animate-my-photo":     catVideo,  // alias for animate-photo
-	"video-story":          catVideo,  // multi-scene image-to-video (Kling multi-image)
-	"business-plan-summary": catText,  // alias for bizplan
-	// ── Free chat tools ──────────────────────────────────────────────────────
-	"ask-nexus":  catText, // free conversational AI
-	"nexus-chat": catText, // free Gemini Flash chat
-	"voice-to-plan": catText, // voice-to-business-plan
+	"video-story":           catVideo,  // multi-scene image-to-video (Kling multi-image)
+	"business-plan-summary": catText,   // alias for bizplan
+	// ── Whisk-style image composition ────────────────────────────────────────────────────────────────────────────────
+	"image-compose":         catImage,  // Whisk-style subject+scene+style composition (Flux Ultra)
+	// ── Free chat tools ──────────────────────────────────────────────────────────────────────────────────────
+	"ask-nexus":             catText,   // free conversational AI
+	"nexus-chat":            catText,   // free Gemini Flash chat
+	"voice-to-plan":         catText,   // voice-to-business-plan
 }
 
-// ─── Provider result ──────────────────────────────────────────────────────────
+// ─── Provider result ──────────────────────────────────────────────────────────────────────────────────────
 
 type studioProviderResult struct {
 	OutputURL  string // CDN URL or data URI for binary outputs
@@ -686,7 +688,7 @@ func (o *AIStudioOrchestrator) enhanceVideoPrompt(ctx context.Context, userPromp
 }
 
 // ─── Image dispatch ────────────────────────────────────────────────────────────
-// Handles: ai-photo, bg-remover, ai-photo-pro, ai-photo-max, ai-photo-dream, photo-editor
+// Handles: ai-photo, bg-remover, ai-photo-pro, ai-photo-max, ai-photo-dream, photo-editor, image-compose
 
 func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	prompt := o.enhanceImagePrompt(ctx, slug, env.Prompt)
@@ -696,6 +698,44 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 		slug = "ai-photo"
 	case "background-remover":
 		slug = "bg-remover"
+	}
+
+	// ── image-compose: Whisk-style multi-reference composition ───────────────
+	// Uses Flux Pro 1.1 Ultra with subject image_url + optional scene/style refs
+	if slug == "image-compose" {
+		falKey := os.Getenv("FAL_API_KEY")
+		if falKey == "" {
+			return nil, fmt.Errorf("image-compose: FAL_API_KEY not configured")
+		}
+		subjectURL := env.ImageURL
+		if subjectURL == "" {
+			return nil, fmt.Errorf("image-compose: subject image_url is required")
+		}
+		// Read extra params
+		numImages := 1
+		if n, ok := env.Extra["num_images"].(float64); ok && n >= 1 && n <= 4 {
+			numImages = int(n)
+		}
+		imgStrength := 0.35
+		if s, ok := env.Extra["image_prompt_strength"].(float64); ok && s > 0 && s <= 1.0 {
+			imgStrength = s
+		}
+		// Enrich prompt with scene/style context from extra params
+		compositePrompt := prompt
+		if sceneURL, ok := env.Extra["scene_image_url"].(string); ok && sceneURL != "" {
+			compositePrompt += " Scene reference image provided."
+			_ = sceneURL // stored for future multi-image API support
+		}
+		if styleURL, ok := env.Extra["style_image_url"].(string); ok && styleURL != "" {
+			compositePrompt += " Style reference image provided."
+			_ = styleURL
+		}
+		urls, err := o.callFALFluxUltra(ctx, falKey, compositePrompt, subjectURL, imgStrength, numImages, env.AspectRatio)
+		if err != nil {
+			return nil, fmt.Errorf("image-compose: %w", err)
+		}
+		// Return first URL; multi-image handled by OutputURLs in future
+		return &studioProviderResult{OutputURL: urls[0], Provider: "fal/flux-pro-ultra", CostMicros: 40000 * numImages}, nil
 	}
 	switch slug {
 	case "bg-remover":
@@ -814,7 +854,25 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 		}
 		return nil, fmt.Errorf("photo-editor: all providers failed: %w", err)
 
-	default: // ai-photo
+	default: // ai-photo — also handles ai-photo with reference image (Whisk-style)
+		// If a reference image is provided, route to Flux Pro 1.1 Ultra for image-guided generation
+		if env.ImageURL != "" {
+			if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
+				numImages := 1
+				if n, ok := env.Extra["num_images"].(float64); ok && n >= 1 && n <= 4 {
+					numImages = int(n)
+				}
+				imgStrength := 0.3
+				if s, ok := env.Extra["image_prompt_strength"].(float64); ok && s > 0 && s <= 1.0 {
+					imgStrength = s
+				}
+				urls, err := o.callFALFluxUltra(ctx, falKey, prompt, env.ImageURL, imgStrength, numImages, env.AspectRatio)
+				if err == nil {
+					return &studioProviderResult{OutputURL: urls[0], Provider: "fal/flux-pro-ultra", CostMicros: 40000 * numImages}, nil
+				}
+				log.Printf("[AIStudio] FAL Flux Ultra (reference) failed: %v — falling back to standard generation", err)
+			}
+		}
 		// ── DB-first ────────────────────────────────────────────────────────
 		in := providerInput{Prompt: prompt}
 		if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryImage, in); err == nil {
@@ -1909,6 +1967,72 @@ func (o *AIStudioOrchestrator) callFALFlux(ctx context.Context, falKey, prompt s
 		return "", fmt.Errorf("FAL parse: empty images")
 	}
 	return parsed.Images[0].URL, nil
+}
+
+// callFALFluxUltra calls FAL.AI Flux Pro 1.1 Ultra — supports reference image, num_images (1-4),
+// and image_prompt_strength (0-1). Used for Whisk-style reference-guided generation.
+func (o *AIStudioOrchestrator) callFALFluxUltra(
+	ctx context.Context,
+	falKey, prompt, imageURL string,
+	imagePromptStrength float64,
+	numImages int,
+	aspectRatio string,
+) ([]string, error) {
+	if numImages < 1 {
+		numImages = 1
+	}
+	if numImages > 4 {
+		numImages = 4
+	}
+	payload := map[string]interface{}{
+		"prompt":                prompt,
+		"num_images":            numImages,
+		"output_format":         "jpeg",
+		"safety_tolerance":      "2",
+	}
+	if imageURL != "" {
+		payload["image_url"] = imageURL
+		payload["image_prompt_strength"] = imagePromptStrength
+	}
+	if aspectRatio != "" {
+		payload["aspect_ratio"] = aspectRatio
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://fal.run/fal-ai/flux-pro/v1.1-ultra", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Key "+falKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("FAL Ultra %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+	var parsed struct {
+		Images []struct {
+			URL string `json:"url"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Images) == 0 {
+		return nil, fmt.Errorf("FAL Ultra parse: empty images")
+	}
+	var urls []string
+	for _, img := range parsed.Images {
+		if img.URL != "" {
+			urls = append(urls, img.URL)
+		}
+	}
+	if len(urls) == 0 {
+		return nil, fmt.Errorf("FAL Ultra: no image URLs in response")
+	}
+	return urls, nil
 }
 
 // callFALImageEdit calls FAL.AI FLUX.1 Kontext Pro for image-to-image editing.

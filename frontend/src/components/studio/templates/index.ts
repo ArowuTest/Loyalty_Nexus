@@ -1,6 +1,7 @@
 export { default as MusicComposer }    from './MusicComposer';
 export { default as ImageCreator }     from './ImageCreator';
 export { default as ImageEditor }      from './ImageEditor';
+export { default as ImageCompose }     from './ImageCompose';
 export { default as VideoCreator }     from './VideoCreator';
 export { default as VideoAnimator }    from './VideoAnimator';
 export { default as VideoMultiScene }  from './VideoMultiScene';

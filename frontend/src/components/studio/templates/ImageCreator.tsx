@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { Loader2, Sparkles, Info, Shuffle, ChevronDown, ChevronUp, Wand2, Mic, MicOff } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Loader2, Sparkles, Info, Shuffle, ChevronDown, ChevronUp, Wand2, Mic, MicOff, Upload, X, ImageIcon, CheckCircle2 } from 'lucide-react';
 import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
+import api from '@/lib/api';
 
 const DEFAULT_ASPECT_RATIOS = [
   { label: 'Square',    value: '1:1',   w: 1,   h: 1   },
@@ -35,6 +36,9 @@ const MODEL_IDENTITY: Record<string, { label: string; desc: string; color: strin
   'ai-photo-dream': { label: 'Seedream',        desc: 'Dreamlike aesthetics · stylised outputs', color: 'text-pink-300 bg-pink-600/15 border-pink-500/30',        dot: 'bg-pink-400' },
 };
 
+const NUM_IMAGE_OPTIONS = [1, 2, 4] as const;
+type NumImages = typeof NUM_IMAGE_OPTIONS[number];
+
 export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
   const cfg          = tool.ui_config ?? {};
   const aspectRatios = cfg.aspect_ratios ?? DEFAULT_ASPECT_RATIOS;
@@ -49,16 +53,26 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
   const [showNegBox,     setShowNegBox]     = useState(false);
   const [showInspo,      setShowInspo]      = useState(false);
+  const [quality,        setQuality]        = useState<'standard' | 'hd'>('standard');
+  const [numImages,      setNumImages]      = useState<NumImages>(1);
+
+  // ── Style reference image ───────────────────────────────────────────────
+  const [refPreview,    setRefPreview]    = useState<string | null>(null);
+  const [refUploadedUrl, setRefUploadedUrl] = useState<string | null>(null);
+  const [isRefUploading, setIsRefUploading] = useState(false);
+  const [refUploadError, setRefUploadError] = useState<string | null>(null);
+  const [refStrength,   setRefStrength]   = useState(0.3); // 0–1, how much the reference influences output
+  const [showRefSection, setShowRefSection] = useState(false);
+  const refFileRef = useRef<HTMLInputElement>(null);
 
   // ── Web Speech API mic ──────────────────────────────────────────────────
-  const { speechState, speechError, interimText, handleMicClick, isMicBusy } =
+  const { speechState, speechError, interimText, handleMicClick } =
     useSpeechToText({
       onTranscript: (t) => setPrompt(prev => (prev ? prev + ' ' + t : t).slice(0, 500)),
       language: 'en-US',
     });
-  const [quality,        setQuality]        = useState<'standard' | 'hd'>('standard');
 
-  const canAfford  = tool.is_free || userPoints >= tool.point_cost;
+  const canAfford  = tool.is_free || userPoints >= (tool.point_cost * numImages);
   const isValid    = prompt.trim().length >= 3;
   const modelInfo  = MODEL_IDENTITY[tool.slug ?? ''];
   const charPct    = Math.min(100, (prompt.length / 500) * 100);
@@ -82,6 +96,28 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
     setPrompt(random);
   }
 
+  async function handleRefFile(file: File) {
+    setRefUploadError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => setRefPreview(e.target?.result as string);
+    reader.readAsDataURL(file);
+    setIsRefUploading(true);
+    try {
+      const result = await api.uploadAsset(file);
+      setRefUploadedUrl(result.url);
+    } catch {
+      setRefUploadError('Upload failed — please try again.');
+    } finally {
+      setIsRefUploading(false);
+    }
+  }
+
+  function clearRef() {
+    setRefPreview(null);
+    setRefUploadedUrl(null);
+    setRefUploadError(null);
+  }
+
   function handleSubmit() {
     if (!isValid || isLoading || !canAfford) return;
     const stylePrefix = selectedStyles.length > 0 ? `[${selectedStyles.join(', ')}] ` : '';
@@ -90,12 +126,19 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
       aspect_ratio:    aspect,
       style_tags:      selectedStyles.length > 0 ? selectedStyles : undefined,
       negative_prompt: negPrompt.trim() || undefined,
+      // If a reference image is provided, pass it as image_url so the backend
+      // routes to Flux Ultra (which accepts image_url + image_prompt_strength)
+      image_url:       refUploadedUrl ?? undefined,
       extra_params: {
-        quality: showQuality ? quality : undefined,
+        quality:               showQuality ? quality : undefined,
+        num_images:            numImages > 1 ? numImages : undefined,
+        image_prompt_strength: refUploadedUrl ? refStrength : undefined,
       },
     };
     onSubmit(payload);
   }
+
+  const totalCost = tool.point_cost * numImages;
 
   return (
     <div className="space-y-5">
@@ -117,7 +160,6 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Aspect Ratio</label>
-          {/* Live canvas preview */}
           <div className="flex items-center gap-2">
             <div
               className="border-2 border-purple-500/50 bg-purple-600/10 rounded transition-all duration-300"
@@ -144,6 +186,34 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
             </button>
           ))}
         </div>
+      </div>
+
+      {/* ── Number of images ── */}
+      <div>
+        <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">
+          Number of Images
+        </label>
+        <div className="flex gap-2">
+          {NUM_IMAGE_OPTIONS.map((n) => (
+            <button
+              key={n}
+              onClick={() => setNumImages(n)}
+              className={cn(
+                'flex-1 py-2.5 rounded-xl border text-sm font-semibold transition-all',
+                numImages === n
+                  ? 'bg-purple-600/25 border-purple-500/60 text-purple-200 shadow-sm shadow-purple-900/30'
+                  : 'border-white/10 text-white/45 hover:border-white/25 hover:text-white/70',
+              )}
+            >
+              {n === 1 ? '× 1' : n === 2 ? '× 2' : '× 4'}
+            </button>
+          ))}
+        </div>
+        {numImages > 1 && (
+          <p className="text-white/25 text-[11px] mt-1.5">
+            Generates {numImages} variations simultaneously · costs {totalCost} PulsePoints
+          </p>
+        )}
       </div>
 
       {/* ── Quality toggle (GPT-Image only) ── */}
@@ -197,6 +267,99 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
         </div>
       )}
 
+      {/* ── Style reference image (optional, Whisk-style) ── */}
+      <div>
+        <button
+          onClick={() => setShowRefSection((v) => !v)}
+          className="flex items-center gap-2 text-white/40 hover:text-white/65 text-xs transition-colors w-full"
+        >
+          <ImageIcon size={12} />
+          <span className="font-medium">
+            {showRefSection ? 'Hide' : 'Add'} style reference image
+          </span>
+          <span className="text-white/20 font-normal">(optional)</span>
+          {showRefSection ? <ChevronUp size={11} className="ml-auto" /> : <ChevronDown size={11} className="ml-auto" />}
+        </button>
+
+        {showRefSection && (
+          <div className="mt-3 p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-3">
+            <p className="text-white/35 text-[11px] leading-relaxed">
+              Upload an image whose <span className="text-purple-300">style, colour palette, or mood</span> you want the AI to match. Your text prompt still controls the subject and composition.
+            </p>
+
+            {!refPreview ? (
+              <>
+                <div
+                  onClick={() => refFileRef.current?.click()}
+                  className="border-2 border-dashed border-white/12 rounded-xl p-5 flex flex-col items-center gap-2 cursor-pointer
+                             hover:border-purple-500/35 hover:bg-purple-500/5 transition-all text-center"
+                >
+                  <Upload size={18} className="text-white/30" />
+                  <p className="text-white/45 text-xs">Click to upload a style reference</p>
+                  <p className="text-white/25 text-[11px]">PNG, JPG, WebP</p>
+                </div>
+                <input
+                  ref={refFileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleRefFile(f); }}
+                />
+              </>
+            ) : (
+              <div className="relative rounded-xl overflow-hidden border border-white/10">
+                <img src={refPreview} alt="Style reference" className="w-full max-h-36 object-contain bg-black/30" />
+                <button
+                  onClick={clearRef}
+                  className="absolute top-2 right-2 p-1.5 bg-black/70 rounded-full text-white/60 hover:text-white transition-colors"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            )}
+
+            {isRefUploading && (
+              <div className="flex items-center gap-2 bg-purple-500/10 border border-purple-500/20 rounded-xl px-3 py-2">
+                <Loader2 size={12} className="text-purple-400 animate-spin flex-shrink-0" />
+                <p className="text-purple-300/80 text-xs">Uploading reference…</p>
+              </div>
+            )}
+            {refUploadedUrl && !isRefUploading && (
+              <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-xl px-3 py-2">
+                <CheckCircle2 size={12} className="text-green-400 flex-shrink-0" />
+                <p className="text-green-300/80 text-xs">Style reference ready</p>
+              </div>
+            )}
+            {refUploadError && (
+              <p className="text-red-300/80 text-xs">{refUploadError}</p>
+            )}
+
+            {/* Influence strength slider */}
+            {refUploadedUrl && (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-white/40 text-[11px] font-semibold uppercase tracking-wider">Style Influence</label>
+                  <span className="text-white/40 text-[11px] font-mono">{Math.round(refStrength * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.05}
+                  max={0.95}
+                  step={0.05}
+                  value={refStrength}
+                  onChange={(e) => setRefStrength(parseFloat(e.target.value))}
+                  className="w-full accent-purple-500"
+                />
+                <div className="flex justify-between text-[10px] text-white/20 mt-0.5">
+                  <span>Subtle</span>
+                  <span>Strong</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* ── Prompt ── */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
@@ -243,7 +406,7 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value.slice(0, 500))}
-          placeholder={cfg.prompt_placeholder ?? 'e.g. A majestic lion standing on a cliff at golden hour, dramatic lighting, ultra-detailed, 8K…'}
+          placeholder={cfg.prompt_placeholder ?? 'e.g. A majestic lion standing on a cliff at golden hour, dramatic lighting, ultra-detailed'}
           rows={4}
           autoFocus
           className="nexus-input resize-none w-full text-sm leading-relaxed"
@@ -308,10 +471,10 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
       {/* ── Generate button ── */}
       <button
         onClick={handleSubmit}
-        disabled={!isValid || isLoading || !canAfford}
+        disabled={!isValid || isLoading || !canAfford || isRefUploading}
         className={cn(
           'w-full py-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all',
-          isValid && !isLoading && canAfford
+          isValid && !isLoading && canAfford && !isRefUploading
             ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-purple-900/40'
             : 'bg-white/5 text-white/20 cursor-not-allowed',
         )}
@@ -319,12 +482,12 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
         {isLoading ? (
           <>
             <Loader2 size={15} className="animate-spin" />
-            <span>Generating your image…</span>
+            <span>Generating {numImages > 1 ? `${numImages} images` : 'your image'}…</span>
           </>
         ) : (
           <>
             <Sparkles size={15} />
-            <span>Generate Image</span>
+            <span>Generate {numImages > 1 ? `${numImages} Images` : 'Image'}</span>
             {!canAfford && <span className="text-xs opacity-60 ml-1">(insufficient points)</span>}
           </>
         )}
@@ -333,7 +496,7 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
       {/* Cost hint */}
       {!tool.is_free && (
         <p className="text-white/20 text-[11px] text-center -mt-2">
-          {tool.point_cost} PulsePoints per generation · {userPoints} available
+          {totalCost} PulsePoints per generation · {userPoints} available
         </p>
       )}
     </div>

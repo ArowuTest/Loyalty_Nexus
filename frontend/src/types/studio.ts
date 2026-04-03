@@ -22,6 +22,7 @@ export type UITemplate =
   | 'music-composer'
   | 'image-creator'
   | 'image-editor'
+  | 'image-compose'
   | 'video-creator'
   | 'video-animator'
   | 'video-multi-scene'
