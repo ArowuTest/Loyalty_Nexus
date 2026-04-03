@@ -941,7 +941,13 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 			log.Printf("[AIStudio] Grok Imagine Video failed for video-veo: %v — trying Veo", err)
 		}
 		// Tier 2: Google Veo 3.1 (Pollinations) — $0.150/sec
-		vidURL, err := o.callPollinationsVeo(ctx, prompt, env.AspectRatio, env.Extra["audio_direction"] != "")
+		// Always enable audio for Veo; audio_direction is appended to prompt as a hint
+		if audioHint, ok := env.Extra["audio_direction"]; ok {
+			if hint := fmt.Sprintf("%v", audioHint); hint != "" && hint != "<nil>" {
+				prompt = prompt + ". Audio: " + hint
+			}
+		}
+		vidURL, err := o.callPollinationsVeo(ctx, prompt, env.AspectRatio, true)
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo", CostMicros: 400000}, nil
 		}
@@ -980,9 +986,9 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		var model string
 		switch slug {
 		case "video-premium":
-			model = "fal-ai/kling-video/v1.5/standard/image-to-video"
+			model = "fal-ai/kling-video/v2.6/pro/image-to-video"
 		case "video-jingle":
-			model = "fal-ai/kling-video/v1.5/standard/image-to-video"
+			model = "fal-ai/kling-video/v2.6/pro/image-to-video"
 		default: // animate-photo
 			model = "fal-ai/ltx-video"
 		}
@@ -2018,12 +2024,17 @@ func (o *AIStudioOrchestrator) callFALVideo(ctx context.Context, falKey, model, 
 		motionPrompt = "animate this photo naturally with smooth cinematic motion, subtle movement, professional quality"
 	}
 	payload := map[string]interface{}{
-		"image_url": imageURL,
-		"prompt":    motionPrompt,
-		"duration":  "5",
+		"prompt":   motionPrompt,
+		"duration": "5",
 	}
 	if strings.Contains(model, "kling") {
-		payload["aspect_ratio"] = "9:16"
+		// Kling v2.6 uses start_image_url and supports native audio generation
+		payload["start_image_url"] = imageURL
+		payload["generate_audio"] = true
+		payload["aspect_ratio"] = "16:9" // default; overridden by caller if needed
+	} else {
+		// LTX and other models use image_url
+		payload["image_url"] = imageURL
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
