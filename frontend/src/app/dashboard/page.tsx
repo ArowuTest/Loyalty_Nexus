@@ -131,9 +131,9 @@ function PassportBanner({ points, streak }: { points: number; streak: number }) 
         transition={{ duration: 0.35, ease: "easeOut" }}
         className="relative rounded-2xl overflow-hidden"
         style={{
-          background: "linear-gradient(135deg, #0e1a2e 0%, #0d1120 100%)",
-          border: "1px solid rgba(99,179,237,0.25)",
-          boxShadow: "0 0 32px rgba(99,179,237,0.08), inset 0 1px 0 rgba(255,255,255,0.04)",
+          background: "linear-gradient(135deg, #0a1628 0%, #0d1120 60%, #0e1a2e 100%)",
+          border: "1px solid rgba(99,179,237,0.40)",
+          boxShadow: "0 0 48px rgba(99,179,237,0.18), 0 0 16px rgba(99,179,237,0.10), inset 0 1px 0 rgba(255,255,255,0.06)",
         }}
       >
         <div className="absolute top-0 left-0 right-0 h-[2px]"
@@ -143,30 +143,47 @@ function PassportBanner({ points, streak }: { points: number; streak: number }) 
         <div className="relative p-4 flex items-start gap-3">
           <div className="relative flex-shrink-0 mt-0.5">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{ background: "rgba(99,179,237,0.15)", border: "1px solid rgba(99,179,237,0.3)" }}>
+              style={{ background: "rgba(99,179,237,0.22)", border: "1px solid rgba(99,179,237,0.50)" }}>
               <CreditCard size={18} className="text-blue-300" />
             </div>
+            {/* Primary pulse ring */}
             <span className="absolute inset-0 rounded-xl animate-ping"
-              style={{ background: "rgba(99,179,237,0.15)", animationDuration: "2s" }} />
+              style={{ background: "rgba(99,179,237,0.20)", animationDuration: "1.6s" }} />
+            {/* Secondary outer pulse ring */}
+            <span className="absolute -inset-1.5 rounded-xl animate-ping"
+              style={{ background: "rgba(99,179,237,0.08)", animationDuration: "2.4s", animationDelay: "0.5s" }} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-white font-black text-sm leading-snug">🎫 {cfg.banner_title}</p>
-            <p className="text-white/50 text-[12px] mt-0.5 leading-relaxed">
-              Track your <strong className="text-blue-300">{formatPoints(points)} pts</strong>
-              {streak > 0 && <> and <strong className="text-orange-400">Day {streak} streak</strong></>}{" "}
-              {cfg.banner_subtitle}
+            <div className="flex items-center gap-2">
+              <p className="text-white font-black text-sm leading-snug">🎫 {cfg.banner_title}</p>
+              <span
+                className="text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wider animate-pulse"
+                style={{ background: "rgba(99,179,237,0.22)", color: "#93c5fd", border: "1px solid rgba(99,179,237,0.40)" }}
+              >NEW</span>
+            </div>
+            <p className="text-white/55 text-[12px] mt-0.5 leading-relaxed">
+              Your <strong className="text-blue-300">{formatPoints(points)} pts</strong>
+              {streak > 0 && <> &amp; <strong className="text-orange-400">Day {streak} streak</strong></>}{" "}
+              live on your lock screen — no app needed.
             </p>
-            <div className="flex items-center gap-2 mt-2.5">
+            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
               <Link href="/passport">
-                <button className="inline-flex items-center gap-1.5 text-[11px] font-black px-3 py-1.5 rounded-lg"
-                  style={{ background: "rgba(99,179,237,0.15)", border: "1px solid rgba(99,179,237,0.3)", color: "#93c5fd" }}>
+                <button
+                  className="inline-flex items-center gap-1.5 text-[11px] font-black px-3.5 py-2 rounded-lg transition-all hover:scale-105 active:scale-95"
+                  style={{
+                    background: "linear-gradient(135deg, rgba(99,179,237,0.30) 0%, rgba(59,130,246,0.22) 100%)",
+                    border: "1px solid rgba(99,179,237,0.55)",
+                    color: "#bfdbfe",
+                    boxShadow: "0 0 14px rgba(99,179,237,0.22)",
+                  }}
+                >
                   {isIOS ? <Smartphone size={12} /> : <Wallet size={12} />}
-                  {isIOS ? cfg.banner_cta_ios : cfg.banner_cta_android}
+                  ↓ {isIOS ? cfg.banner_cta_ios : cfg.banner_cta_android}
                 </button>
               </Link>
               <Link href="/passport">
                 <button className="inline-flex items-center gap-1 text-[11px] font-black text-white/40 hover:text-white/70 transition-colors">
-                  Learn more <ChevronRight size={11} />
+                  How it works <ChevronRight size={11} />
                 </button>
               </Link>
             </div>

@@ -11,8 +11,8 @@ import {
 
 const NAV_ITEMS = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Home"   },
-  { href: "/spin",      icon: Zap,             label: "Spin"   },
-  { href: "/studio",    icon: Wand2,           label: "Studio" },
+  { href: "/spin",      icon: Zap,             label: "Wheel Spin"   },
+  { href: "/studio",    icon: Wand2,           label: "AI Studio" },
   { href: "/wars",      icon: Trophy,          label: "Wars"   },
   { href: "/prizes",    icon: Gift,            label: "Prizes" },
 ];
@@ -71,7 +71,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         }}
       >
         {/* Logo */}
-        <Link href="/dashboard" className="flex items-center gap-2.5">
+        <Link href="/" className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
             style={{ background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.25)" }}>
             <Zap size={16} style={{ color: "var(--gold)" }} />
