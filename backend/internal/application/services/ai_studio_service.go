@@ -115,6 +115,7 @@ var slugCategory = map[string]studioToolCat{
 	"my-podcast":           catComposite, // alias for podcast
 	"background-remover":   catImage,  // alias for bg-remover
 	"animate-my-photo":     catVideo,  // alias for animate-photo
+	"video-story":          catVideo,  // multi-scene image-to-video (Kling multi-image)
 	"business-plan-summary": catText,  // alias for bizplan
 	// ── Free chat tools ──────────────────────────────────────────────────────
 	"ask-nexus":  catText, // free conversational AI
@@ -902,6 +903,35 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		slug = "animate-photo"
 	}
 
+	// video-story: multi-scene image-to-video (FAL Kling v1.6 multi-image)
+	if slug == "video-story" {
+		imageURLsRaw := env.Extra["image_urls"]
+		var imageURLs []string
+		if arr, ok := imageURLsRaw.([]interface{}); ok {
+			for _, v := range arr {
+				if s, ok2 := v.(string); ok2 && s != "" {
+					imageURLs = append(imageURLs, s)
+				}
+			}
+		}
+		if len(imageURLs) < 2 {
+			return nil, fmt.Errorf("video-story: at least 2 images required, got %d", len(imageURLs))
+		}
+		if len(imageURLs) > 4 {
+			imageURLs = imageURLs[:4]
+		}
+		prompt := o.enhanceVideoPrompt(ctx, env.Prompt)
+		falKey := os.Getenv("FAL_API_KEY")
+		if falKey == "" {
+			return nil, fmt.Errorf("video-story: FAL_API_KEY not configured")
+		}
+		vidURL, err := o.callFALMultiImageVideo(ctx, falKey, imageURLs, prompt, env)
+		if err != nil {
+			return nil, fmt.Errorf("video-story: %w", err)
+		}
+		return &studioProviderResult{OutputURL: vidURL, Provider: "fal.ai/kling-multi-image", CostMicros: 56000}, nil
+	}
+
 	// video-cinematic: high-quality cinematic image-to-video
 	// Primary: wan-fast (Wan 2.2) — FREE, 15 pollen input, ~50s, image-to-video
 	// Fallback: ltx-2 (LTX-2)   — FREE, 15 pollen input, NEW model
@@ -993,9 +1023,9 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 			model = "fal-ai/ltx-video"
 		}
 
-		videoURL, err := o.callFALVideo(ctx, falKey, model, imageURL, o.enhanceVideoPrompt(ctx, env.Prompt))
+		videoURL, err := o.callFALVideo(ctx, falKey, model, imageURL, o.enhanceVideoPrompt(ctx, env.Prompt), env)
 		if err != nil {
-			// Fallback for Kling → LTX within FAL
+			// Fallback for Kling → LTX within FAL (LTX doesn't support end_image_url, pass empty env)
 			if slug == "video-premium" {
 				log.Printf("[AIStudio] Kling failed, falling back to LTX: %v", err)
 				videoURL, err = o.callFALVideo(ctx, falKey, "fal-ai/ltx-video", imageURL, o.enhanceVideoPrompt(ctx, env.Prompt))
@@ -2019,22 +2049,60 @@ func (o *AIStudioOrchestrator) callRemoveBg(ctx context.Context, apiKey, imageUR
 }
 
 // callFALVideo calls FAL.AI for image-to-video animation.
-func (o *AIStudioOrchestrator) callFALVideo(ctx context.Context, falKey, model, imageURL, motionPrompt string) (string, error) {
+// Pass the promptEnvelope so duration, aspect_ratio, generate_audio, and
+// end_image_url (tail frame) are forwarded from the user's request.
+func (o *AIStudioOrchestrator) callFALVideo(ctx context.Context, falKey, model, imageURL, motionPrompt string, envs ...promptEnvelope) (string, error) {
 	if motionPrompt == "" {
 		motionPrompt = "animate this photo naturally with smooth cinematic motion, subtle movement, professional quality"
 	}
+
+	// Resolve optional envelope
+	var env promptEnvelope
+	if len(envs) > 0 {
+		env = envs[0]
+	}
+
+	// Duration: prefer envelope value, default to 5
+	durationStr := "5"
+	if env.Duration > 0 {
+		durationStr = fmt.Sprintf("%d", env.Duration)
+	}
+
+	// Aspect ratio: prefer envelope value, default to 16:9
+	aspectRatio := "16:9"
+	if env.AspectRatio != "" {
+		aspectRatio = env.AspectRatio
+	}
+
 	payload := map[string]interface{}{
 		"prompt":   motionPrompt,
-		"duration": "5",
+		"duration": durationStr,
 	}
+
 	if strings.Contains(model, "kling") {
 		// Kling v2.6 uses start_image_url and supports native audio generation
 		payload["start_image_url"] = imageURL
-		payload["generate_audio"] = true
-		payload["aspect_ratio"] = "16:9" // default; overridden by caller if needed
+		payload["aspect_ratio"] = aspectRatio
+
+		// generate_audio: read from extra_params, default true
+		generateAudio := true
+		if env.Extra != nil {
+			if ga, ok := env.Extra["generate_audio"].(bool); ok {
+				generateAudio = ga
+			}
+		}
+		payload["generate_audio"] = generateAudio
+
+		// end_image_url (tail frame): read from extra_params
+		if env.Extra != nil {
+			if tail, ok := env.Extra["tail_image_url"].(string); ok && tail != "" {
+				payload["end_image_url"] = tail
+			}
+		}
 	} else {
 		// LTX and other models use image_url
 		payload["image_url"] = imageURL
+		payload["aspect_ratio"] = aspectRatio
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -2061,6 +2129,81 @@ func (o *AIStudioOrchestrator) callFALVideo(ctx context.Context, falKey, model, 
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Video.URL == "" {
 		return "", fmt.Errorf("FAL video parse failed: %s", truncateStr(string(raw), 200))
+	}
+	return parsed.Video.URL, nil
+}
+
+// callFALMultiImageVideo calls the FAL Kling v1.6 multi-image-to-video endpoint.
+// Accepts 2-4 image URLs and a story prompt, returns a video URL.
+func (o *AIStudioOrchestrator) callFALMultiImageVideo(ctx context.Context, falKey string, imageURLs []string, prompt string, env promptEnvelope) (string, error) {
+	const model = "fal-ai/kling-video/v1.6-standard/multi-image-to-video"
+
+	if prompt == "" {
+		prompt = "Create a smooth cinematic video transitioning between these scenes with natural motion"
+	}
+
+	// Build image_list payload — each entry has url and optional caption
+	type imageEntry struct {
+		URL     string `json:"url"`
+		Caption string `json:"caption,omitempty"`
+	}
+	var images []imageEntry
+	for i, u := range imageURLs {
+		entry := imageEntry{URL: u}
+		// Check for per-scene captions in extra_params
+		if env.Extra != nil {
+			key := fmt.Sprintf("scene_%d_caption", i+1)
+			if cap, ok := env.Extra[key].(string); ok && cap != "" {
+				entry.Caption = cap
+			}
+		}
+		images = append(images, entry)
+	}
+
+	// Duration: prefer envelope value, default to 5
+	durationStr := "5"
+	if env.Duration > 0 {
+		durationStr = fmt.Sprintf("%d", env.Duration)
+	}
+
+	// Aspect ratio: prefer envelope value, default to 16:9
+	aspectRatio := "16:9"
+	if env.AspectRatio != "" {
+		aspectRatio = env.AspectRatio
+	}
+
+	payload := map[string]interface{}{
+		"prompt":       prompt,
+		"image_list":   images,
+		"duration":     durationStr,
+		"aspect_ratio": aspectRatio,
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://fal.run/"+model, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Key "+falKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("FAL multi-image video %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	var parsed struct {
+		Video struct{ URL string `json:"url"` } `json:"video"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Video.URL == "" {
+		return "", fmt.Errorf("FAL multi-image video parse failed: %s", truncateStr(string(raw), 200))
 	}
 	return parsed.Video.URL, nil
 }

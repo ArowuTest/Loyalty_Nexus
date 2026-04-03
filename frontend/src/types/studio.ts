@@ -24,6 +24,7 @@ export type UITemplate =
   | 'image-editor'
   | 'video-creator'
   | 'video-animator'
+  | 'video-multi-scene'
   | 'voice-studio'
   | 'transcribe'
   | 'vision-ask'
@@ -127,6 +128,11 @@ export interface UIConfig {
   example_questions?: string[];
   // translate
   translate_languages?: LanguageOption[];
+  // multi-scene video
+  max_images?: number;                  // max number of scene images (default 4)
+  placeholder_prompt?: string;          // story prompt placeholder
+  aspect_ratio_options?: AspectRatioOption[];  // alias for aspect_ratios
+  submit_label?: string;                // custom generate button label
 }
 
 export interface StudioTool {

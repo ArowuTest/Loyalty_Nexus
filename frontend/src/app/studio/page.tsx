@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import {
   MusicComposer, ImageCreator, ImageEditor,
-  VideoCreator, VideoAnimator, VoiceStudio,
+  VideoCreator, VideoAnimator, VideoMultiScene, VoiceStudio,
   Transcribe, VisionAsk, KnowledgeDoc,
 } from "../../components/studio/templates";
 import type { GeneratePayload } from "../../components/studio/templates";
@@ -119,6 +119,7 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "background-remover":  { time: "~5 sec",   output: "Transparent PNG",               tip: "Works best with clear subject vs background" },
   "animate-my-photo":    { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
   "my-video-story":      { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
+  "video-story":         { time: "~3 min",   output: "Multi-scene story video",         tip: "Use 2–4 images; describe each scene for best transitions" },
   "my-marketing-jingle": { time: "~25 sec",  output: "AI music jingle",               tip: "Add brand name and target emotion in prompt" },
   "my-podcast":          { time: "~90 sec",  output: "2-host AI podcast audio",       tip: "Give a clear topic — the AI writes the full script" },
   "local-translation":   { time: "~3 sec",   output: "Translated text",               tip: "Format: type your text, select target language" },
@@ -129,7 +130,7 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
 // ─── Output type helpers ──────────────────────────────────────────────────────
 const IMAGE_SLUGS  = new Set(["ai-photo","ai-photo-pro","ai-photo-max","ai-photo-dream","photo-editor","animate-photo","my-ai-photo","background-remover","bg-remover"]);
 const AUDIO_SLUGS  = new Set(["narrate","narrate-pro","bg-music","jingle","my-marketing-jingle","song-creator","instrumental","transcribe","transcribe-african","podcast","my-podcast"]);
-const VIDEO_SLUGS  = new Set(["animate-photo","video-premium","video-cinematic","video-veo","animate-my-photo","my-video-story"]);
+const VIDEO_SLUGS  = new Set(["animate-photo","video-premium","video-cinematic","video-veo","animate-my-photo","my-video-story","video-story"]);
 const CODE_SLUGS   = new Set(["code-helper"]);
 const VISION_SLUGS = new Set(["image-analyser","ask-my-photo"]);
 const WEB_SLUGS    = new Set(["web-search-ai"]);
@@ -1868,7 +1869,8 @@ function renderTemplate(
     case "image-creator":   return <ImageCreator   {...props} />;
     case "image-editor":    return <ImageEditor    {...props} />;
     case "video-creator":   return <VideoCreator   {...props} />;
-    case "video-animator":  return <VideoAnimator  {...props} />;
+    case "video-animator":      return <VideoAnimator      {...props} />;
+    case "video-multi-scene":  return <VideoMultiScene  {...props} />;
     case "voice-studio":    return <VoiceStudio    {...props} />;
     case "transcribe":      return <Transcribe     {...props} />;
     case "vision-ask":      return <VisionAsk      {...props} />;
