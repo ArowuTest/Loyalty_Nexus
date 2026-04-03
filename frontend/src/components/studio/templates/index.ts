@@ -4,6 +4,8 @@ export { default as ImageEditor }      from './ImageEditor';
 export { default as ImageCompose }     from './ImageCompose';
 export { default as VideoCreator }     from './VideoCreator';
 export { default as VideoAnimator }    from './VideoAnimator';
+export { default as VideoEditor }      from './VideoEditor';
+export { default as VideoExtender }    from './VideoExtender';
 export { default as VideoMultiScene }  from './VideoMultiScene';
 export { default as VoiceStudio }      from './VoiceStudio';
 export { default as Transcribe }       from './Transcribe';

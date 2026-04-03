@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react';
 import {
   Loader2, Upload, X, ImageIcon, Sparkles, AlertTriangle,
-  Mic, MicOff, Volume2, VolumeX, PlusCircle,
+  Mic, MicOff, Volume2, VolumeX, PlusCircle, Zap, Film,
 } from 'lucide-react';
 import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
@@ -15,19 +15,27 @@ const DEFAULT_STYLE_TAGS = [
   'Pan left', 'Pan right', 'Parallax', 'Vibrant', 'Cinematic',
 ];
 
-// Kling v2.6 Pro only supports 5s or 10s
-const KLING_DURATIONS  = [5, 10];
-// Wan Fast / LTX supports 5, 8, 10
-const WAN_DURATIONS    = [5, 8, 10];
+// Grok supports 2–15 seconds; Kling v2.6 Pro supports 5 or 10
+const GROK_DURATIONS = [5, 6, 8, 10, 15];
+const KLING_DURATIONS = [5, 10];
+const WAN_DURATIONS   = [5, 8, 10];
 
 const INTENSITY_LABELS = ['Subtle', 'Moderate', 'Strong'] as const;
 
+const ASPECT_RATIOS = [
+  { value: '16:9', label: 'Landscape', icon: '🖥️' },
+  { value: '9:16', label: 'Portrait',  icon: '📱' },
+  { value: '1:1',  label: 'Square',    icon: '⬜' },
+];
+
 export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
-  const cfg        = tool.ui_config ?? {};
-  const styleTags  = cfg.style_tags       ?? DEFAULT_STYLE_TAGS;
+  const cfg       = tool.ui_config ?? {};
+  const styleTags = cfg.style_tags ?? DEFAULT_STYLE_TAGS;
   // video-premium uses Kling (5/10s only); video-cinematic uses Wan (5/8/10s)
-  const isKling    = tool.slug === 'video-premium';
-  const durations  = cfg.duration_options ?? (isKling ? KLING_DURATIONS : WAN_DURATIONS);
+  // animate-photo now uses Grok image-to-video as Tier 1 (2–15s)
+  const isKling   = tool.slug === 'video-premium';
+  const isGrok    = tool.slug === 'animate-photo' || tool.slug === 'video-premium';
+  const durations = cfg.duration_options ?? (isKling ? KLING_DURATIONS : isGrok ? GROK_DURATIONS : WAN_DURATIONS);
 
   // ── Start image state ──────────────────────────────────────────────────────
   const [imageUrl,      setImageUrl]      = useState('');
@@ -44,9 +52,10 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
   // ── Motion controls ────────────────────────────────────────────────────────
   const [motionPrompt,  setMotionPrompt]  = useState('');
   const [selStyles,     setSelStyles]     = useState<string[]>([]);
-  const [duration,      setDuration]      = useState<number>(cfg.default_duration ?? 5);
+  const [duration,      setDuration]      = useState<number>(cfg.default_duration ?? 6);
   const [intensity,     setIntensity]     = useState<number>(1); // 0=Subtle,1=Moderate,2=Strong
   const [aspectRatio,   setAspectRatio]   = useState<string>(cfg.default_aspect ?? '16:9');
+  const [resolution,    setResolution]    = useState<'720p' | '480p'>('720p');
   const [generateAudio, setGenerateAudio] = useState<boolean>(true);
 
   // ── Voice input ────────────────────────────────────────────────────────────
@@ -111,12 +120,10 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
     let finalEndUrl = endImageUrl.trim();
 
     try {
-      // Upload start image if it's a local file
       if (imageFile) {
         const result = await api.uploadAsset(imageFile);
         finalUrl = result.url;
       }
-      // Upload end image if provided as a local file
       if (endImageFile) {
         const result = await api.uploadAsset(endImageFile);
         finalEndUrl = result.url;
@@ -141,6 +148,7 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
       extra_params: {
         intensity:       intensityLabel,
         generate_audio:  generateAudio,
+        resolution,
         ...(finalEndUrl ? { tail_image_url: finalEndUrl } : {}),
       },
     };
@@ -150,6 +158,17 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-5">
+
+      {/* ── Grok Imagine badge ── */}
+      {isGrok && (
+        <div className="flex items-center gap-2 bg-gradient-to-r from-violet-500/10 to-cyan-500/10 border border-violet-500/20 rounded-xl px-3 py-2.5">
+          <Zap size={13} className="text-violet-400 flex-shrink-0" />
+          <p className="text-violet-300/80 text-xs leading-relaxed">
+            <span className="font-semibold text-violet-300">Powered by Grok Imagine</span>
+            {' '}— xAI&apos;s state-of-the-art image-to-video model. Upload your image and it becomes the first frame of a cinematic video.
+          </p>
+        </div>
+      )}
 
       {/* ── Generation warning ── */}
       {cfg.generation_warning && (
@@ -164,7 +183,7 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
         <div className="flex items-center gap-2 mb-2">
           <span className="w-5 h-5 rounded-full bg-cyan-600/30 text-cyan-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">1</span>
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
-            {cfg.upload_label ?? 'Starting image to animate'}
+            {cfg.upload_label ?? 'Image to animate (becomes the first frame)'}
           </label>
         </div>
 
@@ -203,7 +222,6 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
           </>
         ) : (
           <div className="relative rounded-xl overflow-hidden border border-white/10 bg-black/50">
-            {/* object-contain so the full image is visible, not cropped */}
             <img
               src={preview ?? imageUrl}
               alt="Start frame"
@@ -302,18 +320,20 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
           <div>
             <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Aspect Ratio</label>
             <div className="flex gap-2 flex-wrap">
-              {(['16:9', '9:16', '1:1'] as const).map((ar) => (
+              {ASPECT_RATIOS.map((ar) => (
                 <button
-                  key={ar}
-                  onClick={() => setAspectRatio(ar)}
+                  key={ar.value}
+                  onClick={() => setAspectRatio(ar.value)}
                   className={cn(
-                    'text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
-                    aspectRatio === ar
+                    'flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
+                    aspectRatio === ar.value
                       ? 'bg-cyan-600 text-white border-cyan-500'
                       : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
                   )}
                 >
-                  {ar === '16:9' ? '16:9 Landscape' : ar === '9:16' ? '9:16 Portrait' : '1:1 Square'}
+                  <span>{ar.icon}</span>
+                  <span>{ar.label}</span>
+                  <span className="text-[9px] font-mono opacity-60">{ar.value}</span>
                 </button>
               ))}
             </div>
@@ -321,7 +341,10 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
 
           {/* Duration */}
           <div>
-            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Duration</label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Duration</label>
+              <span className="text-white/35 text-[11px] font-mono">{duration}s</span>
+            </div>
             <div className="flex gap-2 flex-wrap">
               {durations.map((d: number) => (
                 <button
@@ -340,30 +363,53 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
             </div>
           </div>
 
-          {/* Audio toggle (Kling v2.6 Pro supports native audio generation) */}
-          {isKling && (
+          {/* Resolution (Grok supports 480p / 720p) */}
+          {isGrok && (
             <div>
-              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Audio</label>
-              <button
-                onClick={() => setGenerateAudio(!generateAudio)}
-                className={cn(
-                  'flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm font-semibold transition-all w-full',
-                  generateAudio
-                    ? 'bg-green-500/15 border-green-500/30 text-green-300'
-                    : 'bg-white/5 border-white/15 text-white/40',
-                )}
-              >
-                {generateAudio ? <Volume2 size={14} /> : <VolumeX size={14} />}
-                <span>{generateAudio ? 'AI audio generation ON' : 'Silent video (no audio)'}</span>
-                <span className={cn(
-                  'ml-auto text-[10px] px-2 py-0.5 rounded-full font-bold',
-                  generateAudio ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-white/30',
-                )}>
-                  {generateAudio ? 'ON' : 'OFF'}
-                </span>
-              </button>
+              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Resolution</label>
+              <div className="flex gap-2">
+                {(['720p', '480p'] as const).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setResolution(r)}
+                    className={cn(
+                      'flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
+                      resolution === r
+                        ? 'bg-violet-600 text-white border-violet-500'
+                        : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
+                    )}
+                  >
+                    <Film size={11} />
+                    {r}
+                    {r === '720p' && <span className="text-[9px] bg-violet-500/20 text-violet-300 px-1.5 py-0.5 rounded-full">HD</span>}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
+
+          {/* Audio toggle */}
+          <div>
+            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Audio</label>
+            <button
+              onClick={() => setGenerateAudio(!generateAudio)}
+              className={cn(
+                'flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm font-semibold transition-all w-full',
+                generateAudio
+                  ? 'bg-green-500/15 border-green-500/30 text-green-300'
+                  : 'bg-white/5 border-white/15 text-white/40',
+              )}
+            >
+              {generateAudio ? <Volume2 size={14} /> : <VolumeX size={14} />}
+              <span>{generateAudio ? 'AI audio generation ON' : 'Silent video (no audio)'}</span>
+              <span className={cn(
+                'ml-auto text-[10px] px-2 py-0.5 rounded-full font-bold',
+                generateAudio ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-white/30',
+              )}>
+                {generateAudio ? 'ON' : 'OFF'}
+              </span>
+            </button>
+          </div>
 
           {/* Motion intensity slider */}
           <div>
@@ -468,17 +514,17 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
         className={cn(
           'w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all',
           isValid && !isLoading && canAfford && !uploading
-            ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-cyan-900/30'
+            ? 'bg-gradient-to-r from-violet-600 via-cyan-600 to-blue-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-cyan-900/30'
             : 'bg-white/5 text-white/20 cursor-not-allowed',
         )}
       >
         {uploading
           ? <><Loader2 size={15} className="animate-spin" /> Uploading image…</>
           : isLoading
-            ? <><Loader2 size={15} className="animate-spin" /> Animating…</>
+            ? <><Loader2 size={15} className="animate-spin" /> Generating video…</>
             : !hasImage
               ? <><ImageIcon size={15} className="opacity-50" /> Upload an image first</>
-              : <><Sparkles size={15} /> Animate Image →</>
+              : <><Sparkles size={15} /> Animate with Grok →</>
         }
       </button>
     </div>

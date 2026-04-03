@@ -115,7 +115,9 @@ var slugCategory = map[string]studioToolCat{
 	"my-podcast":           catComposite, // alias for podcast
 	"background-remover":   catImage,  // alias for bg-remover
 	"animate-my-photo":     catVideo,  // alias for animate-photo
-	"video-story":           catVideo,  // multi-scene image-to-video (Kling multi-image)
+	"video-story":           catVideo,  // multi-scene image-to-video (Grok reference / Kling multi-image)
+	"video-edit":            catVideo,  // natural language video editing (Grok Imagine)
+	"video-extend":          catVideo,  // extend existing video (Grok Imagine)
 	"business-plan-summary": catText,   // alias for bizplan
 	// ── Whisk-style image composition ────────────────────────────────────────────────────────────────────────────────
 	"image-compose":         catImage,  // Whisk-style subject+scene+style composition (Flux Ultra)
@@ -961,7 +963,69 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		slug = "animate-photo"
 	}
 
-	// video-story: multi-scene image-to-video (FAL Kling v1.6 multi-image)
+	// ── video-edit: Natural language video editing via Grok Imagine ───────────────────────────
+	if slug == "video-edit" {
+		if o.grokClient == nil {
+			return nil, fmt.Errorf("video-edit: XAI_API_KEY not configured")
+		}
+		videoURL := env.ImageURL // frontend sends video_url in image_url field for simplicity
+		if v, ok := env.Extra["video_url"].(string); ok && v != "" {
+			videoURL = v
+		}
+		if videoURL == "" {
+			return nil, fmt.Errorf("video-edit: video_url is required")
+		}
+		prompt := env.Prompt
+		if prompt == "" {
+			return nil, fmt.Errorf("video-edit: edit instruction (prompt) is required")
+		}
+		grokReq := external.GrokVideoRequest{
+			Prompt:   prompt,
+			VideoURL: videoURL,
+		}
+		url, err := o.grokClient.GenerateVideo(ctx, grokReq)
+		if err != nil {
+			return nil, fmt.Errorf("video-edit: %w", err)
+		}
+		// Cost: $0.05/sec × estimated 6s output = $0.30 = 300000 µUSD
+		return &studioProviderResult{OutputURL: url, Provider: "grok/imagine-video-edit", CostMicros: 300000}, nil
+	}
+
+	// ── video-extend: Extend an existing video via Grok Imagine ───────────────────────────
+	if slug == "video-extend" {
+		if o.grokClient == nil {
+			return nil, fmt.Errorf("video-extend: XAI_API_KEY not configured")
+		}
+		videoURL := env.ImageURL
+		if v, ok := env.Extra["video_url"].(string); ok && v != "" {
+			videoURL = v
+		}
+		if videoURL == "" {
+			return nil, fmt.Errorf("video-extend: video_url is required")
+		}
+		duration := env.Duration
+		if duration <= 0 {
+			duration = 6
+		}
+		grokReq := external.GrokVideoRequest{
+			Prompt:      env.Prompt,
+			VideoURL:    videoURL,
+			Extend:      true,
+			Duration:    duration,
+			AspectRatio: env.AspectRatio,
+			Resolution:  "720p",
+		}
+		url, err := o.grokClient.GenerateVideo(ctx, grokReq)
+		if err != nil {
+			return nil, fmt.Errorf("video-extend: %w", err)
+		}
+		costMicros := 50000 * duration // $0.05/sec
+		return &studioProviderResult{OutputURL: url, Provider: "grok/imagine-video-extend", CostMicros: costMicros}, nil
+	}
+
+	// ── video-story: multi-scene image-to-video ────────────────────────────────────────────────────
+	// Tier 1: Grok reference-image mode (up to 7 images, $0.05/sec)
+	// Tier 2: FAL Kling v1.6 multi-image fallback
 	if slug == "video-story" {
 		imageURLsRaw := env.Extra["image_urls"]
 		var imageURLs []string
@@ -975,10 +1039,31 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		if len(imageURLs) < 2 {
 			return nil, fmt.Errorf("video-story: at least 2 images required, got %d", len(imageURLs))
 		}
+		prompt := o.enhanceVideoPrompt(ctx, env.Prompt)
+		// Tier 1: Grok reference-image mode (supports up to 7 images)
+		if o.grokClient != nil {
+			duration := env.Duration
+			if duration <= 0 {
+				duration = 10
+			}
+			grokReq := external.GrokVideoRequest{
+				Prompt:             prompt,
+				ReferenceImageURLs: imageURLs,
+				Duration:           duration,
+				AspectRatio:        env.AspectRatio,
+				Resolution:         "720p",
+			}
+			if url, err := o.grokClient.GenerateVideo(ctx, grokReq); err == nil {
+				costMicros := 50000 * duration
+				return &studioProviderResult{OutputURL: url, Provider: "grok/imagine-reference", CostMicros: costMicros}, nil
+			} else {
+				log.Printf("[AIStudio] Grok reference-image failed for video-story: %v — falling back to Kling", err)
+			}
+		}
+		// Tier 2: FAL Kling v1.6 multi-image fallback
 		if len(imageURLs) > 4 {
 			imageURLs = imageURLs[:4]
 		}
-		prompt := o.enhanceVideoPrompt(ctx, env.Prompt)
 		falKey := os.Getenv("FAL_API_KEY")
 		if falKey == "" {
 			return nil, fmt.Errorf("video-story: FAL_API_KEY not configured")
@@ -1014,17 +1099,32 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		return nil, fmt.Errorf("video-cinematic: all providers failed")
 	}
 
-	// video-veo: Premium video generation with Grok (xAI) as Tier 1
-	// Tier 1: Grok Imagine Video (xAI) — $0.05/sec, top-tier quality
+	// video-veo: Premium text-to-video with Grok (xAI) as Tier 1
+	// Tier 1: Grok Imagine Video (xAI) — $0.05/sec, top-tier quality, native audio
 	// Tier 2: Google Veo 3.1 (Pollinations) — $0.150/sec
 	// Tier 3: wan-fast (FREE)
 	if slug == "video-veo" {
 		prompt := o.enhanceVideoPrompt(ctx, env.Prompt)
-		// Tier 1: Grok Imagine Video (xAI) — $0.05/sec (~$2.50 for 5sec video)
+		// Tier 1: Grok Imagine Video (xAI) — $0.05/sec
 		if o.grokClient != nil {
-			vidURL, err := o.grokClient.GenerateVideo(ctx, prompt)
+			duration := env.Duration
+			if duration <= 0 {
+				duration = 6
+			}
+			ar := env.AspectRatio
+			if ar == "" {
+				ar = "16:9"
+			}
+			grokReq := external.GrokVideoRequest{
+				Prompt:      prompt,
+				Duration:    duration,
+				AspectRatio: ar,
+				Resolution:  "720p",
+			}
+			vidURL, err := o.grokClient.GenerateVideo(ctx, grokReq)
 			if err == nil {
-				return &studioProviderResult{OutputURL: vidURL, Provider: "grok/imagine-video", CostMicros: 250000}, nil
+				costMicros := 50000 * duration
+				return &studioProviderResult{OutputURL: vidURL, Provider: "grok/imagine-video", CostMicros: costMicros}, nil
 			}
 			log.Printf("[AIStudio] Grok Imagine Video failed for video-veo: %v — trying Veo", err)
 		}
@@ -1062,13 +1162,38 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		imageURL = env.Prompt // legacy fallback: older rows stored imageURL in prompt
 	}
 
-	// ── DB-first ─────────────────────────────────────────────────────────────
+	// ── Tier 0: Grok image-to-video (for video-premium and animate-photo) ───────────────────────────
+	if o.grokClient != nil && imageURL != "" && (slug == "video-premium" || slug == "animate-photo") {
+		duration := env.Duration
+		if duration <= 0 {
+			duration = 6
+		}
+		ar := env.AspectRatio
+		if ar == "" {
+			ar = "16:9"
+		}
+		grokReq := external.GrokVideoRequest{
+			Prompt:      o.enhanceVideoPrompt(ctx, env.Prompt),
+			ImageURL:    imageURL,
+			Duration:    duration,
+			AspectRatio: ar,
+			Resolution:  "720p",
+		}
+		if vidURL, err := o.grokClient.GenerateVideo(ctx, grokReq); err == nil {
+			costMicros := 50000 * duration
+			return &studioProviderResult{OutputURL: vidURL, Provider: "grok/imagine-i2v", CostMicros: costMicros}, nil
+		} else {
+			log.Printf("[AIStudio] Grok image-to-video failed for %s: %v — falling back", slug, err)
+		}
+	}
+
+	// ── DB-first ─────────────────────────────────────────────────────────
 	vidIn := providerInput{Prompt: env.Prompt, ImageURL: imageURL}
 	if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryVideo, vidIn); err == nil {
 		return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
 	}
 
-	// ── Hardcoded fallback chain ──────────────────────────────────────────────
+	// ── Hardcoded fallback chain ────────────────────────────────────────────
 	// Tier 1: FAL.AI (Kling v1.5 for premium, LTX for standard)
 	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
 		var model string

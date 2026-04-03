@@ -25,6 +25,8 @@ export type UITemplate =
   | 'image-compose'
   | 'video-creator'
   | 'video-animator'
+  | 'video-editor'
+  | 'video-extender'
   | 'video-multi-scene'
   | 'voice-studio'
   | 'transcribe'

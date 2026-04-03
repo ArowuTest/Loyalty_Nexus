@@ -963,47 +963,198 @@ func (a *GrokAdapter) GenerateImage(ctx context.Context, prompt string, model st
 	return result.Data[0].URL, nil
 }
 
-// GenerateVideo calls Grok's video generation API (grok-imagine-video)
-func (a *GrokAdapter) GenerateVideo(ctx context.Context, prompt string) (string, error) {
+// GrokVideoRequest holds all parameters for a Grok Imagine video generation call.
+// Exactly one of the mode fields should be set:
+//   - TextToVideo:      prompt only (no image/video URL)
+//   - ImageToVideo:     ImageURL set  → image becomes first frame
+//   - ReferenceVideo:   ReferenceImageURLs set (1-7) → reference-guided generation
+//   - VideoEdit:        VideoURL set + prompt → edit existing video
+//   - VideoExtend:      VideoURL set + Extend=true → extend existing video
+type GrokVideoRequest struct {
+	Prompt              string
+	ImageURL            string   // image-to-video: source image
+	VideoURL            string   // video-edit / video-extend: source video
+	ReferenceImageURLs  []string // reference-image mode: 1-7 reference images
+	Duration            int      // seconds (2-15 for generation, 2-10 for extension)
+	AspectRatio         string   // "16:9", "9:16", "1:1"
+	Resolution          string   // "480p" or "720p"
+	Extend              bool     // true = video extension mode
+}
+
+// GenerateVideo submits a Grok Imagine video request and polls until done.
+// It supports all five modes: text-to-video, image-to-video, reference-image,
+// video-edit, and video-extend. The ctx deadline controls the total wait time.
+func (a *GrokAdapter) GenerateVideo(ctx context.Context, req GrokVideoRequest) (string, error) {
+	if req.Prompt == "" && req.VideoURL == "" {
+		return "", fmt.Errorf("grok video: prompt is required")
+	}
+
+	// ── Build payload ─────────────────────────────────────────────────────────
 	payload := map[string]interface{}{
 		"model":  "grok-imagine-video",
-		"prompt": prompt,
+		"prompt": req.Prompt,
 	}
+
+	// Duration (only for generation modes, not video editing)
+	if req.VideoURL == "" || req.Extend {
+		dur := req.Duration
+		if dur <= 0 {
+			dur = 6 // API default
+		}
+		payload["duration"] = dur
+	}
+
+	// Aspect ratio and resolution (not supported in video editing mode)
+	if req.VideoURL == "" || req.Extend {
+		ar := req.AspectRatio
+		if ar == "" {
+			ar = "16:9"
+		}
+		payload["aspect_ratio"] = ar
+		res := req.Resolution
+		if res == "" {
+			res = "720p"
+		}
+		payload["resolution"] = res
+	}
+
+	// Mode-specific fields
+	switch {
+	case req.Extend && req.VideoURL != "":
+		// Video extension mode
+		payload["video_url"] = req.VideoURL
+	case req.VideoURL != "":
+		// Video editing mode
+		payload["video_url"] = req.VideoURL
+	case len(req.ReferenceImageURLs) > 0:
+		// Reference-image mode (1-7 images)
+		refs := req.ReferenceImageURLs
+		if len(refs) > 7 {
+			refs = refs[:7]
+		}
+		payload["reference_image_urls"] = refs
+	case req.ImageURL != "":
+		// Image-to-video mode
+		payload["image_url"] = req.ImageURL
+	}
+
+	// ── Step 1: Submit generation request ────────────────────────────────────
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("grok video marshal: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+	// Use a long-lived client for the initial request (up to 30s)
+	initClient := &http.Client{Timeout: 30 * time.Second}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://api.x.ai/v1/videos/generations", bytes.NewBuffer(body))
 	if err != nil {
 		return "", fmt.Errorf("grok video new request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
 
-	resp, err := a.client.Do(req)
+	initResp, err := initClient.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("grok video http: %w", err)
+		return "", fmt.Errorf("grok video submit: %w", err)
 	}
-	defer resp.Body.Close()
+	defer initResp.Body.Close()
+	initBody, _ := io.ReadAll(initResp.Body)
+	if initResp.StatusCode != http.StatusOK && initResp.StatusCode != http.StatusCreated && initResp.StatusCode != http.StatusAccepted {
+		return "", fmt.Errorf("grok video submit %d: %s", initResp.StatusCode, truncateGrokStr(string(initBody), 300))
+	}
 
-	var result struct {
-		Data []struct {
+	var submitResult struct {
+		RequestID string `json:"request_id"`
+		// Some responses return the video directly if already done
+		Status string `json:"status"`
+		Video  struct {
 			URL string `json:"url"`
-		} `json:"data"`
+		} `json:"video"`
 		Error *struct {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("grok video decode: %w", err)
+	if err := json.Unmarshal(initBody, &submitResult); err != nil {
+		return "", fmt.Errorf("grok video submit parse: %w", err)
 	}
-	if result.Error != nil {
-		return "", fmt.Errorf("grok video API error: %s", result.Error.Message)
+	if submitResult.Error != nil {
+		return "", fmt.Errorf("grok video API error: %s", submitResult.Error.Message)
 	}
-	if len(result.Data) == 0 {
-		return "", fmt.Errorf("grok video: no videos returned")
+	// If already done (rare but possible)
+	if submitResult.Status == "done" && submitResult.Video.URL != "" {
+		return submitResult.Video.URL, nil
 	}
-	return result.Data[0].URL, nil
+	if submitResult.RequestID == "" {
+		return "", fmt.Errorf("grok video: no request_id in response: %s", truncateGrokStr(string(initBody), 200))
+	}
+
+	// ── Step 2: Poll for completion ───────────────────────────────────────────
+	// Grok videos take up to several minutes. We poll every 5s for up to 8 minutes.
+	pollURL := fmt.Sprintf("https://api.x.ai/v1/videos/%s", submitResult.RequestID)
+	pollClient := &http.Client{Timeout: 15 * time.Second}
+	const maxAttempts = 96 // 96 × 5s = 8 minutes
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("grok video: context cancelled while polling")
+		case <-time.After(5 * time.Second):
+		}
+
+		pollReq, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		if err != nil {
+			log.Printf("[GrokAdapter] poll request build error: %v", err)
+			continue
+		}
+		pollReq.Header.Set("Authorization", "Bearer "+a.apiKey)
+
+		pollResp, err := pollClient.Do(pollReq)
+		if err != nil {
+			log.Printf("[GrokAdapter] poll attempt %d error: %v", attempt+1, err)
+			continue
+		}
+		pollBody, _ := io.ReadAll(pollResp.Body)
+		pollResp.Body.Close()
+
+		var pollResult struct {
+			Status string `json:"status"`
+			Video  struct {
+				URL string `json:"url"`
+			} `json:"video"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(pollBody, &pollResult); err != nil {
+			log.Printf("[GrokAdapter] poll parse error attempt %d: %v", attempt+1, err)
+			continue
+		}
+		if pollResult.Error != nil {
+			return "", fmt.Errorf("grok video poll error: %s", pollResult.Error.Message)
+		}
+
+		switch pollResult.Status {
+		case "done":
+			if pollResult.Video.URL == "" {
+				return "", fmt.Errorf("grok video: done but no URL")
+			}
+			log.Printf("[GrokAdapter] video ready after %d polls: %s", attempt+1, pollResult.Video.URL)
+			return pollResult.Video.URL, nil
+		case "failed":
+			return "", fmt.Errorf("grok video: generation failed")
+		case "expired":
+			return "", fmt.Errorf("grok video: request expired")
+		default: // "pending" or unknown
+			log.Printf("[GrokAdapter] poll attempt %d: status=%s", attempt+1, pollResult.Status)
+		}
+	}
+	return "", fmt.Errorf("grok video: timed out after 8 minutes (request_id=%s)", submitResult.RequestID)
+}
+
+// truncateGrokStr truncates a string for error messages.
+func truncateGrokStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
