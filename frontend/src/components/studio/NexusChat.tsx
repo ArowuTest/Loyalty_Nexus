@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Send, User, Bot, Sparkles, ArrowLeft, Copy, Check, Download, Paperclip, Link2, X, FileText, Globe, Mic, MicOff, Loader2 } from 'lucide-react';
+import { useSpeechToText } from '@/hooks/useSpeechToText';
 import Link from 'next/link';
 import api from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -226,8 +227,6 @@ const ACCEPTED_MIME_TYPES = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ];
 
-// ─── Mic recording states ────────────────────────────────────────────────────
-type MicState = 'idle' | 'recording' | 'transcribing' | 'error';
 
 export default function NexusChat() {
   const [messages, setMessages] = useState<Message[]>([
@@ -255,12 +254,15 @@ export default function NexusChat() {
   const [linkInput,     setLinkInput]     = useState('');
   const [attachedLink,  setAttachedLink]  = useState<string>('');
 
-  // ─── Mic / voice-to-text state ───────────────────────────────────────────
-  const [micState,    setMicState]    = useState<MicState>('idle');
-  const [micError,    setMicError]    = useState<string>('');
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef   = useRef<Blob[]>([]);
-  const micStreamRef     = useRef<MediaStream | null>(null);
+  // ─── Web Speech API mic (browser-native, zero backend cost) ────────────────
+  const { speechState, speechError, interimText, handleMicClick, isMicBusy } =
+    useSpeechToText({
+      onTranscript: (t) => {
+        setInput(prev => prev ? `${prev} ${t}` : t);
+        setTimeout(() => textareaRef.current?.focus(), 100);
+      },
+      language: 'en-US',
+    });
 
   const sessionId      = useRef<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -293,13 +295,6 @@ export default function NexusChat() {
   useEffect(() => {
     if (showLinkInput) linkInputRef.current?.focus();
   }, [showLinkInput]);
-
-  // Cleanup mic stream on unmount
-  useEffect(() => {
-    return () => {
-      micStreamRef.current?.getTracks().forEach(t => t.stop());
-    };
-  }, []);
 
   // ─── File upload handler ─────────────────────────────────────────────────
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -354,108 +349,7 @@ export default function NexusChat() {
     setShowLinkInput(false);
   }
 
-  // ─── Mic recording handlers ──────────────────────────────────────────────
-  const startRecording = useCallback(async () => {
-    setMicError('');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micStreamRef.current = stream;
-      audioChunksRef.current = [];
 
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-          ? 'audio/webm'
-          : 'audio/ogg';
-
-      const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        // Stop all mic tracks
-        stream.getTracks().forEach(t => t.stop());
-        micStreamRef.current = null;
-
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        if (audioBlob.size < 1000) {
-          setMicState('idle');
-          setMicError('Recording too short — please try again.');
-          return;
-        }
-
-        setMicState('transcribing');
-        try {
-          // Upload audio blob to CDN
-          const audioFile = new File([audioBlob], `voice_${Date.now()}.webm`, { type: mimeType });
-          const { url: audioURL } = await api.uploadAsset(audioFile);
-
-          // Transcribe using the transcribe-african tool (supports Yoruba, Igbo, Hausa, Pidgin, English)
-          const genRes = await api.generateBySlug('transcribe-african', {
-            prompt: audioURL,
-            language: 'en',
-          }) as { generation_id: string };
-
-          // Poll for result
-          let transcript = '';
-          const deadline = Date.now() + 60_000;
-          while (Date.now() < deadline) {
-            await new Promise(r => setTimeout(r, 1500));
-            const status = await api.getGenerationStatus(genRes.generation_id) as {
-              status: string; output_text?: string; error_message?: string;
-            };
-            if (status.status === 'completed') {
-              transcript = status.output_text ?? '';
-              break;
-            }
-            if (status.status === 'failed') {
-              throw new Error(status.error_message ?? 'Transcription failed');
-            }
-          }
-
-          if (!transcript) throw new Error('No transcript returned');
-
-          // Append to existing input (in case user had already typed something)
-          setInput(prev => prev ? `${prev} ${transcript}` : transcript);
-          setMicState('idle');
-          // Focus textarea so user can review / edit before sending
-          setTimeout(() => textareaRef.current?.focus(), 100);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : 'Transcription failed';
-          setMicError(msg);
-          setMicState('error');
-          setTimeout(() => { setMicState('idle'); setMicError(''); }, 4000);
-        }
-      };
-
-      recorder.start(250); // collect chunks every 250 ms
-      setMicState('recording');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Microphone access denied';
-      setMicError(msg.includes('Permission') || msg.includes('denied') || msg.includes('NotAllowed')
-        ? 'Microphone permission denied — please allow access in your browser settings.'
-        : msg);
-      setMicState('error');
-      setTimeout(() => { setMicState('idle'); setMicError(''); }, 4000);
-    }
-  }, []);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-  }, []);
-
-  function handleMicClick() {
-    if (micState === 'recording') {
-      stopRecording();
-    } else if (micState === 'idle' || micState === 'error') {
-      startRecording();
-    }
-  }
 
   // ─── Send message ────────────────────────────────────────────────────────
   const handleSend = async (text?: string) => {
@@ -537,12 +431,12 @@ export default function NexusChat() {
   const remaining      = Math.max(0, msgLimit - msgCount);
   const showSuggestions = messages.length === 1;
   const hasAttachment   = !!attachedFile || !!attachedLink;
-  const isBusy          = isLoading || isUploading || micState === 'transcribing';
+  const isBusy          = isLoading || isUploading || isMicBusy;
 
   // Mic button appearance
-  const micIsRecording    = micState === 'recording';
-  const micIsTranscribing = micState === 'transcribing';
-  const micIsError        = micState === 'error';
+  const micIsRecording    = speechState === 'listening';
+  const micIsTranscribing = speechState === 'processing';
+  const micIsError        = speechState === 'error';
 
   return (
     <div className="flex flex-col h-screen bg-black text-white max-w-screen-md mx-auto border-x border-white/5">
@@ -713,22 +607,22 @@ export default function NexusChat() {
         )}
 
         {/* Mic status banners */}
-        {micState === 'recording' && (
+        {speechState === 'listening' && (
           <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/25">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
             <span className="text-[11px] text-red-300 font-medium flex-1">Recording… tap mic to stop</span>
           </div>
         )}
-        {micState === 'transcribing' && (
+        {speechState === 'processing' && (
           <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl bg-brand-gold/8 border border-brand-gold/20">
             <Loader2 size={12} className="text-brand-gold animate-spin flex-shrink-0" />
-            <span className="text-[11px] text-brand-gold/80 font-medium flex-1">Transcribing your voice…</span>
+            <span className="text-[11px] text-brand-gold/80 font-medium flex-1">Listening… {interimText || 'Speak clearly'}</span>
           </div>
         )}
-        {micState === 'error' && micError && (
+        {speechState === 'error' && speechError && (
           <div className="flex items-center gap-2 mb-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/20">
             <MicOff size={12} className="text-red-400 flex-shrink-0" />
-            <span className="text-[11px] text-red-300 flex-1">{micError}</span>
+            <span className="text-[11px] text-red-300 flex-1">{speechError}</span>
           </div>
         )}
 
@@ -843,7 +737,7 @@ export default function NexusChat() {
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
-            disabled={remaining === 0 || micIsRecording || micIsTranscribing}
+            disabled={remaining === 0 || isMicBusy}
             className={cn(
               'flex-1 bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-5 pr-4 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-brand-gold/30 focus:bg-white/10 transition-all resize-none overflow-hidden disabled:opacity-40',
               micIsRecording && 'border-red-500/30 bg-red-500/5',

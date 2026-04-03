@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Loader2, Upload, X, ImageIcon, Sparkles, AlertTriangle } from 'lucide-react';
+import { Loader2, Upload, X, ImageIcon, Sparkles, AlertTriangle, Mic, MicOff } from 'lucide-react';
+import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 import api from '@/lib/api';
@@ -24,6 +25,13 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
   const [imageFile,     setImageFile]     = useState<File | null>(null);
   const [preview,       setPreview]       = useState<string | null>(null);
   const [motionPrompt,  setMotionPrompt]  = useState('');
+
+  // Web Speech API mic
+  const { speechState, speechError, interimText, handleMicClick } =
+    useSpeechToText({
+      onTranscript: (t) => setMotionPrompt(prev => prev ? prev + ' ' + t : t),
+      language: 'en-US',
+    });
   const [selStyles,     setSelStyles]     = useState<string[]>([]);
   const [duration,      setDuration]      = useState<number>(cfg.default_duration ?? 5);
   const [intensity,     setIntensity]     = useState<number>(1); // 0=Subtle, 1=Moderate, 2=Strong
@@ -243,9 +251,24 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
 
           {/* Motion description */}
           <div>
-            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
-              Motion description <span className="text-white/25 normal-case font-normal">(optional)</span>
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
+                Motion description <span className="text-white/25 normal-case font-normal">(optional)</span>
+              </label>
+              <button
+                onClick={handleMicClick}
+                disabled={speechState === 'processing'}
+                title={speechState === 'listening' ? 'Stop listening' : 'Speak the motion'}
+                className={cn(
+                  'w-7 h-7 rounded-lg flex items-center justify-center transition-all border',
+                  speechState === 'listening'
+                    ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+                    : 'bg-white/5 text-white/30 hover:text-white/60 hover:bg-white/10 border-transparent',
+                )}
+              >
+                {speechState === 'listening' ? <MicOff size={12} /> : <Mic size={12} />}
+              </button>
+            </div>
             <textarea
               value={motionPrompt}
               onChange={(e) => setMotionPrompt(e.target.value)}
@@ -254,6 +277,15 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
               autoFocus
               className="nexus-input resize-none w-full text-sm leading-relaxed"
             />
+            {speechState === 'listening' && (
+              <p className="text-[11px] text-red-300 mt-1 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+                Listening… {interimText || 'describe the motion'}
+              </p>
+            )}
+            {speechState === 'error' && speechError && (
+              <p className="text-[11px] text-red-300 mt-1">{speechError}</p>
+            )}
           </div>
         </>
       )}

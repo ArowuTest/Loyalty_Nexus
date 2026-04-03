@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, Sparkles, Info, Shuffle, ChevronDown, ChevronUp, Wand2 } from 'lucide-react';
+import { Loader2, Sparkles, Info, Shuffle, ChevronDown, ChevronUp, Wand2, Mic, MicOff } from 'lucide-react';
+import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 
@@ -48,6 +49,13 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
   const [showNegBox,     setShowNegBox]     = useState(false);
   const [showInspo,      setShowInspo]      = useState(false);
+
+  // ── Web Speech API mic ──────────────────────────────────────────────────
+  const { speechState, speechError, interimText, handleMicClick, isMicBusy } =
+    useSpeechToText({
+      onTranscript: (t) => setPrompt(prev => (prev ? prev + ' ' + t : t).slice(0, 500)),
+      language: 'en-US',
+    });
   const [quality,        setQuality]        = useState<'standard' | 'hd'>('standard');
 
   const canAfford  = tool.is_free || userPoints >= tool.point_cost;
@@ -217,6 +225,19 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
             >
               <Shuffle size={12} /> Surprise me
             </button>
+            <button
+              onClick={handleMicClick}
+              disabled={speechState === 'processing'}
+              title={speechState === 'listening' ? 'Stop listening' : 'Speak your prompt'}
+              className={cn(
+                'w-7 h-7 rounded-lg flex items-center justify-center transition-all border',
+                speechState === 'listening'
+                  ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+                  : 'bg-white/5 text-white/30 hover:text-white/60 hover:bg-white/10 border-transparent',
+              )}
+            >
+              {speechState === 'listening' ? <MicOff size={12} /> : <Mic size={12} />}
+            </button>
           </div>
         </div>
         <textarea
@@ -228,6 +249,16 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
           className="nexus-input resize-none w-full text-sm leading-relaxed"
         />
 
+        {/* Mic status */}
+        {speechState === 'listening' && (
+          <p className="text-[11px] text-red-300 mt-1 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+            Listening… {interimText || 'speak your prompt'}
+          </p>
+        )}
+        {speechState === 'error' && speechError && (
+          <p className="text-[11px] text-red-300 mt-1">{speechError}</p>
+        )}
         {/* Prompt inspirations */}
         <button
           onClick={() => setShowInspo((v) => !v)}

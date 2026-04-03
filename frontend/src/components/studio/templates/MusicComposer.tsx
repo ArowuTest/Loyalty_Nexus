@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, Music, ChevronDown, ChevronUp, Sparkles, Shuffle, Plus } from 'lucide-react';
+import { Loader2, Music, ChevronDown, ChevronUp, Sparkles, Shuffle, Plus, Mic, MicOff } from 'lucide-react';
+import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 
@@ -205,6 +206,20 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
 
   // UI toggles — lyrics always open for song-creator
   const [showLyricsBox, setShowLyricsBox] = useState(ctx.mode === 'song-creator');
+
+  // Web Speech API mic — prompt field
+  const { speechState: promptSpeech, speechError: promptSpeechErr, interimText: promptInterim, handleMicClick: handlePromptMic } =
+    useSpeechToText({
+      onTranscript: (t) => setPrompt(prev => prev ? prev + ' ' + t : t),
+      language: 'en-US',
+    });
+
+  // Web Speech API mic — lyrics field
+  const { speechState: lyricsSpeech, speechError: lyricsSpeechErr, interimText: lyricsInterim, handleMicClick: handleLyricsMic } =
+    useSpeechToText({
+      onTranscript: (t) => setLyrics(prev => prev ? prev + '\n' + t : t),
+      language: 'en-US',
+    });
   const [showInspo,     setShowInspo]     = useState(false);
   const [showAdvanced,  setShowAdvanced]  = useState(false);
 
@@ -507,12 +522,27 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
             {ctx.promptLabel}
           </label>
-          <button
-            onClick={surpriseMe}
-            className="flex items-center gap-1 text-white/30 hover:text-amber-400 transition-colors text-[11px] font-medium"
-          >
-            <Shuffle size={11} /> Surprise me
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={surpriseMe}
+              className="flex items-center gap-1 text-white/30 hover:text-amber-400 transition-colors text-[11px] font-medium"
+            >
+              <Shuffle size={11} /> Surprise me
+            </button>
+            <button
+              onClick={handlePromptMic}
+              disabled={promptSpeech === 'processing'}
+              title={promptSpeech === 'listening' ? 'Stop listening' : 'Speak your style direction'}
+              className={cn(
+                'w-7 h-7 rounded-lg flex items-center justify-center transition-all border',
+                promptSpeech === 'listening'
+                  ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+                  : 'bg-white/5 text-white/30 hover:text-white/60 hover:bg-white/10 border-transparent',
+              )}
+            >
+              {promptSpeech === 'listening' ? <MicOff size={12} /> : <Mic size={12} />}
+            </button>
+          </div>
         </div>
         {ctx.mode === 'song-creator' && (
           <p className="text-white/30 text-[10px] mb-1.5">
@@ -528,6 +558,15 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
           className="nexus-input resize-none w-full text-sm leading-relaxed"
         />
 
+        {promptSpeech === 'listening' && (
+          <p className="text-[11px] text-red-300 mt-1 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+            Listening… {promptInterim || 'describe the style'}
+          </p>
+        )}
+        {promptSpeech === 'error' && promptSpeechErr && (
+          <p className="text-[11px] text-red-300 mt-1">{promptSpeechErr}</p>
+        )}
         {/* Prompt inspirations */}
         <button
           onClick={() => setShowInspo((v) => !v)}
@@ -778,12 +817,27 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
                 Paste your verses, chorus and bridge here — the AI will sing them exactly as written.
               </p>
             </div>
-            <button
-              onClick={() => setShowLyricsBox((v) => !v)}
-              className="text-white/25 hover:text-white/50 transition-colors"
-            >
-              {showLyricsBox ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
+          <div className="flex items-center gap-2">
+              <button
+                onClick={handleLyricsMic}
+                disabled={lyricsSpeech === 'processing'}
+                title={lyricsSpeech === 'listening' ? 'Stop listening' : 'Dictate your lyrics'}
+                className={cn(
+                  'w-7 h-7 rounded-lg flex items-center justify-center transition-all border',
+                  lyricsSpeech === 'listening'
+                    ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+                    : 'bg-white/5 text-white/30 hover:text-white/60 hover:bg-white/10 border-transparent',
+                )}
+              >
+                {lyricsSpeech === 'listening' ? <MicOff size={12} /> : <Mic size={12} />}
+              </button>
+              <button
+                onClick={() => setShowLyricsBox((v) => !v)}
+                className="text-white/25 hover:text-white/50 transition-colors"
+              >
+                {showLyricsBox ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+            </div>
           </div>
 
           {showLyricsBox && (
@@ -815,6 +869,15 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
                 rows={8}
                 className="nexus-input resize-none w-full text-sm leading-relaxed font-mono"
               />
+              {lyricsSpeech === 'listening' && (
+                <p className="text-[11px] text-red-300 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+                  Listening… {lyricsInterim || 'dictate your lyrics'}
+                </p>
+              )}
+              {lyricsSpeech === 'error' && lyricsSpeechErr && (
+                <p className="text-[11px] text-red-300">{lyricsSpeechErr}</p>
+              )}
               <p className="text-white/20 text-[10px]">
                 Leave blank to let the AI write its own lyrics based on your style direction above.
               </p>

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Loader2, Upload, X, ImageIcon, Sparkles, Sliders, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
+import { Loader2, Upload, X, ImageIcon, Sparkles, Sliders, ChevronDown, ChevronUp, CheckCircle2, Mic, MicOff } from 'lucide-react';
+import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 import api from '@/lib/api';
@@ -49,6 +50,13 @@ export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: T
   const canAfford  = tool.is_free || userPoints >= tool.point_cost;
   const hasImage   = uploadedUrl || imageUrl.trim() || imageFile;
   const promptOk   = promptOptional || !showEditPrompt || editPrompt.trim().length >= 3;
+
+  // Web Speech API mic
+  const { speechState, speechError, interimText, handleMicClick } =
+    useSpeechToText({
+      onTranscript: (t) => setEditPrompt(prev => prev ? prev + ' ' + t : t),
+      language: 'en-US',
+    });
   const isValid    = !!hasImage && promptOk && !isUploading;
   const isBusy     = isLoading || isUploading;
 
@@ -212,10 +220,23 @@ export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: T
         <div>
           <div className="flex items-center gap-2 mb-1.5">
             <span className="w-5 h-5 rounded-full bg-purple-600/30 text-purple-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">2</span>
-            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
+            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold flex-1">
               Edit instruction
               {promptOptional && <span className="text-white/25 normal-case font-normal ml-1">(optional)</span>}
             </label>
+            <button
+              onClick={handleMicClick}
+              disabled={speechState === 'processing'}
+              title={speechState === 'listening' ? 'Stop listening' : 'Speak your instruction'}
+              className={cn(
+                'w-7 h-7 rounded-lg flex items-center justify-center transition-all border flex-shrink-0',
+                speechState === 'listening'
+                  ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+                  : 'bg-white/5 text-white/30 hover:text-white/60 hover:bg-white/10 border-transparent',
+              )}
+            >
+              {speechState === 'listening' ? <MicOff size={12} /> : <Mic size={12} />}
+            </button>
           </div>
 
           {/* Quick-edit chips */}
@@ -247,6 +268,15 @@ export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: T
             className="nexus-input resize-none w-full text-sm leading-relaxed"
           />
 
+          {speechState === 'listening' && (
+            <p className="text-[11px] text-red-300 mt-1 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+              Listening… {interimText || 'describe the edit'}
+            </p>
+          )}
+          {speechState === 'error' && speechError && (
+            <p className="text-[11px] text-red-300 mt-1">{speechError}</p>
+          )}
           {/* ── Advanced: Strength slider ── */}
           <button
             onClick={() => setShowAdvanced((v) => !v)}

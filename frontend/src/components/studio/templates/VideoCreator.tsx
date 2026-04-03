@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, Sparkles, AlertTriangle, Film, Plus, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Sparkles, AlertTriangle, Film, Plus, X, ChevronDown, ChevronUp, Mic, MicOff } from 'lucide-react';
+import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 
@@ -60,6 +61,13 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
   const [scenes,     setScenes]     = useState<string[]>([]);
   const [newScene,   setNewScene]   = useState('');
   const [showScenes, setShowScenes] = useState(false);
+
+  // Web Speech API mic
+  const { speechState, speechError, interimText, handleMicClick } =
+    useSpeechToText({
+      onTranscript: (t) => setPrompt(prev => (prev ? prev + ' ' + t : t).slice(0, 500)),
+      language: 'en-US',
+    });
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
   const isValid   = prompt.trim().length >= 3;
@@ -235,14 +243,29 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
             Scene description
           </label>
-          <button
-            onClick={() => setShowInspo((v) => !v)}
-            className="flex items-center gap-1 text-white/25 hover:text-white/50 transition-colors text-[11px]"
-          >
-            <Film size={11} />
-            {showInspo ? 'Hide' : 'Show'} ideas
-            {showInspo ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowInspo((v) => !v)}
+              className="flex items-center gap-1 text-white/25 hover:text-white/50 transition-colors text-[11px]"
+            >
+              <Film size={11} />
+              {showInspo ? 'Hide' : 'Show'} ideas
+              {showInspo ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            </button>
+            <button
+              onClick={handleMicClick}
+              disabled={speechState === 'processing'}
+              title={speechState === 'listening' ? 'Stop listening' : 'Speak your scene'}
+              className={cn(
+                'w-7 h-7 rounded-lg flex items-center justify-center transition-all border',
+                speechState === 'listening'
+                  ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+                  : 'bg-white/5 text-white/30 hover:text-white/60 hover:bg-white/10 border-transparent',
+              )}
+            >
+              {speechState === 'listening' ? <MicOff size={12} /> : <Mic size={12} />}
+            </button>
+          </div>
         </div>
         <textarea
           value={prompt}
@@ -256,6 +279,15 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
           className="nexus-input resize-none w-full text-sm leading-relaxed"
         />
         <p className="text-white/25 text-[11px] mt-1">{prompt.length}/500 characters</p>
+        {speechState === 'listening' && (
+          <p className="text-[11px] text-red-300 mt-1 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+            Listening… {interimText || 'describe the scene'}
+          </p>
+        )}
+        {speechState === 'error' && speechError && (
+          <p className="text-[11px] text-red-300 mt-1">{speechError}</p>
+        )}
 
         {showInspo && (
           <div className="mt-2 grid grid-cols-1 gap-1.5">

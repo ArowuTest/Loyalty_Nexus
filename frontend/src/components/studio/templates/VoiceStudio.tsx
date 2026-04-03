@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { Loader2, Sparkles, Play, Clock, Mic, MicOff, StopCircle, X, CheckCircle2 } from 'lucide-react';
+import { useState } from 'react';
+import { Loader2, Sparkles, Play, Clock, Mic, MicOff } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
-import api from '@/lib/api';
+import { useSpeechToText } from '@/hooks/useSpeechToText';
 
 const DEFAULT_VOICES = [
   { id: 'alloy',   name: 'Alloy',   tone: 'Neutral & Clear',       category: 'Conversational', gender: 'N' },
@@ -23,13 +23,13 @@ const DEFAULT_VOICES = [
 ];
 
 const DEFAULT_LANGUAGES = [
-  { code: 'en', label: 'English',          flag: '🇬🇧' },
-  { code: 'yo', label: 'Yoruba',           flag: '🇳🇬' },
-  { code: 'ha', label: 'Hausa',            flag: '🇳🇬' },
-  { code: 'ig', label: 'Igbo',             flag: '🇳🇬' },
-  { code: 'fr', label: 'French',           flag: '🇫🇷' },
-  { code: 'pt', label: 'Portuguese',       flag: '🇵🇹' },
-  { code: 'es', label: 'Spanish',          flag: '🇪🇸' },
+  { code: 'en', label: 'English',    flag: '🇬🇧' },
+  { code: 'yo', label: 'Yoruba',     flag: '🇳🇬' },
+  { code: 'ha', label: 'Hausa',      flag: '🇳🇬' },
+  { code: 'ig', label: 'Igbo',       flag: '🇳🇬' },
+  { code: 'fr', label: 'French',     flag: '🇫🇷' },
+  { code: 'pt', label: 'Portuguese', flag: '🇵🇹' },
+  { code: 'es', label: 'Spanish',    flag: '🇪🇸' },
 ];
 
 const SPEED_STEPS = [
@@ -45,7 +45,6 @@ const FORMAT_OPTIONS = [
   { label: 'WAV', value: 'wav', desc: 'Lossless'  },
 ];
 
-// Category colour map
 const CAT_COLORS: Record<string, string> = {
   'Conversational': 'bg-sky-600/20 border-sky-500/40 text-sky-300',
   'Social Media':   'bg-pink-600/20 border-pink-500/40 text-pink-300',
@@ -62,7 +61,6 @@ const CAT_COLORS: Record<string, string> = {
   'Characters':     'bg-fuchsia-600/20 border-fuchsia-500/40 text-fuchsia-300',
 };
 
-// Avatar gradient per voice
 const AVATAR_GRADIENTS: Record<string, string> = {
   alloy: 'from-sky-600 to-blue-700', nova: 'from-pink-500 to-rose-600',
   echo: 'from-blue-600 to-indigo-700', shimmer: 'from-teal-500 to-cyan-600',
@@ -81,25 +79,22 @@ interface VoiceEntry {
   gender?: string;
 }
 
-// Estimate audio duration based on word count and speed
 function estimateDuration(text: string, speed: number): string {
   const words = text.trim().split(/\s+/).filter(Boolean).length;
   if (words === 0) return '—';
-  const seconds = Math.round((words / 150) * 60 / speed); // ~150 wpm
+  const seconds = Math.round((words / 150) * 60 / speed);
   if (seconds < 60) return `~${seconds}s`;
   return `~${Math.round(seconds / 60)}m ${seconds % 60}s`;
 }
 
-type RecordState = 'idle' | 'recording' | 'transcribing' | 'done' | 'error';
-
 export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
-  const cfg       = tool.ui_config ?? {};
-  const voices    = (cfg.voices    ?? DEFAULT_VOICES) as VoiceEntry[];
-  const languages = cfg.languages  ?? DEFAULT_LANGUAGES;
-  const maxChars  = cfg.max_chars  ?? 5000;
-  const showLang  = cfg.show_language_selector ?? true;
-  const showSpeed = cfg.show_speed_control     ?? true;
-  const showFormat = cfg.show_format_selector  ?? true;
+  const cfg        = tool.ui_config ?? {};
+  const voices     = (cfg.voices    ?? DEFAULT_VOICES) as VoiceEntry[];
+  const languages  = cfg.languages  ?? DEFAULT_LANGUAGES;
+  const maxChars   = cfg.max_chars  ?? 5000;
+  const showLang   = cfg.show_language_selector ?? true;
+  const showSpeed  = cfg.show_speed_control     ?? true;
+  const showFormat = cfg.show_format_selector   ?? true;
 
   const [text,        setText]        = useState('');
   const [voiceId,     setVoiceId]     = useState<string>(cfg.default_voice ?? 'nova');
@@ -108,19 +103,18 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
   const [format,      setFormat]      = useState<string>('mp3');
   const [voiceFilter, setVoiceFilter] = useState('');
 
-  // ── Microphone recording state ──────────────────────────────────────────────
-  const [recordState,  setRecordState]  = useState<RecordState>('idle');
-  const [recordError,  setRecordError]  = useState('');
-  const [audioPreview, setAudioPreview] = useState('');
-  const mediaRef  = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
+  // ── Web Speech API mic — dictate the text to narrate ─────────────────────
+  const { speechState, speechError, interimText, handleMicClick, isMicBusy } =
+    useSpeechToText({
+      onTranscript: (t) => setText(prev => prev ? `${prev}\n\n${t}` : t),
+      language: 'en-US',
+    });
 
   const canAfford     = tool.is_free || userPoints >= tool.point_cost;
   const isValid       = text.trim().length >= 5 && text.length <= maxChars;
   const charPct       = (text.length / maxChars) * 100;
   const selectedVoice = voices.find((v) => v.id === voiceId);
   const estDuration   = estimateDuration(text, speed);
-  const isBusy        = recordState === 'recording' || recordState === 'transcribing';
 
   const filteredVoices = voiceFilter
     ? voices.filter((v) =>
@@ -130,81 +124,8 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
       )
     : voices;
 
-  // ── Microphone recording logic ─────────────────────────────────────────────
-  async function toggleRecording() {
-    if (recordState === 'recording') {
-      mediaRef.current?.stop();
-      return;
-    }
-
-    setRecordError('');
-    setAudioPreview('');
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      chunksRef.current = [];
-
-      mr.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      mr.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const file = new File([blob], 'voice-recording.webm', { type: 'audio/webm' });
-        setAudioPreview(URL.createObjectURL(blob));
-        setRecordState('transcribing');
-
-        try {
-          const { url: audioURL } = await api.uploadAsset(file);
-          const tr = await api.generateBySlug('transcribe-african', {
-            prompt: audioURL,
-            language: language,
-          }) as { generation_id: string };
-
-          let attempts = 0;
-          while (attempts < 40) {
-            await new Promise((r) => setTimeout(r, 3000));
-            const s = await api.getGenerationStatus(tr.generation_id) as {
-              status: string;
-              output_text?: string;
-            };
-            if (s.status === 'completed') {
-              const transcript = s.output_text ?? '';
-              if (transcript) {
-                setText((prev) => prev ? prev + '\n\n' + transcript : transcript);
-              }
-              setRecordState('done');
-              return;
-            }
-            if (s.status === 'failed') break;
-            attempts++;
-          }
-          throw new Error('Transcription timed out — please type your text manually.');
-        } catch (e: unknown) {
-          setRecordError(e instanceof Error ? e.message : 'Transcription failed');
-          setRecordState('error');
-        }
-      };
-
-      mr.start();
-      mediaRef.current = mr;
-      setRecordState('recording');
-    } catch {
-      setRecordError('Microphone access denied. Please allow microphone access in your browser, or type your text directly.');
-      setRecordState('error');
-    }
-  }
-
-  function clearRecording() {
-    setRecordState('idle');
-    setRecordError('');
-    setAudioPreview('');
-  }
-
   function handleSubmit() {
-    if (!isValid || isLoading || !canAfford) return;
+    if (!isValid || isLoading || !canAfford || isMicBusy) return;
     const payload: GeneratePayload = {
       prompt:   text.trim(),
       voice_id: voiceId,
@@ -240,7 +161,7 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
           </div>
           {text.trim() && (
             <div className="flex items-center gap-1 text-white/35 text-[11px] flex-shrink-0">
-              <Clock size={11} />
+              <Clock size={10} />
               <span>{estDuration}</span>
             </div>
           )}
@@ -379,33 +300,29 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
       {/* ── Text to narrate ── */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Text to narrate</label>
+          <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
+            Text to narrate
+          </label>
           <div className="flex items-center gap-2">
-            {/* Mic recording button */}
+            {/* Web Speech API mic button */}
             <button
               type="button"
-              onClick={toggleRecording}
-              disabled={recordState === 'transcribing' || isLoading}
-              title={
-                recordState === 'recording'
-                  ? 'Stop recording'
-                  : 'Record your voice — it will be auto-transcribed into the text box'
-              }
+              onClick={handleMicClick}
+              disabled={speechState === 'processing' || isLoading}
+              title={speechState === 'listening' ? 'Stop — text will be added below' : 'Dictate the text you want narrated'}
               className={cn(
                 'flex items-center gap-1 text-[10px] px-2 py-1 rounded-full border font-medium transition-all',
-                recordState === 'recording'
+                speechState === 'listening'
                   ? 'bg-red-600/20 border-red-500/50 text-red-300 animate-pulse'
-                  : recordState === 'transcribing'
+                  : speechState === 'processing'
                     ? 'bg-white/5 border-white/10 text-white/30 cursor-not-allowed'
                     : 'border-white/15 text-white/45 hover:border-green-500/40 hover:text-green-300',
               )}
             >
-              {recordState === 'recording' ? (
-                <><StopCircle size={10} className="text-red-400" /> Stop</>
-              ) : recordState === 'transcribing' ? (
-                <><Loader2 size={10} className="animate-spin" /> Transcribing…</>
+              {speechState === 'listening' ? (
+                <><MicOff size={10} className="text-red-400" /> Stop</>
               ) : (
-                <><Mic size={10} /> Record</>
+                <><Mic size={10} /> Dictate</>
               )}
             </button>
             <span className={cn('text-[11px] tabular-nums', text.length > maxChars * 0.9 ? 'text-red-400' : 'text-white/30')}>
@@ -414,48 +331,26 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
           </div>
         </div>
 
-        {/* Recording status banners */}
-        {recordState === 'recording' && (
+        {/* Mic status banners */}
+        {speechState === 'listening' && (
           <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-red-600/10 border border-red-500/20">
             <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
-            <p className="text-red-300 text-xs">Recording… Speak clearly, then press <strong>Stop</strong></p>
+            <p className="text-red-300 text-xs flex-1">
+              Listening… {interimText ? <em className="not-italic text-white/50">&ldquo;{interimText}&rdquo;</em> : 'speak clearly, then pause'}
+            </p>
           </div>
         )}
-
-        {recordState === 'transcribing' && (
-          <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/10">
-            <Loader2 size={12} className="text-green-400 animate-spin flex-shrink-0" />
-            <p className="text-white/50 text-xs">Transcribing your recording — this takes a few seconds…</p>
-          </div>
-        )}
-
-        {recordState === 'done' && audioPreview && (
-          <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-xl bg-green-600/10 border border-green-500/20">
-            <CheckCircle2 size={12} className="text-green-400 flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-green-300 text-[11px] font-medium">Transcribed — text added below</p>
-              <audio src={audioPreview} controls className="mt-1 w-full h-6 opacity-60" />
-            </div>
-            <button onClick={clearRecording} className="text-white/30 hover:text-white/60 flex-shrink-0">
-              <X size={12} />
-            </button>
-          </div>
-        )}
-
-        {recordState === 'error' && (
+        {speechState === 'error' && speechError && (
           <div className="mb-2 flex items-start gap-2 px-3 py-2 rounded-xl bg-red-600/10 border border-red-500/20">
             <MicOff size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
-            <p className="text-red-300 text-[11px] flex-1">{recordError || 'Recording failed'}</p>
-            <button onClick={clearRecording} className="text-white/30 hover:text-white/60 flex-shrink-0">
-              <X size={12} />
-            </button>
+            <p className="text-red-300 text-[11px] flex-1">{speechError}</p>
           </div>
         )}
 
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={cfg.prompt_placeholder ?? 'Paste or type the text you want narrated… or use the Record button above to dictate it'}
+          placeholder={cfg.prompt_placeholder ?? 'Paste or type the text you want narrated… or tap Dictate above to speak it'}
           rows={6}
           maxLength={maxChars}
           autoFocus
@@ -485,18 +380,18 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
       {/* ── Generate button ── */}
       <button
         onClick={handleSubmit}
-        disabled={!isValid || isLoading || !canAfford || isBusy}
+        disabled={!isValid || isLoading || !canAfford || isMicBusy}
         className={cn(
           'w-full py-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all',
-          isValid && !isLoading && canAfford && !isBusy
+          isValid && !isLoading && canAfford && !isMicBusy
             ? 'bg-gradient-to-r from-green-600 to-teal-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-green-900/30'
             : 'bg-white/5 text-white/20 cursor-not-allowed',
         )}
       >
         {isLoading ? (
           <><Loader2 size={15} className="animate-spin" /> Generating audio…</>
-        ) : isBusy ? (
-          <><Loader2 size={15} className="animate-spin" /> {recordState === 'transcribing' ? 'Transcribing…' : 'Recording…'}</>
+        ) : isMicBusy ? (
+          <><Loader2 size={15} className="animate-spin" /> Listening…</>
         ) : (
           <><Sparkles size={15} /> Generate Voice</>
         )}
