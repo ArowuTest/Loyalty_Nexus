@@ -112,6 +112,12 @@ export interface UIConfig {
   output_note?: string;         // optional note shown below upload zone
   // video v2
   camera_movements?: Array<{ label: string; icon?: string; value: string }>;
+  show_audio_direction?: boolean;   // show audio/sound direction field (video-veo)
+  show_music_style?: boolean;       // show music style field (video-jingle)
+  show_image_upload?: boolean;      // show optional image upload (video-jingle)
+  image_upload_optional?: boolean;  // whether image upload is optional
+  image_upload_label?: string;      // label for image upload zone
+  image_upload_hint?: string;       // hint text inside image upload zone
   // voice v2
   show_speed_control?: boolean;
   show_format_selector?: boolean;

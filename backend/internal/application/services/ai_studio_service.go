@@ -76,7 +76,7 @@ var slugCategory = map[string]studioToolCat{
 	"ai-photo":       catImage,
 	"animate-photo":  catVideo,
 	"video-premium":  catVideo,
-	"video-jingle":   catVideo,
+	"video-jingle":   catComposite,
 	"bg-music":       catMusic,
 	"jingle":         catMusic,
 	"study-guide":    catText,
@@ -941,7 +941,7 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 			log.Printf("[AIStudio] Grok Imagine Video failed for video-veo: %v — trying Veo", err)
 		}
 		// Tier 2: Google Veo 3.1 (Pollinations) — $0.150/sec
-		vidURL, err := o.callPollinationsVeo(ctx, prompt)
+		vidURL, err := o.callPollinationsVeo(ctx, prompt, env.AspectRatio, env.Extra["audio_direction"] != "")
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo", CostMicros: 400000}, nil
 		}
@@ -987,12 +987,12 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 			model = "fal-ai/ltx-video"
 		}
 
-		videoURL, err := o.callFALVideo(ctx, falKey, model, imageURL)
+		videoURL, err := o.callFALVideo(ctx, falKey, model, imageURL, o.enhanceVideoPrompt(ctx, env.Prompt))
 		if err != nil {
 			// Fallback for Kling → LTX within FAL
 			if slug == "video-premium" {
 				log.Printf("[AIStudio] Kling failed, falling back to LTX: %v", err)
-				videoURL, err = o.callFALVideo(ctx, falKey, "fal-ai/ltx-video", imageURL)
+				videoURL, err = o.callFALVideo(ctx, falKey, "fal-ai/ltx-video", imageURL, o.enhanceVideoPrompt(ctx, env.Prompt))
 			}
 		}
 		if err == nil {
@@ -1486,9 +1486,105 @@ func (o *AIStudioOrchestrator) dispatchComposite(ctx context.Context, slug strin
 	switch slug {
 	case "podcast", "my-podcast":
 		return o.assemblePodcast(ctx, env.Prompt)
+	case "video-jingle":
+		return o.assembleVideoJingle(ctx, env)
 	default:
 		return o.dispatchText(ctx, slug, env)
 	}
+}
+
+// assembleVideoJingle creates a short video with a matching jingle/music track.
+// Step 1: Generate a short music jingle using the music pipeline.
+// Step 2: Generate a short video clip using the video pipeline.
+// Returns: OutputURL = video, OutputURL2 = music track.
+func (o *AIStudioOrchestrator) assembleVideoJingle(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
+	// ── Step 1: Generate jingle audio ────────────────────────────────────────
+	// Use the music style from extra_params if provided, else derive from prompt
+	musicStyle := env.Extra["music_style"]
+	if musicStyle == "" {
+		musicStyle = "upbeat, catchy, commercial jingle"
+	}
+	musicPrompt := fmt.Sprintf("Short 15-second jingle: %s. Style: %s. Energetic, memorable, brand-friendly.", env.Prompt, musicStyle)
+	// Try ElevenLabs Music first, then Mubert, then Pollinations ElevenMusic
+	var musicURL string
+	if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
+		if url, err := o.callElevenLabsMusic(ctx, el11Key, musicPrompt); err == nil {
+			musicURL = url
+		} else {
+			log.Printf("[AIStudio] video-jingle: ElevenLabs music failed: %v", err)
+		}
+	}
+	if musicURL == "" {
+		if mubertKey := os.Getenv("MUBERT_API_KEY"); mubertKey != "" {
+			if url, err := o.callMubert(ctx, mubertKey, musicPrompt, 15); err == nil {
+				musicURL = url
+			} else {
+				log.Printf("[AIStudio] video-jingle: Mubert failed: %v", err)
+			}
+		}
+	}
+	if musicURL == "" {
+		// Pollinations ElevenMusic fallback
+		polKey := os.Getenv("POLLINATIONS_SECRET_KEY")
+		if polKey != "" {
+			musicAPIURL := fmt.Sprintf("https://gen.pollinations.ai/audio/%s?model=elevenmusic&duration=15",
+				url.PathEscape(musicPrompt))
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, musicAPIURL, nil)
+			req.Header.Set("Authorization", "Bearer "+polKey)
+			if resp, err := o.httpClient.Do(req); err == nil {
+				defer resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					raw, _ := io.ReadAll(resp.Body)
+					if len(raw) > 1000 {
+						key := fmt.Sprintf("studio/audio/jingle_%d.mp3", time.Now().UnixNano())
+						musicURL = o.uploadOrDataURI(ctx, raw, "audio/mpeg", key)
+					}
+				}
+			}
+		}
+	}
+	// ── Step 2: Generate video clip ──────────────────────────────────────────
+	videoPrompt := o.enhanceVideoPrompt(ctx, env.Prompt)
+	var videoURL string
+	// If user uploaded an image, animate it; otherwise text-to-video
+	if env.ImageURL != "" {
+		if url, err := o.callPollinationsVideoModel(ctx, "wan-fast", env.ImageURL, videoPrompt, 180, env.AspectRatio, "15"); err == nil {
+			videoURL = url
+		} else {
+			log.Printf("[AIStudio] video-jingle: wan-fast image-to-video failed: %v", err)
+		}
+	}
+	if videoURL == "" {
+		if url, err := o.callPollinationsVideoModel(ctx, "wan-fast", "", videoPrompt, 180, env.AspectRatio, "15"); err == nil {
+			videoURL = url
+		} else {
+			log.Printf("[AIStudio] video-jingle: wan-fast text-to-video failed: %v", err)
+		}
+	}
+	if videoURL == "" {
+		if url, err := o.callPollinationsVideoModel(ctx, "p-video", "", videoPrompt, 180, env.AspectRatio, "15"); err == nil {
+			videoURL = url
+		} else {
+			log.Printf("[AIStudio] video-jingle: p-video fallback failed: %v", err)
+		}
+	}
+	// ── Return composite result ───────────────────────────────────────────────
+	if videoURL == "" && musicURL == "" {
+		return nil, fmt.Errorf("video-jingle: all providers failed")
+	}
+	outText := ""
+	if musicURL == "" {
+		outText = "Note: Music generation failed — video only."
+	} else if videoURL == "" {
+		outText = "Note: Video generation failed — music track only."
+	}
+	return &studioProviderResult{
+		OutputURL:  videoURL,
+		OutputURL2: musicURL,
+		OutputText: outText,
+		Provider:   "composite/video-jingle",
+		CostMicros: 0,
+	}, nil
 }
 
 func (o *AIStudioOrchestrator) assemblePodcast(ctx context.Context, topic string) (*studioProviderResult, error) {
@@ -1917,10 +2013,13 @@ func (o *AIStudioOrchestrator) callRemoveBg(ctx context.Context, apiKey, imageUR
 }
 
 // callFALVideo calls FAL.AI for image-to-video animation.
-func (o *AIStudioOrchestrator) callFALVideo(ctx context.Context, falKey, model, imageURL string) (string, error) {
+func (o *AIStudioOrchestrator) callFALVideo(ctx context.Context, falKey, model, imageURL, motionPrompt string) (string, error) {
+	if motionPrompt == "" {
+		motionPrompt = "animate this photo naturally with smooth cinematic motion, subtle movement, professional quality"
+	}
 	payload := map[string]interface{}{
 		"image_url": imageURL,
-		"prompt":    "animate this photo naturally with smooth motion",
+		"prompt":    motionPrompt,
 		"duration":  "5",
 	}
 	if strings.Contains(model, "kling") {
@@ -2524,9 +2623,10 @@ func (o *AIStudioOrchestrator) callPollinationsVideoModel(ctx context.Context, m
 	}
 
 	encoded := url.PathEscape(prompt)
-	// opts: [0]=aspectRatio, [1]=duration (seconds as string)
+	// opts: [0]=aspectRatio, [1]=duration (seconds as string), [2]=audio ("true"/"false")
 	videoAR := "16:9"
 	videoDur := "5"
+	videoAudio := false
 	if len(opts) > 0 && opts[0] != "" {
 		switch opts[0] {
 		case "9:16", "portrait":
@@ -2542,10 +2642,16 @@ func (o *AIStudioOrchestrator) callPollinationsVideoModel(ctx context.Context, m
 	if len(opts) > 1 && opts[1] != "" {
 		videoDur = opts[1]
 	}
+	if len(opts) > 2 && opts[2] == "true" {
+		videoAudio = true
+	}
 	apiURL := fmt.Sprintf("https://gen.pollinations.ai/image/%s?model=%s&duration=%s&aspectRatio=%s",
 		encoded, model, videoDur, url.QueryEscape(videoAR))
 	if imageURL != "" {
 		apiURL += "&image=" + url.QueryEscape(imageURL)
+	}
+	if videoAudio {
+		apiURL += "&audio=true"
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
@@ -3329,8 +3435,12 @@ func (o *AIStudioOrchestrator) callPollinationsSeedance(ctx context.Context, ima
 // callPollinationsVeo generates a premium text-to-video using Google Veo via Pollinations.
 // Official documented endpoint: GET gen.pollinations.ai/image/{prompt}?model=veo
 // Paid model (~$0.40-0.50/video). Uses sk_ key via Bearer header. Timeout: 180s.
-func (o *AIStudioOrchestrator) callPollinationsVeo(ctx context.Context, prompt string) (string, error) {
-	return o.callPollinationsVideoModel(ctx, "veo", "", prompt, 180)
+func (o *AIStudioOrchestrator) callPollinationsVeo(ctx context.Context, prompt, aspectRatio string, withAudio bool) (string, error) {
+	audioOpt := "false"
+	if withAudio {
+		audioOpt = "true"
+	}
+	return o.callPollinationsVideoModel(ctx, "veo", "", prompt, 180, aspectRatio, "5", audioOpt)
 }
 
 // ─── S3 upload helper ─────────────────────────────────────────────────────────

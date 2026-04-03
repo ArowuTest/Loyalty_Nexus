@@ -1891,6 +1891,13 @@ function ToolDrawer({
   const [genStartedAt,   setGenStartedAt]   = useState<number | null>(null);
   // Inline result — set when polling returns completed, shown directly in drawer
   const [inlineResult,   setInlineResult]   = useState<{ output_url?: string; output_url_2?: string; output_text?: string; output_type?: string } | null>(null);
+  // Scroll-to-top ref — resets scroll position whenever the active tool changes
+  const drawerScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (drawerScrollRef.current) {
+      drawerScrollRef.current.scrollTop = 0;
+    }
+  }, [tool.id]);
 
   const cfg        = catCfg(tool.category);
   const slug       = tool.slug;
@@ -1988,6 +1995,7 @@ function ToolDrawer({
       <motion.div
         initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
+        ref={drawerScrollRef}
         className="fixed bottom-0 left-0 right-0 z-40 max-h-[92vh] overflow-y-auto
                    md:relative md:inset-auto md:max-h-none"
       >

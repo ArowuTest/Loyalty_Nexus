@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, Sparkles, AlertTriangle, Film, Plus, X, ChevronDown, ChevronUp, Mic, MicOff } from 'lucide-react';
+import { Loader2, Sparkles, AlertTriangle, Film, Plus, X, ChevronDown, ChevronUp, Mic, MicOff, Volume2, Music, ImagePlus } from 'lucide-react';
+import { useRef } from 'react';
+import { api } from '@/lib/api';
 import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
@@ -47,7 +49,11 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
   const durations     = cfg.duration_options     ?? DEFAULT_DURATIONS;
   const showNeg       = cfg.show_negative_prompt ?? true;
   const maxDuration   = cfg.max_duration         ?? 15;
-  const cameraPresets = cfg.camera_movements     ?? CAMERA_MOVEMENTS;
+  const cameraPresets   = cfg.camera_movements     ?? CAMERA_MOVEMENTS;
+  const showAudioDir    = cfg.show_audio_direction ?? (tool.slug === 'video-veo');
+  const showMusicStyle  = cfg.show_music_style     ?? (tool.slug === 'video-jingle');
+  const showImgUpload   = cfg.show_image_upload    ?? (tool.slug === 'video-jingle');
+  const imgUploadOpt    = cfg.image_upload_optional ?? true;
 
   const [prompt,     setPrompt]     = useState('');
   const [aspect,     setAspect]     = useState(cfg.default_aspect ?? '16:9');
@@ -57,6 +63,14 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
   const [showNegBox, setShowNegBox] = useState(false);
   const [cameraMove, setCameraMove] = useState<string | null>(null);
   const [showInspo,  setShowInspo]  = useState(false);
+  // Audio direction (video-veo), music style (video-jingle), image upload (video-jingle)
+  const [audioDir,     setAudioDir]     = useState('');
+  const [musicStyle,   setMusicStyle]   = useState('');
+  const [imageFile,    setImageFile]    = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageUrl,     setImageUrl]     = useState<string | null>(null);
+  const [uploading,    setUploading]    = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // Multi-scene builder
   const [scenes,     setScenes]     = useState<string[]>([]);
   const [newScene,   setNewScene]   = useState('');
@@ -70,7 +84,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
     });
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
-  const isValid   = prompt.trim().length >= 3;
+  const isValid   = prompt.trim().length >= 3 && !uploading;
 
   const filteredDurations = durations.filter((d: number) => d <= maxDuration);
 
@@ -97,6 +111,23 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
     setScenes((prev) => prev.filter((_, idx) => idx !== i));
   }
 
+  async function handleImageFile(file: File) {
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => setImagePreview(e.target?.result as string);
+    reader.readAsDataURL(file);
+    // Upload to CDN immediately
+    setUploading(true);
+    try {
+      const result = await api.uploadAsset(file);
+      setImageUrl(result.url);
+    } catch {
+      setImageUrl(null);
+    } finally {
+      setUploading(false);
+    }
+  }
+
   function handleSubmit() {
     if (!isValid || isLoading || !canAfford) return;
     const stylePrefix  = selStyles.length > 0 ? `[${selStyles.join(', ')}] ` : '';
@@ -104,15 +135,19 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
     const scenesSuffix = scenes.length > 0
       ? '\n\nScene breakdown:\n' + scenes.map((s, i) => `Scene ${i + 1}: ${s}`).join('\n')
       : '';
+    const audioDirSuffix = audioDir.trim() ? `. Audio: ${audioDir.trim()}.` : '';
     const payload: GeneratePayload = {
-      prompt:          stylePrefix + prompt.trim() + cameraSuffix + scenesSuffix,
+      prompt:          stylePrefix + prompt.trim() + cameraSuffix + scenesSuffix + audioDirSuffix,
       aspect_ratio:    aspect,
       duration,
       style_tags:      selStyles.length > 0 ? selStyles : undefined,
       negative_prompt: negPrompt.trim() || undefined,
+      image_url:       imageUrl ?? undefined,
       extra_params: {
-        camera_movement: cameraMove ?? undefined,
-        scenes:          scenes.length > 0 ? scenes : undefined,
+        camera_movement:   cameraMove ?? undefined,
+        scenes:            scenes.length > 0 ? scenes : undefined,
+        audio_direction:   audioDir.trim() || undefined,
+        music_style:       musicStyle.trim() || undefined,
       },
     };
     onSubmit(payload);
@@ -375,6 +410,89 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
         </div>
       )}
 
+      {/* ── Audio direction (video-veo only) ── */}
+      {showAudioDir && (
+        <div>
+          <label className="flex items-center gap-1.5 text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2">
+            <Volume2 size={11} />
+            Audio / Sound direction
+            <span className="text-white/25 normal-case font-normal">(optional)</span>
+          </label>
+          <textarea
+            value={audioDir}
+            onChange={(e) => setAudioDir(e.target.value.slice(0, 200))}
+            placeholder="Describe the audio: ambient city sounds, dramatic orchestral score, birds chirping, crowd noise, silence..."
+            rows={2}
+            className="nexus-input resize-none w-full text-sm leading-relaxed"
+          />
+          <p className="text-white/20 text-[10px] mt-1">
+            Veo 3 supports native audio generation — describe sounds, music, or ambient audio.
+          </p>
+        </div>
+      )}
+      {/* ── Music style (video-jingle only) ── */}
+      {showMusicStyle && (
+        <div>
+          <label className="flex items-center gap-1.5 text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2">
+            <Music size={11} />
+            Music style
+            <span className="text-white/25 normal-case font-normal">(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={musicStyle}
+            onChange={(e) => setMusicStyle(e.target.value.slice(0, 100))}
+            placeholder="upbeat pop, corporate, Afrobeats, cinematic orchestral, lo-fi..."
+            className="nexus-input w-full text-sm"
+          />
+        </div>
+      )}
+      {/* ── Optional image upload (video-jingle) ── */}
+      {showImgUpload && (
+        <div>
+          <label className="flex items-center gap-1.5 text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2">
+            <ImagePlus size={11} />
+            {cfg.image_upload_label ?? 'Reference image'}
+            {imgUploadOpt && <span className="text-white/25 normal-case font-normal">(optional)</span>}
+          </label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageFile(f); }}
+          />
+          {imagePreview ? (
+            <div className="relative">
+              <img src={imagePreview} alt="Reference" className="w-full h-28 object-cover rounded-xl border border-white/10" />
+              <button
+                onClick={() => { setImageFile(null); setImagePreview(null); setImageUrl(null); }}
+                className="absolute top-2 right-2 bg-black/60 rounded-full p-1 text-white/70 hover:text-white transition-colors"
+              >
+                <X size={12} />
+              </button>
+              {uploading && (
+                <div className="absolute inset-0 bg-black/50 rounded-xl flex items-center justify-center">
+                  <Loader2 size={16} className="animate-spin text-white/70" />
+                </div>
+              )}
+              {imageUrl && !uploading && (
+                <div className="absolute bottom-2 right-2 bg-green-600/80 rounded-full px-2 py-0.5 text-[10px] text-white font-medium">
+                  Ready
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full h-20 border-2 border-dashed border-white/15 rounded-xl flex flex-col items-center justify-center gap-1.5 text-white/30 hover:border-white/30 hover:text-white/50 transition-all"
+            >
+              <ImagePlus size={18} />
+              <span className="text-xs">{cfg.image_upload_hint ?? 'Upload a reference image'}</span>
+            </button>
+          )}
+        </div>
+      )}
       {/* ── Generate button ── */}
       <button
         onClick={handleSubmit}

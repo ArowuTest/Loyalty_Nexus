@@ -106,7 +106,7 @@ func (o *AIStudioOrchestrator) callByTemplate(
 		if model == "" {
 			model = "fal-ai/ltx-video"
 		}
-		outputURL, err = o.callFALVideo(ctx, key, model, in.ImageURL)
+		outputURL, err = o.callFALVideo(ctx, key, model, in.ImageURL, in.Prompt)
 
 	case entities.TemplatePollVideo:
 		model := p.ModelID
