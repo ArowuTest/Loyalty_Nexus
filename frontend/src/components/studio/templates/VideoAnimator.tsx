@@ -4,6 +4,7 @@ import { useState, useRef } from 'react';
 import { Loader2, Upload, X, ImageIcon, Sparkles, AlertTriangle } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
+import api from '@/lib/api';
 
 const DEFAULT_STYLE_TAGS = [
   'Smooth motion', 'Dramatic', 'Slow motion', 'Zoom in', 'Zoom out',
@@ -56,12 +57,28 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
     setSelStyles((prev) => prev.includes(s) ? prev.filter((t) => t !== s) : [...prev, s]);
   }
 
-  function handleSubmit() {
+  const [uploading, setUploading] = useState(false);
+
+  async function handleSubmit() {
     if (!isValid || isLoading || !canAfford) return;
-    const finalUrl     = imageFile && preview ? preview : imageUrl.trim();
-    const stylePrefix  = selStyles.length > 0 ? `[${selStyles.join(', ')}] ` : '';
+    let finalUrl = imageUrl.trim();
+    // If a file was selected, upload it to get a real HTTPS URL (base64 data URIs
+    // are rejected by Pollinations and FAL video providers)
+    if (imageFile) {
+      setUploading(true);
+      try {
+        const result = await api.uploadAsset(imageFile);
+        finalUrl = result.url;
+      } catch (err) {
+        console.error('Image upload failed:', err);
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
+    }
+    const stylePrefix    = selStyles.length > 0 ? `[${selStyles.join(', ')}] ` : '';
     const intensityLabel = INTENSITY_LABELS[intensity];
-    const intensityCue = intensityLabel !== 'Moderate' ? ` ${intensityLabel} motion.` : '';
+    const intensityCue   = intensityLabel !== 'Moderate' ? ` ${intensityLabel} motion.` : '';
     const payload: GeneratePayload = {
       prompt:     stylePrefix + (motionPrompt.trim() || 'Animate this image with natural motion') + intensityCue,
       image_url:  finalUrl,
@@ -252,9 +269,11 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
             : 'bg-white/5 text-white/20 cursor-not-allowed',
         )}
       >
-        {isLoading
-          ? <><Loader2 size={15} className="animate-spin" /> Animating…</>
-          : <><Sparkles size={15} /> Animate Image →</>
+        {uploading
+          ? <><Loader2 size={15} className="animate-spin" /> Uploading image…</>
+          : isLoading
+            ? <><Loader2 size={15} className="animate-spin" /> Animating…</>
+            : <><Sparkles size={15} /> Animate Image →</>
         }
       </button>
     </div>

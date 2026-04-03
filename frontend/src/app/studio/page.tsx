@@ -1291,6 +1291,75 @@ function renderInfographic(text: string) {
   );
 }
 
+// ─── Mind Map renderer ──────────────────────────────────────────────────────
+function renderMindMap(text: string) {
+  interface MindBranch { label: string; color?: string; children?: { label: string; children?: { label: string }[] }[] }
+  interface MindMapData { center?: string; branches?: MindBranch[] }
+  let data: MindMapData | null = null;
+  try {
+    const raw = JSON.parse(text);
+    if (raw && typeof raw === 'object' && raw.center) data = raw;
+  } catch { /* not JSON */ }
+  if (!data || !data.branches) {
+    return (
+      <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+        <p className="text-white/70 text-xs leading-relaxed whitespace-pre-wrap">{text}</p>
+      </div>
+    );
+  }
+  const branches = data.branches ?? [];
+  const BRANCH_COLORS = ['#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#ec4899'];
+  return (
+    <div className="space-y-3">
+      {/* Central topic */}
+      <div className="flex justify-center">
+        <div className="bg-gradient-to-br from-purple-600 to-indigo-600 text-white font-bold text-sm px-5 py-2.5 rounded-2xl shadow-lg shadow-purple-900/40 text-center max-w-[200px]">
+          {data.center}
+        </div>
+      </div>
+      {/* Branches */}
+      <div className="grid grid-cols-1 gap-2">
+        {branches.map((branch: MindBranch, bi: number) => {
+          const color = branch.color ?? BRANCH_COLORS[bi % BRANCH_COLORS.length];
+          return (
+            <div key={bi} className="rounded-xl border overflow-hidden" style={{ borderColor: color + '40' }}>
+              {/* Branch header */}
+              <div className="flex items-center gap-2 px-3 py-2" style={{ backgroundColor: color + '20' }}>
+                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                <span className="text-white font-semibold text-xs">{branch.label}</span>
+              </div>
+              {/* Sub-branches */}
+              {Array.isArray(branch.children) && branch.children.length > 0 && (
+                <div className="px-3 py-2 space-y-1.5 bg-white/[0.02]">
+                  {branch.children.map((child: { label: string; children?: { label: string }[] }, ci: number) => (
+                    <div key={ci}>
+                      <div className="flex items-start gap-1.5">
+                        <span className="text-[10px] mt-0.5 flex-shrink-0" style={{ color }}>▸</span>
+                        <span className="text-white/80 text-[11px] font-medium leading-snug">{child.label}</span>
+                      </div>
+                      {/* Leaf nodes */}
+                      {Array.isArray(child.children) && child.children.length > 0 && (
+                        <div className="ml-4 mt-1 space-y-0.5">
+                          {child.children.map((leaf: { label: string }, li: number) => (
+                            <div key={li} className="flex items-start gap-1.5">
+                              <span className="text-[9px] mt-0.5 flex-shrink-0 text-white/30">–</span>
+                              <span className="text-white/55 text-[10px] leading-snug">{leaf.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Status pill ─────────────────────────────────────────────────────────────
 function StatusPill({ status }: { status: Generation["status"] }) {
   const config = {
@@ -1303,6 +1372,41 @@ function StatusPill({ status }: { status: Generation["status"] }) {
     <span className={cn("flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border flex-shrink-0", config.cls)}>
       {config.icon}{config.label}
     </span>
+  );
+}
+
+// ─── Quiz renderer (module-level so both GenerationCard and ToolDrawer can use it) ─────────────────
+function renderQuiz(text: string) {
+  let parsed: { question?: string; options?: string[]; answer?: string }[] | null = null;
+  try {
+    const raw = JSON.parse(text);
+    if (Array.isArray(raw)) parsed = raw;
+  } catch { /* not valid JSON */ }
+  if (!parsed) {
+    return <p className="text-white/70 text-sm leading-relaxed whitespace-pre-wrap">{text}</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {parsed.map((q, i) => (
+        <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-2">
+          <p className="text-white/90 text-sm font-medium">{i + 1}. {q.question}</p>
+          {Array.isArray(q.options) && (
+            <ul className="space-y-1">
+              {q.options.map((opt: string, oi: number) => (
+                <li key={oi} className={cn(
+                  "text-xs px-3 py-1.5 rounded-lg border",
+                  q.answer === opt || q.answer === String(oi)
+                    ? "border-green-500/40 bg-green-500/10 text-green-300"
+                    : "border-white/10 text-white/55"
+                )}>
+                  {opt}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1319,40 +1423,7 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
   const meta     = TOOL_META[gen.tool_slug];
   const outType  = getOutputType(gen.tool_slug);
 
-  // ── Quiz renderer ──
-  function renderQuiz(text: string) {
-    let parsed: { question?: string; options?: string[]; answer?: string }[] | null = null;
-    try {
-      const raw = JSON.parse(text);
-      if (Array.isArray(raw)) parsed = raw;
-    } catch { /* not valid JSON */ }
-    if (!parsed) {
-      return <p className="text-white/70 text-sm leading-relaxed whitespace-pre-wrap">{text}</p>;
-    }
-    return (
-      <div className="space-y-3">
-        {parsed.map((q, i) => (
-          <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-2">
-            <p className="text-white/90 text-sm font-medium">{i + 1}. {q.question}</p>
-            {Array.isArray(q.options) && (
-              <ul className="space-y-1">
-                {q.options.map((opt: string, oi: number) => (
-                  <li key={oi} className={cn(
-                    "text-xs px-3 py-1.5 rounded-lg border",
-                    q.answer === opt || q.answer === String(oi)
-                      ? "border-green-500/40 bg-green-500/10 text-green-300"
-                      : "border-white/10 text-white/55"
-                  )}>
-                    {opt}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
-      </div>
-    );
-  }
+
 
   // Colored left border accent per output type
   const accentBorder = gen.status === 'failed'
@@ -1610,11 +1681,16 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                 <span className="text-white/50 text-xs font-medium uppercase tracking-wider">Result</span>
                 <CopyButton text={gen.output_text} label="📋 Copy JSON" />
               </div>
-              {(gen.tool_slug === "quiz" || gen.tool_slug === "quiz-me") ? renderQuiz(gen.output_text) : (
-                <pre className="bg-gray-950 text-white/60 text-xs font-mono p-3 rounded-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
-                  {gen.output_text}
-                </pre>
-              )}
+              {(gen.tool_slug === "quiz" || gen.tool_slug === "quiz-me")
+                ? renderQuiz(gen.output_text)
+                : (gen.tool_slug === "mindmap" || gen.tool_slug === "mind-map")
+                  ? renderMindMap(gen.output_text)
+                  : (
+                    <pre className="bg-gray-950 text-white/60 text-xs font-mono p-3 rounded-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
+                      {gen.output_text}
+                    </pre>
+                  )
+              }
               {onRegenerate && (
                 <button onClick={() => onRegenerate(gen)}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
@@ -2191,9 +2267,16 @@ function ToolDrawer({
                   {inlineResult.output_text && !inlineResult.output_url && (
                     <div className="p-4 space-y-3">
                       <div className="rounded-xl bg-white/5 border border-white/10 p-4 max-h-72 overflow-y-auto">
-                        <pre className="text-white/80 text-xs leading-relaxed whitespace-pre-wrap font-sans">
-                          {inlineResult.output_text}
-                        </pre>
+                        {(slug === 'mindmap' || slug === 'mind-map')
+                          ? renderMindMap(inlineResult.output_text)
+                          : (slug === 'quiz' || slug === 'quiz-me')
+                            ? renderQuiz(inlineResult.output_text)
+                            : (
+                              <pre className="text-white/80 text-xs leading-relaxed whitespace-pre-wrap font-sans">
+                                {inlineResult.output_text}
+                              </pre>
+                            )
+                        }
                       </div>
                       <div className="flex gap-2">
                         <button
