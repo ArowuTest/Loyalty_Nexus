@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Loader2, Upload, X, ImageIcon, Sparkles, Eye, Search } from 'lucide-react';
+import { Loader2, Upload, X, ImageIcon, Sparkles, Eye, Search, CheckCircle2 } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
+import api from '@/lib/api';
 
 const DEFAULT_EXAMPLE_QUESTIONS = [
   'What do you see in this image?',
@@ -25,24 +26,41 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
   // When prompt_optional=true the tool auto-generates a full description
   const autoMode = promptOptional;
 
-  const [imageUrl,  setImageUrl]  = useState('');
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [preview,   setPreview]   = useState<string | null>(null);
-  const [question,  setQuestion]  = useState('');
-  const [qSearch,   setQSearch]   = useState('');
+  const [imageUrl,    setImageUrl]    = useState('');
+  const [imageFile,   setImageFile]   = useState<File | null>(null);
+  const [preview,     setPreview]     = useState<string | null>(null);
+  const [uploadedUrl, setUploadedUrl] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [question,    setQuestion]    = useState('');
+  const [qSearch,     setQSearch]     = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
-  const hasImage  = imageUrl.trim() || imageFile;
+  const hasImage  = uploadedUrl || imageUrl.trim() || imageFile;
   // In auto mode (image-analyser) a question is not needed
-  const isValid   = !!hasImage && (autoMode || question.trim().length >= 3);
+  const isValid   = !!hasImage && !isUploading && (autoMode || question.trim().length >= 3);
 
-  function handleFile(file: File) {
+  async function handleFile(file: File) {
     setImageFile(file);
+    setUploadedUrl(null);
+    setUploadError(null);
+    // Show local preview immediately
     const reader = new FileReader();
     reader.onload = (e) => setPreview(e.target?.result as string);
     reader.readAsDataURL(file);
     setImageUrl('');
+    // Upload to CDN so backend gets a valid HTTPS URL
+    setIsUploading(true);
+    try {
+      const result = await api.uploadAsset(file);
+      setUploadedUrl(result.url);
+    } catch (err) {
+      setUploadError('Upload failed — please try again or paste a URL instead.');
+      console.error('[VisionAsk] upload error:', err);
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -55,11 +73,14 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
     setImageFile(null);
     setPreview(null);
     setImageUrl('');
+    setUploadedUrl(null);
+    setUploadError(null);
   }
 
   function handleSubmit() {
-    if (!isValid || isLoading || !canAfford) return;
-    const finalUrl = imageFile && preview ? preview : imageUrl.trim();
+    if (!isValid || isLoading || isUploading || !canAfford) return;
+    // Use CDN URL if we uploaded a file, otherwise use the pasted URL
+    const finalUrl = uploadedUrl ?? imageUrl.trim();
     const payload: GeneratePayload = {
       prompt:    question.trim() || 'Describe this image in full detail — objects, people, text, setting, mood, and any notable elements.',
       image_url: finalUrl,
@@ -131,6 +152,25 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
         )}
       </div>
 
+      {/* ── Upload status banners ── */}
+      {isUploading && (
+        <div className="flex items-center gap-2 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">
+          <Loader2 size={13} className="text-rose-400 animate-spin flex-shrink-0" />
+          <p className="text-rose-300/80 text-xs">Uploading image…</p>
+        </div>
+      )}
+      {uploadedUrl && !isUploading && (
+        <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-xl px-3 py-2">
+          <CheckCircle2 size={13} className="text-green-400 flex-shrink-0" />
+          <p className="text-green-300/80 text-xs">Image ready for analysis</p>
+        </div>
+      )}
+      {uploadError && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
+          <p className="text-red-300/80 text-xs">{uploadError}</p>
+        </div>
+      )}
+
       {/* ── Auto-mode banner (image-analyser) ── */}
       {autoMode && hasImage && (
         <div className="flex items-center gap-2 bg-rose-500/8 border border-rose-500/20 rounded-xl px-3 py-2.5">
@@ -196,7 +236,7 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
       {/* ── Generate button ── */}
       <button
         onClick={handleSubmit}
-        disabled={!isValid || isLoading || !canAfford}
+        disabled={!isValid || isLoading || isUploading || !canAfford}
         className={cn(
           'w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all',
           isValid && !isLoading && canAfford
@@ -204,11 +244,13 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
             : 'bg-white/5 text-white/20 cursor-not-allowed',
         )}
       >
-        {isLoading
-          ? <><Loader2 size={15} className="animate-spin" /> Analysing…</>
-          : autoMode
-            ? <><Eye size={15} /> Analyse Image →</>
-            : <><Sparkles size={15} /> Ask About Image →</>
+        {isUploading
+          ? <><Loader2 size={15} className="animate-spin" /> Uploading image…</>
+          : isLoading
+            ? <><Loader2 size={15} className="animate-spin" /> Analysing…</>
+            : autoMode
+              ? <><Eye size={15} /> Analyse Image →</>
+              : <><Sparkles size={15} /> Ask About Image →</>
         }
       </button>
     </div>

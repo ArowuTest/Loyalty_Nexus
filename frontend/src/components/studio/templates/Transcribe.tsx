@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Loader2, Upload, X, Mic, FileAudio, Sparkles, Users } from 'lucide-react';
+import { Loader2, Upload, X, Mic, FileAudio, Sparkles, Users, CheckCircle2 } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
+import api from '@/lib/api';
 
 const DEFAULT_LANGUAGES = [
   { code: 'auto', label: 'Auto-detect' },
@@ -36,18 +37,35 @@ export default function Transcribe({ tool, onSubmit, isLoading, userPoints }: Te
 
   const [audioUrl,     setAudioUrl]     = useState('');
   const [audioFile,    setAudioFile]    = useState<File | null>(null);
+  const [uploadedUrl,  setUploadedUrl]  = useState<string | null>(null);
+  const [isUploading,  setIsUploading]  = useState(false);
+  const [uploadError,  setUploadError]  = useState<string | null>(null);
   const [language,     setLanguage]     = useState<string>(cfg.default_language ?? 'auto');
   const [speakLabels,  setSpeakLabels]  = useState<boolean>(true);
   const [outFormat,    setOutFormat]    = useState<string>('plain');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
-  const hasAudio  = audioUrl.trim() || audioFile;
-  const isValid   = !!hasAudio;
+  const hasAudio  = uploadedUrl || audioUrl.trim() || audioFile;
+  const isValid   = !!hasAudio && !isUploading;
+  const isBusy    = isLoading || isUploading;
 
-  function handleFile(file: File) {
+  async function handleFile(file: File) {
     setAudioFile(file);
+    setUploadedUrl(null);
+    setUploadError(null);
     setAudioUrl('');
+    // Upload to CDN so backend gets a valid HTTPS URL
+    setIsUploading(true);
+    try {
+      const result = await api.uploadAsset(file);
+      setUploadedUrl(result.url);
+    } catch (err) {
+      setUploadError('Upload failed — please try again or paste a URL instead.');
+      console.error('[Transcribe] upload error:', err);
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -59,20 +77,20 @@ export default function Transcribe({ tool, onSubmit, isLoading, userPoints }: Te
   function clearAudio() {
     setAudioFile(null);
     setAudioUrl('');
+    setUploadedUrl(null);
+    setUploadError(null);
   }
 
   function handleSubmit() {
-    if (!isValid || isLoading || !canAfford) return;
-    const finalUrl = audioFile ? `file:${audioFile.name}` : audioUrl.trim();
+    if (!isValid || isBusy || !canAfford) return;
+    // Use the CDN URL if we uploaded a file, otherwise use the pasted URL
+    const finalUrl = uploadedUrl ?? audioUrl.trim();
     const payload: GeneratePayload = {
       prompt:   finalUrl,
       language: showLang ? language : undefined,
       extra_params: {
         speaker_labels: showSpeakers ? speakLabels : false,
         output_format:  outFormat,
-        file_name:      audioFile?.name,
-        file_type:      audioFile?.type,
-        file_size:      audioFile?.size,
       },
     };
     onSubmit(payload);
@@ -227,18 +245,39 @@ export default function Transcribe({ tool, onSubmit, isLoading, userPoints }: Te
         )}
       </div>
 
+      {/* ── Upload status banners ── */}
+      {isUploading && (
+        <div className="flex items-center gap-2 bg-orange-500/10 border border-orange-500/20 rounded-xl px-3 py-2">
+          <Loader2 size={13} className="text-orange-400 animate-spin flex-shrink-0" />
+          <p className="text-orange-300/80 text-xs">Uploading audio…</p>
+        </div>
+      )}
+      {uploadedUrl && !isUploading && (
+        <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/20 rounded-xl px-3 py-2">
+          <CheckCircle2 size={13} className="text-green-400 flex-shrink-0" />
+          <p className="text-green-300/80 text-xs">Audio ready for transcription</p>
+        </div>
+      )}
+      {uploadError && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
+          <p className="text-red-300/80 text-xs">{uploadError}</p>
+        </div>
+      )}
+
       {/* ── Generate button ── */}
       <button
         onClick={handleSubmit}
-        disabled={!isValid || isLoading || !canAfford}
+        disabled={!isValid || isBusy || !canAfford}
         className={cn(
           'w-full py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all',
-          isValid && !isLoading && canAfford
+          isValid && !isBusy && canAfford
             ? 'bg-gradient-to-r from-orange-600 to-amber-600 text-white hover:opacity-90 active:scale-[0.98] shadow-lg shadow-orange-900/30'
             : 'bg-white/5 text-white/20 cursor-not-allowed',
         )}
       >
-        {isLoading
+        {isUploading
+          ? <><Loader2 size={15} className="animate-spin" /> Uploading audio…</>
+          : isLoading
           ? <><Loader2 size={15} className="animate-spin" /> Transcribing…</>
           : <><Sparkles size={15} /> Transcribe Audio →</>
         }

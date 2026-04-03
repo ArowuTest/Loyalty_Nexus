@@ -108,6 +108,8 @@ export interface UIConfig {
   show_quality_toggle?: boolean;
   // image editor v2
   edit_suggestions?: string[];
+  show_edit_prompt?: boolean;   // false = hide edit instruction (e.g. bg-remover)
+  output_note?: string;         // optional note shown below upload zone
   // video v2
   camera_movements?: Array<{ label: string; icon?: string; value: string }>;
   // voice v2

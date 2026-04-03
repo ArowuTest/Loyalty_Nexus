@@ -1410,6 +1410,50 @@ function renderQuiz(text: string) {
   );
 }
 
+// ─── Slide-deck renderer (module-level so both GenerationCard and ToolDrawer can use it) ─────────────────
+function renderSlideDeck(text: string) {
+  let parsed: { title?: string; subtitle?: string; bullets?: string[]; notes?: string }[] | null = null;
+  try {
+    const raw = JSON.parse(text);
+    if (Array.isArray(raw)) parsed = raw;
+    else if (raw && Array.isArray(raw.slides)) parsed = raw.slides;
+  } catch { /* not valid JSON */ }
+  if (!parsed) {
+    return <p className="text-white/70 text-sm leading-relaxed whitespace-pre-wrap">{text}</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {parsed.map((slide, i) => (
+        <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full bg-indigo-600/30 text-indigo-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+              {i + 1}
+            </span>
+            <p className="text-white/90 text-sm font-semibold">{slide.title ?? `Slide ${i + 1}`}</p>
+          </div>
+          {slide.subtitle && (
+            <p className="text-white/55 text-xs italic pl-8">{slide.subtitle}</p>
+          )}
+          {Array.isArray(slide.bullets) && slide.bullets.length > 0 && (
+            <ul className="pl-8 space-y-1">
+              {slide.bullets.map((b: string, bi: number) => (
+                <li key={bi} className="text-white/65 text-xs flex items-start gap-1.5">
+                  <span className="text-indigo-400 mt-0.5 flex-shrink-0">•</span>
+                  {b}
+                </li>
+              ))}
+            </ul>
+          )}
+          {slide.notes && (
+            <p className="text-white/30 text-[11px] italic pl-8 border-t border-white/5 pt-2">
+              Speaker note: {slide.notes}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 // ─── Generation card ──────────────────────────────────────────────────────────
 function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?: (gen: Generation) => void }) {
   const isImage       = IMAGE_SLUGS.has(gen.tool_slug);
@@ -1685,11 +1729,13 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                 ? renderQuiz(gen.output_text)
                 : (gen.tool_slug === "mindmap" || gen.tool_slug === "mind-map")
                   ? renderMindMap(gen.output_text)
-                  : (
-                    <pre className="bg-gray-950 text-white/60 text-xs font-mono p-3 rounded-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
-                      {gen.output_text}
-                    </pre>
-                  )
+                  : (gen.tool_slug === "slide-deck")
+                    ? renderSlideDeck(gen.output_text)
+                    : (
+                      <pre className="bg-gray-950 text-white/60 text-xs font-mono p-3 rounded-xl border border-white/10 overflow-x-auto whitespace-pre-wrap max-h-60 overflow-y-auto leading-relaxed">
+                        {gen.output_text}
+                      </pre>
+                    )
               }
               {onRegenerate && (
                 <button onClick={() => onRegenerate(gen)}
@@ -2271,11 +2317,15 @@ function ToolDrawer({
                           ? renderMindMap(inlineResult.output_text)
                           : (slug === 'quiz' || slug === 'quiz-me')
                             ? renderQuiz(inlineResult.output_text)
-                            : (
-                              <pre className="text-white/80 text-xs leading-relaxed whitespace-pre-wrap font-sans">
-                                {inlineResult.output_text}
-                              </pre>
-                            )
+                            : (slug === 'infographic')
+                              ? renderInfographic(inlineResult.output_text)
+                              : (slug === 'slide-deck')
+                                ? renderSlideDeck(inlineResult.output_text)
+                                : (
+                                  <pre className="text-white/80 text-xs leading-relaxed whitespace-pre-wrap font-sans">
+                                    {inlineResult.output_text}
+                                  </pre>
+                                )
                         }
                       </div>
                       <div className="flex gap-2">
