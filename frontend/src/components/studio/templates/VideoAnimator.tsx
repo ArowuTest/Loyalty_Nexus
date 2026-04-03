@@ -35,6 +35,7 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
   const [selStyles,     setSelStyles]     = useState<string[]>([]);
   const [duration,      setDuration]      = useState<number>(cfg.default_duration ?? 5);
   const [intensity,     setIntensity]     = useState<number>(1); // 0=Subtle, 1=Moderate, 2=Strong
+  const [aspectRatio,   setAspectRatio]   = useState<string>(cfg.default_aspect ?? '16:9');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const canAfford = tool.is_free || userPoints >= tool.point_cost;
@@ -91,6 +92,7 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
       prompt:     stylePrefix + (motionPrompt.trim() || 'Animate this image with natural motion') + intensityCue,
       image_url:  finalUrl,
       duration,
+      aspect_ratio: aspectRatio,
       style_tags: selStyles.length > 0 ? selStyles : undefined,
       extra_params: {
         intensity: intensityLabel,
@@ -172,6 +174,27 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
       {/* ── Step 2: Motion options (revealed once image is loaded) ── */}
       {hasImage && (
         <>
+          {/* Aspect Ratio */}
+          <div>
+            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Aspect Ratio</label>
+            <div className="flex gap-2 flex-wrap">
+              {(['16:9', '9:16', '1:1', '4:3'] as const).map((ar) => (
+                <button
+                  key={ar}
+                  onClick={() => setAspectRatio(ar)}
+                  className={cn(
+                    'text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
+                    aspectRatio === ar
+                      ? 'bg-cyan-600 text-white border-cyan-500'
+                      : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
+                  )}
+                >
+                  {ar === '16:9' ? '16:9 Landscape' : ar === '9:16' ? '9:16 Portrait' : ar === '1:1' ? '1:1 Square' : '4:3 Standard'}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Duration */}
           <div>
             <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Duration</label>

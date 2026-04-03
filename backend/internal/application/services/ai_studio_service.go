@@ -715,13 +715,13 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 			log.Printf("[AIStudio] Grok Aurora Pro failed for ai-photo-pro: %v — falling back", err)
 		}
 		// Tier 2: GPT Image (gptimage model) — CostMicros: $0.02
-		url, err := o.callPollinationsGPTImage(ctx, prompt, "gptimage")
+		url, err := o.callPollinationsGPTImage(ctx, prompt, "gptimage", env.AspectRatio)
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/gptimage", CostMicros: 20000}, nil
 		}
 		log.Printf("[AIStudio] GPTImage failed for ai-photo-pro: %v — falling back to FLUX", err)
 		// Tier 3: Pollinations FLUX (free fallback)
-		url, err = o.callPollinationsImage(ctx, prompt)
+		url, err = o.callPollinationsImage(ctx, prompt, env.AspectRatio)
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
 		}
@@ -737,13 +737,17 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 			log.Printf("[AIStudio] Grok Aurora Pro failed for ai-photo-max: %v — falling back", err)
 		}
 		// Tier 2: GPT Image Large — CostMicros: $0.03
-		url, err := o.callPollinationsGPTImage(ctx, prompt, "gptimage-large")
+		quality := "standard"
+		if q, ok := env.Extra["quality"].(string); ok && q == "hd" {
+			quality = "hd"
+		}
+		url, err := o.callPollinationsGPTImage(ctx, prompt, "gptimage-large", env.AspectRatio, quality)
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/gptimage-large", CostMicros: 30000}, nil
 		}
 		log.Printf("[AIStudio] GPTImage-large failed for ai-photo-max: %v — falling back", err)
 		// Tier 3: Pollinations FLUX (free fallback)
-		url, err = o.callPollinationsImage(ctx, prompt)
+		url, err = o.callPollinationsImage(ctx, prompt, env.AspectRatio)
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
 		}
@@ -752,12 +756,12 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 	case "ai-photo-dream":
 		// Seedream (ByteDance) — CostMicros: $0.01
 		// Live model ID from GET /v1/models is "seedream5" (not "seedream")
-		url, err := o.callPollinationsGPTImage(ctx, prompt, "seedream5")
+		url, err := o.callPollinationsGPTImage(ctx, prompt, "seedream5", env.AspectRatio)
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/seedream5", CostMicros: 10000}, nil
 		}
 		log.Printf("[AIStudio] Seedream5 failed for ai-photo-dream: %v — falling back", err)
-		url, err = o.callPollinationsImage(ctx, prompt)
+		url, err = o.callPollinationsImage(ctx, prompt, env.AspectRatio)
 		if err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
 		}
@@ -773,6 +777,19 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 		instruction := env.Prompt
 		if imgURL == "" {
 			return nil, fmt.Errorf("photo-editor: image_url is required")
+		}
+		// Read strength from extra_params (0.0–1.0, default 0.75)
+		strength := 0.75
+		if env.Extra != nil {
+			if s, ok := env.Extra["strength"].(float64); ok && s > 0 && s <= 1.0 {
+				strength = s
+			}
+		}
+		// Append strength hint to instruction for providers that use text guidance
+		if strength < 0.5 {
+			instruction += " (subtle change, preserve most of the original)"
+		} else if strength > 0.85 {
+			instruction += " (strong transformation)"
 		}
 		// Tier 1: p-image-edit (Pruna) — image-to-image editing, 98.1% success
 		url, err := o.callPollinationsKontextAlt(ctx, imgURL, instruction)
@@ -812,7 +829,7 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 			log.Printf("[AIStudio] HF FLUX.1-Schnell failed: %v", err)
 		}
 		// tier 2: Pollinations.ai FLUX (100% free, no key required)
-		if url, err := o.callPollinationsImage(ctx, prompt); err == nil {
+		if url, err := o.callPollinationsImage(ctx, prompt, env.AspectRatio); err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
 		}
 		// tier 3: FAL.AI FLUX-dev (paid fallback)
@@ -895,13 +912,13 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 			return nil, fmt.Errorf("video-cinematic: image_url is required")
 		}
 		// Tier 1: wan-fast (Wan 2.2) — FREE, 91.4% success
-		vidURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imgURL, motionPrompt, 180)
+		vidURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imgURL, motionPrompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration))
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 		}
 		log.Printf("[AIStudio] wan-fast failed for video-cinematic: %v — trying p-video", err)
 		// Tier 2: p-video (Pruna p-video) — FREE, 100% success (ltx-2 was OFF, replaced)
-		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", imgURL, motionPrompt, 180)
+		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", imgURL, motionPrompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration))
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 		}
@@ -930,13 +947,13 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		}
 		log.Printf("[AIStudio] Veo failed for video-veo: %v — falling back to wan-fast (FREE)", err)
 		// Fallback 1: wan-fast text-to-video (FREE) — NOT seedance (also paid)
-		vidURL, err = o.callPollinationsVideoModel(ctx, "wan-fast", "", prompt, 180)
+		vidURL, err = o.callPollinationsVideoModel(ctx, "wan-fast", "", prompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration))
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 		}
 		log.Printf("[AIStudio] wan-fast fallback failed for video-veo: %v — trying p-video", err)
 		// Fallback 2: p-video (Pruna p-video) — FREE, 100% success
-		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", "", prompt, 180)
+		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", "", prompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration))
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 		}
@@ -994,14 +1011,14 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 	if motionDesc == "" {
 		motionDesc = "animate this image with subtle cinematic motion, smooth camera movement, natural lighting"
 	}
-	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, motionDesc, 180); err == nil {
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, motionDesc, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration)); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 	} else {
 		log.Printf("[AIStudio] Pollinations wan-fast failed: %v — trying p-video", err)
 	}
 
 	// Tier 3: Pollinations p-video (Pruna) — FREE, 100% success (ltx-2 was OFF, replaced)
-	if videoURL, err := o.callPollinationsVideoModel(ctx, "p-video", imageURL, motionDesc, 180); err == nil {
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "p-video", imageURL, motionDesc, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration)); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 	} else {
 		log.Printf("[AIStudio] Pollinations p-video failed: %v", err)
@@ -1136,15 +1153,27 @@ func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, env promp
 	if lang == "" {
 		lang = "en"
 	}
+	// Read speaker_labels and output_format from extra_params
+	speakerLabels := false
+	outputFormat := "plain"
+	if env.Extra != nil {
+		if sl, ok := env.Extra["speaker_labels"].(bool); ok {
+			speakerLabels = sl
+		}
+		if of, ok := env.Extra["output_format"].(string); ok && of != "" {
+			outputFormat = of
+		}
+	}
 	// ── DB-first ─────────────────────────────────────────────────────────────────────────────
 	in := providerInput{AudioURL: audioURL}
 	if _, text, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryTranscribe, in); err == nil {
-		return &studioProviderResult{OutputText: text, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+		formatted := o.formatTranscript(text, outputFormat)
+		return &studioProviderResult{OutputText: formatted, Provider: "db/" + usedSlug, CostMicros: cost}, nil
 	}
 	// ── Hardcoded fallback chain ─────────────────────────────────────────────────────────────────────────────
-	// Primary: AssemblyAI (free $50 credit on signup) — supports language_code
+	// Primary: AssemblyAI (free $50 credit on signup) — supports language_code + speaker diarization
 	if aaiKey := os.Getenv("ASSEMBLY_AI_KEY"); aaiKey != "" {
-		text, err := o.callAssemblyAIWithLang(ctx, aaiKey, audioURL, lang)
+		text, err := o.callAssemblyAIFull(ctx, aaiKey, audioURL, lang, speakerLabels, outputFormat)
 		if err == nil {
 			return &studioProviderResult{OutputText: text, Provider: "assemblyai", CostMicros: 25}, nil
 		}
@@ -1154,11 +1183,102 @@ func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, env promp
 	if groqKey := os.Getenv("GROQ_API_KEY"); groqKey != "" {
 		text, err := o.callGroqWhisper(ctx, groqKey, audioURL)
 		if err == nil {
-			return &studioProviderResult{OutputText: text, Provider: "groq/whisper-large-v3", CostMicros: 10}, nil
+			formatted := o.formatTranscript(text, outputFormat)
+			return &studioProviderResult{OutputText: formatted, Provider: "groq/whisper-large-v3", CostMicros: 10}, nil
 		}
 		log.Printf("[AIStudio] Groq Whisper failed: %v", err)
 	}
 	return nil, fmt.Errorf("transcription unavailable: configure ASSEMBLY_AI_KEY or GROQ_API_KEY")
+}
+
+// formatTranscript converts a plain transcript to the requested output format.
+func (o *AIStudioOrchestrator) formatTranscript(text, format string) string {
+switch format {
+case "srt":
+// Wrap entire transcript in a single SRT block (real timestamps require word-level data)
+return fmt.Sprintf("1\n00:00:00,000 --> 00:05:00,000\n%s\n", text)
+case "vtt":
+return fmt.Sprintf("WEBVTT\n\n00:00:00.000 --> 00:05:00.000\n%s\n", text)
+case "timestamped":
+return fmt.Sprintf("[00:00:00] %s", text)
+default: // plain
+return text
+}
+}
+
+// callAssemblyAIFull calls AssemblyAI with full options: language, speaker diarization, and output format.
+func (o *AIStudioOrchestrator) callAssemblyAIFull(ctx context.Context, apiKey, audioURL, lang string, speakerLabels bool, outputFormat string) (string, error) {
+	submitPayload := map[string]interface{}{
+		"audio_url":          audioURL,
+		"language_code":      lang,
+		"speech_models":      []string{"universal-2"},
+		"speaker_labels":     speakerLabels,
+	}
+	body, _ := json.Marshal(submitPayload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.assemblyai.com/v2/transcript", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("AssemblyAI submit: %w", err)
+	}
+	defer resp.Body.Close()
+	var jobResp struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&jobResp); err != nil {
+		return "", fmt.Errorf("AssemblyAI submit parse: %w", err)
+	}
+	if jobResp.ID == "" {
+		return "", fmt.Errorf("AssemblyAI: no job ID returned")
+	}
+	pollURL := "https://api.assemblyai.com/v2/transcript/" + jobResp.ID
+	deadline := time.Now().Add(5 * time.Minute)
+	for time.Now().Before(deadline) {
+		time.Sleep(3 * time.Second)
+		pollReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		pollReq.Header.Set("Authorization", apiKey)
+		pollResp, err := o.httpClient.Do(pollReq)
+		if err != nil {
+			continue
+		}
+		var result struct {
+			Status    string `json:"status"`
+			Text      string `json:"text"`
+			Error     string `json:"error"`
+			Utterances []struct {
+				Speaker string  `json:"speaker"`
+				Text    string  `json:"text"`
+				Start   int     `json:"start"`
+				End     int     `json:"end"`
+			} `json:"utterances"`
+		}
+		_ = json.NewDecoder(pollResp.Body).Decode(&result)
+		pollResp.Body.Close()
+		switch result.Status {
+		case "completed":
+			// If speaker labels requested and utterances available, format them
+			if speakerLabels && len(result.Utterances) > 0 {
+				var lines []string
+				for _, u := range result.Utterances {
+					startSec := u.Start / 1000
+					lines = append(lines, fmt.Sprintf("[Speaker %s %02d:%02d]: %s",
+						u.Speaker, startSec/60, startSec%60, u.Text))
+				}
+				rawFormatted := strings.Join(lines, "\n")
+				return o.formatTranscript(rawFormatted, outputFormat), nil
+			}
+			return o.formatTranscript(result.Text, outputFormat), nil
+		case "error":
+			return "", fmt.Errorf("AssemblyAI error: %s", result.Error)
+		}
+	}
+	return "", fmt.Errorf("AssemblyAI: timeout waiting for transcript")
 }
 
 // ─── Music dispatch ───────────────────────────────────────────────────────────
@@ -2250,12 +2370,30 @@ func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt
 // Docs: https://gen.pollinations.ai  — Returns JPEG/PNG directly (not JSON).
 // NOTE (2026-03-26): Pollinations removed anonymous access — sk_ key is now REQUIRED
 // for ALL models including free ones. Requests without a key return HTTP 401.
-func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt string) (string, error) {
+func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt string, aspectRatio ...string) (string, error) {
 	encoded := url.PathEscape(prompt)
 	seed := time.Now().UnixNano() % 999983
+	// Map aspect_ratio to width/height for Pollinations image API
+	ar := "1:1"
+	if len(aspectRatio) > 0 && aspectRatio[0] != "" {
+		ar = aspectRatio[0]
+	}
+	width, height := 1024, 1024
+	switch ar {
+	case "9:16", "portrait":
+		width, height = 768, 1344
+	case "16:9", "landscape", "wide":
+		width, height = 1344, 768
+	case "4:3":
+		width, height = 1152, 896
+	case "3:4":
+		width, height = 896, 1152
+	case "21:9", "ultrawide":
+		width, height = 1536, 640
+	}
 	apiURL := fmt.Sprintf(
-		"https://gen.pollinations.ai/image/%s?model=flux&width=1024&height=1024&nologo=true&seed=%d&enhance=false",
-		encoded, seed,
+		"https://gen.pollinations.ai/image/%s?model=flux&width=%d&height=%d&nologo=true&seed=%d&enhance=false",
+		encoded, width, height, seed,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
@@ -2402,6 +2540,74 @@ func (o *AIStudioOrchestrator) callPollinationsTTSWithSpeed(ctx context.Context,
 	return publicURL, nil
 }
 
+// callPollinationsTTSFull generates speech with speed, format, and language support.
+func (o *AIStudioOrchestrator) callPollinationsTTSFull(ctx context.Context, text, voice string, speed float64, format, lang string) (string, error) {
+	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+	if sk == "" {
+		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
+	}
+	if voice == "" {
+		voice = "nova"
+	}
+	if format == "" {
+		format = "mp3"
+	}
+	payload := map[string]interface{}{
+		"model":           "tts-1",
+		"input":           text,
+		"voice":           voice,
+		"response_format": format,
+	}
+	if speed > 0 && speed != 1.0 {
+		payload["speed"] = speed
+	}
+	// Some TTS providers support language hints for accent/pronunciation
+	if lang != "" && lang != "en" && lang != "en-us" {
+		payload["language"] = lang
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://gen.pollinations.ai/v1/audio/speech", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "NexusAI/1.0")
+	req.Header.Set("Authorization", "Bearer "+sk)
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Pollinations TTS request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Pollinations TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 100))
+	}
+	audioBytes, err := io.ReadAll(resp.Body)
+	if err != nil || len(audioBytes) < 500 {
+		return "", fmt.Errorf("Pollinations TTS: response too small")
+	}
+	mimeType := "audio/mpeg"
+	ext := "mp3"
+	switch format {
+	case "wav":
+		mimeType, ext = "audio/wav", "wav"
+	case "opus":
+		mimeType, ext = "audio/ogg", "opus"
+	case "aac":
+		mimeType, ext = "audio/aac", "aac"
+	case "flac":
+		mimeType, ext = "audio/flac", "flac"
+	}
+	fileName := fmt.Sprintf("studio/narrate/pollinations_%d.%s", time.Now().UnixNano(), ext)
+	publicURL, err := o.storage.Upload(ctx, fileName, audioBytes, mimeType)
+	if err != nil {
+		encoded64 := base64.StdEncoding.EncodeToString(audioBytes)
+		return "data:" + mimeType + ";base64," + encoded64, nil
+	}
+	return publicURL, nil
+}
+
 // callPollinationsVideo generates a short video using wan-fast (FREE).
 // Pollinations video pricing (2026-03-26):
 //   FREE: wan-fast (Wan 2.2), ltx-2 (LTX-2)
@@ -2412,15 +2618,33 @@ func (o *AIStudioOrchestrator) callPollinationsVideo(ctx context.Context, imageU
 }
 
 // callPollinationsVideoModel is the shared GET-based video caller for any video model.
-func (o *AIStudioOrchestrator) callPollinationsVideoModel(ctx context.Context, model, imageURL, prompt string, timeoutSecs int) (string, error) {
+func (o *AIStudioOrchestrator) callPollinationsVideoModel(ctx context.Context, model, imageURL, prompt string, timeoutSecs int, opts ...string) (string, error) {
 	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
 	if sk == "" {
 		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
 	}
 
 	encoded := url.PathEscape(prompt)
-	apiURL := fmt.Sprintf("https://gen.pollinations.ai/image/%s?model=%s&duration=5&aspectRatio=16:9",
-		encoded, model)
+	// opts: [0]=aspectRatio, [1]=duration (seconds as string)
+	videoAR := "16:9"
+	videoDur := "5"
+	if len(opts) > 0 && opts[0] != "" {
+		switch opts[0] {
+		case "9:16", "portrait":
+			videoAR = "9:16"
+		case "1:1", "square":
+			videoAR = "1:1"
+		case "4:3":
+			videoAR = "4:3"
+		default:
+			videoAR = "16:9"
+		}
+	}
+	if len(opts) > 1 && opts[1] != "" {
+		videoDur = opts[1]
+	}
+	apiURL := fmt.Sprintf("https://gen.pollinations.ai/image/%s?model=%s&duration=%s&aspectRatio=%s",
+		encoded, model, videoDur, url.QueryEscape(videoAR))
 	if imageURL != "" {
 		apiURL += "&image=" + url.QueryEscape(imageURL)
 	}
@@ -2782,16 +3006,21 @@ func (o *AIStudioOrchestrator) dispatchNarratorPro(ctx context.Context, env prom
 	}
 	text := env.Prompt
 
-	// Use callPollinationsTTS — already implemented, uses POLLINATIONS_SECRET_KEY when set
-	// Read speed from extra_params (sent by VoiceStudio when show_speed_control is true)
+	// Read speed and format from extra_params (sent by VoiceStudio)
 	speed := 1.0
+	audioFormat := "mp3"
 	if env.Extra != nil {
 		if s, ok := env.Extra["speed"].(float64); ok && s > 0 {
 			speed = s
 		}
+		if f, ok := env.Extra["format"].(string); ok && f != "" {
+			audioFormat = f
+		}
 	}
-	// Use callPollinationsTTSWithSpeed — supports speed parameter
-	audioURL, err := o.callPollinationsTTSWithSpeed(ctx, text, voice, speed)
+	// Pass language for multilingual TTS (e.g. "fr", "es", "de")
+	lang := strings.ToLower(strings.TrimSpace(env.Language))
+	// Use callPollinationsTTSFull — supports speed, format, and language
+	audioURL, err := o.callPollinationsTTSFull(ctx, text, voice, speed, audioFormat, lang)
 	if err == nil {
 		return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/tts-" + voice, CostMicros: 0}, nil
 	}
@@ -2914,16 +3143,31 @@ func (o *AIStudioOrchestrator) callPollinationsOpenAIChat(ctx context.Context, s
 }
 
 // callPollinationsGPTImage generates a premium image via Pollinations (gptimage / gptimage-large / seedream).
-func (o *AIStudioOrchestrator) callPollinationsGPTImage(ctx context.Context, prompt, model string) (string, error) {
+func (o *AIStudioOrchestrator) callPollinationsGPTImage(ctx context.Context, prompt, model string, opts ...string) (string, error) {
 	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
 	if sk == "" {
 		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
 	}
+	// opts: [0]=aspectRatio, [1]=quality
+	gptSize := "1024x1024"
+	gptQuality := "standard"
+	if len(opts) > 0 && opts[0] != "" {
+		switch opts[0] {
+		case "9:16", "portrait":
+			gptSize = "1024x1792"
+		case "16:9", "landscape", "wide":
+			gptSize = "1792x1024"
+		}
+	}
+	if len(opts) > 1 && opts[1] == "hd" {
+		gptQuality = "hd"
+	}
 	payload := map[string]interface{}{
-		"model":  model,
-		"prompt": prompt,
-		"n":      1,
-		"size":   "1024x1024",
+		"model":   model,
+		"prompt":  prompt,
+		"n":       1,
+		"size":    gptSize,
+		"quality": gptQuality,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
