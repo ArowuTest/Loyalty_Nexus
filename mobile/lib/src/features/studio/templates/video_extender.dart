@@ -104,10 +104,10 @@ class _VideoExtenderTemplateState extends ConsumerState<VideoExtenderTemplate> {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.04),
+              color: Colors.white.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: _videoUrl != null ? const Color(0xFF0EA5E9).withOpacity(0.4) : Colors.white.withOpacity(0.1),
+                color: _videoUrl != null ? const Color(0xFF0EA5E9).withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.1),
               ),
             ),
             child: Row(
@@ -115,7 +115,7 @@ class _VideoExtenderTemplateState extends ConsumerState<VideoExtenderTemplate> {
                 Icon(
                   _videoUrl != null ? Icons.videocam_rounded : Icons.upload_file_rounded,
                   size: 22,
-                  color: _videoUrl != null ? const Color(0xFF0EA5E9) : Colors.white.withOpacity(0.4),
+                  color: _videoUrl != null ? const Color(0xFF0EA5E9) : Colors.white.withValues(alpha: 0.4),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -125,19 +125,19 @@ class _VideoExtenderTemplateState extends ConsumerState<VideoExtenderTemplate> {
                       Text(
                         _videoFileName ?? 'Upload video file',
                         style: TextStyle(
-                          color: _videoFileName != null ? Colors.white : Colors.white.withOpacity(0.4),
+                          color: _videoFileName != null ? Colors.white : Colors.white.withValues(alpha: 0.4),
                           fontSize: 13,
                           fontWeight: _videoFileName != null ? FontWeight.w600 : FontWeight.normal,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      Text('MP4, MOV, AVI, WEBM', style: TextStyle(color: Colors.white.withOpacity(0.25), fontSize: 10)),
+                      Text('MP4, MOV, AVI, WEBM', style: TextStyle(color: Colors.white.withValues(alpha: 0.25), fontSize: 10)),
                     ],
                   ),
                 ),
                 if (_videoUrl != null)
-                  GestureDetector(onTap: _clearVideo, child: Icon(Icons.close, size: 16, color: Colors.white.withOpacity(0.3))),
+                  GestureDetector(onTap: _clearVideo, child: Icon(Icons.close, size: 16, color: Colors.white.withValues(alpha: 0.3))),
               ],
             ),
           ),
@@ -152,11 +152,11 @@ class _VideoExtenderTemplateState extends ConsumerState<VideoExtenderTemplate> {
           style: const TextStyle(color: Colors.white, fontSize: 13),
           decoration: InputDecoration(
             hintText: 'https://example.com/video.mp4',
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 12),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.04),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+            fillColor: Colors.white.withValues(alpha: 0.04),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
             focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF0EA5E9), width: 1.5)),
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           ),
@@ -176,23 +176,23 @@ class _VideoExtenderTemplateState extends ConsumerState<VideoExtenderTemplate> {
                 duration: const Duration(milliseconds: 150),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF0EA5E9).withOpacity(0.1) : Colors.white.withOpacity(0.03),
+                  color: isSelected ? const Color(0xFF0EA5E9).withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.03),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isSelected ? const Color(0xFF0EA5E9).withOpacity(0.4) : Colors.white.withOpacity(0.08),
+                    color: isSelected ? const Color(0xFF0EA5E9).withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.08),
                     width: isSelected ? 1.5 : 1,
                   ),
                 ),
                 child: Row(
                   children: [
-                    Icon(d['icon'] as IconData, size: 16, color: isSelected ? const Color(0xFF0EA5E9) : Colors.white.withOpacity(0.4)),
+                    Icon(d['icon'] as IconData, size: 16, color: isSelected ? const Color(0xFF0EA5E9) : Colors.white.withValues(alpha: 0.4)),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(d['label'] as String, style: TextStyle(color: isSelected ? Colors.white : Colors.white.withOpacity(0.7), fontWeight: FontWeight.w700, fontSize: 13)),
-                          Text(d['desc'] as String, style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11)),
+                          Text(d['label'] as String, style: TextStyle(color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.7), fontWeight: FontWeight.w700, fontSize: 13)),
+                          Text(d['desc'] as String, style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 11)),
                         ],
                       ),
                     ),
@@ -227,22 +227,22 @@ class _VideoExtenderTemplateState extends ConsumerState<VideoExtenderTemplate> {
             duration: const Duration(milliseconds: 150),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: _matchStyle ? const Color(0xFF0EA5E9).withOpacity(0.08) : Colors.white.withOpacity(0.03),
+              color: _matchStyle ? const Color(0xFF0EA5E9).withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.03),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: _matchStyle ? const Color(0xFF0EA5E9).withOpacity(0.3) : Colors.white.withOpacity(0.08),
+                color: _matchStyle ? const Color(0xFF0EA5E9).withValues(alpha: 0.3) : Colors.white.withValues(alpha: 0.08),
               ),
             ),
             child: Row(
               children: [
-                Icon(Icons.auto_awesome_rounded, size: 16, color: _matchStyle ? const Color(0xFF0EA5E9) : Colors.white.withOpacity(0.4)),
+                Icon(Icons.auto_awesome_rounded, size: 16, color: _matchStyle ? const Color(0xFF0EA5E9) : Colors.white.withValues(alpha: 0.4)),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Match Original Style', style: TextStyle(color: _matchStyle ? Colors.white : Colors.white.withOpacity(0.6), fontWeight: FontWeight.w700, fontSize: 13)),
-                      Text('Maintain visual consistency with the original', style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11)),
+                      Text('Match Original Style', style: TextStyle(color: _matchStyle ? Colors.white : Colors.white.withValues(alpha: 0.6), fontWeight: FontWeight.w700, fontSize: 13)),
+                      Text('Maintain visual consistency with the original', style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 11)),
                     ],
                   ),
                 ),
@@ -279,7 +279,7 @@ class _VideoExtenderTemplateState extends ConsumerState<VideoExtenderTemplate> {
 
         if (!p.canAfford) ...[
           const SizedBox(height: 8),
-          Center(child: Text('You need ${p.pointCost} Pulse Points to use this tool', style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12))),
+          Center(child: Text('You need ${p.pointCost} Pulse Points to use this tool', style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12))),
         ],
       ],
     );

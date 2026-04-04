@@ -268,7 +268,7 @@ class _WinCard extends StatelessWidget {
           color: NexusColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: _canClaim ? NexusColors.gold.withOpacity(0.3)
+            color: _canClaim ? NexusColors.gold.withValues(alpha: 0.3)
                 : bgColor,
           ),
         ),
@@ -396,7 +396,7 @@ class _ClaimModalState extends ConsumerState<_ClaimModal> {
           margin: const EdgeInsets.only(top: 12, bottom: 20),
           width: 36, height: 4,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.15),
+            color: Colors.white.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(2),
           ),
         )),
@@ -470,9 +470,9 @@ class _ClaimModalState extends ConsumerState<_ClaimModal> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: NexusColors.green.withOpacity(0.08),
+                  color: NexusColors.green.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: NexusColors.green.withOpacity(0.2)),
+                  border: Border.all(color: NexusColors.green.withValues(alpha: 0.2)),
                 ),
                 child: Row(children: [
                   const Icon(Icons.check_circle_outline_rounded,
@@ -493,9 +493,9 @@ class _ClaimModalState extends ConsumerState<_ClaimModal> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: NexusColors.red.withOpacity(0.1),
+                  color: NexusColors.red.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: NexusColors.red.withOpacity(0.3)),
+                  border: Border.all(color: NexusColors.red.withValues(alpha: 0.3)),
                 ),
                 child: Row(children: [
                   const Icon(Icons.error_outline_rounded, color: NexusColors.red, size: 14),
@@ -552,11 +552,11 @@ class _HowItWorksCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: NexusColors.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('How Claiming Works',
-            style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 11,
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 11,
                 fontWeight: FontWeight.w700, letterSpacing: 0.8)),
         const SizedBox(height: 10),
         for (final row in [

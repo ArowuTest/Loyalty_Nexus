@@ -104,12 +104,12 @@ class _VideoEditorTemplateState extends ConsumerState<VideoEditorTemplate> {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.04),
+              color: Colors.white.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: _videoUrl != null
-                    ? const Color(0xFF7C3AED).withOpacity(0.4)
-                    : Colors.white.withOpacity(0.1),
+                    ? const Color(0xFF7C3AED).withValues(alpha: 0.4)
+                    : Colors.white.withValues(alpha: 0.1),
               ),
             ),
             child: Row(
@@ -117,7 +117,7 @@ class _VideoEditorTemplateState extends ConsumerState<VideoEditorTemplate> {
                 Icon(
                   _videoUrl != null ? Icons.videocam_rounded : Icons.upload_file_rounded,
                   size: 22,
-                  color: _videoUrl != null ? const Color(0xFF7C3AED) : Colors.white.withOpacity(0.4),
+                  color: _videoUrl != null ? const Color(0xFF7C3AED) : Colors.white.withValues(alpha: 0.4),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -127,7 +127,7 @@ class _VideoEditorTemplateState extends ConsumerState<VideoEditorTemplate> {
                       Text(
                         _videoFileName ?? 'Upload video file',
                         style: TextStyle(
-                          color: _videoFileName != null ? Colors.white : Colors.white.withOpacity(0.4),
+                          color: _videoFileName != null ? Colors.white : Colors.white.withValues(alpha: 0.4),
                           fontSize: 13,
                           fontWeight: _videoFileName != null ? FontWeight.w600 : FontWeight.normal,
                         ),
@@ -136,7 +136,7 @@ class _VideoEditorTemplateState extends ConsumerState<VideoEditorTemplate> {
                       ),
                       Text(
                         'MP4, MOV, AVI, WEBM',
-                        style: TextStyle(color: Colors.white.withOpacity(0.25), fontSize: 10),
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.25), fontSize: 10),
                       ),
                     ],
                   ),
@@ -144,7 +144,7 @@ class _VideoEditorTemplateState extends ConsumerState<VideoEditorTemplate> {
                 if (_videoUrl != null)
                   GestureDetector(
                     onTap: _clearVideo,
-                    child: Icon(Icons.close, size: 16, color: Colors.white.withOpacity(0.3)),
+                    child: Icon(Icons.close, size: 16, color: Colors.white.withValues(alpha: 0.3)),
                   ),
               ],
             ),
@@ -167,11 +167,11 @@ class _VideoEditorTemplateState extends ConsumerState<VideoEditorTemplate> {
           style: const TextStyle(color: Colors.white, fontSize: 13),
           decoration: InputDecoration(
             hintText: 'https://example.com/video.mp4',
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 12),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.04),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+            fillColor: Colors.white.withValues(alpha: 0.04),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
             focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF7C3AED), width: 1.5)),
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           ),
@@ -191,23 +191,23 @@ class _VideoEditorTemplateState extends ConsumerState<VideoEditorTemplate> {
                 duration: const Duration(milliseconds: 150),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF7C3AED).withOpacity(0.1) : Colors.white.withOpacity(0.03),
+                  color: isSelected ? const Color(0xFF7C3AED).withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.03),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isSelected ? const Color(0xFF7C3AED).withOpacity(0.4) : Colors.white.withOpacity(0.08),
+                    color: isSelected ? const Color(0xFF7C3AED).withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.08),
                     width: isSelected ? 1.5 : 1,
                   ),
                 ),
                 child: Row(
                   children: [
-                    Icon(et['icon'] as IconData, size: 16, color: isSelected ? const Color(0xFF7C3AED) : Colors.white.withOpacity(0.4)),
+                    Icon(et['icon'] as IconData, size: 16, color: isSelected ? const Color(0xFF7C3AED) : Colors.white.withValues(alpha: 0.4)),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(et['label'] as String, style: TextStyle(color: isSelected ? Colors.white : Colors.white.withOpacity(0.7), fontWeight: FontWeight.w700, fontSize: 13)),
-                          Text(et['desc'] as String, style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11)),
+                          Text(et['label'] as String, style: TextStyle(color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.7), fontWeight: FontWeight.w700, fontSize: 13)),
+                          Text(et['desc'] as String, style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 11)),
                         ],
                       ),
                     ),
@@ -237,7 +237,7 @@ class _VideoEditorTemplateState extends ConsumerState<VideoEditorTemplate> {
           max: 1.0,
           divisions: 9,
           activeColor: const Color(0xFF7C3AED),
-          inactiveColor: Colors.white.withOpacity(0.1),
+          inactiveColor: Colors.white.withValues(alpha: 0.1),
           onChanged: (v) => setState(() => _strength = v),
         ),
         const SizedBox(height: 24),
@@ -253,7 +253,7 @@ class _VideoEditorTemplateState extends ConsumerState<VideoEditorTemplate> {
 
         if (!p.canAfford) ...[
           const SizedBox(height: 8),
-          Center(child: Text('You need ${p.pointCost} Pulse Points to use this tool', style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12))),
+          Center(child: Text('You need ${p.pointCost} Pulse Points to use this tool', style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12))),
         ],
       ],
     );

@@ -264,7 +264,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(color: NexusColors.border),
                     boxShadow: _spinning
-                        ? [BoxShadow(color: NexusColors.primary.withOpacity(0.3), blurRadius: 40, spreadRadius: 4)]
+                        ? [BoxShadow(color: NexusColors.primary.withValues(alpha: 0.3), blurRadius: 40, spreadRadius: 4)]
                         : [],
                   ),
                   child: Column(children: [
@@ -364,11 +364,11 @@ class _CreditsBadge extends StatelessWidget {
     decoration: BoxDecoration(
       color: NexusColors.surface,
       borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: credits > 0 ? NexusColors.primary.withOpacity(0.3) : NexusColors.border),
+      border: Border.all(color: credits > 0 ? NexusColors.primary.withValues(alpha: 0.3) : NexusColors.border),
     ),
     child: Row(children: [
       Icon(Icons.bolt_rounded,
-        color: credits > 0 ? NexusColors.gold : NexusColors.textSecondary.withOpacity(0.4),
+        color: credits > 0 ? NexusColors.gold : NexusColors.textSecondary.withValues(alpha: 0.4),
         size: 20),
       const SizedBox(width: 10),
       const Text('Available Spins', style: TextStyle(color: NexusColors.textSecondary, fontSize: 14)),
@@ -433,8 +433,8 @@ class _WheelWidget extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 boxShadow: [
-                  BoxShadow(color: NexusColors.primary.withOpacity(0.4), blurRadius: 50, spreadRadius: 10),
-                  BoxShadow(color: NexusColors.gold.withOpacity(0.2), blurRadius: 80, spreadRadius: 20),
+                  BoxShadow(color: NexusColors.primary.withValues(alpha: 0.4), blurRadius: 50, spreadRadius: 10),
+                  BoxShadow(color: NexusColors.gold.withValues(alpha: 0.2), blurRadius: 80, spreadRadius: 20),
                 ],
               ),
             ),
@@ -486,7 +486,7 @@ class _PointerPainter extends CustomPainter {
       ..lineTo(size.width, 0)
       ..close();
     canvas.drawPath(path, paint);
-    canvas.drawShadow(path, NexusColors.gold.withOpacity(0.6), 6, false);
+    canvas.drawShadow(path, NexusColors.gold.withValues(alpha: 0.6), 6, false);
   }
   @override bool shouldRepaint(_) => false;
 }
@@ -520,7 +520,7 @@ class _WheelPainter extends CustomPainter {
 
       // Sector border
       canvas.drawPath(path, Paint()
-        ..color = Colors.black.withOpacity(0.25)
+        ..color = Colors.black.withValues(alpha: 0.25)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.2);
 
@@ -533,7 +533,7 @@ class _WheelPainter extends CustomPainter {
         text: TextSpan(
           text: seg.label,
           style: TextStyle(
-            color: Colors.white.withOpacity(0.95),
+            color: Colors.white.withValues(alpha: 0.95),
             fontSize: r < 140 ? 8.5 : 9.5,
             fontWeight: FontWeight.w700,
             shadows: const [Shadow(color: Colors.black, blurRadius: 4)],
@@ -563,7 +563,7 @@ class _WheelHub extends StatelessWidget {
       shape: BoxShape.circle,
       border: Border.all(
         color: spinning ? NexusColors.primary : NexusColors.border, width: 3),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 12)],
+      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 12)],
     ),
     child: Center(
       child: spinning
@@ -595,7 +595,7 @@ class _SpinButton extends StatelessWidget {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             backgroundColor: NexusColors.primary,
             foregroundColor: Colors.white,
-            disabledBackgroundColor: NexusColors.primary.withOpacity(0.3),
+            disabledBackgroundColor: NexusColors.primary.withValues(alpha: 0.3),
             elevation: 0,
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -669,13 +669,13 @@ class _ResultCard extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: isWin
             ? LinearGradient(
-                colors: [NexusColors.primary.withOpacity(0.12), iconData.$2.withOpacity(0.08)],
+                colors: [NexusColors.primary.withValues(alpha: 0.12), iconData.$2.withValues(alpha: 0.08)],
                 begin: Alignment.topLeft, end: Alignment.bottomRight)
             : null,
         color: isWin ? null : NexusColors.surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isWin ? iconData.$2.withOpacity(0.4) : NexusColors.border),
+          color: isWin ? iconData.$2.withValues(alpha: 0.4) : NexusColors.border),
       ),
       child: Column(children: [
         if (isWin) ...[
@@ -763,7 +763,7 @@ class _PrizesKey extends StatelessWidget {
             Text(s.label,
               style: TextStyle(
                 color: s.prizeType == 'try_again'
-                    ? NexusColors.textSecondary.withOpacity(0.4)
+                    ? NexusColors.textSecondary.withValues(alpha: 0.4)
                     : NexusColors.textSecondary,
                 fontSize: 12,
                 fontStyle: s.prizeType == 'try_again' ? FontStyle.italic : FontStyle.normal,
@@ -824,18 +824,18 @@ class _HistoryRow extends StatelessWidget {
       child: Row(children: [
         Icon(item.isWin ? Icons.card_giftcard_rounded : Icons.close_rounded,
           size: 16,
-          color: item.isWin ? NexusColors.primary : NexusColors.textSecondary.withOpacity(0.3)),
+          color: item.isWin ? NexusColors.primary : NexusColors.textSecondary.withValues(alpha: 0.3)),
         const SizedBox(width: 10),
         Expanded(
           child: Text(item.displayLabel,
             style: TextStyle(
-              color: item.isWin ? NexusColors.textPrimary : NexusColors.textSecondary.withOpacity(0.5),
+              color: item.isWin ? NexusColors.textPrimary : NexusColors.textSecondary.withValues(alpha: 0.5),
               fontSize: 13, fontWeight: FontWeight.w500)),
         ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
-            color: statusCfg.$1.withOpacity(0.15),
+            color: statusCfg.$1.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(statusCfg.$2,
@@ -855,7 +855,7 @@ class _HistoryRow extends StatelessWidget {
       case 'pending_momo': return (NexusColors.gold,  'Pending');
       case 'failed':       return (NexusColors.red,   'Failed');
       case 'n/a':
-      default:             return (NexusColors.textSecondary.withOpacity(0.3), 'No Prize');
+      default:             return (NexusColors.textSecondary.withValues(alpha: 0.3), 'No Prize');
     }
   }
 

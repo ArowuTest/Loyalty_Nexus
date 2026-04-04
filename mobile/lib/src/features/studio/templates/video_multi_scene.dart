@@ -112,7 +112,7 @@ class _VideoMultiSceneTemplateState extends State<VideoMultiSceneTemplate> {
   @override
   void dispose() {
     _storyCtrl.dispose();
-    for (final s in _scenes) s.ctrl.dispose();
+    for (final s in _scenes) { s.ctrl.dispose(); }
     super.dispose();
   }
 
@@ -226,7 +226,7 @@ class _VideoMultiSceneTemplateState extends State<VideoMultiSceneTemplate> {
 
         if (!p.canAfford) ...[
           const SizedBox(height: 8),
-          Center(child: Text('You need ${p.pointCost} Pulse Points to use this tool', style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12))),
+          Center(child: Text('You need ${p.pointCost} Pulse Points to use this tool', style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12))),
         ],
       ],
     );
@@ -266,9 +266,9 @@ class _SceneCardState extends State<_SceneCard> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.03),
+        color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -279,7 +279,7 @@ class _SceneCardState extends State<_SceneCard> {
                 width: 24,
                 height: 24,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF59E0B).withOpacity(0.15),
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
                 child: Center(
@@ -306,19 +306,19 @@ class _SceneCardState extends State<_SceneCard> {
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                       decoration: BoxDecoration(
                         color: widget.data.duration == d
-                            ? const Color(0xFFF59E0B).withOpacity(0.15)
+                            ? const Color(0xFFF59E0B).withValues(alpha: 0.15)
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
                           color: widget.data.duration == d
-                              ? const Color(0xFFF59E0B).withOpacity(0.4)
-                              : Colors.white.withOpacity(0.08),
+                              ? const Color(0xFFF59E0B).withValues(alpha: 0.4)
+                              : Colors.white.withValues(alpha: 0.08),
                         ),
                       ),
                       child: Text(
                         '${d}s',
                         style: TextStyle(
-                          color: widget.data.duration == d ? const Color(0xFFF59E0B) : Colors.white.withOpacity(0.35),
+                          color: widget.data.duration == d ? const Color(0xFFF59E0B) : Colors.white.withValues(alpha: 0.35),
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
                         ),
@@ -331,7 +331,7 @@ class _SceneCardState extends State<_SceneCard> {
                 const SizedBox(width: 8),
                 GestureDetector(
                   onTap: widget.onRemove,
-                  child: Icon(Icons.remove_circle_outline, size: 16, color: Colors.white.withOpacity(0.25)),
+                  child: Icon(Icons.remove_circle_outline, size: 16, color: Colors.white.withValues(alpha: 0.25)),
                 ),
               ],
             ],
@@ -343,11 +343,11 @@ class _SceneCardState extends State<_SceneCard> {
             maxLines: 2,
             decoration: InputDecoration(
               hintText: 'Describe scene ${widget.index + 1}…',
-              hintStyle: TextStyle(color: Colors.white.withOpacity(0.25), fontSize: 12),
+              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.25), fontSize: 12),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.03),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.white.withOpacity(0.08))),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.white.withOpacity(0.08))),
+              fillColor: Colors.white.withValues(alpha: 0.03),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
               focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFF59E0B), width: 1.5)),
               contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             ),

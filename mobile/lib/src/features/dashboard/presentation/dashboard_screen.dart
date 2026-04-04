@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/api_client.dart';
-import '../../../core/auth/auth_provider.dart';
 import '../../../core/cache/cache_service.dart';
 import '../../../core/theme/nexus_theme.dart';
 import '../../passport/presentation/wallet_onboarding_sheet.dart';
@@ -108,12 +107,11 @@ final bonusPulseProvider = FutureProvider.autoDispose<int>((ref) async {
 
 final myWarRankProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref) async {
   try {
-    final r = await ref.read(warsApiProvider).getMyRank();
-    if (r is Map) return Map<String, dynamic>.from(r);
+     final r = await ref.read(warsApiProvider).getMyRank();
+    return Map<String, dynamic>.from(r);
   } catch (_) {}
   return null;
 });
-
 final _dashUnreadProvider = FutureProvider.autoDispose<int>((ref) async {
   try {
     final r = await ref.read(notificationsApiProvider).list(limit: 1);
@@ -394,7 +392,7 @@ class _WalletHeroCard extends ConsumerWidget {
           colors: colors, begin: Alignment.topLeft, end: Alignment.bottomRight),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: colors[1].withOpacity(0.35), blurRadius: 30, offset: const Offset(0, 8)),
+          BoxShadow(color: colors[1].withValues(alpha: 0.35), blurRadius: 30, offset: const Offset(0, 8)),
         ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -412,9 +410,9 @@ class _WalletHeroCard extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white.withOpacity(0.3)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
             ),
             child: Text(tier, style: const TextStyle(
               color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 1)),
@@ -426,7 +424,7 @@ class _WalletHeroCard extends ConsumerWidget {
         // Sub stats
         Row(children: [
           Expanded(child: _HeroStat(label: 'Spin Credits', value: '$spins', icon: '🎡')),
-          Container(width: 1, height: 36, color: Colors.white.withOpacity(0.2)),
+          Container(width: 1, height: 36, color: Colors.white.withValues(alpha: 0.2)),
           Expanded(child: _HeroStat(label: 'Lifetime', value: _formatPts(life), icon: '⭐')),
         ]),
 
@@ -436,9 +434,9 @@ class _WalletHeroCard extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
+              color: Colors.white.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white.withOpacity(0.15)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
             ),
             child: Row(children: [
               const Text('🎁', style: TextStyle(fontSize: 13)),
@@ -475,7 +473,7 @@ class _WalletHeroCard extends ConsumerWidget {
             child: LinearProgressIndicator(
               value: progress,
               minHeight: 5,
-              backgroundColor: Colors.white.withOpacity(0.15),
+              backgroundColor: Colors.white.withValues(alpha: 0.15),
               valueColor: const AlwaysStoppedAnimation(Colors.white),
             ),
           ),
@@ -520,7 +518,6 @@ class _QuickActionsGrid extends ConsumerWidget {
   const _QuickActionsGrid();
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final bonusAsync = ref.watch(bonusPulseProvider);
     final actions = [
       _Action('🎡', 'Spin & Win', 'Use spin credits', '/spin',     NexusColors.primary),
       _Action('🧠', 'AI Studio',  '17 free tools',   '/studio',   const Color(0xFF8B5CF6)),
@@ -561,7 +558,7 @@ class _ActionCard extends StatelessWidget {
         Container(
           width: 36, height: 36,
           decoration: BoxDecoration(
-            color: action.color.withOpacity(0.12),
+            color: action.color.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Center(child: Text(action.emoji, style: const TextStyle(fontSize: 18))),
@@ -862,14 +859,14 @@ class _DrawsTeaser extends StatelessWidget {
             Container(
               width: 32, height: 32,
               decoration: BoxDecoration(
-                color: item.color.withOpacity(0.1), borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: item.color.withOpacity(0.2))),
+                color: item.color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: item.color.withValues(alpha: 0.2))),
               child: Icon(item.icon, size: 15, color: item.color)),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: item.color.withOpacity(0.1), borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: item.color.withOpacity(0.2))),
+                color: item.color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: item.color.withValues(alpha: 0.2))),
               child: Text('SOON', style: TextStyle(color: item.color,
                 fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 0.5))),
           ]),
@@ -982,7 +979,7 @@ class _TxRow extends StatelessWidget {
         Container(
           width: 36, height: 36,
           decoration: BoxDecoration(
-            color: (isEarn ? NexusColors.green : NexusColors.red).withOpacity(0.1),
+            color: (isEarn ? NexusColors.green : NexusColors.red).withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Center(child: Text(_txEmoji(type), style: const TextStyle(fontSize: 16))),
@@ -1030,7 +1027,7 @@ class _LoadingPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.15),
+      color: Colors.white.withValues(alpha: 0.15),
       borderRadius: BorderRadius.circular(8),
     ),
   );

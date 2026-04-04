@@ -125,7 +125,7 @@ class GoldButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-              color: NexusColors.gold.withOpacity(0.3),
+              color: NexusColors.gold.withValues(alpha: 0.3),
               blurRadius: 16,
               offset: const Offset(0, 4),
             ),
@@ -181,9 +181,9 @@ class TierBadge extends StatelessWidget {
       padding: EdgeInsets.symmetric(
           horizontal: large ? 12 : 8, vertical: large ? 6 : 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(large ? 12 : 8),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -389,7 +389,7 @@ class TopShimmerLine extends StatelessWidget {
           gradient: LinearGradient(
             colors: [
               Colors.transparent,
-              color.withOpacity(0.6),
+              color.withValues(alpha: 0.6),
               Colors.transparent,
             ],
           ),

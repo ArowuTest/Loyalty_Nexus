@@ -52,6 +52,7 @@ dependencies:
 
   # Audio recording (Transcribe template mic input)
   record: ^5.1.2
+  path_provider: ^2.1.4
   just_audio: ^0.9.42
 
   # Speech-to-text (mic dictation in templates)

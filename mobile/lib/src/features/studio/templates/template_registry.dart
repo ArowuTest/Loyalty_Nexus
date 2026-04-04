@@ -3,8 +3,6 @@
 // All 13 templates registered — 9 updated + 4 new.
 // Usage: TemplateRegistry.build(tool, onSubmit, isLoading, userPoints)
 
-library studio_templates;
-
 export 'template_types.dart';
 export 'music_composer.dart';
 export 'image_creator.dart';

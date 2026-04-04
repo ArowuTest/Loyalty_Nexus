@@ -72,7 +72,6 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
 
   // Start-frame image upload
   String? _imageUrl;
-  String? _imagePreview;
   bool    _isImageUploading = false;
   String? _imageUploadError;
 
@@ -117,7 +116,7 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (picked == null) return;
-    setState(() { _imagePreview = picked.path; _isImageUploading = true; _imageUploadError = null; });
+    setState(() { _isImageUploading = true; _imageUploadError = null; });
     try {
       final studioApi = ref.read(studioApiProvider);
       final url = await studioApi.uploadAsset(File(picked.path));
@@ -127,7 +126,7 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
     }
   }
 
-  void _clearStartFrame() => setState(() { _imageUrl = null; _imagePreview = null; _imageUploadError = null; });
+  void _clearStartFrame() => setState(() { _imageUrl = null; _imageUploadError = null; });
 
   void _addScene() {
     if (_sceneCtrlList.length >= 5) return;
@@ -174,7 +173,7 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
     _negCtrl.dispose();
     _audioDirCtrl.dispose();
     _musicCtrl.dispose();
-    for (final c in _sceneCtrlList) c.dispose();
+    for (final c in _sceneCtrlList) { c.dispose(); }
     super.dispose();
   }
 
@@ -190,9 +189,9 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFFF59E0B).withOpacity(0.08),
+            color: const Color(0xFFF59E0B).withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.2)),
+            border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.2)),
           ),
           child: Row(
             children: [
@@ -201,7 +200,7 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
               Expanded(
                 child: Text(
                   'Video generation takes 2–5 minutes. You\'ll be notified when it\'s ready.',
-                  style: TextStyle(color: const Color(0xFFF59E0B).withOpacity(0.8), fontSize: 11, height: 1.4),
+                  style: TextStyle(color: const Color(0xFFF59E0B).withValues(alpha: 0.8), fontSize: 11, height: 1.4),
                 ),
               ),
             ],
@@ -242,13 +241,13 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
                   constraints: const BoxConstraints(maxWidth: 200),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
+                    color: Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                   ),
                   child: Text(
                     insp.length > 50 ? '${insp.substring(0, 50)}…' : insp,
-                    style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11),
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -265,8 +264,8 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
           options: _defaultStyleTags,
           selected: _selectedStyles,
           onToggle: (tag) => setState(() {
-            if (_selectedStyles.contains(tag)) _selectedStyles.remove(tag);
-            else if (_selectedStyles.length < 3) _selectedStyles.add(tag);
+            if (_selectedStyles.contains(tag)) { _selectedStyles.remove(tag); }
+            else if (_selectedStyles.length < 3) { _selectedStyles.add(tag); }
           }),
           activeColor: const Color(0xFFEF4444),
         ),
@@ -351,7 +350,7 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
                       width: 24,
                       height: 24,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEF4444).withOpacity(0.15),
+                        color: const Color(0xFFEF4444).withValues(alpha: 0.15),
                         shape: BoxShape.circle,
                       ),
                       child: Center(
@@ -368,16 +367,16 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
                         style: const TextStyle(color: Colors.white, fontSize: 13),
                         decoration: InputDecoration(
                           hintText: 'Describe scene ${e.key + 1}…',
-                          hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+                          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 12),
                           filled: true,
-                          fillColor: Colors.white.withOpacity(0.04),
+                          fillColor: Colors.white.withValues(alpha: 0.04),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
@@ -390,7 +389,7 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
                     const SizedBox(width: 8),
                     GestureDetector(
                       onTap: () => _removeScene(e.key),
-                      child: Icon(Icons.remove_circle_outline, size: 18, color: Colors.white.withOpacity(0.3)),
+                      child: Icon(Icons.remove_circle_outline, size: 18, color: Colors.white.withValues(alpha: 0.3)),
                     ),
                   ],
                 ),
@@ -401,16 +400,16 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.03),
+                      color: Colors.white.withValues(alpha: 0.03),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.white.withOpacity(0.1)),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.add, size: 14, color: Colors.white.withOpacity(0.4)),
+                        Icon(Icons.add, size: 14, color: Colors.white.withValues(alpha: 0.4)),
                         const SizedBox(width: 6),
-                        Text('Add Scene', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12)),
+                        Text('Add Scene', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12)),
                       ],
                     ),
                   ),
@@ -471,7 +470,7 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
           Center(
             child: Text(
               'You need ${p.pointCost} Pulse Points to use this tool',
-              style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],

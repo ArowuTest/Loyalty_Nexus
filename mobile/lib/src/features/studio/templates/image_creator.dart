@@ -224,13 +224,13 @@ class _ImageCreatorTemplateState extends ConsumerState<ImageCreatorTemplate> {
                   constraints: const BoxConstraints(maxWidth: 200),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
+                    color: Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                   ),
                   child: Text(
                     insp.length > 50 ? '${insp.substring(0, 50)}…' : insp,
-                    style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11),
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -328,7 +328,7 @@ class _ImageCreatorTemplateState extends ConsumerState<ImageCreatorTemplate> {
                   max: 1.0,
                   divisions: 9,
                   activeColor: const Color(0xFF7C3AED),
-                  inactiveColor: Colors.white.withOpacity(0.1),
+                  inactiveColor: Colors.white.withValues(alpha: 0.1),
                   onChanged: (v) => setState(() => _refStrength = v),
                 ),
               ],
@@ -364,7 +364,7 @@ class _ImageCreatorTemplateState extends ConsumerState<ImageCreatorTemplate> {
           Center(
             child: Text(
               'You need ${p.pointCost * _numImages} Pulse Points to generate',
-              style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],

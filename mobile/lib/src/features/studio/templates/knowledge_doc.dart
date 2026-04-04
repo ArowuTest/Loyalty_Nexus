@@ -188,13 +188,13 @@ class _KnowledgeDocTemplateState extends ConsumerState<KnowledgeDocTemplate> {
                   constraints: const BoxConstraints(maxWidth: 200),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
+                    color: Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                   ),
                   child: Text(
                     insp.length > 50 ? '${insp.substring(0, 50)}…' : insp,
-                    style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11),
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -225,10 +225,10 @@ class _KnowledgeDocTemplateState extends ConsumerState<KnowledgeDocTemplate> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF10B981).withOpacity(0.12) : Colors.white.withOpacity(0.03),
+                  color: isSelected ? const Color(0xFF10B981).withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.03),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: isSelected ? const Color(0xFF10B981).withOpacity(0.4) : Colors.white.withOpacity(0.08),
+                    color: isSelected ? const Color(0xFF10B981).withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.08),
                     width: isSelected ? 1.5 : 1,
                   ),
                 ),
@@ -238,13 +238,13 @@ class _KnowledgeDocTemplateState extends ConsumerState<KnowledgeDocTemplate> {
                     Icon(
                       fmt['icon'] as IconData,
                       size: 18,
-                      color: isSelected ? const Color(0xFF10B981) : Colors.white.withOpacity(0.4),
+                      color: isSelected ? const Color(0xFF10B981) : Colors.white.withValues(alpha: 0.4),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       fmt['label'] as String,
                       style: TextStyle(
-                        color: isSelected ? Colors.white : Colors.white.withOpacity(0.45),
+                        color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.45),
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
                       ),
@@ -285,13 +285,13 @@ class _KnowledgeDocTemplateState extends ConsumerState<KnowledgeDocTemplate> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
                     color: _length == l['value']
-                        ? const Color(0xFF10B981).withOpacity(0.12)
-                        : Colors.white.withOpacity(0.03),
+                        ? const Color(0xFF10B981).withValues(alpha: 0.12)
+                        : Colors.white.withValues(alpha: 0.03),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
                       color: _length == l['value']
-                          ? const Color(0xFF10B981).withOpacity(0.4)
-                          : Colors.white.withOpacity(0.08),
+                          ? const Color(0xFF10B981).withValues(alpha: 0.4)
+                          : Colors.white.withValues(alpha: 0.08),
                     ),
                   ),
                   child: Column(
@@ -299,14 +299,14 @@ class _KnowledgeDocTemplateState extends ConsumerState<KnowledgeDocTemplate> {
                       Text(
                         l['label']!,
                         style: TextStyle(
-                          color: _length == l['value'] ? Colors.white : Colors.white.withOpacity(0.5),
+                          color: _length == l['value'] ? Colors.white : Colors.white.withValues(alpha: 0.5),
                           fontWeight: FontWeight.w700,
                           fontSize: 11,
                         ),
                       ),
                       Text(
                         l['desc']!,
-                        style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9),
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 9),
                       ),
                     ],
                   ),
@@ -341,19 +341,19 @@ class _KnowledgeDocTemplateState extends ConsumerState<KnowledgeDocTemplate> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
+                    color: Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.upload_file_rounded, size: 18, color: Colors.white.withOpacity(0.4)),
+                      Icon(Icons.upload_file_rounded, size: 18, color: Colors.white.withValues(alpha: 0.4)),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           _documentName ?? 'Upload PDF, DOC, DOCX, TXT',
                           style: TextStyle(
-                            color: _documentName != null ? Colors.white : Colors.white.withOpacity(0.35),
+                            color: _documentName != null ? Colors.white : Colors.white.withValues(alpha: 0.35),
                             fontSize: 12,
                           ),
                           maxLines: 1,
@@ -363,7 +363,7 @@ class _KnowledgeDocTemplateState extends ConsumerState<KnowledgeDocTemplate> {
                       if (_documentUrl != null)
                         GestureDetector(
                           onTap: _clearDocument,
-                          child: Icon(Icons.close, size: 14, color: Colors.white.withOpacity(0.3)),
+                          child: Icon(Icons.close, size: 14, color: Colors.white.withValues(alpha: 0.3)),
                         ),
                     ],
                   ),
@@ -398,7 +398,7 @@ class _KnowledgeDocTemplateState extends ConsumerState<KnowledgeDocTemplate> {
           Center(
             child: Text(
               'You need ${p.pointCost} Pulse Points to use this tool',
-              style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],

@@ -33,7 +33,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _showMoMo     = false;
 
   // ── Notification prefs local mirror ──
-  Map<String, bool> _notifToggles = {
+  final Map<String, bool> _notifToggles = {
     'spin_results':    true,
     'draw_winners':    true,
     'point_updates':   true,
@@ -104,8 +104,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ],
       ),
     );
-    if (ok == true && mounted) {
+    if (ok == true) {
       await ref.read(authStateProvider.notifier).logout();
+      if (!mounted) return;
       context.go('/');
     }
   }
@@ -266,13 +267,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               decoration: BoxDecoration(
                 color: NexusColors.surface,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: NexusColors.red.withOpacity(0.2)),
+                border: Border.all(color: NexusColors.red.withValues(alpha: 0.2)),
               ),
               child: Row(children: [
                 Container(
                   width: 38, height: 38,
                   decoration: BoxDecoration(
-                    color: NexusColors.red.withOpacity(0.1),
+                    color: NexusColors.red.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(11),
                   ),
                   child: const Icon(Icons.logout_rounded, color: NexusColors.red, size: 18),
@@ -563,7 +564,7 @@ class _SettingsCard extends StatelessWidget {
     decoration: BoxDecoration(
       color: NexusColors.surface,
       borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: Colors.white.withOpacity(0.06)),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
     ),
     clipBehavior: Clip.hardEdge,
     child: Column(mainAxisSize: MainAxisSize.min, children: children),
@@ -587,7 +588,7 @@ class _Tile extends StatelessWidget {
     leading: Container(
       width: 38, height: 38,
       decoration: BoxDecoration(
-        color: (iconColor ?? NexusColors.primary).withOpacity(0.12),
+        color: (iconColor ?? NexusColors.primary).withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(11),
       ),
       child: Icon(icon, color: iconColor ?? NexusColors.primary, size: 18),
@@ -616,7 +617,7 @@ class _ToggleTile extends StatelessWidget {
       Container(
         width: 38, height: 38,
         decoration: BoxDecoration(
-          color: NexusColors.primary.withOpacity(0.1),
+          color: NexusColors.primary.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(11),
         ),
         child: Icon(icon, color: NexusColors.primary, size: 18),

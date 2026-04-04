@@ -8,8 +8,6 @@ include: package:flutter_lints/flutter.yaml
 
 analyzer:
   errors:
-    # Raw types (Map, List without type params) — relax until API layer is fully typed
-    strict_raw_types: ignore
     # Unnecessary casts on dynamic responses from Dio
     unnecessary_cast: ignore
     # avoid_dynamic_calls — relax for dynamic JSON maps from REST API

@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,7 +5,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
-import '../../../core/widgets/nexus_widgets.dart' hide NexusCard;
+import '../../../core/widgets/nexus_widgets.dart';
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 final _passportProvider =
@@ -141,7 +140,7 @@ class _PassportScreenState extends ConsumerState<PassportScreen>
 
   void _sharePassport(Map<String, dynamic>? passport) {
     if (passport == null) return;
-    final passportId = passport['passport_id']?.toString() ??
+    final _ = passport['passport_id']?.toString() ??
         passport['id']?.toString() ?? '';
     final name = passport['display_name']?.toString() ?? 'Member';
     final tier = passport['tier']?.toString() ?? 'Bronze';
@@ -167,8 +166,6 @@ class _PassportCard extends StatelessWidget {
     final tier        = passport['tier']?.toString() ?? 'BRONZE';
     final name        = passport['display_name']?.toString() ?? 'Member';
     final phone       = passport['phone_number']?.toString() ?? '';
-    final passportId  = passport['passport_id']?.toString() ??
-        passport['id']?.toString() ?? '';
     final totalPoints = passport['total_points'] as int? ?? 0;
     final memberSince = _fmt(passport['created_at']?.toString() ?? '');
 
@@ -188,7 +185,7 @@ class _PassportCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: gradStart.withOpacity(0.4),
+                color: gradStart.withValues(alpha: 0.4),
                 blurRadius: 30,
                 offset: const Offset(0, 12),
               ),
@@ -214,7 +211,7 @@ class _PassportCard extends StatelessWidget {
                   height: 120,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white.withOpacity(0.05),
+                    color: Colors.white.withValues(alpha: 0.05),
                   ),
                 ),
               ),
@@ -226,7 +223,7 @@ class _PassportCard extends StatelessWidget {
                   height: 80,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white.withOpacity(0.05),
+                    color: Colors.white.withValues(alpha: 0.05),
                   ),
                 ),
               ),
@@ -242,10 +239,10 @@ class _PassportCard extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
+                            color: Colors.white.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
-                                color: Colors.white.withOpacity(0.3)),
+                                color: Colors.white.withValues(alpha: 0.3)),
                           ),
                           child: Text(
                             '${_tierEmoji(tier)} ${tier.toUpperCase()}',
@@ -379,7 +376,7 @@ class _ShimmerPainter extends CustomPainter {
         end: Alignment(position + 0.5, 0),
         colors: [
           Colors.transparent,
-          Colors.white.withOpacity(0.08),
+          Colors.white.withValues(alpha: 0.08),
           Colors.transparent,
         ],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
@@ -429,7 +426,7 @@ class _QRSection extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                    color: NexusColors.primary.withOpacity(0.2),
+                    color: NexusColors.primary.withValues(alpha: 0.2),
                     blurRadius: 20,
                     spreadRadius: 2,
                   ),
@@ -458,10 +455,10 @@ class _QRSection extends StatelessWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: NexusColors.primary.withOpacity(0.1),
+                color: NexusColors.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                    color: NexusColors.primary.withOpacity(0.2)),
+                    color: NexusColors.primary.withValues(alpha: 0.2)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -925,7 +922,7 @@ class _WalletButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
-                color: color.withOpacity(0.3),
+                color: color.withValues(alpha: 0.3),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -1060,7 +1057,7 @@ class _ActivityItem extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
+              color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Center(

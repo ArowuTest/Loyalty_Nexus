@@ -103,19 +103,19 @@ class NexusSpacing {
 
 class NexusShadows {
   static final card = [
-    BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 4)),
+    BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 16, offset: const Offset(0, 4)),
   ];
 
   static final glow = [
-    BoxShadow(color: NexusColors.primary.withOpacity(0.3), blurRadius: 24, spreadRadius: 0),
+    BoxShadow(color: NexusColors.primary.withValues(alpha: 0.3), blurRadius: 24, spreadRadius: 0),
   ];
 
   static final goldGlow = [
-    BoxShadow(color: NexusColors.gold.withOpacity(0.35), blurRadius: 20, spreadRadius: 0),
+    BoxShadow(color: NexusColors.gold.withValues(alpha: 0.35), blurRadius: 20, spreadRadius: 0),
   ];
 
   static final elevated = [
-    BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 32, offset: const Offset(0, 8)),
+    BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 32, offset: const Offset(0, 8)),
   ];
 }
 
@@ -164,9 +164,8 @@ class NexusText {
 
 class NexusTheme {
   static ThemeData dark() {
-    final base = ThemeData.dark();
+    final base = ThemeData.dark(useMaterial3: true);
     return base.copyWith(
-      useMaterial3: true,
       scaffoldBackgroundColor: NexusColors.background,
 
       colorScheme: const ColorScheme.dark(
@@ -242,7 +241,7 @@ class NexusTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: NexusColors.primary,
           foregroundColor: Colors.white,
-          disabledBackgroundColor: NexusColors.primary.withOpacity(0.4),
+          disabledBackgroundColor: NexusColors.primary.withValues(alpha: 0.4),
           disabledForegroundColor: Colors.white54,
           minimumSize:    const Size(double.infinity, 52),
           shape:          RoundedRectangleBorder(borderRadius: NexusRadius.md),
@@ -280,7 +279,7 @@ class NexusTheme {
 
       chipTheme: ChipThemeData(
         backgroundColor: NexusColors.surfaceHigh,
-        selectedColor:   NexusColors.primary.withOpacity(0.2),
+        selectedColor:   NexusColors.primary.withValues(alpha: 0.2),
         labelStyle: const TextStyle(fontSize: 12, color: NexusColors.textPrimary),
         side: const BorderSide(color: NexusColors.border),
         shape: const StadiumBorder(),

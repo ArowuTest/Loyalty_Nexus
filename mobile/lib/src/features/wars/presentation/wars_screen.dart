@@ -16,7 +16,7 @@ final _leaderboardProvider = FutureProvider.autoDispose<Map<String, dynamic>>((r
 final _myRankProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref) async {
   try {
     final r = await ref.read(warsApiProvider).getMyRank();
-    if (r is Map) return Map<String, dynamic>.from(r);
+    return Map<String, dynamic>.from(r);
   } catch (_) {}
   return null;
 });
@@ -209,8 +209,8 @@ class _PrizePoolBanner extends StatelessWidget {
         begin: Alignment.topLeft, end: Alignment.bottomRight,
       ),
       borderRadius: NexusRadius.xl,
-      border: Border.all(color: NexusColors.gold.withOpacity(0.3)),
-      boxShadow: [BoxShadow(color: NexusColors.gold.withOpacity(0.08),
+      border: Border.all(color: NexusColors.gold.withValues(alpha: 0.3)),
+      boxShadow: [BoxShadow(color: NexusColors.gold.withValues(alpha: 0.08),
           blurRadius: 24, spreadRadius: 2)],
     ),
     child: Column(children: [
@@ -279,7 +279,7 @@ class _MyRankCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: NexusColors.primaryGlow,
         borderRadius: NexusRadius.lg,
-        border: Border.all(color: NexusColors.primary.withOpacity(0.4)),
+        border: Border.all(color: NexusColors.primary.withValues(alpha: 0.4)),
       ),
       child: Row(children: [
         Text(medal ?? '🏅', style: const TextStyle(fontSize: 24)),
@@ -317,7 +317,7 @@ class _HowItWorksRow extends StatelessWidget {
         decoration: BoxDecoration(
           color: NexusColors.surface,
           borderRadius: NexusRadius.md,
-          border: Border.all(color: s.color.withOpacity(0.2)),
+          border: Border.all(color: s.color.withValues(alpha: 0.2)),
         ),
         child: Column(children: [
           Icon(s.icon, color: s.color, size: 18),
@@ -360,7 +360,7 @@ class _LeaderboardRow extends StatelessWidget {
         color: NexusColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isTop3 ? NexusColors.gold.withOpacity(0.3) : NexusColors.border,
+          color: isTop3 ? NexusColors.gold.withValues(alpha: 0.3) : NexusColors.border,
           width: isTop3 ? 1.2 : 1,
         ),
       ),
@@ -468,7 +468,7 @@ class _NoActiveWarViewState extends State<_NoActiveWarView>
         decoration: BoxDecoration(
           color: NexusColors.surface,
           borderRadius: NexusRadius.lg,
-          border: Border.all(color: NexusColors.gold.withOpacity(0.2)),
+          border: Border.all(color: NexusColors.gold.withValues(alpha: 0.2)),
         ),
         child: const Column(children: [
           Text('WATCH OUT FOR THE NEXT EVENT',
@@ -532,7 +532,7 @@ class _StepCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: NexusColors.surface,
         borderRadius: NexusRadius.md,
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Column(children: [
         Icon(icon, color: color, size: 22),

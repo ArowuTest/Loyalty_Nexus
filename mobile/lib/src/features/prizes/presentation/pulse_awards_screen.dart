@@ -137,14 +137,14 @@ class _TotalBanner extends StatelessWidget {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient: RadialGradient(colors: [
-              Colors.white.withOpacity(0.15), Colors.transparent,
+              Colors.white.withValues(alpha: 0.15), Colors.transparent,
             ]),
           ),
         ),
       ),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Total Bonus Points Received'.toUpperCase(),
-            style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 10,
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 10,
                 fontWeight: FontWeight.w700, letterSpacing: 0.8)),
         const SizedBox(height: 8),
         Text(_formatPoints(total),
@@ -152,7 +152,7 @@ class _TotalBanner extends StatelessWidget {
                 fontWeight: FontWeight.w900, height: 1)),
         const SizedBox(height: 4),
         Text('$count award${count != 1 ? "s" : ""} received',
-            style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12)),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12)),
       ]),
     ]),
   );
@@ -177,14 +177,14 @@ class _AwardCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: NexusColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
       child: Row(children: [
         // Rank badge
         Container(
           width: 40, height: 40,
           decoration: BoxDecoration(
-            color: NexusColors.primary.withOpacity(0.15),
+            color: NexusColors.primary.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(12),
           ),
           child: const Center(child: Text('🎁', style: TextStyle(fontSize: 18))),

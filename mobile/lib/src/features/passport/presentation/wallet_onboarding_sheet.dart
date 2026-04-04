@@ -113,7 +113,7 @@ class _WalletOnboardingSheetState
   Widget build(BuildContext context) {
     return PopScope(
       // Swipe-down or tap-outside counts as a dismissal.
-      onPopInvoked: (_) => recordWalletDismissed(),
+      onPopInvokedWithResult: (_, __) => recordWalletDismissed(),
       child: Container(
         decoration: BoxDecoration(
           color: NexusColors.surface,
@@ -129,7 +129,7 @@ class _WalletOnboardingSheetState
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: NexusColors.textMuted.withOpacity(0.4),
+                color: NexusColors.textMuted.withValues(alpha: 0.4),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -148,7 +148,7 @@ class _WalletOnboardingSheetState
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
-                    color: NexusColors.primary.withOpacity(0.4),
+                    color: NexusColors.primary.withValues(alpha: 0.4),
                     blurRadius: 20,
                     offset: const Offset(0, 8),
                   ),
@@ -260,8 +260,10 @@ class _WalletOnboardingSheetState
               height: 48,
               child: TextButton(
                 onPressed: () async {
+                  final nav = Navigator.of(context);
                   await recordWalletDismissed();
-                  if (mounted) Navigator.of(context).pop();
+                  if (!mounted) return;
+                  nav.pop();
                 },
                 child: const Text(
                   'Maybe Later',
@@ -342,10 +344,10 @@ class _FeaturePill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: NexusColors.primary.withOpacity(0.12),
+        color: NexusColors.primary.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-            color: NexusColors.primary.withOpacity(0.3), width: 1),
+            color: NexusColors.primary.withValues(alpha: 0.3), width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gap/gap.dart';
 import '../../../core/api/api_client.dart';
@@ -164,7 +163,7 @@ class _SectionHeader extends StatelessWidget {
     Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
+        color: Colors.white.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text('$count', style: const TextStyle(
@@ -195,9 +194,9 @@ class _DrawCardState extends ConsumerState<_DrawCard> {
     _timeLeft = _timeRemaining(widget.draw['draw_date'] as String?);
     if (!_ended) {
       _timer = Timer.periodic(const Duration(minutes: 1), (_) {
-        if (mounted) setState(() {
+        if (mounted) { setState(() {
           _timeLeft = _timeRemaining(widget.draw['draw_date'] as String?);
-        });
+        }); }
       });
     }
   }
@@ -228,7 +227,7 @@ class _DrawCardState extends ConsumerState<_DrawCard> {
       decoration: BoxDecoration(
         color: NexusColors.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(_ended ? 0.04 : 0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: _ended ? 0.04 : 0.08)),
       ),
       clipBehavior: Clip.hardEdge,
       child: Column(children: [
@@ -254,7 +253,7 @@ class _DrawCardState extends ConsumerState<_DrawCard> {
                     color: NexusColors.textPrimary, fontSize: 16, fontWeight: FontWeight.w800))),
                 const SizedBox(width: 8),
                 if (recur.isNotEmpty)
-                  _Chip(label: recur, color: NexusColors.primary.withOpacity(0.2),
+                  _Chip(label: recur, color: NexusColors.primary.withValues(alpha: 0.2),
                       textColor: NexusColors.primary),
               ]),
               if (desc != null) ...[
@@ -305,7 +304,7 @@ class _DrawCardState extends ConsumerState<_DrawCard> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 11),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.04),
+                color: Colors.white.withValues(alpha: 0.04),
                 border: const Border(top: BorderSide(color: NexusColors.border)),
               ),
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -339,7 +338,7 @@ class _DrawCardState extends ConsumerState<_DrawCard> {
               const Icon(Icons.bolt_rounded, size: 13, color: NexusColors.primary),
               const SizedBox(width: 5),
               Text('Spin the wheel to earn entries',
-                  style: TextStyle(color: NexusColors.primary.withOpacity(0.7),
+                  style: TextStyle(color: NexusColors.primary.withValues(alpha: 0.7),
                       fontSize: 11, fontWeight: FontWeight.w600)),
             ])),
           ),
@@ -461,15 +460,15 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (Color bg, Color fg) = switch (status) {
-      'SCHEDULED'   => (NexusColors.primary.withOpacity(0.15), NexusColors.primary),
-      'IN_PROGRESS' => (NexusColors.gold.withOpacity(0.15), NexusColors.gold),
-      'COMPLETED'   => (NexusColors.green.withOpacity(0.15), NexusColors.green),
-      _             => (Colors.white.withOpacity(0.08), Colors.white38),
+      'SCHEDULED'   => (NexusColors.primary.withValues(alpha: 0.15), NexusColors.primary),
+      'IN_PROGRESS' => (NexusColors.gold.withValues(alpha: 0.15), NexusColors.gold),
+      'COMPLETED'   => (NexusColors.green.withValues(alpha: 0.15), NexusColors.green),
+      _             => (Colors.white.withValues(alpha: 0.08), Colors.white38),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: fg.withOpacity(0.4))),
+          border: Border.all(color: fg.withValues(alpha: 0.4))),
       child: Text(status, style: TextStyle(color: fg, fontSize: 9, fontWeight: FontWeight.w800)),
     );
   }
@@ -484,7 +483,7 @@ class _StatTile extends StatelessWidget {
   Widget build(BuildContext context) => Expanded(child: Container(
     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
     decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.04),
+      color: Colors.white.withValues(alpha: 0.04),
       borderRadius: BorderRadius.circular(12),
     ),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

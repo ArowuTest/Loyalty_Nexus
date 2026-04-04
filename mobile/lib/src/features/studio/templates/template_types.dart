@@ -120,7 +120,7 @@ Widget buildChip({
         color: selected ? activeColor : Colors.transparent,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: selected ? activeColor : Colors.white.withOpacity(0.15),
+          color: selected ? activeColor : Colors.white.withValues(alpha: 0.15),
         ),
       ),
       child: Row(
@@ -130,7 +130,7 @@ Widget buildChip({
           Text(
             label,
             style: TextStyle(
-              color: selected ? activeText : Colors.white.withOpacity(0.55),
+              color: selected ? activeText : Colors.white.withValues(alpha: 0.55),
               fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
@@ -188,16 +188,16 @@ Widget buildTextArea({
         style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5),
         decoration: InputDecoration(
           hintText: placeholder,
-          hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 13),
+          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 13),
           filled: true,
-          fillColor: Colors.white.withOpacity(0.04),
+          fillColor: Colors.white.withValues(alpha: 0.04),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
@@ -222,19 +222,19 @@ Widget buildTextArea({
               height: 32,
               decoration: BoxDecoration(
                 color: micActive
-                    ? const Color(0xFFEF4444).withOpacity(0.2)
-                    : Colors.white.withOpacity(0.06),
+                    ? const Color(0xFFEF4444).withValues(alpha: 0.2)
+                    : Colors.white.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: micActive
-                      ? const Color(0xFFEF4444).withOpacity(0.5)
-                      : Colors.white.withOpacity(0.1),
+                      ? const Color(0xFFEF4444).withValues(alpha: 0.5)
+                      : Colors.white.withValues(alpha: 0.1),
                 ),
               ),
               child: Icon(
                 micActive ? Icons.mic : Icons.mic_none_rounded,
                 size: 16,
-                color: micActive ? const Color(0xFFEF4444) : Colors.white.withOpacity(0.4),
+                color: micActive ? const Color(0xFFEF4444) : Colors.white.withValues(alpha: 0.4),
               ),
             ),
           ),
@@ -292,14 +292,14 @@ class UploadZone extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         height: height,
         decoration: BoxDecoration(
-          color: hasFile ? accentColor.withOpacity(0.08) : Colors.white.withOpacity(0.03),
+          color: hasFile ? accentColor.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.03),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: error != null
-                ? const Color(0xFFEF4444).withOpacity(0.5)
+                ? const Color(0xFFEF4444).withValues(alpha: 0.5)
                 : hasFile
-                    ? accentColor.withOpacity(0.4)
-                    : Colors.white.withOpacity(0.1),
+                    ? accentColor.withValues(alpha: 0.4)
+                    : Colors.white.withValues(alpha: 0.1),
             width: hasFile ? 1.5 : 1,
           ),
         ),
@@ -326,7 +326,7 @@ class UploadZone extends StatelessWidget {
                   child: Container(
                     width: 22, height: 22,
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.6),
+                      color: Colors.black.withValues(alpha: 0.6),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.close, size: 12, color: Colors.white),
@@ -336,7 +336,7 @@ class UploadZone extends StatelessWidget {
             if (isUploading)
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.5),
+                  color: Colors.black.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(13),
                 ),
                 child: const Center(
@@ -356,10 +356,10 @@ class UploadZone extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 22, color: Colors.white.withOpacity(0.3)),
+            Icon(icon, size: 22, color: Colors.white.withValues(alpha: 0.3)),
             const SizedBox(height: 6),
-            Text(label, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12, fontWeight: FontWeight.w600)),
-            Text(sublabel, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 10)),
+            Text(label, style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12, fontWeight: FontWeight.w600)),
+            Text(sublabel, style: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 10)),
           ],
         ),
       );
@@ -386,9 +386,9 @@ class ProviderBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.25)),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Row(
         children: [
@@ -397,7 +397,7 @@ class ProviderBadge extends StatelessWidget {
           Expanded(
             child: RichText(
               text: TextSpan(
-                style: TextStyle(color: color.withOpacity(0.8), fontSize: 11, height: 1.4),
+                style: TextStyle(color: color.withValues(alpha: 0.8), fontSize: 11, height: 1.4),
                 children: [
                   TextSpan(text: label, style: TextStyle(fontWeight: FontWeight.w700, color: color)),
                   TextSpan(text: ' — $description'),
@@ -441,10 +441,10 @@ class AspectRatioSelector extends StatelessWidget {
                 duration: const Duration(milliseconds: 150),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF7C3AED).withOpacity(0.15) : Colors.transparent,
+                  color: isSelected ? const Color(0xFF7C3AED).withValues(alpha: 0.15) : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: isSelected ? const Color(0xFF7C3AED).withOpacity(0.6) : Colors.white.withOpacity(0.12),
+                    color: isSelected ? const Color(0xFF7C3AED).withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.12),
                   ),
                 ),
                 child: Column(
@@ -454,7 +454,7 @@ class AspectRatioSelector extends StatelessWidget {
                     Text(
                       opt['label'] ?? val,
                       style: TextStyle(
-                        color: isSelected ? Colors.white : Colors.white.withOpacity(0.5),
+                        color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.5),
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
                       ),
@@ -510,7 +510,7 @@ class _CollapsibleSectionState extends State<CollapsibleSection> {
               Icon(
                 _expanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
                 size: 16,
-                color: Colors.white.withOpacity(0.4),
+                color: Colors.white.withValues(alpha: 0.4),
               ),
             ],
           ),
@@ -541,10 +541,10 @@ Widget buildGenerateButton({
         gradient: enabled && !isLoading
             ? LinearGradient(colors: gradientColors)
             : null,
-        color: enabled && !isLoading ? null : Colors.white.withOpacity(0.05),
+        color: enabled && !isLoading ? null : Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(14),
         boxShadow: enabled && !isLoading
-            ? [BoxShadow(color: gradientColors.first.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))]
+            ? [BoxShadow(color: gradientColors.first.withValues(alpha: 0.3), blurRadius: 12, offset: const Offset(0, 4))]
             : null,
       ),
       child: isLoading
@@ -558,12 +558,12 @@ Widget buildGenerateButton({
           : Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon, color: enabled ? Colors.white : Colors.white.withOpacity(0.2), size: 16),
+                Icon(icon, color: enabled ? Colors.white : Colors.white.withValues(alpha: 0.2), size: 16),
                 const SizedBox(width: 8),
                 Text(
                   label,
                   style: TextStyle(
-                    color: enabled ? Colors.white : Colors.white.withOpacity(0.2),
+                    color: enabled ? Colors.white : Colors.white.withValues(alpha: 0.2),
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
                   ),

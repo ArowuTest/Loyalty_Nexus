@@ -92,7 +92,7 @@ class _ArcadeHeader extends StatelessWidget {
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
                   colors: [
-                    NexusColors.purple.withOpacity(0.3),
+                    NexusColors.purple.withValues(alpha: 0.3),
                     Colors.transparent,
                   ],
                 ),
@@ -109,7 +109,7 @@ class _ArcadeHeader extends StatelessWidget {
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
                   colors: [
-                    NexusColors.primary.withOpacity(0.25),
+                    NexusColors.primary.withValues(alpha: 0.25),
                     Colors.transparent,
                   ],
                 ),
@@ -197,7 +197,7 @@ class _ComingSoonHero extends StatelessWidget {
         end: Alignment.bottomRight,
         colors: [Color(0xFF1A0533), Color(0xFF0D1B4B)],
       ),
-      border: Border.all(color: NexusColors.purple.withOpacity(0.4)),
+      border: Border.all(color: NexusColors.purple.withValues(alpha: 0.4)),
       child: Column(
         children: [
           const Text('🎮', style: TextStyle(fontSize: 56))
@@ -236,7 +236,7 @@ class _ComingSoonHero extends StatelessWidget {
               borderRadius: BorderRadius.circular(30),
               boxShadow: [
                 BoxShadow(
-                  color: NexusColors.purple.withOpacity(0.4),
+                  color: NexusColors.purple.withValues(alpha: 0.4),
                   blurRadius: 20,
                   offset: const Offset(0, 6),
                 ),
@@ -353,9 +353,9 @@ class _EarningRow extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: NexusColors.gold.withOpacity(0.15),
+              color: NexusColors.gold.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: NexusColors.gold.withOpacity(0.3)),
+              border: Border.all(color: NexusColors.gold.withValues(alpha: 0.3)),
             ),
             child: Text(
               points,
@@ -429,7 +429,7 @@ class _GameCategoryCard extends StatelessWidget {
           Positioned.fill(
             child: Container(
               decoration: BoxDecoration(
-                color: NexusColors.background.withOpacity(0.4),
+                color: NexusColors.background.withValues(alpha: 0.4),
                 borderRadius: BorderRadius.circular(16),
               ),
             ),
@@ -502,18 +502,18 @@ class _NotifyCard extends StatelessWidget {
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: [
-          NexusColors.primary.withOpacity(0.15),
-          NexusColors.purple.withOpacity(0.1),
+          NexusColors.primary.withValues(alpha: 0.15),
+          NexusColors.purple.withValues(alpha: 0.1),
         ],
       ),
-      border: Border.all(color: NexusColors.primary.withOpacity(0.3)),
+      border: Border.all(color: NexusColors.primary.withValues(alpha: 0.3)),
       child: Row(
         children: [
           Container(
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: NexusColors.primary.withOpacity(0.15),
+              color: NexusColors.primary.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(14),
             ),
             child: const Center(

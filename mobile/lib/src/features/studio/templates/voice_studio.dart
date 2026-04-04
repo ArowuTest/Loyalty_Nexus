@@ -166,9 +166,9 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: catColor.withOpacity(0.08),
+            color: catColor.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: catColor.withOpacity(0.25)),
+            border: Border.all(color: catColor.withValues(alpha: 0.25)),
           ),
           child: Row(
             children: [
@@ -176,7 +176,7 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: catColor.withOpacity(0.15),
+                  color: catColor.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
                 child: Center(
@@ -201,7 +201,7 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
                     ),
                     Text(
                       selectedVoice['tone']!,
-                      style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 12),
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12),
                     ),
                   ],
                 ),
@@ -209,7 +209,7 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: catColor.withOpacity(0.15),
+                  color: catColor.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
@@ -229,17 +229,17 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
           style: const TextStyle(color: Colors.white, fontSize: 13),
           decoration: InputDecoration(
             hintText: 'Search voices…',
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
-            prefixIcon: Icon(Icons.search, size: 16, color: Colors.white.withOpacity(0.3)),
+            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 12),
+            prefixIcon: Icon(Icons.search, size: 16, color: Colors.white.withValues(alpha: 0.3)),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.04),
+            fillColor: Colors.white.withValues(alpha: 0.04),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
@@ -272,10 +272,10 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
                   duration: const Duration(milliseconds: 150),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isSelected ? vColor.withOpacity(0.12) : Colors.white.withOpacity(0.03),
+                    color: isSelected ? vColor.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.03),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: isSelected ? vColor.withOpacity(0.5) : Colors.white.withOpacity(0.08),
+                      color: isSelected ? vColor.withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.08),
                       width: isSelected ? 1.5 : 1,
                     ),
                   ),
@@ -286,7 +286,7 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
                       Text(
                         v['name']!,
                         style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.white.withOpacity(0.75),
+                          color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.75),
                           fontWeight: FontWeight.w700,
                           fontSize: 12,
                         ),
@@ -294,7 +294,7 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
                       Text(
                         v['tone']!,
                         style: TextStyle(
-                          color: isSelected ? vColor.withOpacity(0.8) : Colors.white.withOpacity(0.35),
+                          color: isSelected ? vColor.withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.35),
                           fontSize: 10,
                         ),
                         maxLines: 1,
@@ -381,7 +381,7 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
           Center(
             child: Text(
               'You need ${p.pointCost} Pulse Points to use this tool',
-              style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],

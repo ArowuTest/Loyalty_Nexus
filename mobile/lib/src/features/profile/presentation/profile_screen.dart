@@ -138,7 +138,7 @@ class _HeroBanner extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: [
             NexusColors.primaryDark,
-            tierColor.withOpacity(0.7),
+            tierColor.withValues(alpha: 0.7),
             NexusColors.background,
           ],
           stops: const [0, 0.5, 1],
@@ -153,7 +153,7 @@ class _HeroBanner extends StatelessWidget {
             gradient: NexusColors.gradientBrand,
             shape: BoxShape.circle,
             border: Border.all(color: tierColor, width: 3),
-            boxShadow: [BoxShadow(color: tierColor.withOpacity(0.4), blurRadius: 16)],
+            boxShadow: [BoxShadow(color: tierColor.withValues(alpha: 0.4), blurRadius: 16)],
           ),
           child: Center(child: Text(
             phone.length >= 4 ? phone.substring(phone.length - 4) : '****',
@@ -172,9 +172,9 @@ class _HeroBanner extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
               decoration: BoxDecoration(
-                color: tierColor.withOpacity(0.2),
+                color: tierColor.withValues(alpha: 0.2),
                 borderRadius: NexusRadius.pill,
-                border: Border.all(color: tierColor.withOpacity(0.5)),
+                border: Border.all(color: tierColor.withValues(alpha: 0.5)),
               ),
               child: Text('$tierEmoji  $tier',
                   style: TextStyle(color: tierColor, fontSize: 11,
@@ -308,7 +308,7 @@ class _ActionTile extends StatelessWidget {
         Container(
           width: 38, height: 38,
           decoration: BoxDecoration(
-            color: color.withOpacity(0.12),
+            color: color.withValues(alpha: 0.12),
             borderRadius: NexusRadius.sm,
           ),
           child: Icon(icon, color: color, size: 20),
@@ -342,7 +342,7 @@ class _MemberCard extends StatelessWidget {
         colors: [NexusColors.surfaceHigh, NexusColors.surface],
         begin: Alignment.topLeft, end: Alignment.bottomRight,
       ),
-      border: Border.all(color: tierColor.withOpacity(0.3)),
+      border: Border.all(color: tierColor.withValues(alpha: 0.3)),
       child: Column(children: [
         // Header
         Row(children: [
@@ -444,7 +444,7 @@ class _UssdBanner extends StatelessWidget {
     gradient: const LinearGradient(
       colors: [Color(0xFF1A2040), Color(0xFF141830)],
     ),
-    border: Border.all(color: NexusColors.primary.withOpacity(0.2)),
+    border: Border.all(color: NexusColors.primary.withValues(alpha: 0.2)),
     child: Row(children: [
       Container(
         width: 44, height: 44,

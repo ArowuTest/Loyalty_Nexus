@@ -6,12 +6,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:gap/gap.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
 import '../templates/template_registry.dart';
-import '../templates/template_types.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Providers
@@ -647,7 +645,7 @@ class _WalletBar extends StatelessWidget {
         const SizedBox(width: 8),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Text('${points.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')}',
+            Text(points.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},'),
               style: TextStyle(
                 color: isLow ? const Color(0xFFfbbf24) : Colors.white,
                 fontWeight: FontWeight.w800, fontSize: 15)),
@@ -726,10 +724,10 @@ class _ChatTab extends StatelessWidget {
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 decoration: BoxDecoration(
-                  color: active ? m.color.withOpacity(0.2) : NexusColors.surface,
+                  color: active ? m.color.withValues(alpha: 0.2) : NexusColors.surface,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: active ? m.color.withOpacity(0.5) : NexusColors.border),
+                    color: active ? m.color.withValues(alpha: 0.5) : NexusColors.border),
                 ),
                 child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   Text(m.emoji, style: const TextStyle(fontSize: 12)),
@@ -809,7 +807,7 @@ class _ChatTab extends StatelessWidget {
                     borderSide: const BorderSide(color: NexusColors.border)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(color: mode.color.withOpacity(0.5))),
+                    borderSide: BorderSide(color: mode.color.withValues(alpha: 0.5))),
                 ),
               ),
             ),
@@ -821,11 +819,11 @@ class _ChatTab extends StatelessWidget {
                 width: 44, height: 44,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [mode.color, mode.color.withOpacity(0.7)],
+                    colors: [mode.color, mode.color.withValues(alpha: 0.7)],
                     begin: Alignment.topLeft, end: Alignment.bottomRight),
                   borderRadius: BorderRadius.circular(14),
                   boxShadow: [BoxShadow(
-                    color: mode.color.withOpacity(0.3),
+                    color: mode.color.withValues(alpha: 0.3),
                     blurRadius: 8, offset: const Offset(0, 3))],
                 ),
                 child: sending
@@ -844,10 +842,10 @@ class _ChatTab extends StatelessWidget {
               onTap: canSummarise ? onSummarise : null,
               child: Row(children: [
                 Icon(Icons.summarize_rounded, size: 11,
-                  color: canSummarise ? mode.color : NexusColors.textSecondary.withOpacity(0.4)),
+                  color: canSummarise ? mode.color : NexusColors.textSecondary.withValues(alpha: 0.4)),
                 const SizedBox(width: 3),
                 Text('Summarise', style: TextStyle(
-                  color: canSummarise ? mode.color : NexusColors.textSecondary.withOpacity(0.4),
+                  color: canSummarise ? mode.color : NexusColors.textSecondary.withValues(alpha: 0.4),
                   fontSize: 10, fontWeight: FontWeight.w600)),
               ]),
             ),
@@ -916,7 +914,7 @@ class _RichMessageState extends State<_RichMessage> {
           decoration: BoxDecoration(
             color: const Color(0xFF030712),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withOpacity(0.1)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             // Header bar
@@ -975,7 +973,7 @@ class _RichMessageState extends State<_RichMessage> {
           child: Text.rich(TextSpan(children: chunks),
             style: TextStyle(
               color: widget.mode == ChatMode.code
-                  ? const Color(0xFF86efac).withOpacity(0.9)
+                  ? const Color(0xFF86efac).withValues(alpha: 0.9)
                   : NexusColors.textPrimary,
               fontSize: 13, height: 1.5)),
         );
@@ -1003,9 +1001,9 @@ class _RichMessageState extends State<_RichMessage> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
+              color: Colors.white.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: Colors.white.withOpacity(0.12)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
             ),
             child: Text(m.group(2)!,
               style: const TextStyle(fontFamily: 'monospace',
@@ -1062,7 +1060,7 @@ class _ChatBubbleState extends State<_ChatBubble> {
               if (!isUser) ...[
                 CircleAvatar(
                   radius: 15,
-                  backgroundColor: msg.mode.color.withOpacity(0.12),
+                  backgroundColor: msg.mode.color.withValues(alpha: 0.12),
                   child: Text(msg.mode.emoji, style: const TextStyle(fontSize: 13)),
                 ),
                 const SizedBox(width: 8),
@@ -1072,7 +1070,7 @@ class _ChatBubbleState extends State<_ChatBubble> {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   gradient: isUser ? LinearGradient(
-                    colors: [msg.mode.color, msg.mode.color.withOpacity(0.75)],
+                    colors: [msg.mode.color, msg.mode.color.withValues(alpha: 0.75)],
                     begin: Alignment.topLeft, end: Alignment.bottomRight,
                   ) : null,
                   color: isUser ? null : NexusColors.surface,
@@ -1084,7 +1082,7 @@ class _ChatBubbleState extends State<_ChatBubble> {
                   ),
                   border: isUser ? null : Border.all(color: NexusColors.border),
                   boxShadow: [BoxShadow(
-                    color: Colors.black.withOpacity(0.12),
+                    color: Colors.black.withValues(alpha: 0.12),
                     blurRadius: 6, offset: const Offset(0, 2))],
                 ),
                 child: isUser
@@ -1098,7 +1096,7 @@ class _ChatBubbleState extends State<_ChatBubble> {
                 const SizedBox(width: 8),
                 CircleAvatar(
                   radius: 15,
-                  backgroundColor: NexusColors.primary.withOpacity(0.15),
+                  backgroundColor: NexusColors.primary.withValues(alpha: 0.15),
                   child: const Icon(Icons.person_rounded, size: 15, color: NexusColors.primary),
                 ),
               ],
@@ -1173,7 +1171,7 @@ class _ThinkingBubbleState extends State<_ThinkingBubble>
       child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
         CircleAvatar(
           radius: 15,
-          backgroundColor: widget.mode.color.withOpacity(0.12),
+          backgroundColor: widget.mode.color.withValues(alpha: 0.12),
           child: Text(widget.mode.emoji, style: const TextStyle(fontSize: 13)),
         ),
         const SizedBox(width: 8),
@@ -1199,7 +1197,7 @@ class _ThinkingBubbleState extends State<_ThinkingBubble>
                     width: 7, height: 7,
                     margin: EdgeInsets.only(right: i < 2 ? 4 : 0),
                     decoration: BoxDecoration(
-                      color: widget.mode.color.withOpacity(0.4 + 0.6 * bounce),
+                      color: widget.mode.color.withValues(alpha: 0.4 + 0.6 * bounce),
                       shape: BoxShape.circle),
                   ),
                 );
@@ -1337,9 +1335,9 @@ class _ToolsTab extends ConsumerWidget {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: _catCfg(entry.key).color.withOpacity(0.12),
+                              color: _catCfg(entry.key).color.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: _catCfg(entry.key).color.withOpacity(0.3)),
+                              border: Border.all(color: _catCfg(entry.key).color.withValues(alpha: 0.3)),
                             ),
                             child: Row(mainAxisSize: MainAxisSize.min, children: [
                               Icon(_catCfg(entry.key).icon, size: 12,
@@ -1395,9 +1393,9 @@ class _CategoryChip extends StatelessWidget {
       margin: const EdgeInsets.only(right: 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       decoration: BoxDecoration(
-        color: active ? color.withOpacity(0.15) : Colors.transparent,
+        color: active ? color.withValues(alpha: 0.15) : Colors.transparent,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: active ? color.withOpacity(0.4) : NexusColors.border),
+        border: Border.all(color: active ? color.withValues(alpha: 0.4) : NexusColors.border),
       ),
       child: Text(label,
         style: TextStyle(color: active ? color : NexusColors.textSecondary,
@@ -1431,9 +1429,9 @@ class _ToolCard extends StatelessWidget {
             Container(
               width: 40, height: 40,
               decoration: BoxDecoration(
-                color: cfg.color.withOpacity(0.12),
+                color: cfg.color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(11),
-                border: Border.all(color: cfg.color.withOpacity(0.25)),
+                border: Border.all(color: cfg.color.withValues(alpha: 0.25)),
               ),
               child: Icon(cfg.icon, size: 18, color: cfg.color),
             ),
@@ -1457,8 +1455,8 @@ class _ToolCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: tool.isFree ? NexusColors.green.withOpacity(0.12)
-                        : NexusColors.gold.withOpacity(0.12),
+                    color: tool.isFree ? NexusColors.green.withValues(alpha: 0.12)
+                        : NexusColors.gold.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(6)),
                   child: Text(tool.isFree ? 'Free' : '${tool.pointCost} pts/gen',
                     style: TextStyle(
@@ -1474,12 +1472,12 @@ class _ToolCard extends StatelessWidget {
                 ],
               ]),
             ])),
-            Icon(Icons.chevron_right_rounded, color: NexusColors.textSecondary.withOpacity(0.5), size: 18),
+            Icon(Icons.chevron_right_rounded, color: NexusColors.textSecondary.withValues(alpha: 0.5), size: 18),
           ]),
           if (entryLocked)
             Positioned.fill(child: Container(
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.55),
+                color: Colors.black.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Align(
@@ -1518,9 +1516,9 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
     decoration: BoxDecoration(
-      color: color.withOpacity(0.15),
+      color: color.withValues(alpha: 0.15),
       borderRadius: BorderRadius.circular(4),
-      border: Border.all(color: color.withOpacity(0.3)),
+      border: Border.all(color: color.withValues(alpha: 0.3)),
     ),
     child: Text(label, style: TextStyle(color: color, fontSize: 8, fontWeight: FontWeight.w800)),
   );
@@ -1557,7 +1555,7 @@ class _GalleryTab extends StatelessWidget {
     final gallery = galleryState.items;
 
     // Empty state
-    if (gallery.isEmpty) return RefreshIndicator(
+    if (gallery.isEmpty) { return RefreshIndicator(
       onRefresh: onRefresh,
       color: NexusColors.primary,
       child: ListView(padding: const EdgeInsets.all(32), children: [
@@ -1572,7 +1570,7 @@ class _GalleryTab extends StatelessWidget {
           style: TextStyle(color: NexusColors.textSecondary, fontSize: 13),
           textAlign: TextAlign.center),
       ]),
-    );
+    ); }
 
     return Column(children: [
       Padding(
@@ -1724,9 +1722,9 @@ class _StatusPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 10, color: color),
@@ -1836,9 +1834,9 @@ class _AudioOutput extends StatelessWidget {
       Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: NexusColors.green.withOpacity(0.08),
+          color: NexusColors.green.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: NexusColors.green.withOpacity(0.2)),
+          border: Border.all(color: NexusColors.green.withValues(alpha: 0.2)),
         ),
         child: Row(children: [
           const Icon(Icons.audio_file_rounded, color: NexusColors.green, size: 28),
@@ -2034,9 +2032,9 @@ class _FailedView extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: NexusColors.green.withOpacity(0.08),
+            color: NexusColors.green.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: NexusColors.green.withOpacity(0.2))),
+            border: Border.all(color: NexusColors.green.withValues(alpha: 0.2))),
           child: Row(children: [
             const Icon(Icons.check_circle_rounded, size: 12, color: NexusColors.green),
             const SizedBox(width: 6),
@@ -2075,15 +2073,6 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
   bool get _canAfford  => _isFree || widget.userPoints >= widget.tool.pointCost;
   bool get _entryLocked => !widget.tool.isFree &&
       widget.tool.entryPointCost > 0 && widget.userPoints < widget.tool.entryPointCost;
-
-  bool get _needsUrl => const {
-    'image-analyser','transcribe','transcribe-african','ask-my-photo',
-    'photo-editor','animate-photo','video-cinematic','bg-remover',
-  }.contains(widget.tool.slug);
-
-  bool get _needsSecondPrompt => const {
-    'ask-my-photo','photo-editor','video-cinematic',
-  }.contains(widget.tool.slug);
 
   @override
   Widget build(BuildContext context) {
@@ -2186,8 +2175,8 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
     Row(children: [
       Container(width: 44, height: 44,
         decoration: BoxDecoration(
-          color: cfg.color.withOpacity(0.12), borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: cfg.color.withOpacity(0.25))),
+          color: cfg.color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cfg.color.withValues(alpha: 0.25))),
         child: Icon(cfg.icon, size: 22, color: cfg.color)),
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2230,12 +2219,12 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
     Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: _isFree ? NexusColors.green.withOpacity(0.05)
+        color: _isFree ? NexusColors.green.withValues(alpha: 0.05)
             : _canAfford ? const Color(0x0CF5A623)
             : const Color(0x1Aef4444),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: _isFree ? NexusColors.green.withOpacity(0.2)
+          color: _isFree ? NexusColors.green.withValues(alpha: 0.2)
               : _canAfford ? const Color(0x1AF5A623)
               : const Color(0x33ef4444))),
       child: _isFree
@@ -2273,12 +2262,10 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
     _doGenerateRaw(payload.toJson());
   }
 
-  void _onGenerate() => setState(() => _showConfirm = true);
-
   Widget _buildConfirmModal(int after) => GestureDetector(
     onTap: () => setState(() => _showConfirm = false),
     child: Container(
-      color: Colors.black.withOpacity(0.7),
+      color: Colors.black.withValues(alpha: 0.7),
       child: Center(child: GestureDetector(
         onTap: () {},
         child: Container(
@@ -2361,33 +2348,6 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
     final prompt = _promptCtrl.text.trim();
     await _doGenerateRaw({'prompt': prompt});
   }
-
-  String _urlHint() => switch (widget.tool.slug) {
-    'image-analyser'    => 'Paste image URL to analyse…',
-    'ask-my-photo'      => 'Paste your image URL here…',
-    'photo-editor'      => 'Paste your image URL here…',
-    'animate-photo'     => 'URL of your image to animate…',
-    'video-cinematic'   => 'Paste your image URL here…',
-    'bg-remover'        => 'URL of product image…',
-    'transcribe'        => 'Paste direct link to MP3/WAV…',
-    'transcribe-african'=> 'Paste the URL of an audio file…',
-    _                   => 'Paste URL here…',
-  };
-
-  String _promptHint() => switch (widget.tool.slug) {
-    'ai-photo'       => "A vibrant market scene in Lagos at golden hour, photorealistic…",
-    'ai-chat'        => 'Ask me anything…',
-    'bg-music'       => 'Uplifting Afrobeats background music, 15 seconds, no vocals…',
-    'narrate'        => 'Paste your text here and I\'ll convert it to natural speech…',
-    'translate'      => 'Enter the text you want translated…',
-    'song-creator'   => 'Upbeat Afrobeats love song, Lagos vibes, female vocals, 120 BPM…',
-    'code-helper'    => 'Describe what code you need…',
-    'research-brief' => 'Opportunities in Nigeria\'s mobile payments sector 2026…',
-    'ask-my-photo'   => 'What do you want to know about this image?',
-    'photo-editor'   => "Describe the edit — e.g. 'Remove the background'",
-    'video-cinematic'=> "Describe the motion — e.g. 'Slow zoom in with lens flare'",
-    _                => 'Describe what you want to create…',
-  };
 
   String _outputEmoji() {
     final slug = widget.tool.slug;

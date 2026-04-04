@@ -49,8 +49,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _progressCtrl.dispose();
     _phoneCtrl.dispose();
     _resendTimer?.cancel();
-    for (final c in _otpCtrls) c.dispose();
-    for (final f in _otpFoci)  f.dispose();
+    for (final c in _otpCtrls) { c.dispose(); }
+    for (final f in _otpFoci)  { f.dispose(); }
     super.dispose();
   }
 
@@ -72,7 +72,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   }
 
   void _clearOtp() {
-    for (final c in _otpCtrls) c.clear();
+    for (final c in _otpCtrls) { c.clear(); }
     _otpFoci[0].requestFocus();
   }
 
@@ -458,10 +458,10 @@ class _OtpBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(
     width: 46, height: 56,
-    child: RawKeyboardListener(
+    child: KeyboardListener(
       focusNode: FocusNode(),
-      onKey: (event) {
-        if (event is RawKeyDownEvent &&
+      onKeyEvent: (event) {
+        if (event is KeyDownEvent &&
             event.logicalKey == LogicalKeyboardKey.backspace &&
             ctrl.text.isEmpty) {
           onBack?.call();
@@ -514,7 +514,7 @@ class _SuccessView extends StatelessWidget {
         decoration: BoxDecoration(
           color: NexusColors.greenDim,
           shape: BoxShape.circle,
-          border: Border.all(color: NexusColors.green.withOpacity(0.4), width: 2),
+          border: Border.all(color: NexusColors.green.withValues(alpha: 0.4), width: 2),
         ),
         child: const Icon(Icons.check_rounded, color: NexusColors.green, size: 44),
       ),
@@ -570,7 +570,7 @@ class _ErrorBox extends StatelessWidget {
     decoration: BoxDecoration(
       color: NexusColors.redDim,
       borderRadius: NexusRadius.md,
-      border: Border.all(color: NexusColors.red.withOpacity(0.3)),
+      border: Border.all(color: NexusColors.red.withValues(alpha: 0.3)),
     ),
     child: Row(children: [
       const Icon(Icons.error_outline_rounded, color: NexusColors.red, size: 16),

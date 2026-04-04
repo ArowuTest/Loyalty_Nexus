@@ -36,7 +36,7 @@ class _NotifsNotifier extends StateNotifier<_NotifsState> {
   final NotificationsApi _api;
   _NotifsNotifier(this._api) : super(const _NotifsState()) { _load(); }
 
-  Future<void> _load({String? afterCursor}) async {
+  Future<void> _load() async {
     try {
       final Map res = await _api.list() as Map;
       final items = ((res['notifications'] ?? []) as List).cast<Map>();
@@ -231,19 +231,19 @@ class _NotifTile extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: isRead ? NexusColors.surface : cfg.color.withOpacity(0.05),
+          color: isRead ? NexusColors.surface : cfg.color.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isRead ? NexusColors.border : cfg.color.withOpacity(0.2)),
+            color: isRead ? NexusColors.border : cfg.color.withValues(alpha: 0.2)),
         ),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           // Type icon
           Container(
             width: 40, height: 40,
             decoration: BoxDecoration(
-              color: cfg.color.withOpacity(0.12),
+              color: cfg.color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: cfg.color.withOpacity(0.2)),
+              border: Border.all(color: cfg.color.withValues(alpha: 0.2)),
             ),
             child: Center(child: Text(cfg.emoji, style: const TextStyle(fontSize: 18))),
           ),
@@ -342,16 +342,3 @@ class _EmptyState extends StatelessWidget {
   );
 }
 
-// ── Loading shimmer list ───────────────────────────────────────────────────────
-
-class _LoadingList extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => ListView.builder(
-    padding: const EdgeInsets.all(16),
-    itemCount: 6,
-    itemBuilder: (_, __) => Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: NexusShimmer(width: double.infinity, height: 72, radius: NexusRadius.md),
-    ),
-  );
-}

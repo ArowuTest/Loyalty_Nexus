@@ -54,7 +54,6 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
   // Recording
   final AudioRecorder _recorder = AudioRecorder();
   bool   _isRecording   = false;
-  String? _recordingPath;
 
   bool get _isAfricanMode => widget.props.slug == 'african-transcribe';
 
@@ -83,7 +82,7 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
     if (_isRecording) {
       final path = await _recorder.stop();
       if (path != null) {
-        setState(() { _isRecording = false; _recordingPath = path; _isUploading = true; });
+        setState(() { _isRecording = false; _isUploading = true; });
         try {
           final studioApi = ref.read(studioApiProvider);
           final url = await studioApi.uploadAsset(File(path));
@@ -98,7 +97,7 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
       final dir = await getTemporaryDirectory();
       final path = '${dir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
       await _recorder.start(const RecordConfig(), path: path);
-      setState(() { _isRecording = true; _recordingPath = null; });
+      setState(() { _isRecording = true; });
     }
   }
 
@@ -106,7 +105,7 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
     _audioUrl = null;
     _audioFileName = null;
     _uploadError = null;
-    _recordingPath = null;
+   
   });
 
   void _handleSubmit() {
@@ -159,18 +158,18 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
+                    color: Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                   ),
                   child: Column(
                     children: [
-                      Icon(Icons.upload_file_rounded, size: 22, color: Colors.white.withOpacity(0.5)),
+                      Icon(Icons.upload_file_rounded, size: 22, color: Colors.white.withValues(alpha: 0.5)),
                       const SizedBox(height: 6),
                       Text(
                         _audioFileName ?? 'Upload Audio',
                         style: TextStyle(
-                          color: _audioFileName != null ? Colors.white : Colors.white.withOpacity(0.4),
+                          color: _audioFileName != null ? Colors.white : Colors.white.withValues(alpha: 0.4),
                           fontSize: 12,
                           fontWeight: _audioFileName != null ? FontWeight.w600 : FontWeight.normal,
                         ),
@@ -179,7 +178,7 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
                       ),
                       Text(
                         'MP3, WAV, M4A, OGG',
-                        style: TextStyle(color: Colors.white.withOpacity(0.25), fontSize: 10),
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.25), fontSize: 10),
                       ),
                     ],
                   ),
@@ -195,13 +194,13 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 decoration: BoxDecoration(
                   color: _isRecording
-                      ? const Color(0xFFEF4444).withOpacity(0.15)
-                      : Colors.white.withOpacity(0.04),
+                      ? const Color(0xFFEF4444).withValues(alpha: 0.15)
+                      : Colors.white.withValues(alpha: 0.04),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: _isRecording
-                        ? const Color(0xFFEF4444).withOpacity(0.5)
-                        : Colors.white.withOpacity(0.1),
+                        ? const Color(0xFFEF4444).withValues(alpha: 0.5)
+                        : Colors.white.withValues(alpha: 0.1),
                   ),
                 ),
                 child: Column(
@@ -209,13 +208,13 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
                     Icon(
                       _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
                       size: 22,
-                      color: _isRecording ? const Color(0xFFEF4444) : Colors.white.withOpacity(0.5),
+                      color: _isRecording ? const Color(0xFFEF4444) : Colors.white.withValues(alpha: 0.5),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       _isRecording ? 'Stop' : 'Record',
                       style: TextStyle(
-                        color: _isRecording ? const Color(0xFFEF4444) : Colors.white.withOpacity(0.4),
+                        color: _isRecording ? const Color(0xFFEF4444) : Colors.white.withValues(alpha: 0.4),
                         fontSize: 11,
                       ),
                     ),
@@ -249,7 +248,7 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
               ),
               GestureDetector(
                 onTap: _clearAudio,
-                child: Icon(Icons.close, size: 14, color: Colors.white.withOpacity(0.3)),
+                child: Icon(Icons.close, size: 14, color: Colors.white.withValues(alpha: 0.3)),
               ),
             ],
           ),
@@ -282,13 +281,13 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
                   color: _outputFormat == f['value']
-                      ? const Color(0xFF0EA5E9).withOpacity(0.12)
-                      : Colors.white.withOpacity(0.04),
+                      ? const Color(0xFF0EA5E9).withValues(alpha: 0.12)
+                      : Colors.white.withValues(alpha: 0.04),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: _outputFormat == f['value']
-                        ? const Color(0xFF0EA5E9).withOpacity(0.4)
-                        : Colors.white.withOpacity(0.08),
+                        ? const Color(0xFF0EA5E9).withValues(alpha: 0.4)
+                        : Colors.white.withValues(alpha: 0.08),
                   ),
                 ),
                 child: Column(
@@ -298,7 +297,7 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
                       size: 16,
                       color: _outputFormat == f['value']
                           ? const Color(0xFF0EA5E9)
-                          : Colors.white.withOpacity(0.4),
+                          : Colors.white.withValues(alpha: 0.4),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -306,7 +305,7 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
                       style: TextStyle(
                         color: _outputFormat == f['value']
                             ? Colors.white
-                            : Colors.white.withOpacity(0.4),
+                            : Colors.white.withValues(alpha: 0.4),
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
                       ),
@@ -360,7 +359,7 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
           Center(
             child: Text(
               'You need ${p.pointCost} Pulse Points to use this tool',
-              style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],
@@ -375,21 +374,21 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: value ? const Color(0xFF0EA5E9).withOpacity(0.1) : Colors.white.withOpacity(0.04),
+          color: value ? const Color(0xFF0EA5E9).withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: value ? const Color(0xFF0EA5E9).withOpacity(0.4) : Colors.white.withOpacity(0.08),
+            color: value ? const Color(0xFF0EA5E9).withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.08),
           ),
         ),
         child: Row(
           children: [
-            Icon(icon, size: 14, color: value ? const Color(0xFF0EA5E9) : Colors.white.withOpacity(0.4)),
+            Icon(icon, size: 14, color: value ? const Color(0xFF0EA5E9) : Colors.white.withValues(alpha: 0.4)),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 label,
                 style: TextStyle(
-                  color: value ? Colors.white : Colors.white.withOpacity(0.45),
+                  color: value ? Colors.white : Colors.white.withValues(alpha: 0.45),
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
                 ),
@@ -398,7 +397,7 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
             Icon(
               value ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
               size: 14,
-              color: value ? const Color(0xFF0EA5E9) : Colors.white.withOpacity(0.2),
+              color: value ? const Color(0xFF0EA5E9) : Colors.white.withValues(alpha: 0.2),
             ),
           ],
         ),

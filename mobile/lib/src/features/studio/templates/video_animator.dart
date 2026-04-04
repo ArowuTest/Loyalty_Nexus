@@ -53,7 +53,6 @@ class _VideoAnimatorTemplateState extends ConsumerState<VideoAnimatorTemplate> {
   String  _aspect        = '16:9';
 
   String? _imageUrl;
-  String? _imagePreview;
   bool    _isUploading   = false;
   String? _uploadError;
 
@@ -61,7 +60,7 @@ class _VideoAnimatorTemplateState extends ConsumerState<VideoAnimatorTemplate> {
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (picked == null) return;
-    setState(() { _imagePreview = picked.path; _isUploading = true; _uploadError = null; });
+    setState(() { _isUploading = true; _uploadError = null; });
     try {
       final studioApi = ref.read(studioApiProvider);
       final url = await studioApi.uploadAsset(File(picked.path));
@@ -71,7 +70,7 @@ class _VideoAnimatorTemplateState extends ConsumerState<VideoAnimatorTemplate> {
     }
   }
 
-  void _clearImage() => setState(() { _imageUrl = null; _imagePreview = null; _uploadError = null; });
+  void _clearImage() => setState(() { _imageUrl = null; _uploadError = null; });
 
   void _handleSubmit() {
     final p = widget.props;
@@ -154,13 +153,13 @@ class _VideoAnimatorTemplateState extends ConsumerState<VideoAnimatorTemplate> {
                   constraints: const BoxConstraints(maxWidth: 200),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
+                    color: Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                   ),
                   child: Text(
                     insp.length > 50 ? '${insp.substring(0, 50)}…' : insp,
-                    style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11),
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -259,7 +258,7 @@ class _VideoAnimatorTemplateState extends ConsumerState<VideoAnimatorTemplate> {
           Center(
             child: Text(
               'Please upload an image to animate',
-              style: TextStyle(color: Colors.orange.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.orange.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],
@@ -268,7 +267,7 @@ class _VideoAnimatorTemplateState extends ConsumerState<VideoAnimatorTemplate> {
           Center(
             child: Text(
               'You need ${p.pointCost} Pulse Points to use this tool',
-              style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],

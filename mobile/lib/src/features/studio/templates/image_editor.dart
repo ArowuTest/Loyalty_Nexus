@@ -23,7 +23,6 @@ class _ImageEditorTemplateState extends ConsumerState<ImageEditorTemplate> {
   final _urlCtrl        = TextEditingController();
 
   String? _uploadedUrl;
-  String? _previewPath;
   bool    _isUploading  = false;
   String? _uploadError;
   double  _strength     = 0.85;
@@ -35,7 +34,7 @@ class _ImageEditorTemplateState extends ConsumerState<ImageEditorTemplate> {
     final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (picked == null) return;
     setState(() {
-      _previewPath = picked.path;
+
       _isUploading = true;
       _uploadError = null;
       _uploadedUrl = null;
@@ -50,7 +49,7 @@ class _ImageEditorTemplateState extends ConsumerState<ImageEditorTemplate> {
   }
 
   void _clearImage() => setState(() {
-    _previewPath = null;
+
     _uploadedUrl = null;
     _uploadError = null;
     _urlCtrl.clear();
@@ -125,16 +124,16 @@ class _ImageEditorTemplateState extends ConsumerState<ImageEditorTemplate> {
           style: const TextStyle(color: Colors.white, fontSize: 13),
           decoration: InputDecoration(
             hintText: 'https://example.com/image.jpg',
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 12),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.04),
+            fillColor: Colors.white.withValues(alpha: 0.04),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
@@ -165,14 +164,14 @@ class _ImageEditorTemplateState extends ConsumerState<ImageEditorTemplate> {
           max: 1.0,
           divisions: 9,
           activeColor: const Color(0xFF06B6D4),
-          inactiveColor: Colors.white.withOpacity(0.1),
+          inactiveColor: Colors.white.withValues(alpha: 0.1),
           onChanged: (v) => setState(() => _strength = v),
         ),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Subtle', style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 10)),
-            Text('Strong', style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 10)),
+            Text('Subtle', style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 10)),
+            Text('Strong', style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 10)),
           ],
         ),
         const SizedBox(height: 24),
@@ -195,7 +194,7 @@ class _ImageEditorTemplateState extends ConsumerState<ImageEditorTemplate> {
           Center(
             child: Text(
               'You need ${p.pointCost} Pulse Points to use this tool',
-              style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],

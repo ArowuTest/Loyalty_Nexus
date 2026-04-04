@@ -335,13 +335,13 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
+                    color: Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                   ),
                   child: Text(
                     insp.length > 40 ? '${insp.substring(0, 40)}…' : insp,
-                    style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11),
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
                   ),
                 ),
               ),
@@ -428,7 +428,7 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
           max: 4,
           divisions: 4,
           activeColor: const Color(0xFF10B981),
-          inactiveColor: Colors.white.withOpacity(0.1),
+          inactiveColor: Colors.white.withValues(alpha: 0.1),
           onChanged: (v) => setState(() => _energy = v.round()),
         ),
         const SizedBox(height: 16),
@@ -553,7 +553,7 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
           Center(
             child: Text(
               'You need ${p.pointCost} Pulse Points to use this tool',
-              style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],
@@ -570,17 +570,17 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? const Color(0xFF10B981).withOpacity(0.15) : Colors.transparent,
+            color: selected ? const Color(0xFF10B981).withValues(alpha: 0.15) : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: selected ? const Color(0xFF10B981).withOpacity(0.5) : Colors.white.withOpacity(0.12),
+              color: selected ? const Color(0xFF10B981).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.12),
             ),
           ),
           child: Center(
             child: Text(
               label,
               style: TextStyle(
-                color: selected ? Colors.white : Colors.white.withOpacity(0.45),
+                color: selected ? Colors.white : Colors.white.withValues(alpha: 0.45),
                 fontWeight: FontWeight.w600,
                 fontSize: 13,
               ),

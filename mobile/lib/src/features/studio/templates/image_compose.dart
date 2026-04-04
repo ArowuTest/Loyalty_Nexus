@@ -171,10 +171,10 @@ class _ImageComposeTemplateState extends ConsumerState<ImageComposeTemplate> {
                 duration: const Duration(milliseconds: 150),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFDB2777).withOpacity(0.1) : Colors.white.withOpacity(0.03),
+                  color: isSelected ? const Color(0xFFDB2777).withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.03),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isSelected ? const Color(0xFFDB2777).withOpacity(0.4) : Colors.white.withOpacity(0.08),
+                    color: isSelected ? const Color(0xFFDB2777).withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.08),
                     width: isSelected ? 1.5 : 1,
                   ),
                 ),
@@ -189,14 +189,14 @@ class _ImageComposeTemplateState extends ConsumerState<ImageComposeTemplate> {
                           Text(
                             s['label'] as String,
                             style: TextStyle(
-                              color: isSelected ? Colors.white : Colors.white.withOpacity(0.7),
+                              color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.7),
                               fontWeight: FontWeight.w700,
                               fontSize: 13,
                             ),
                           ),
                           Text(
                             s['desc'] as String,
-                            style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11),
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 11),
                           ),
                         ],
                       ),
@@ -253,7 +253,7 @@ class _ImageComposeTemplateState extends ConsumerState<ImageComposeTemplate> {
           Center(
             child: Text(
               'Please upload at least one image',
-              style: TextStyle(color: Colors.orange.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.orange.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],
@@ -262,7 +262,7 @@ class _ImageComposeTemplateState extends ConsumerState<ImageComposeTemplate> {
           Center(
             child: Text(
               'You need ${p.pointCost} Pulse Points to use this tool',
-              style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],
@@ -305,14 +305,14 @@ class _ImageSlot extends StatelessWidget {
         decoration: BoxDecoration(
           color: hasImage
               ? Colors.transparent
-              : Colors.white.withOpacity(0.04),
+              : Colors.white.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: error != null
-                ? const Color(0xFFEF4444).withOpacity(0.5)
+                ? const Color(0xFFEF4444).withValues(alpha: 0.5)
                 : hasImage
-                    ? const Color(0xFFDB2777).withOpacity(0.4)
-                    : Colors.white.withOpacity(0.1),
+                    ? const Color(0xFFDB2777).withValues(alpha: 0.4)
+                    : Colors.white.withValues(alpha: 0.1),
             width: hasImage ? 1.5 : 1,
           ),
         ),
@@ -334,7 +334,7 @@ class _ImageSlot extends StatelessWidget {
                               width: 18,
                               height: 18,
                               decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.6),
+                                color: Colors.black.withValues(alpha: 0.6),
                                 shape: BoxShape.circle,
                               ),
                               child: const Icon(Icons.close, size: 10, color: Colors.white),
@@ -349,13 +349,13 @@ class _ImageSlot extends StatelessWidget {
                         Icon(
                           Icons.add_photo_alternate_outlined,
                           size: 20,
-                          color: Colors.white.withOpacity(0.3),
+                          color: Colors.white.withValues(alpha: 0.3),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           index == 0 ? 'Primary *' : 'Image ${index + 1}',
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.3),
+                            color: Colors.white.withValues(alpha: 0.3),
                             fontSize: 10,
                             fontWeight: index == 0 ? FontWeight.w700 : FontWeight.normal,
                           ),

@@ -43,7 +43,6 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
   String _analysisMode = 'general';
 
   String? _imageUrl;
-  String? _imagePreview;
   bool    _isUploading = false;
   String? _uploadError;
 
@@ -86,7 +85,7 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
     if (picked == null) return;
-    setState(() { _imagePreview = picked.path; _isUploading = true; _uploadError = null; });
+    setState(() { _isUploading = true; _uploadError = null; });
     try {
       final studioApi = ref.read(studioApiProvider);
       final url = await studioApi.uploadAsset(File(picked.path));
@@ -96,7 +95,7 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
     }
   }
 
-  void _clearImage() => setState(() { _imageUrl = null; _imagePreview = null; _uploadError = null; _urlCtrl.clear(); });
+  void _clearImage() => setState(() { _imageUrl = null; _uploadError = null; _urlCtrl.clear(); });
 
   void _handleSubmit() {
     final p = widget.props;
@@ -160,16 +159,16 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
           style: const TextStyle(color: Colors.white, fontSize: 13),
           decoration: InputDecoration(
             hintText: 'https://example.com/image.jpg',
-            hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 12),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.04),
+            fillColor: Colors.white.withValues(alpha: 0.04),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
@@ -193,10 +192,10 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
                 duration: const Duration(milliseconds: 150),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF6366F1).withOpacity(0.1) : Colors.white.withOpacity(0.03),
+                  color: isSelected ? const Color(0xFF6366F1).withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.03),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isSelected ? const Color(0xFF6366F1).withOpacity(0.4) : Colors.white.withOpacity(0.08),
+                    color: isSelected ? const Color(0xFF6366F1).withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.08),
                     width: isSelected ? 1.5 : 1,
                   ),
                 ),
@@ -205,7 +204,7 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
                     Icon(
                       mode['icon'] as IconData,
                       size: 16,
-                      color: isSelected ? const Color(0xFF6366F1) : Colors.white.withOpacity(0.4),
+                      color: isSelected ? const Color(0xFF6366F1) : Colors.white.withValues(alpha: 0.4),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -215,14 +214,14 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
                           Text(
                             mode['label'] as String,
                             style: TextStyle(
-                              color: isSelected ? Colors.white : Colors.white.withOpacity(0.7),
+                              color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.7),
                               fontWeight: FontWeight.w600,
                               fontSize: 13,
                             ),
                           ),
                           Text(
                             mode['desc'] as String,
-                            style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11),
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 11),
                           ),
                         ],
                       ),
@@ -259,11 +258,11 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
+                    color: Colors.white.withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                   ),
-                  child: Text(q, style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11)),
+                  child: Text(q, style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11)),
                 ),
               ),
             )).toList(),
@@ -287,7 +286,7 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
           Center(
             child: Text(
               'You need ${p.pointCost} Pulse Points to use this tool',
-              style: TextStyle(color: Colors.red.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(color: Colors.red.withValues(alpha: 0.7), fontSize: 12),
             ),
           ),
         ],

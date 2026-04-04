@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -109,7 +108,7 @@ class _BottomBar extends StatelessWidget {
         border: const Border(top: BorderSide(color: NexusColors.border)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
+            color: Colors.black.withValues(alpha: 0.4),
             blurRadius: 24, offset: const Offset(0, -4),
           ),
         ],
