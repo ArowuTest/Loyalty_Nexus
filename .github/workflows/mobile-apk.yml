@@ -113,12 +113,13 @@ jobs:
         run: |
           APK_PATH="mobile/build/app/outputs/flutter-apk/app-debug.apk"
 
+          # Appetize v1 API uses HTTP Basic Auth: token as username, empty password
           # Check if we already have a public key stored (for updates vs new uploads)
           if [ -n "${{ secrets.APPETIZE_PUBLIC_KEY }}" ]; then
             echo "Updating existing Appetize app..."
             RESPONSE=$(curl -s -X POST \
               "https://api.appetize.io/v1/apps/${{ secrets.APPETIZE_PUBLIC_KEY }}" \
-              -H "Authorization: Bearer ${{ secrets.APPETIZE_API_TOKEN }}" \
+              -u "${{ secrets.APPETIZE_API_TOKEN }}:" \
               -F "file=@${APK_PATH}" \
               -F "platform=android" \
               -F "note=Build ${{ github.sha }}")
@@ -126,7 +127,7 @@ jobs:
             echo "Creating new Appetize app..."
             RESPONSE=$(curl -s -X POST \
               "https://api.appetize.io/v1/apps" \
-              -H "Authorization: Bearer ${{ secrets.APPETIZE_API_TOKEN }}" \
+              -u "${{ secrets.APPETIZE_API_TOKEN }}:" \
               -F "file=@${APK_PATH}" \
               -F "platform=android" \
               -F "note=Loyalty Nexus — Build ${{ github.sha }}")
