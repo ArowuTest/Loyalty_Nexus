@@ -1,0 +1,26 @@
+[
+    {
+        "merged": "ng.loyaltynexus.loyalty_nexus.app-debug-55:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "ng.loyaltynexus.loyalty_nexus.app-main-50:/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "ng.loyaltynexus.loyalty_nexus.app-debug-55:/mipmap-hdpi_ic_launcher.png.flat",
+        "source": "ng.loyaltynexus.loyalty_nexus.app-main-50:/mipmap-hdpi/ic_launcher.png"
+    },
+    {
+        "merged": "ng.loyaltynexus.loyalty_nexus.app-debug-55:/mipmap-xhdpi_ic_launcher.png.flat",
+        "source": "ng.loyaltynexus.loyalty_nexus.app-main-50:/mipmap-xhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "ng.loyaltynexus.loyalty_nexus.app-debug-55:/drawable-v21_launch_background.xml.flat",
+        "source": "ng.loyaltynexus.loyalty_nexus.app-main-50:/drawable-v21/launch_background.xml"
+    },
+    {
+        "merged": "ng.loyaltynexus.loyalty_nexus.app-debug-55:/mipmap-mdpi_ic_launcher.png.flat",
+        "source": "ng.loyaltynexus.loyalty_nexus.app-main-50:/mipmap-mdpi/ic_launcher.png"
+    },
+    {
+        "merged": "ng.loyaltynexus.loyalty_nexus.app-debug-55:/mipmap-xxhdpi_ic_launcher.png.flat",
+        "source": "ng.loyaltynexus.loyalty_nexus.app-main-50:/mipmap-xxhdpi/ic_launcher.png"
+    }
+]
