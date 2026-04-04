@@ -48,29 +48,40 @@ jobs:
           storeFile=loyalty-nexus-release.jks
           EOF
 
-      # ── 6. Install Flutter dependencies ──────────────────────────────────────
+      # ── 6. Write Firebase config files (gitignored, must be injected) ────────
+      - name: Write google-services.json
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICES_JSON }}' \
+            > mobile/android/app/google-services.json
+
+      - name: Write GoogleService-Info.plist
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICE_INFO_PLIST }}' \
+            > mobile/ios/Runner/GoogleService-Info.plist
+
+      # ── 7. Install Flutter dependencies ──────────────────────────────────────
       - name: Flutter pub get
         working-directory: mobile
         run: flutter pub get
 
-      # ── 7. Flutter analyze (fail on errors only) ──────────────────────────────
+      # ── 8. Flutter analyze (fail on errors only) ──────────────────────────────
       - name: Flutter analyze
         working-directory: mobile
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
-      # ── 8. Flutter unit tests ─────────────────────────────────────────────────
+      # ── 9. Flutter unit tests ─────────────────────────────────────────────────
       - name: Flutter test
         working-directory: mobile
         run: flutter test --reporter=compact || true
 
-      # ── 9. Build debug APK ────────────────────────────────────────────────────
+      # ── 10. Build debug APK ────────────────────────────────────────────────────
       - name: Build debug APK
         working-directory: mobile
         run: flutter build apk --debug --no-tree-shake-icons
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
 
-      # ── 10. Upload APK artifact ───────────────────────────────────────────────
+      # ── 11. Upload APK artifact ───────────────────────────────────────────────
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -78,7 +89,7 @@ jobs:
           path: mobile/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 14
 
-      # ── 11. Upload to Appetize.io ─────────────────────────────────────────────
+      # ── 12. Upload to Appetize.io ─────────────────────────────────────────────
       - name: Upload to Appetize.io
         id: appetize
         run: |
@@ -111,7 +122,7 @@ jobs:
           echo "app_url=${APP_URL}" >> $GITHUB_OUTPUT
           echo "✅ Appetize URL: ${APP_URL}"
 
-      # ── 12. Post Appetize URL as job summary ──────────────────────────────────
+      # ── 13. Post Appetize URL as job summary ──────────────────────────────────
       - name: Post summary
         run: |
           echo "## 📱 Loyalty Nexus — Debug APK" >> $GITHUB_STEP_SUMMARY
