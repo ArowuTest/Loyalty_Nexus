@@ -1,15 +1,34 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-// ── Route constants \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nclass AppRoutes {\n  static const home          = '/';\n  static const login         = '/login';\n  static const register      = '/register';\n  static const spin          = '/spin';\n  static const studio        = '/studio';\n  static const wars          = '/wars';\n  static const profile       = '/profile';\n  static const passport      = '/passport';\n  static const prizes        = '/prizes';\n  static const draws         = '/draws';\n  static const pulseAwards   = '/pulse-awards';\n  static const notifications = '/notifications';\n  static const settings      = '/settings';\n}
+// ── Route constants ───────────────────────────────────────────────────────────
+class AppRoutes {
+  static const home          = '/';
+  static const login         = '/login';
+  static const register      = '/register';
+  static const dashboard     = '/dashboard';
+  static const spin          = '/spin';
+  static const studio        = '/studio';
+  static const wars          = '/wars';
+  static const arcade        = '/arcade';
+  static const profile       = '/profile';
+  static const passport      = '/passport';
+  static const prizes        = '/prizes';
+  static const draws         = '/draws';
+  static const pulseAwards   = '/pulse-awards';
+  static const notifications = '/notifications';
+  static const settings      = '/settings';
+}
+
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/spin/presentation/spin_screen.dart';
 import '../../features/studio/presentation/studio_screen.dart';
 import '../../features/wars/presentation/wars_screen.dart';
+import '../../features/arcade/presentation/arcade_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
-import '../../features/profile/presentation/passport_screen.dart';
+import '../../features/passport/presentation/passport_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/prizes/presentation/prizes_screen.dart';
 import '../../features/prizes/presentation/draws_screen.dart';
@@ -58,9 +77,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       StatefulShellRoute.indexedStack(
         builder: (_, __, shell) => MainShell(navigationShell: shell),
         branches: [
+          // 0 — Home / Dashboard
           StatefulShellBranch(routes: [
             GoRoute(path: '/dashboard', builder: (_, __) => const DashboardScreen()),
           ]),
+          // 1 — Spin
           StatefulShellBranch(routes: [
             GoRoute(
               path: '/spin',
@@ -70,12 +91,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               ],
             ),
           ]),
+          // 2 — AI Studio
           StatefulShellBranch(routes: [
             GoRoute(path: '/studio', builder: (_, __) => const StudioScreen()),
           ]),
+          // 3 — Wars
           StatefulShellBranch(routes: [
             GoRoute(path: '/wars', builder: (_, __) => const WarsScreen()),
           ]),
+          // 4 — Nexus Games Arcade
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/arcade', builder: (_, __) => const ArcadeScreen()),
+          ]),
+          // 5 — Profile
           StatefulShellBranch(routes: [
             GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
           ]),

@@ -45,8 +45,17 @@ dependencies:
   # QR Code generation (Digital Passport)
   qr_flutter: ^4.1.0
 
-  # Confetti animation (Spin prize reveal)
-  confetti: ^0.7.0
+  # File / media picking & upload (AI Studio templates)
+  image_picker: ^1.1.2
+  file_picker: ^8.1.2
+  mime: ^1.0.6
+
+  # Audio recording (Transcribe template mic input)
+  record: ^5.1.2
+  just_audio: ^0.9.42
+
+  # Speech-to-text (mic dictation in templates)
+  speech_to_text: ^7.0.0
 
   # Device / Platform
   local_auth: ^2.3.0

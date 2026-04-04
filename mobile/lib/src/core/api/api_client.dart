@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:mime/mime.dart';
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
 // Inject via: flutter run --dart-define=API_URL=https://api.yourdomain.com/api/v1
@@ -127,6 +129,20 @@ class UserApi {
     return Map<String, dynamic>.from(r as Map);
   }
 
+  /// Generate a QR code payload for the passport (5-min TTL)
+  Future<Map<String, dynamic>> getPassportQR() async {
+    final r = await _dio.apiGet<Map>('/passport/qr');
+    return Map<String, dynamic>.from(r as Map);
+  }
+
+  /// Passport activity event log (tier upgrades, badge earns, QR scans)
+  Future<List<dynamic>> getPassportEvents({int limit = 30}) async {
+    try {
+      final r = await _dio.apiGet<Map>('/passport/events', query: {'limit': limit});
+      return (r as Map)['events'] as List? ?? [];
+    } catch (_) { return []; }
+  }
+
   Future<Map<String, dynamic>> getBonusPulseAwards() async {
     final r = await _dio.apiGet<Map>('/user/bonus-pulse');
     return Map<String, dynamic>.from(r as Map);
@@ -174,6 +190,14 @@ class SpinApi {
   final Dio _dio;
   const SpinApi(this._dio);
 
+  /// Daily spin eligibility — credits available, recharge threshold, progress
+  Future<Map<String, dynamic>> getEligibility() async {
+    try {
+      final r = await _dio.apiGet<Map>('/spin/eligibility');
+      return Map<String, dynamic>.from(r as Map);
+    } catch (_) { return {}; }
+  }
+
   /// Returns wheel segments, cost, spin limit status — admin-configurable
   Future<Map<String, dynamic>> getWheelConfig() async {
     final r = await _dio.apiGet<Map>('/spin/wheel');
@@ -213,6 +237,27 @@ final spinApiProvider = Provider((ref) => SpinApi(ref.read(dioProvider)));
 class StudioApi {
   final Dio _dio;
   const StudioApi(this._dio);
+
+  /// Upload a file (image, video, audio, document) to the studio CDN.
+  /// Returns the CDN URL string to pass as image_url / document_url etc.
+  Future<String> uploadAsset(File file) async {
+    final mimeType = lookupMimeType(file.path) ?? 'application/octet-stream';
+    final formData = FormData.fromMap({
+      'file': await MultipartFile.fromFile(
+        file.path,
+        filename: file.path.split('/').last,
+        contentType: DioMediaType.parse(mimeType),
+      ),
+    });
+    try {
+      final res = await _dio.post<Map>('/studio/upload', data: formData);
+      final data = res.data as Map;
+      return data['url'] as String;
+    } on DioException catch (e) {
+      final msg = (e.response?.data as Map?)?['error'] as String? ?? 'Upload failed';
+      throw ApiException(msg, statusCode: e.response?.statusCode);
+    }
+  }
 
   /// Full tool list — includes ui_template and ui_config for each tool
   /// so the mobile app never hardcodes tool behaviour — admin configures it.
@@ -267,10 +312,26 @@ class StudioApi {
     return Map<String, dynamic>.from(r as Map);
   }
 
+  /// Chat history for a given mode (general / web-search-ai / code-helper)
+  Future<List<dynamic>> getChatHistory(String mode) async {
+    try {
+      final r = await _dio.apiGet<Map>('/studio/chat/history', query: {'mode': mode});
+      return (r as Map)['messages'] as List? ?? [];
+    } catch (_) { return []; }
+  }
+
   /// Chat usage / quota (messages remaining, resets, plan)
   Future<Map<String, dynamic>> getChatUsage() async {
     try {
       final r = await _dio.apiGet<Map>('/studio/chat/usage');
+      return Map<String, dynamic>.from(r as Map);
+    } catch (_) { return {}; }
+  }
+
+  /// Current session usage (points spent, generations count, session start)
+  Future<Map<String, dynamic>> getSessionUsage() async {
+    try {
+      final r = await _dio.apiGet<Map>('/studio/session');
       return Map<String, dynamic>.from(r as Map);
     } catch (_) { return {}; }
   }
@@ -327,6 +388,14 @@ class WarsApi {
     return (r as Map)['winners'] as List? ?? [];
   }
 
+  /// Past war periods with winners
+  Future<List<dynamic>> getHistory({int limit = 12}) async {
+    try {
+      final r = await _dio.apiGet<Map>('/wars/history', query: {'limit': limit});
+      return (r as Map)['history'] as List? ?? [];
+    } catch (_) { return []; }
+  }
+
   /// Full war config — period, prize pool, rules (admin-set)
   Future<Map<String, dynamic>> getWarConfig() async {
     try {
@@ -367,3 +436,32 @@ class NotificationsApi {
 
 final notificationsApiProvider =
     Provider((ref) => NotificationsApi(ref.read(dioProvider)));
+
+// ─── Passport API ─────────────────────────────────────────────────────────────
+class PassportApi {
+  final Dio _dio;
+  const PassportApi(this._dio);
+
+  /// Full passport profile: tier, badges, streak, lifetime points, wallet URLs
+  Future<Map<String, dynamic>> getPassport() async {
+    final r = await _dio.apiGet<Map>('/passport');
+    return Map<String, dynamic>.from(r as Map);
+  }
+
+  /// HMAC-signed QR payload string (expires in 5 minutes)
+  Future<Map<String, dynamic>> getPassportQR() async {
+    final r = await _dio.apiGet<Map>('/passport/qr');
+    return Map<String, dynamic>.from(r as Map);
+  }
+
+  /// Passport activity event log (tier upgrades, badge earns, QR scans, streaks)
+  Future<List<dynamic>> getPassportEvents({int limit = 30}) async {
+    try {
+      final r = await _dio.apiGet<Map>('/passport/events', query: {'limit': limit});
+      return (r as Map)['events'] as List? ?? [];
+    } catch (_) { return []; }
+  }
+}
+
+final passportApiProvider =
+    Provider((ref) => PassportApi(ref.read(dioProvider)));

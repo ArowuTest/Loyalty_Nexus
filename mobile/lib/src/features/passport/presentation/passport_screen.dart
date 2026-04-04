@@ -7,10 +7,16 @@ import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
 import '../../../core/widgets/nexus_widgets.dart';
 
-// ─── Provider ─────────────────────────────────────────────────────────────────
+// ─── Providers ───────────────────────────────────────────────────────────────
 final _passportProvider =
     FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   return ref.read(passportApiProvider).getPassport();
+});
+
+final _passportEventsProvider =
+    FutureProvider.autoDispose<List<dynamic>>((ref) async {
+  final raw = await ref.read(passportApiProvider).getPassportEvents(limit: 20);
+  return (raw as List?) ?? [];
 });
 
 // ─── Passport Screen ──────────────────────────────────────────────────────────
@@ -121,6 +127,10 @@ class _PassportScreenState extends ConsumerState<PassportScreen>
 
               // ── Wallet CTAs ──────────────────────────────────────────
               _WalletCTAs(passport: passport),
+              const SizedBox(height: 20),
+
+              // ── Activity / Events ────────────────────────────────────
+              _ActivitySection(),
             ],
           ),
         ),
@@ -864,6 +874,187 @@ class _WalletButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ─── Activity Section ───────────────────────────────────────────────────────────────
+class _ActivitySection extends ConsumerWidget {
+  const _ActivitySection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final eventsAsync = ref.watch(_passportEventsProvider);
+
+    return NexusCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionHeader(title: 'Activity History'),
+          const SizedBox(height: 4),
+          const Text(
+            'Your recent passport activity and milestones',
+            style: TextStyle(
+                color: NexusColors.textSecondary,
+                fontSize: 12,
+                height: 1.4),
+          ),
+          const SizedBox(height: 16),
+          eventsAsync.when(
+            loading: () => Column(
+              children: List.generate(3, (_) =>
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: ShimmerBox(height: 52, radius: 10),
+                ),
+              ),
+            ),
+            error: (_, __) => const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  'Could not load activity',
+                  style: TextStyle(color: NexusColors.textSecondary, fontSize: 13),
+                ),
+              ),
+            ),
+            data: (events) {
+              if (events.isEmpty) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('🏆', style: TextStyle(fontSize: 36)),
+                        SizedBox(height: 8),
+                        Text(
+                          'No activity yet',
+                          style: TextStyle(
+                              color: NexusColors.textSecondary,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Earn points and spin to see your history here',
+                          style: TextStyle(
+                              color: NexusColors.textSecondary,
+                              fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+              return Column(
+                children: events.take(10).map((e) {
+                  final event = e as Map<String, dynamic>;
+                  return _ActivityItem(event: event);
+                }).toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActivityItem extends StatelessWidget {
+  final Map<String, dynamic> event;
+  const _ActivityItem({required this.event});
+
+  @override
+  Widget build(BuildContext context) {
+    final eventType = event['event_type']?.toString() ?? '';
+    final detail    = event['detail']?.toString() ?? '';
+    final createdAt = event['created_at']?.toString() ?? '';
+    final (icon, color) = _eventStyle(eventType);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Center(
+              child: Text(icon, style: const TextStyle(fontSize: 18)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _eventLabel(eventType),
+                  style: const TextStyle(
+                      color: NexusColors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13),
+                ),
+                if (detail.isNotEmpty)
+                  Text(
+                    detail,
+                    style: const TextStyle(
+                        color: NexusColors.textSecondary,
+                        fontSize: 11),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          Text(
+            _timeAgo(createdAt),
+            style: const TextStyle(
+                color: NexusColors.textSecondary,
+                fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  (String, Color) _eventStyle(String type) {
+    switch (type) {
+      case 'tier_upgrade':   return ('🏆', NexusColors.gold);
+      case 'badge_earned':   return ('🏅', NexusColors.purple);
+      case 'qr_scan':        return ('📱', NexusColors.primary);
+      case 'streak_milestone': return ('🔥', const Color(0xFFFF6B35));
+      case 'wallet_install': return ('💳', const Color(0xFF1A73E8));
+      default:               return ('✨', NexusColors.textSecondary);
+    }
+  }
+
+  String _eventLabel(String type) {
+    switch (type) {
+      case 'tier_upgrade':     return 'Tier Upgraded';
+      case 'badge_earned':     return 'Badge Earned';
+      case 'qr_scan':          return 'QR Code Scanned';
+      case 'streak_milestone': return 'Streak Milestone';
+      case 'wallet_install':   return 'Wallet Pass Installed';
+      default:                 return type.replaceAll('_', ' ').toUpperCase();
+    }
+  }
+
+  String _timeAgo(String iso) {
+    try {
+      final dt   = DateTime.parse(iso).toLocal();
+      final diff = DateTime.now().difference(dt);
+      if (diff.inMinutes < 1)  return 'just now';
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24)   return '${diff.inHours}h ago';
+      if (diff.inDays < 7)     return '${diff.inDays}d ago';
+      return '${(diff.inDays / 7).floor()}w ago';
+    } catch (_) {
+      return '';
+    }
   }
 }
 

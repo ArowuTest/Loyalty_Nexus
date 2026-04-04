@@ -1,31 +1,40 @@
 // ─── Template Registry ────────────────────────────────────────────────────────
 // Mirrors webapp's renderTemplate() switch exactly.
+// All 13 templates registered — 9 updated + 4 new.
 // Usage: TemplateRegistry.build(tool, onSubmit, isLoading, userPoints)
 
 library studio_templates;
 
 export 'template_types.dart';
-export 'image_creator_template.dart';
-export 'image_editor_template.dart';
-export 'video_creator_template.dart';
-export 'video_animator_template.dart';
-export 'voice_studio_template.dart';
-export 'music_composer_template.dart';
-export 'transcribe_template.dart';
-export 'vision_ask_template.dart';
-export 'knowledge_doc_template.dart';
+export 'music_composer.dart';
+export 'image_creator.dart';
+export 'image_editor.dart';
+export 'image_compose.dart';
+export 'video_creator.dart';
+export 'video_animator.dart';
+export 'video_editor.dart';
+export 'video_extender.dart';
+export 'video_multi_scene.dart';
+export 'voice_studio.dart';
+export 'transcribe.dart';
+export 'vision_ask.dart';
+export 'knowledge_doc.dart';
 
 import 'package:flutter/material.dart';
 import 'template_types.dart';
-import 'image_creator_template.dart';
-import 'image_editor_template.dart';
-import 'video_creator_template.dart';
-import 'video_animator_template.dart';
-import 'voice_studio_template.dart';
-import 'music_composer_template.dart';
-import 'transcribe_template.dart';
-import 'vision_ask_template.dart';
-import 'knowledge_doc_template.dart';
+import 'music_composer.dart';
+import 'image_creator.dart';
+import 'image_editor.dart';
+import 'image_compose.dart';
+import 'video_creator.dart';
+import 'video_animator.dart';
+import 'video_editor.dart';
+import 'video_extender.dart';
+import 'video_multi_scene.dart';
+import 'voice_studio.dart';
+import 'transcribe.dart';
+import 'vision_ask.dart';
+import 'knowledge_doc.dart';
 
 class TemplateRegistry {
   /// Picks the purpose-built input widget based on [tool.ui_template].
@@ -45,22 +54,41 @@ class TemplateRegistry {
     );
 
     switch (tool['ui_template'] as String? ?? '') {
+      // ── Music ──────────────────────────────────────────────────────────────
       case 'music-composer':
         return MusicComposerTemplate(props: props);
+
+      // ── Image ──────────────────────────────────────────────────────────────
       case 'image-creator':
         return ImageCreatorTemplate(props: props);
       case 'image-editor':
         return ImageEditorTemplate(props: props);
+      case 'image-compose':
+        return ImageComposeTemplate(props: props);
+
+      // ── Video ──────────────────────────────────────────────────────────────
       case 'video-creator':
         return VideoCreatorTemplate(props: props);
       case 'video-animator':
         return VideoAnimatorTemplate(props: props);
+      case 'video-editor':
+        return VideoEditorTemplate(props: props);
+      case 'video-extender':
+        return VideoExtenderTemplate(props: props);
+      case 'video-multi-scene':
+        return VideoMultiSceneTemplate(props: props);
+
+      // ── Voice & Audio ──────────────────────────────────────────────────────
       case 'voice-studio':
         return VoiceStudioTemplate(props: props);
       case 'transcribe':
         return TranscribeTemplate(props: props);
+
+      // ── Vision & Analysis ──────────────────────────────────────────────────
       case 'vision-ask':
         return VisionAskTemplate(props: props);
+
+      // ── Document / Knowledge (default) ────────────────────────────────────
       case 'knowledge-doc':
       default:
         return KnowledgeDocTemplate(props: props);

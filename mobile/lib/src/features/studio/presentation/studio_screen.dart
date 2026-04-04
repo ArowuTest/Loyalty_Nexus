@@ -136,6 +136,7 @@ const _newSlugs = {
 const _imageSlugs = {
   'ai-photo','ai-photo-pro','ai-photo-max','ai-photo-dream',
   'photo-editor','animate-photo','infographic','image-analyser','ask-my-photo','bg-remover',
+  'image-compose','image-composer',
 };
 const _audioSlugs = {
   'narrate','narrate-pro','bg-music','jingle','song-creator',
@@ -143,6 +144,8 @@ const _audioSlugs = {
 };
 const _videoSlugs = {
   'animate-photo','video-premium','video-cinematic','video-veo',
+  'video-edit','video-editor','video-extend','video-extender',
+  'video-multi-scene','video-story','video-jingle',
 };
 const _codeSlugs  = {'code-helper'};
 const _webSlugs   = {'web-search-ai'};
@@ -257,6 +260,21 @@ const _toolMeta = <String, (String time, String tip)>{
   'bizplan':           ('~12 sec',  'Include target city and startup budget for relevance'),
   'slide-deck':        ('~10 sec',  "Add audience type: 'investors', 'students', 'clients'"),
   'podcast':           ('~90 sec',  'Give a clear topic — the AI writes the full script'),
+  // New & updated tools
+  'image-compose':     ('~20 sec',  'Upload 2–3 images and describe how to blend them'),
+  'image-composer':    ('~20 sec',  'Upload 2–3 images and describe how to blend them'),
+  'video-edit':        ('~2 min',   'Be specific about the edit — style, colour, effect'),
+  'video-editor':      ('~2 min',   'Be specific about the edit — style, colour, effect'),
+  'video-extend':      ('~2 min',   'Describe what should happen in the extended portion'),
+  'video-extender':    ('~2 min',   'Describe what should happen in the extended portion'),
+  'video-multi-scene': ('~3 min',   'Plan each scene — more detail gives better results'),
+  'video-story':       ('~3 min',   'Plan each scene — more detail gives better results'),
+  'video-jingle':      ('~90 sec',  'Describe the brand, mood and target audience'),
+  'ask-my-photo':      ('~4 sec',   'Upload any image and ask a specific question'),
+  'doc-writer':        ('~10 sec',  'Be specific about format, audience and purpose'),
+  'research-assistant':('~12 sec',  'Include industry, region and scope for best results'),
+  'bg-remover':        ('~5 sec',   'Works best with clear subject and contrasting background'),
+  'infographic':       ('~15 sec',  'List the key data points you want visualised'),
 };
 
 // ══════════════════════════════════════════════════════════════════════════════

@@ -32,11 +32,12 @@ class MainShell extends ConsumerWidget {
   const MainShell({super.key, required this.navigationShell});
 
   static const _tabs = [
-    _Tab(icon: Icons.home_outlined,   activeIcon: Icons.home_rounded,    label: 'Home'),
-    _Tab(icon: Icons.casino_outlined,  activeIcon: Icons.casino_rounded,  label: 'Spin'),
-    _Tab(icon: Icons.auto_awesome_outlined, activeIcon: Icons.auto_awesome, label: 'Studio'),
-    _Tab(icon: Icons.public_outlined,  activeIcon: Icons.public_rounded,  label: 'Wars'),
-    _Tab(icon: Icons.person_outline,   activeIcon: Icons.person_rounded,  label: 'Profile'),
+    _Tab(icon: Icons.home_outlined,       activeIcon: Icons.home_rounded,         label: 'Home'),
+    _Tab(icon: Icons.casino_outlined,      activeIcon: Icons.casino_rounded,       label: 'Spin'),
+    _Tab(icon: Icons.auto_awesome_outlined,activeIcon: Icons.auto_awesome,         label: 'Studio'),
+    _Tab(icon: Icons.public_outlined,      activeIcon: Icons.public_rounded,       label: 'Wars'),
+    _Tab(icon: Icons.sports_esports_outlined, activeIcon: Icons.sports_esports_rounded, label: 'Arcade'),
+    _Tab(icon: Icons.person_outline,       activeIcon: Icons.person_rounded,       label: 'Profile'),
   ];
 
   void _onTap(int i) {
@@ -116,14 +117,16 @@ class _BottomBar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: List.generate(tabs.length, (i) => _TabItem(
               tab:     tabs[i],
               active:  i == current,
-              // Show badge on Profile tab (index 4) — notifications
-              badge:   i == 4 ? unread : 0,
+              // Show badge on Profile tab (index 5) — notifications
+              badge:   i == 5 ? unread : 0,
+              // Arcade tab (index 4) gets a special "NEW" badge
+              isNew:   i == 4,
               onTap:   () => onTap(i),
             )),
           ),
@@ -137,8 +140,15 @@ class _TabItem extends StatefulWidget {
   final _Tab tab;
   final bool active;
   final int badge;
+  final bool isNew;
   final VoidCallback onTap;
-  const _TabItem({required this.tab, required this.active, required this.badge, required this.onTap});
+  const _TabItem({
+    required this.tab,
+    required this.active,
+    required this.badge,
+    required this.onTap,
+    this.isNew = false,
+  });
   @override State<_TabItem> createState() => _TabItemState();
 }
 
@@ -179,8 +189,8 @@ class _TabItemState extends State<_TabItem> with SingleTickerProviderStateMixin 
             builder: (_, child) => AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeOut,
-              width: widget.active ? 56 : 44,
-              height: 34,
+              width: widget.active ? 52 : 40,
+              height: 32,
               decoration: widget.active
                   ? BoxDecoration(
                       color: NexusColors.primaryGlow,
@@ -190,24 +200,47 @@ class _TabItemState extends State<_TabItem> with SingleTickerProviderStateMixin 
               child: Stack(alignment: Alignment.center, children: [
                 Icon(
                   widget.active ? widget.tab.activeIcon : widget.tab.icon,
-                  size: 22,
+                  size: 20,
                   color: widget.active
                       ? NexusColors.primary
                       : NexusColors.textSecondary,
                 ),
-                // Badge
+                // Notification badge
                 if (widget.badge > 0)
                   Positioned(
-                    top: 4, right: widget.active ? 6 : 4,
+                    top: 3, right: widget.active ? 5 : 3,
                     child: Container(
-                      width: 16, height: 16,
+                      width: 15, height: 15,
                       decoration: const BoxDecoration(
                         color: NexusColors.red, shape: BoxShape.circle),
                       child: Center(child: Text(
                         widget.badge > 9 ? '9+' : '${widget.badge}',
-                        style: const TextStyle(color: Colors.white, fontSize: 9,
+                        style: const TextStyle(color: Colors.white, fontSize: 8,
                             fontWeight: FontWeight.w800),
                       )),
+                    ),
+                  ),
+                // "NEW" badge for Arcade tab
+                if (widget.isNew && !widget.active)
+                  Positioned(
+                    top: 0, right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [NexusColors.purple, NexusColors.primary],
+                        ),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'NEW',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 6,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
                     ),
                   ),
               ]),
@@ -220,7 +253,7 @@ class _TabItemState extends State<_TabItem> with SingleTickerProviderStateMixin 
           AnimatedDefaultTextStyle(
             duration: const Duration(milliseconds: 200),
             style: TextStyle(
-              fontSize: 10,
+              fontSize: 9,
               fontWeight: widget.active ? FontWeight.w700 : FontWeight.w500,
               color: widget.active
                   ? NexusColors.primary
