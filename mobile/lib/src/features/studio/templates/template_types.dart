@@ -16,6 +16,8 @@ class GeneratePayload {
   final List<String>? styleTags;
   final String? negativePrompt;
   final String? imageUrl;
+  final String? audioUrl;
+  final String? videoUrl;
   final String? documentUrl;
   final Map<String, dynamic>? extraParams;
 
@@ -30,6 +32,8 @@ class GeneratePayload {
     this.styleTags,
     this.negativePrompt,
     this.imageUrl,
+    this.audioUrl,
+    this.videoUrl,
     this.documentUrl,
     this.extraParams,
   });
@@ -45,6 +49,8 @@ class GeneratePayload {
         if (styleTags != null && styleTags!.isNotEmpty) 'style_tags': styleTags,
         if (negativePrompt != null) 'negative_prompt': negativePrompt,
         if (imageUrl != null) 'image_url': imageUrl,
+        if (audioUrl != null) 'audio_url': audioUrl,
+        if (videoUrl != null) 'video_url': videoUrl,
         if (documentUrl != null) 'document_url': documentUrl,
         if (extraParams != null) ...extraParams!,
       };
@@ -260,6 +266,7 @@ class UploadZone extends StatelessWidget {
   final VoidCallback? onClear;
   final Color accentColor;
   final double height;
+  final bool required;
 
   const UploadZone({
     super.key,
@@ -273,6 +280,7 @@ class UploadZone extends StatelessWidget {
     this.onClear,
     this.accentColor = const Color(0xFF7C3AED),
     this.height = 90,
+    this.required = false,
   });
 
   @override

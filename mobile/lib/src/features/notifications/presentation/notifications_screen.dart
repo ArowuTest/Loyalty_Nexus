@@ -149,7 +149,7 @@ class NotificationsScreen extends ConsumerWidget {
         onRefresh: () => notifier.refresh(),
         color: NexusColors.primary,
         child: items.isEmpty
-            ? ListView(children: [const Gap(80), const _EmptyState()])
+            ? ListView(children: [const Gap(80), _EmptyState()])
             : _NotifList(items: items, state: state, notifier: notifier),
       ),
     );
@@ -176,13 +176,13 @@ class _NotifList extends StatelessWidget {
     }).toList();
 
     return ListView(children: [
-      if (todayItems.isNotEmpty) ..[
+      if (todayItems.isNotEmpty) ...[
         const _GroupHeader('Today'),
         ...todayItems.asMap().entries.map((e) =>
           _NotifTile(notif: e.value, notifier: notifier)
               .animate(delay: (e.key * 30).ms).fadeIn().slideX(begin: -0.03, end: 0)),
       ],
-      if (earlierItems.isNotEmpty) ..[
+      if (earlierItems.isNotEmpty) ...[
         const _GroupHeader('Earlier'),
         ...earlierItems.asMap().entries.map((e) =>
           _NotifTile(notif: e.value, notifier: notifier)

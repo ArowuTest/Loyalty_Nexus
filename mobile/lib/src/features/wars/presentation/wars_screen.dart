@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,10 +10,7 @@ import '../../../core/theme/nexus_theme.dart';
 
 final _leaderboardProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   final raw = await ref.read(warsApiProvider).getLeaderboard();
-  if (raw is Map) return Map<String, dynamic>.from(raw);
-  // If API returns a list directly, wrap it
-  if (raw is List) return {'leaderboard': raw, 'period': '', 'count': raw.length};
-  return {'leaderboard': [], 'period': '', 'count': 0};
+  return {'leaderboard': raw, 'period': '', 'count': raw.length};
 });
 
 final _myRankProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref) async {

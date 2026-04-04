@@ -115,9 +115,9 @@ class _WalletOnboardingSheetState
       // Swipe-down or tap-outside counts as a dismissal.
       onPopInvoked: (_) => recordWalletDismissed(),
       child: Container(
-        decoration: const BoxDecoration(
-          color: NexusColors.surfaceCard,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        decoration: BoxDecoration(
+          color: NexusColors.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         ),
         padding: EdgeInsets.fromLTRB(
             24, 16, 24, MediaQuery.of(context).viewInsets.bottom + 32),
@@ -323,7 +323,7 @@ class _WalletOnboardingSheetState
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(message),
-      backgroundColor: NexusColors.surfaceCard,
+      backgroundColor: NexusColors.surface,
       behavior: SnackBarBehavior.floating,
       shape:
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

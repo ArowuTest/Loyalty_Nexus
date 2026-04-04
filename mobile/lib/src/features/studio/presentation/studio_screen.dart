@@ -2278,7 +2278,7 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
   Widget _buildConfirmModal(int after) => GestureDetector(
     onTap: () => setState(() => _showConfirm = false),
     child: Container(
-      color: Colors.black70,
+      color: Colors.black.withOpacity(0.7),
       child: Center(child: GestureDetector(
         onTap: () {},
         child: Container(

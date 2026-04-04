@@ -6,7 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
-import '../../../core/widgets/nexus_widgets.dart';
+import '../../../core/widgets/nexus_widgets.dart' hide NexusCard;
 
 // ─── Providers ───────────────────────────────────────────────────────────────
 final _passportProvider =
@@ -99,7 +99,7 @@ class _PassportScreenState extends ConsumerState<PassportScreen>
         ),
         data: (passport) => RefreshIndicator(
           color: NexusColors.primary,
-          backgroundColor: NexusColors.surfaceCard,
+          backgroundColor: NexusColors.surface,
           onRefresh: () async => ref.invalidate(_passportProvider),
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
@@ -147,7 +147,7 @@ class _PassportScreenState extends ConsumerState<PassportScreen>
     final tier = passport['tier']?.toString() ?? 'Bronze';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('Sharing $name\'s $tier passport...'),
-      backgroundColor: NexusColors.surfaceCard,
+      backgroundColor: NexusColors.surface,
       behavior: SnackBarBehavior.floating,
       shape:
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -450,7 +450,7 @@ class _QRSection extends StatelessWidget {
               Clipboard.setData(ClipboardData(text: passportId));
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content: Text('Passport ID copied'),
-                backgroundColor: NexusColors.surfaceCard,
+                backgroundColor: NexusColors.surface,
                 behavior: SnackBarBehavior.floating,
               ));
             },
@@ -891,7 +891,7 @@ class _WalletCTAsState extends ConsumerState<_WalletCTAs> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(message),
-      backgroundColor: NexusColors.surfaceCard,
+      backgroundColor: NexusColors.surface,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ));

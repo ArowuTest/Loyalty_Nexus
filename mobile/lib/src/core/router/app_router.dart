@@ -1,5 +1,23 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+import '../../features/auth/presentation/login_screen.dart';
+import '../../features/auth/presentation/register_screen.dart';
+import '../../features/dashboard/presentation/dashboard_screen.dart';
+import '../../features/spin/presentation/spin_screen.dart';
+import '../../features/studio/presentation/studio_screen.dart';
+import '../../features/wars/presentation/wars_screen.dart';
+import '../../features/arcade/presentation/arcade_screen.dart';
+import '../../features/profile/presentation/profile_screen.dart';
+import '../../features/passport/presentation/passport_screen.dart';
+import '../../features/notifications/presentation/notifications_screen.dart';
+import '../../features/prizes/presentation/prizes_screen.dart';
+import '../../features/prizes/presentation/draws_screen.dart';
+import '../../features/prizes/presentation/pulse_awards_screen.dart';
+import '../../features/settings/presentation/settings_screen.dart';
+import '../auth/auth_provider.dart';
+import '../shell/main_shell.dart';
 
 // ── Route constants ───────────────────────────────────────────────────────────
 class AppRoutes {
@@ -19,23 +37,6 @@ class AppRoutes {
   static const notifications = '/notifications';
   static const settings      = '/settings';
 }
-
-import '../../features/auth/presentation/login_screen.dart';
-import '../../features/auth/presentation/register_screen.dart';
-import '../../features/dashboard/presentation/dashboard_screen.dart';
-import '../../features/spin/presentation/spin_screen.dart';
-import '../../features/studio/presentation/studio_screen.dart';
-import '../../features/wars/presentation/wars_screen.dart';
-import '../../features/arcade/presentation/arcade_screen.dart';
-import '../../features/profile/presentation/profile_screen.dart';
-import '../../features/passport/presentation/passport_screen.dart';
-import '../../features/notifications/presentation/notifications_screen.dart';
-import '../../features/prizes/presentation/prizes_screen.dart';
-import '../../features/prizes/presentation/draws_screen.dart';
-import '../../features/prizes/presentation/pulse_awards_screen.dart';
-import '../../features/settings/presentation/settings_screen.dart';
-import '../auth/auth_provider.dart';
-import '../shell/main_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authStateProvider);
@@ -124,7 +125,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 // ─── Listenable for redirect refresh ─────────────────────────────────────────
 
 class _AuthListenable extends ChangeNotifier {
-  _AuthListenable(ProviderRef ref) {
+  _AuthListenable(Ref ref) {
     ref.listen(authStateProvider, (_, __) => notifyListeners());
   }
 }

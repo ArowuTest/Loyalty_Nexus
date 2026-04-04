@@ -37,7 +37,7 @@ const _inspirations = [
 
 // ─── Provider badge config per slug ──────────────────────────────────────────
 
-Map<String, Map<String, dynamic>> _providerConfig(String slug) {
+Map<String, dynamic> _providerConfig(String slug) {
   if (slug == 'ai-photo-pro') {
     return {
       'label': 'Grok Aurora',

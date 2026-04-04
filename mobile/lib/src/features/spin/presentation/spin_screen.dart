@@ -271,7 +271,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
                     // Wheel
                     _WheelWidget(
                       segments: segs,
-                      angle: _currentAngle + _wheelAnim.value * (_currentAngle - (_currentAngle - (_currentAngle - _currentAngle))),
+                      angle: _currentAngle,
                       animValue: _wheelAnim.value,
                       baseAngle: _currentAngle,
                       spinning: _spinning,
@@ -678,7 +678,7 @@ class _ResultCard extends StatelessWidget {
           color: isWin ? iconData.$2.withOpacity(0.4) : NexusColors.border),
       ),
       child: Column(children: [
-        if (isWin) ..[
+        if (isWin) ...[
           Text(iconData.$1, style: const TextStyle(fontSize: 48))
               .animate()
               .scale(begin: const Offset(0.5, 0.5), end: const Offset(1, 1),
@@ -692,7 +692,7 @@ class _ResultCard extends StatelessWidget {
             style: TextStyle(color: iconData.$2, fontSize: 24,
               fontWeight: FontWeight.w900),
             textAlign: TextAlign.center),
-        ] else ..[
+        ] else ...[
           Text(iconData.$1, style: const TextStyle(fontSize: 40))
               .animate().shake(hz: 3, curve: Curves.easeInOut),
           const Gap(8),
@@ -704,7 +704,7 @@ class _ResultCard extends StatelessWidget {
         Text(subText,
           style: const TextStyle(color: NexusColors.textSecondary, fontSize: 12, height: 1.5),
           textAlign: TextAlign.center),
-        if (needsMomo) ..[
+        if (needsMomo) ...[
           const Gap(12),
           FilledButton.icon(
             onPressed: () => context.push('/settings'),

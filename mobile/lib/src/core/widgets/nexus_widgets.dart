@@ -2,43 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 import '../theme/nexus_theme.dart';
 
-// ─── Nexus Card (standard card with consistent padding and border) ────────────
-class NexusCard extends StatelessWidget {
-  final Widget child;
-  final EdgeInsetsGeometry? padding;
-  final VoidCallback? onTap;
-  final Color? color;
-
-  const NexusCard({
-    super.key,
-    required this.child,
-    this.padding,
-    this.onTap,
-    this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final container = Container(
-      width: double.infinity,
-      padding: padding ?? const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color ?? NexusColors.surfaceCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: NexusColors.border),
-      ),
-      child: child,
-    );
-    if (onTap != null) {
-      return GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: container,
-      );
-    }
-    return container;
-  }
-}
+// NexusCard is defined in nexus_theme.dart — re-exported here for convenience.
+// Do NOT redefine it; import nexus_theme.dart directly when you need NexusCard.
 
 // ─── Nexus Divider ────────────────────────────────────────────────────────────
 class NexusDivider extends StatelessWidget {
@@ -78,7 +43,7 @@ class GlassCard extends StatelessWidget {
     final container = Container(
       padding: padding ?? const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: backgroundColor ?? NexusColors.surfaceCard,
+        color: backgroundColor ?? NexusColors.surface,
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(color: borderColor ?? NexusColors.border),
       ),
@@ -210,8 +175,8 @@ class TierBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = NexusColors.tierColor(tier);
-    final emoji = NexusColors.tierEmoji(tier);
+    final color = NexusColors.forTier(tier);
+    final emoji = NexusColors.emojiForTier(tier);
     return Container(
       padding: EdgeInsets.symmetric(
           horizontal: large ? 12 : 8, vertical: large ? 6 : 3),
@@ -256,13 +221,13 @@ class ShimmerBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Shimmer.fromColors(
-      baseColor: NexusColors.surfaceCard,
-      highlightColor: NexusColors.surfaceElevated,
+      baseColor: NexusColors.surface,
+      highlightColor: NexusColors.surfaceHigh,
       child: Container(
         width: width,
         height: height,
         decoration: BoxDecoration(
-          color: NexusColors.surfaceCard,
+          color: NexusColors.surface,
           borderRadius: BorderRadius.circular(radius),
         ),
       ),

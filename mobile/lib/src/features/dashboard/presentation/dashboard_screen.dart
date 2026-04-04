@@ -373,7 +373,8 @@ class _WalletHeroCard extends ConsumerWidget {
 
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bonusAsync = ref.watch(bonusPulseProvider);
     final wallet   = walletAsync.valueOrNull;
     final profile  = profileAsync.valueOrNull;
     final tier     = profile?['tier']?.toString() ?? 'BRONZE';
@@ -515,7 +516,7 @@ class _HeroStat extends StatelessWidget {
 
 // ── Quick actions ─────────────────────────────────────────────────────────────
 
-class _QuickActionsGrid extends StatelessWidget {
+class _QuickActionsGrid extends ConsumerWidget {
   const _QuickActionsGrid();
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -719,8 +720,8 @@ class _WarsMiniCard extends ConsumerWidget {
             loading: () => const SizedBox.shrink(),
             error: (_, __) => const SizedBox.shrink(),
             data: (rank) {
-              final ranked = rank?['ranked'] as bool? ?? false;
-              final entry  = ranked ? rank?['entry'] as Map? : null;
+              final ranked = (rank?['ranked'] as bool?) == true;
+              final entry  = ranked ? (rank?['entry'] as Map?) : null;
               if (ranked && entry != null) {
                 final pts = entry['total_points'] as int? ?? 0;
                 return Container(
