@@ -82,19 +82,22 @@ jobs:
       - name: Build debug APK
         working-directory: mobile
         run: |
-          flutter build apk --debug --no-tree-shake-icons
-          # Flutter 3.27.x may place the APK in either location depending on the
-          # Gradle plugin version — find it and copy to a known path
-          APK=$(find build -name "app-debug.apk" 2>/dev/null | head -1)
+          # Run Gradle directly to bypass Flutter's APK path validation
+          # Flutter 3.27.x changed the output path and its wrapper fails to find the APK
+          chmod +x android/gradlew
+          cd android && ./gradlew assembleDebug --no-daemon 2>&1
+          cd ..
+          # Find the APK wherever Gradle placed it
+          APK=$(find . -name "app-debug.apk" 2>/dev/null | head -1)
           if [ -z "$APK" ]; then
-            echo "ERROR: app-debug.apk not found in build directory"
-            find build -name "*.apk" 2>/dev/null
+            echo "ERROR: app-debug.apk not found"
+            find . -name "*.apk" 2>/dev/null
             exit 1
           fi
           echo "Found APK at: $APK"
           mkdir -p build/app/outputs/flutter-apk
           cp "$APK" build/app/outputs/flutter-apk/app-debug.apk
-          echo "APK copied to build/app/outputs/flutter-apk/app-debug.apk"
+          echo "APK ready at: build/app/outputs/flutter-apk/app-debug.apk"
 
       # ── 12. Upload APK artifact ───────────────────────────────────────────────
       - name: Upload APK artifact
