@@ -27,8 +27,19 @@ export interface WalletPassURLs {
 }
 
 export interface QRData {
-  qr_data_url: string;
+  /** Raw base64url-encoded QR payload returned by the backend.
+   *  The frontend renders this into a QR image using the qrcode library. */
   qr_payload: string;
+  expires_in: number;
+  format: string;
+}
+
+export interface PassportEvent {
+  id: string;
+  user_id: string;
+  event_type: "tier_upgrade" | "badge_earned" | "streak_milestone" | "qr_scanned" | string;
+  details: Record<string, unknown>;
+  created_at: string;
 }
 
 // ─── Bonus Pulse Award Types ──────────────────────────────────────
@@ -147,9 +158,13 @@ class APIClient {
   getPassport() {
     return this.request<PassportData>("GET", "/passport/profile");
   }
-  /** Returns a QR code data URL and the raw payload for display */
+  /** Returns the raw QR payload; the frontend renders it into a QR image client-side */
   getPassportQR() {
     return this.request<QRData>("GET", "/passport/qr");
+  }
+  /** Returns the user's passport event history (tier changes, badge earns, QR scans, etc.) */
+  getPassportEvents(limit = 30) {
+    return this.request<{ events: PassportEvent[] }>("GET", `/passport/events?limit=${limit}`);
   }
   /** Returns Apple Wallet .pkpass download URL and Google Wallet save URL */
   getWalletPassURLs() {

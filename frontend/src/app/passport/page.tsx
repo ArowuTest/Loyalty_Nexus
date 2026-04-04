@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Shield, Flame, Award, Star, ChevronRight, Download,
   Share2, QrCode, RefreshCw, Wallet, Smartphone,
-  Trophy, Zap, Crown, Diamond, CheckCircle2,
+  Trophy, Zap, Crown, Diamond, CheckCircle2, Clock,
 } from "lucide-react";
+import QRCode from "qrcode";
 import AppShell from "@/components/layout/AppShell";
-import { api, PassportData, WalletPassURLs, BadgeDefinition } from "@/lib/api";
+import { api, PassportData, WalletPassURLs, BadgeDefinition, PassportEvent } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // ─── Tier configuration ───────────────────────────────────────────────────────
@@ -90,6 +91,31 @@ const RARITY_STYLES: Record<string, string> = {
   legendary: "border-yellow-400/60 bg-yellow-900/20",
 };
 
+// ─── Event type display helpers ───────────────────────────────────────────────
+
+const EVENT_META: Record<string, { label: string; icon: string; color: string }> = {
+  tier_upgrade:      { label: "Tier Upgrade",      icon: "⬆️",  color: "text-yellow-400" },
+  badge_earned:      { label: "Badge Earned",       icon: "🏅",  color: "text-nexus-400"  },
+  streak_milestone:  { label: "Streak Milestone",   icon: "🔥",  color: "text-orange-400" },
+  qr_scanned:        { label: "QR Scanned",         icon: "📲",  color: "text-green-400"  },
+};
+
+function getEventMeta(type: string) {
+  return EVENT_META[type] ?? { label: type.replace(/_/g, " "), icon: "📌", color: "text-white/60" };
+}
+
+function formatRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins  = Math.floor(diff / 60_000);
+  const hours = Math.floor(diff / 3_600_000);
+  const days  = Math.floor(diff / 86_400_000);
+  if (mins < 1)   return "just now";
+  if (mins < 60)  return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7)   return `${days}d ago`;
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
 // ─── Tier progress bar ────────────────────────────────────────────────────────
 
 const TIER_THRESHOLDS: Record<string, number> = {
@@ -114,13 +140,15 @@ export default function PassportPage() {
   const [passport, setPassport]       = useState<PassportData | null>(null);
   const [walletURLs, setWalletURLs]   = useState<WalletPassURLs | null>(null);
   const [qrDataURL, setQrDataURL]     = useState<string | null>(null);
+  const [events, setEvents]           = useState<PassportEvent[] | null>(null);
+  const [eventsLoading, setEventsLoading] = useState(false);
   const [loading, setLoading]         = useState(true);
   const [qrLoading, setQrLoading]     = useState(false);
   const [walletLoading, setWalletLoading] = useState(false);
   const [error, setError]             = useState<string | null>(null);
   const [showQR, setShowQR]           = useState(false);
   const [copiedShare, setCopiedShare] = useState(false);
-  const [activeTab, setActiveTab]     = useState<"overview" | "badges">("overview");
+  const [activeTab, setActiveTab]     = useState<"overview" | "badges" | "activity">("overview");
 
   const loadPassport = useCallback(async () => {
     try {
@@ -147,22 +175,49 @@ export default function PassportPage() {
     }
   }, []);
 
+  // ── QR: fetch raw payload from backend, render to PNG data URL client-side ──
   const loadQR = useCallback(async () => {
     try {
       setQrLoading(true);
       const data = await api.getPassportQR();
-      setQrDataURL(data.qr_data_url);
+      // Generate a QR code PNG from the raw payload string
+      const dataURL = await QRCode.toDataURL(data.qr_payload, {
+        width: 256,
+        margin: 2,
+        color: { dark: "#0f172a", light: "#ffffff" },
+        errorCorrectionLevel: "M",
+      });
+      setQrDataURL(dataURL);
     } catch {
-      // Non-fatal
+      // Non-fatal — QR is optional
     } finally {
       setQrLoading(false);
     }
   }, []);
 
+  // ── Events: lazy-load when Activity tab is first opened ──────────────────────
+  const loadEvents = useCallback(async () => {
+    if (events !== null) return; // already loaded
+    try {
+      setEventsLoading(true);
+      const res = await api.getPassportEvents(30);
+      setEvents(res.events ?? []);
+    } catch {
+      setEvents([]);
+    } finally {
+      setEventsLoading(false);
+    }
+  }, [events]);
+
   useEffect(() => {
     loadPassport();
     loadWalletURLs();
   }, [loadPassport, loadWalletURLs]);
+
+  // Load events when Activity tab is activated
+  useEffect(() => {
+    if (activeTab === "activity") loadEvents();
+  }, [activeTab, loadEvents]);
 
   const handleShowQR = () => {
     setShowQR(true);
@@ -374,25 +429,44 @@ export default function PassportPage() {
 
         {/* ── Tabs ─────────────────────────────────────────────────────────── */}
         <div className="flex gap-1 p-1 bg-white/5 rounded-xl">
-          {(["overview", "badges"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={cn(
-                "flex-1 py-2 rounded-lg text-sm font-medium transition-all capitalize",
-                activeTab === tab
-                  ? "bg-nexus-600 text-white shadow-lg shadow-nexus-900/50"
-                  : "text-[rgb(130_140_180)] hover:text-white"
-              )}
-            >
-              {tab === "overview" ? "Overview" : `Badges (${passport.badges.length})`}
-            </button>
-          ))}
+          <button
+            onClick={() => setActiveTab("overview")}
+            className={cn(
+              "flex-1 py-2 rounded-lg text-sm font-medium transition-all",
+              activeTab === "overview"
+                ? "bg-nexus-600 text-white shadow-lg shadow-nexus-900/50"
+                : "text-[rgb(130_140_180)] hover:text-white"
+            )}
+          >
+            Overview
+          </button>
+          <button
+            onClick={() => setActiveTab("badges")}
+            className={cn(
+              "flex-1 py-2 rounded-lg text-sm font-medium transition-all",
+              activeTab === "badges"
+                ? "bg-nexus-600 text-white shadow-lg shadow-nexus-900/50"
+                : "text-[rgb(130_140_180)] hover:text-white"
+            )}
+          >
+            Badges ({passport.badges.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("activity")}
+            className={cn(
+              "flex-1 py-2 rounded-lg text-sm font-medium transition-all",
+              activeTab === "activity"
+                ? "bg-nexus-600 text-white shadow-lg shadow-nexus-900/50"
+                : "text-[rgb(130_140_180)] hover:text-white"
+            )}
+          >
+            Activity
+          </button>
         </div>
 
         {/* ── Tab content ──────────────────────────────────────────────────── */}
         <AnimatePresence mode="wait">
-          {activeTab === "overview" ? (
+          {activeTab === "overview" && (
             <motion.div
               key="overview"
               initial={{ opacity: 0, y: 8 }}
@@ -435,7 +509,9 @@ export default function PassportPage() {
                 </div>
               )}
             </motion.div>
-          ) : (
+          )}
+
+          {activeTab === "badges" && (
             <motion.div
               key="badges"
               initial={{ opacity: 0, y: 8 }}
@@ -444,6 +520,18 @@ export default function PassportPage() {
               transition={{ duration: 0.2 }}
             >
               <BadgesGrid badges={passport.badges} />
+            </motion.div>
+          )}
+
+          {activeTab === "activity" && (
+            <motion.div
+              key="activity"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+            >
+              <ActivityFeed events={events} loading={eventsLoading} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -513,7 +601,6 @@ function TierJourneyCard({ currentTier, lifetimePoints }: { currentTier: string;
           const TIcon = cfg.icon;
           const isReached  = i <= currentIdx;
           const isCurrent  = i === currentIdx;
-          const isNext     = i === currentIdx + 1;
           const threshold  = TIER_THRESHOLDS[tier];
 
           return (
@@ -614,6 +701,78 @@ function BadgesGrid({ badges }: { badges: BadgeDefinition[] }) {
   );
 }
 
+// ─── Activity Feed ────────────────────────────────────────────────────────────
+
+function ActivityFeed({ events, loading }: { events: PassportEvent[] | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="nexus-card p-4 animate-pulse flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-white/5 flex-shrink-0" />
+            <div className="flex-1 space-y-2">
+              <div className="h-3 bg-white/5 rounded w-32" />
+              <div className="h-2.5 bg-white/5 rounded w-20" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (!events || events.length === 0) {
+    return (
+      <div className="nexus-card p-8 text-center">
+        <div className="text-4xl mb-3">📋</div>
+        <p className="text-white font-semibold mb-1">No activity yet</p>
+        <p className="text-[rgb(130_140_180)] text-sm">
+          Your passport events — tier upgrades, badges earned, and QR scans — will appear here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {events.map((event, i) => {
+        const meta = getEventMeta(event.event_type);
+        return (
+          <motion.div
+            key={event.id}
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: i * 0.03 }}
+            className="nexus-card p-3.5 flex items-center gap-3"
+          >
+            <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-xl flex-shrink-0">
+              {meta.icon}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={cn("text-sm font-medium capitalize", meta.color)}>
+                {meta.label}
+              </p>
+              {event.details && Object.keys(event.details).length > 0 && (
+                <p className="text-white/40 text-xs mt-0.5 truncate">
+                  {Object.entries(event.details)
+                    .filter(([k]) => !["user_id"].includes(k))
+                    .map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`)
+                    .join(" · ")}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-1 text-white/30 text-xs flex-shrink-0">
+              <Clock size={10} />
+              <span>{formatRelativeTime(event.created_at)}</span>
+            </div>
+          </motion.div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── QR Modal ─────────────────────────────────────────────────────────────────
+
 function QRModal({
   qrDataURL,
   loading,
@@ -646,14 +805,14 @@ function QRModal({
         <p className="text-[rgb(130_140_180)] text-sm mb-4">Scan to verify your identity</p>
 
         <div className={cn(
-          "w-48 h-48 mx-auto rounded-2xl flex items-center justify-center",
+          "w-48 h-48 mx-auto rounded-2xl flex items-center justify-center overflow-hidden",
           `ring-2 ${tierCfg.ring}`
         )}>
           {loading ? (
             <RefreshCw size={32} className="text-nexus-400 animate-spin" />
           ) : qrDataURL ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={qrDataURL} alt="Passport QR Code" className="w-full h-full rounded-xl" />
+            <img src={qrDataURL} alt="Passport QR Code" className="w-full h-full object-cover" />
           ) : (
             <div className="text-center">
               <QrCode size={48} className="text-white/20 mx-auto mb-2" />
@@ -663,7 +822,7 @@ function QRModal({
         </div>
 
         <p className="text-white/40 text-xs mt-4">
-          This QR code is unique to your account and expires daily.
+          This QR code is unique to your account and expires in 5 minutes.
         </p>
 
         <button
