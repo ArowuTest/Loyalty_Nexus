@@ -5,6 +5,7 @@ import '../../../core/api/api_client.dart';
 import '../../../core/auth/auth_provider.dart';
 import '../../../core/cache/cache_service.dart';
 import '../../../core/theme/nexus_theme.dart';
+import '../../passport/presentation/wallet_onboarding_sheet.dart';
 
 // ── Providers ──────────────────────────────────────────────────────────────────
 
@@ -144,13 +145,31 @@ double tierProgress(int lifePoints, String tier) {
   return ((lifePoints - min) / (nextMin - min)).clamp(0.0, 1.0);
 }
 
-// ── Dashboard screen ───────────────────────────────────────────────────────────
+// ── Dashboard screen ─────────────────────────────────────────────────────────────────────
 
-class DashboardScreen extends ConsumerWidget {
+class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
+  @override
+  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Show wallet onboarding bottom sheet once, on the first app launch after login.
+    // Uses SharedPreferences to ensure it is never shown again after dismissal.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final show = await shouldShowWalletOnboarding();
+      if (show && mounted) {
+        await showWalletOnboardingSheet(context);
+      }
+    });
+  }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final walletAsync  = ref.watch(walletProvider);
     final profileAsync = ref.watch(profileProvider);
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
 import '../../../core/widgets/nexus_widgets.dart';
@@ -757,9 +758,16 @@ class _StreakCard extends StatelessWidget {
 }
 
 // ─── Wallet CTAs ──────────────────────────────────────────────────────────────
-class _WalletCTAs extends StatelessWidget {
+class _WalletCTAs extends ConsumerStatefulWidget {
   final Map<String, dynamic> passport;
   const _WalletCTAs({required this.passport});
+  @override
+  ConsumerState<_WalletCTAs> createState() => _WalletCTAsState();
+}
+
+class _WalletCTAsState extends ConsumerState<_WalletCTAs> {
+  bool _appleLoading  = false;
+  bool _googleLoading = false;
 
   @override
   Widget build(BuildContext context) {
@@ -767,6 +775,14 @@ class _WalletCTAs extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SectionHeader(title: 'Add to Wallet'),
+        const SizedBox(height: 4),
+        Text(
+          'Your passport stays on your lock screen and receives live updates.',
+          style: TextStyle(
+            color: NexusColors.textSecondary,
+            fontSize: 12,
+          ),
+        ),
         const SizedBox(height: 12),
         Row(
           children: [
@@ -775,7 +791,8 @@ class _WalletCTAs extends StatelessWidget {
                 icon: '🍎',
                 label: 'Apple Wallet',
                 color: const Color(0xFF1C1C1E),
-                onTap: () => _showComingSoon(context, 'Apple Wallet'),
+                loading: _appleLoading,
+                onTap: _addAppleWallet,
               ),
             ),
             const SizedBox(width: 12),
@@ -784,7 +801,8 @@ class _WalletCTAs extends StatelessWidget {
                 icon: '🤖',
                 label: 'Google Wallet',
                 color: const Color(0xFF1A73E8),
-                onTap: () => _showComingSoon(context, 'Google Wallet'),
+                loading: _googleLoading,
+                onTap: _addGoogleWallet,
               ),
             ),
           ],
@@ -794,10 +812,10 @@ class _WalletCTAs extends StatelessWidget {
           width: double.infinity,
           height: 48,
           child: OutlinedButton.icon(
-            onPressed: () => _downloadPassport(context),
+            onPressed: _downloadPassport,
             icon: const Icon(Icons.download_outlined,
                 color: NexusColors.primary),
-            label: const Text('Download as Image',
+            label: const Text('Download Passport PDF',
                 style: TextStyle(
                     color: NexusColors.primary,
                     fontWeight: FontWeight.w700)),
@@ -812,21 +830,70 @@ class _WalletCTAs extends StatelessWidget {
     );
   }
 
-  void _showComingSoon(BuildContext context, String feature) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('$feature integration coming soon'),
-      backgroundColor: NexusColors.surfaceCard,
-      behavior: SnackBarBehavior.floating,
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ));
+  Future<void> _addAppleWallet() async {
+    if (_appleLoading) return;
+    setState(() => _appleLoading = true);
+    try {
+      final url = await ref.read(passportApiProvider).getApplePKPassURL();
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        // iOS intercepts .pkpass URLs and opens Wallet automatically
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        _showError('Apple Wallet is not available on this device');
+      }
+    } catch (e) {
+      _showError('Could not open Apple Wallet: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _appleLoading = false);
+    }
   }
 
-  void _downloadPassport(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Downloading passport...'),
+  Future<void> _addGoogleWallet() async {
+    if (_googleLoading) return;
+    setState(() => _googleLoading = true);
+    try {
+      final urls = await ref.read(passportApiProvider).getWalletPassURLs();
+      final googleUrl = urls['google_wallet_url']?.toString() ?? '';
+      if (googleUrl.isEmpty) {
+        _showError('Google Wallet is not available right now');
+        return;
+      }
+      final uri = Uri.parse(googleUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        _showError('Could not open Google Wallet');
+      }
+    } catch (e) {
+      _showError('Could not open Google Wallet: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _googleLoading = false);
+    }
+  }
+
+  Future<void> _downloadPassport() async {
+    try {
+      final urls = await ref.read(passportApiProvider).getWalletPassURLs();
+      final pdfUrl = urls['pdf_url']?.toString() ?? '';
+      if (pdfUrl.isNotEmpty) {
+        await launchUrl(Uri.parse(pdfUrl),
+            mode: LaunchMode.externalApplication);
+      } else {
+        _showError('PDF download is not available right now');
+      }
+    } catch (e) {
+      _showError('Could not download passport');
+    }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
       backgroundColor: NexusColors.surfaceCard,
       behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     ));
   }
 }
@@ -836,41 +903,55 @@ class _WalletButton extends StatelessWidget {
   final String label;
   final Color color;
   final VoidCallback onTap;
+  final bool loading;
   const _WalletButton({
     required this.icon,
     required this.label,
     required this.color,
     required this.onTap,
+    this.loading = false,
   });
-
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 52,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: color.withOpacity(0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(icon, style: const TextStyle(fontSize: 18)),
-            const SizedBox(width: 8),
-            Text(label,
-                style: const TextStyle(
+      onTap: loading ? null : onTap,
+      child: AnimatedOpacity(
+        opacity: loading ? 0.7 : 1.0,
+        duration: const Duration(milliseconds: 200),
+        child: Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (loading)
+                const SizedBox(
+                  width: 18, height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
                     color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13)),
-          ],
+                  ),
+                )
+              else
+                Text(icon, style: const TextStyle(fontSize: 18)),
+              const SizedBox(width: 8),
+              Text(label,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13)),
+            ],
+          ),
         ),
       ),
     );

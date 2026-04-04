@@ -461,6 +461,27 @@ class PassportApi {
       return (r as Map)['events'] as List? ?? [];
     } catch (_) { return []; }
   }
+
+  /// Returns both the Apple .pkpass download URL and the Google Wallet save URL.
+  /// apple_pkpass_url  → direct download; iOS intercepts and opens Wallet
+  /// google_wallet_url → "Add to Google Wallet" deep-link
+  Future<Map<String, dynamic>> getWalletPassURLs() async {
+    final r = await _dio.apiGet<Map>('/passport/wallet-urls');
+    return Map<String, dynamic>.from(r as Map);
+  }
+
+  /// Constructs the direct Apple .pkpass download URL including the Bearer token
+  /// so iOS can authenticate the download without a separate header.
+  /// The token is appended as a query param because iOS Wallet does not send
+  /// custom headers when downloading a .pkpass file.
+  Future<String> getApplePKPassURL() async {
+    const storage = FlutterSecureStorage();
+    final token = await storage.read(key: 'nexus_token');
+    final base = _baseUrl.replaceFirst('/api/v1', '');
+    return token != null
+        ? '$base/api/v1/passport/pkpass?token=$token'
+        : '$base/api/v1/passport/pkpass';
+  }
 }
 
 final passportApiProvider =
