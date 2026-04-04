@@ -258,7 +258,8 @@ func (o *LLMOrchestrator) RecordStudioToolUse(ctx context.Context, toolSlug, pro
 
 func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
 	// 1. Get current daily usage count
-	dailyCount, _ := o.usageTracker.GetDailyCount(ctx, req.UserID)
+	// Daily count retained for usage tracking; no longer used for routing.
+	_, _ = o.usageTracker.GetDailyCount(ctx, req.UserID)
 
 	// 2. Build session memory context
 	uid, _ := uuid.Parse(req.UserID)
@@ -350,50 +351,24 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 			"[END MEMORY USAGE RULES]"
 	}
 
-	// 4. Route: Gemini (primary) → Groq (fast fallback) → DeepSeek (overflow)
+	// 4. Route: Gemini 2.5 Flash (primary) → DeepSeek V3 (fallback)
+	// Groq removed: model availability and response accuracy were unreliable.
 	var (
 		text     string
 		provider LLMProvider
 		err      error
 	)
 
-	switch {
-	case dailyCount < o.geminiDailyLimit:
-		// Primary: Gemini 2.5 Flash
-		text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
-		if err != nil {
-			log.Printf("[LLM] Gemini failed (count=%d) → falling through to Groq: %v", dailyCount, err)
-			go o.recordProviderUse(context.Background(), ProviderGeminiLite, false, err.Error())
-			// Fallback: Groq
-			text, err = o.groqClient.Complete(ctx, systemPrompt, req.Prompt)
-			if err != nil {
-				log.Printf("[LLM] Groq failed → DeepSeek: %v", err)
-				go o.recordProviderUse(context.Background(), ProviderGroq, false, err.Error())
-				text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
-				provider = ProviderDeepSeek
-			} else {
-				provider = ProviderGroq
-			}
-		} else {
-			provider = ProviderGeminiLite
-		}
-
-	case dailyCount < o.groqDailyLimit:
-		// Secondary: Groq (fast)
-		text, err = o.groqClient.Complete(ctx, systemPrompt, req.Prompt)
-		if err != nil {
-			log.Printf("[LLM] Groq failed (count=%d) → DeepSeek: %v", dailyCount, err)
-			go o.recordProviderUse(context.Background(), ProviderGroq, false, err.Error())
-			text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
-			provider = ProviderDeepSeek
-		} else {
-			provider = ProviderGroq
-		}
-
-	default:
-		// Overflow: DeepSeek
+	// Primary: Gemini 2.5 Flash
+	text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
+	if err != nil {
+		log.Printf("[LLM] Gemini failed → DeepSeek: %v", err)
+		go o.recordProviderUse(context.Background(), ProviderGeminiLite, false, err.Error())
+		// Fallback: DeepSeek V3
 		text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
 		provider = ProviderDeepSeek
+	} else {
+		provider = ProviderGeminiLite
 	}
 
 	if err != nil {

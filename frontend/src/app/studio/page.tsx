@@ -2675,7 +2675,10 @@ function StudioPageInner() {
 
   // Canonical tools — excludes alias/duplicate slugs for a cleaner grid
   const canonicalTools = tools.filter((t) => !HIDDEN_ALIAS_SLUGS.has(t.slug));
-  const categories    = [...new Set(canonicalTools.map((t) => t.category))];
+  // Build categories from visible tools, then ensure "Chat" is always present
+  // (defensive guard: even if all Chat-category tools are hidden, the pill stays)
+  const derivedCats = [...new Set(canonicalTools.map((t) => t.category))];
+  const categories  = derivedCats.includes("Chat") ? derivedCats : ["Chat", ...derivedCats];
   const filteredTools = canonicalTools.filter((t) => {
     const matchesSearch = !searchQuery ||
       t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -3312,7 +3315,11 @@ function StudioPageInner() {
                     return (
                       <button
                         key={cat}
-                        onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
+                        onClick={() => {
+                          // Clicking "Chat" pill switches to the Chat tab directly
+                          if (cat === "Chat") { setActiveTab("chat"); return; }
+                          setActiveCategory(activeCategory === cat ? null : cat);
+                        }}
                         className={cn(
                           "flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-all font-medium flex items-center gap-1",
                           activeCategory === cat
