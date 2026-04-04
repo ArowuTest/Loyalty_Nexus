@@ -24,7 +24,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # ── 3. Set up Flutter stable ─────────────────────────────────────────────
+      # ── 3. Set up Android SDK ─────────────────────────────────────────────────
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ── 4. Set up Flutter stable ─────────────────────────────────────────────
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -32,13 +36,13 @@ jobs:
           channel: stable
           cache: true
 
-      # ── 4. Restore signing keystore from secret ──────────────────────────────
+      # ── 5. Restore signing keystore from secret ──────────────────────────────
       - name: Restore keystore
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode \
             > mobile/android/app/loyalty-nexus-release.jks
 
-      # ── 5. Write key.properties ──────────────────────────────────────────────
+      # ── 6. Write key.properties ──────────────────────────────────────────────
       - name: Write key.properties
         run: |
           cat > mobile/android/key.properties <<EOF
@@ -48,7 +52,7 @@ jobs:
           storeFile=loyalty-nexus-release.jks
           EOF
 
-      # ── 6. Write Firebase config files (gitignored, must be injected) ────────
+      # ── 7. Write Firebase config files (gitignored, must be injected) ────────
       - name: Write google-services.json
         run: |
           echo '${{ secrets.GOOGLE_SERVICES_JSON }}' \
@@ -59,29 +63,27 @@ jobs:
           echo '${{ secrets.GOOGLE_SERVICE_INFO_PLIST }}' \
             > mobile/ios/Runner/GoogleService-Info.plist
 
-      # ── 7. Install Flutter dependencies ──────────────────────────────────────
+      # ── 8. Install Flutter dependencies ──────────────────────────────────────
       - name: Flutter pub get
         working-directory: mobile
         run: flutter pub get
 
-      # ── 8. Flutter analyze (fail on errors only) ──────────────────────────────
+      # ── 9. Flutter analyze (fail on errors only) ──────────────────────────────
       - name: Flutter analyze
         working-directory: mobile
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
-      # ── 9. Flutter unit tests ─────────────────────────────────────────────────
+      # ── 10. Flutter unit tests ─────────────────────────────────────────────────
       - name: Flutter test
         working-directory: mobile
         run: flutter test --reporter=compact || true
 
-      # ── 10. Build debug APK ────────────────────────────────────────────────────
+      # ── 11. Build debug APK ────────────────────────────────────────────────────
       - name: Build debug APK
         working-directory: mobile
         run: flutter build apk --debug --no-tree-shake-icons
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
-      # ── 11. Upload APK artifact ───────────────────────────────────────────────
+      # ── 12. Upload APK artifact ───────────────────────────────────────────────
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -89,7 +91,7 @@ jobs:
           path: mobile/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 14
 
-      # ── 12. Upload to Appetize.io ─────────────────────────────────────────────
+      # ── 13. Upload to Appetize.io ─────────────────────────────────────────────
       - name: Upload to Appetize.io
         id: appetize
         run: |
@@ -122,7 +124,7 @@ jobs:
           echo "app_url=${APP_URL}" >> $GITHUB_OUTPUT
           echo "✅ Appetize URL: ${APP_URL}"
 
-      # ── 13. Post Appetize URL as job summary ──────────────────────────────────
+      # ── 14. Post Appetize URL as job summary ──────────────────────────────────
       - name: Post summary
         run: |
           echo "## 📱 Loyalty Nexus — Debug APK" >> $GITHUB_STEP_SUMMARY
