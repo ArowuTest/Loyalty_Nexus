@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "693548905840",
+    "project_id": "loyalty-nexus-aee8d",
+    "storage_bucket": "loyalty-nexus-aee8d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:693548905840:android:e5dfd61334e514dcdfcbb5",
+        "android_client_info": {
+          "package_name": "ng.loyaltynexus.loyalty_nexus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDPi0VS7Y9z2DSIg5y2TqOrIjNWdF84FqE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
