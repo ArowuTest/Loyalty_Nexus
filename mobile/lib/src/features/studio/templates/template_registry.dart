@@ -51,12 +51,22 @@ class TemplateRegistry {
       userPoints: userPoints,
     );
 
-    switch (tool['ui_template'] as String? ?? '') {
-      // ── Music ──────────────────────────────────────────────────────────────
+    // Normalise: DB may still have PascalCase values (e.g. 'MusicComposer').
+    // Convert to kebab-case so both old and new values match.
+    final rawTpl = (tool['ui_template'] as String? ?? '').trim();
+    final tpl = rawTpl
+        .replaceAllMapped(RegExp(r'([A-Z])'), (m) {
+          final i = rawTpl.indexOf(m.group(0)!);
+          return (i > 0 ? '-' : '') + m.group(0)!.toLowerCase();
+        })
+        .replaceFirst(RegExp(r'^-'), '');
+
+    switch (tpl) {
+      // ── Music ──────────────────────────────────────────────────────────────────────
       case 'music-composer':
         return MusicComposerTemplate(props: props);
 
-      // ── Image ──────────────────────────────────────────────────────────────
+      // ── Image ──────────────────────────────────────────────────────────────────────
       case 'image-creator':
         return ImageCreatorTemplate(props: props);
       case 'image-editor':
@@ -64,7 +74,7 @@ class TemplateRegistry {
       case 'image-compose':
         return ImageComposeTemplate(props: props);
 
-      // ── Video ──────────────────────────────────────────────────────────────
+      // ── Video ──────────────────────────────────────────────────────────────────────
       case 'video-creator':
         return VideoCreatorTemplate(props: props);
       case 'video-animator':
@@ -76,17 +86,23 @@ class TemplateRegistry {
       case 'video-multi-scene':
         return VideoMultiSceneTemplate(props: props);
 
-      // ── Voice & Audio ──────────────────────────────────────────────────────
+      // ── Voice & Audio ──────────────────────────────────────────────────────────────
       case 'voice-studio':
         return VoiceStudioTemplate(props: props);
       case 'transcribe':
         return TranscribeTemplate(props: props);
 
-      // ── Vision & Analysis ──────────────────────────────────────────────────
+      // ── Vision & Analysis ──────────────────────────────────────────────────────────────
       case 'vision-ask':
         return VisionAskTemplate(props: props);
 
-      // ── Document / Knowledge (default) ────────────────────────────────────
+      // ── Chat tools ──────────────────────────────────────────────────────────────────────
+      // These should never reach TemplateRegistry (they are routed to the
+      // Chat tab by _openTool). This case is a safety net only.
+      case 'chat':
+        return KnowledgeDocTemplate(props: props);
+
+      // ── Document / Knowledge (default) ──────────────────────────────────────────────────────────────
       case 'knowledge-doc':
       default:
         return KnowledgeDocTemplate(props: props);

@@ -105,7 +105,12 @@ class StudioTool {
   );
 
   bool get isNew => _newSlugs.contains(slug);
-  bool get isChatTool => slug == 'web-search-ai' || slug == 'code-helper';
+  bool get isChatTool =>
+      slug == 'web-search-ai' ||
+      slug == 'code-helper'   ||
+      slug == 'nexus-chat'    ||
+      slug == 'ask-nexus'     ||
+      slug == 'ai-chat';
   bool get isPremium => pointCost >= 20;
 
   /// Converts to a Map that TemplateRegistry / TemplateProps can read.
@@ -463,6 +468,11 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
       setState(() { _chatMode = ChatMode.search; _tabs.animateTo(0); });
     } else if (tool.slug == 'code-helper') {
       setState(() { _chatMode = ChatMode.code; _tabs.animateTo(0); });
+    } else if (tool.slug == 'nexus-chat' ||
+               tool.slug == 'ask-nexus'  ||
+               tool.slug == 'ai-chat') {
+      // Conversational tools → switch to Chat tab in general mode
+      setState(() { _chatMode = ChatMode.general; _tabs.animateTo(0); });
     } else {
       setState(() => _selectedTool = tool);
     }
@@ -1235,8 +1245,12 @@ class _ToolsTab extends ConsumerWidget {
       error: (_, __) => const Center(child: Text('Could not load tools',
         style: TextStyle(color: NexusColors.textSecondary))),
       data: (tools) {
+        // Chat-tab tools are handled by the Chat tab — exclude from the tools grid
+        const chatTabSlugs = {'nexus-chat', 'ask-nexus', 'ai-chat'};
+
         // Filter
         final filtered = tools.where((t) {
+          if (chatTabSlugs.contains(t.slug)) return false;
           final matchSearch = searchQuery.isEmpty ||
             t.name.toLowerCase().contains(searchQuery.toLowerCase()) ||
             t.description.toLowerCase().contains(searchQuery.toLowerCase());
