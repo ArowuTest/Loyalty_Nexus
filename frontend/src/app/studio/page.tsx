@@ -250,6 +250,8 @@ const HIDDEN_ALIAS_SLUGS = new Set([
   "business-plan",       // alias → bizplan
   "summary",             // alias → research-brief
   "ai-chat",             // handled via Chat tab — not a standalone tool card
+  "nexus-chat",         // handled via Chat tab → general mode
+  "ask-nexus",          // handled via Chat tab → general mode
 ]);
 
 // ─── Placeholders ─────────────────────────────────────────────────────────────
@@ -2651,6 +2653,12 @@ function StudioPageInner() {
   useEffect(() => {
     const slugParam = searchParams?.get("tool");
     if (!slugParam || tools.length === 0) return;
+    // Chat tools → switch to Chat tab with correct mode
+    if (slugParam === "nexus-chat" || slugParam === "ask-nexus" || slugParam === "ai-chat") {
+      setChatMode("general"); setActiveTab("chat"); return;
+    }
+    if (slugParam === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); return; }
+    if (slugParam === "code-helper")   { setChatMode("code");   setActiveTab("chat"); return; }
     const match = tools.find((t: Tool) => t.slug === slugParam);
     if (match) {
       setSelectedTool(match);
@@ -3389,6 +3397,7 @@ function StudioPageInner() {
                             onClick={() => {
                               if (tool.slug === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); }
                               else if (tool.slug === "code-helper") { setChatMode("code"); setActiveTab("chat"); }
+                              else if (tool.slug === "nexus-chat" || tool.slug === "ask-nexus") { setChatMode("general"); setActiveTab("chat"); }
                               else { setSelectedTool(tool); }
                             }}
                           />
@@ -3421,6 +3430,9 @@ function StudioPageInner() {
                                 setActiveTab("chat");
                               } else if (tool.slug === "code-helper") {
                                 setChatMode("code");
+                                setActiveTab("chat");
+                              } else if (tool.slug === "nexus-chat" || tool.slug === "ask-nexus") {
+                                setChatMode("general");
                                 setActiveTab("chat");
                               } else {
                                 setSelectedTool(tool);
