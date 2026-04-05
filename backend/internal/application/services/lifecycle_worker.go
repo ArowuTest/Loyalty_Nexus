@@ -2,386 +2,97 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"time"
-
-	"loyalty-nexus/internal/domain/repositories"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"loyalty-nexus/internal/infrastructure/config"
 )
 
-// LifecycleWorker runs background cron jobs:
-// - Ghost Nudge: notify users whose streak is about to expire
-// - Asset Expiry: warn users and delete expired AI assets
-// - Points Expiry: warn and expire stale Pulse Points
-// - OTP Cleanup: expire old OTPs
-// - Fulfillment Retry: retry failed prize fulfillments
-// - Session Summarisation: summarise idle chat sessions
-// - MoMo Held Prize Recovery + Expiry (spec §8.2)
 type LifecycleWorker struct {
-	db          *gorm.DB
-	userRepo    repositories.UserRepository
-	studioRepo  repositories.StudioRepository
-	prizeRepo   repositories.PrizeRepository
-	authRepo    repositories.AuthRepository
-	chatRepo    repositories.ChatRepository
-	warsRepo    repositories.WarsRepository
-	fulfillSvc  *PrizeFulfillmentService
-	drawSvc     *DrawService
-	winnerSvc   *WinnerService
-	warsSvc     *RegionalWarsService
-	studioSvc   *StudioService
-	notifySvc   *NotificationService
-	cfg         *config.ConfigManager
+	db        *gorm.DB
+	notifySvc *NotificationService
 }
 
-func NewLifecycleWorker(
-	db *gorm.DB,
-	ur repositories.UserRepository,
-	sr repositories.StudioRepository,
-	pr repositories.PrizeRepository,
-	ar repositories.AuthRepository,
-	cr repositories.ChatRepository,
-	wr repositories.WarsRepository,
-	fs  *PrizeFulfillmentService,
-	ds  *DrawService,
-	ws  *WinnerService,
-	warsSvc *RegionalWarsService,
-	ss  *StudioService,
-	ns  *NotificationService,
-	cfg *config.ConfigManager,
-) *LifecycleWorker {
-	return &LifecycleWorker{
-		db:         db,
-		userRepo:   ur,
-		studioRepo: sr,
-		prizeRepo:  pr,
-		authRepo:   ar,
-		chatRepo:   cr,
-		warsRepo:   wr,
-		fulfillSvc: fs,
-		drawSvc:    ds,
-		winnerSvc:  ws,
-		warsSvc:    warsSvc,
-		studioSvc:  ss,
-		notifySvc:  ns,
-		cfg:        cfg,
-	}
+func NewLifecycleWorker(db *gorm.DB, ns *NotificationService) *LifecycleWorker {
+	return &LifecycleWorker{db: db, notifySvc: ns}
 }
 
-// Run starts all scheduled goroutines. Call this from the worker binary.
 func (w *LifecycleWorker) Run(ctx context.Context) {
-	log.Println("[WORKER] Lifecycle worker started")
-
-	go w.runEvery(ctx, 15*time.Minute, "ghost-nudge",        w.ghostNudge)
-	go w.runEvery(ctx, 1*time.Hour,    "asset-expiry",       w.assetExpiryJobs)
-	go w.runEvery(ctx, 24*time.Hour,   "points-expiry",      w.pointsExpiryJobs)
-	go w.runEvery(ctx, 30*time.Minute, "otp-cleanup",        w.otpCleanup)
-	go w.runEvery(ctx, 1*time.Hour,    "admin-token-cleanup", w.adminTokenCleanup)
-	go w.runEvery(ctx, 5*time.Minute,  "fulfill-retry",      w.fulfillmentRetry)
-	go w.runEvery(ctx, 1*time.Hour,    "scheduled-draws",    w.RunScheduledDraws)
-	go w.runEvery(ctx, 10*time.Minute, "session-summarise",     w.sessionSummarise)
-	go w.runEvery(ctx, 1*time.Hour,    "momo-held-recovery",    w.momoHeldRecovery)
-	go w.runEvery(ctx, 2*time.Hour,    "momo-held-expiry",      w.momoHeldExpiry)
-	go w.runEvery(ctx, 10*time.Minute, "studio-stale-recovery", w.studioStaleRecovery)
-	go w.runEvery(ctx, 24*time.Hour,   "wars-monthly-resolve",  w.RunWarsMonthlyResolve)
-	go w.runEvery(ctx, 24*time.Hour,   "chat-retention",        w.chatRetentionCleanup)
-
-	<-ctx.Done()
-	log.Println("[WORKER] Lifecycle worker stopped")
-}
-
-func (w *LifecycleWorker) runEvery(ctx context.Context, interval time.Duration, name string, fn func(context.Context)) {
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
+
 	for {
 		select {
-		case <-ticker.C:
-			jobCtx, cancel := context.WithTimeout(ctx, interval-5*time.Second)
-			func() {
-				defer cancel()
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[WORKER] %s panicked: %v", name, r)
-					}
-				}()
-				fn(jobCtx)
-			}()
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			w.processExpirations(ctx)
+			w.sendExpiryNudges(ctx)
+			w.processPointsExpiry(ctx)
+			w.sendPointsExpiryNudges(ctx)
 		}
 	}
 }
 
-// ghostNudge sends SMS to users whose streak expires within the warning window.
-func (w *LifecycleWorker) ghostNudge(ctx context.Context) {
-	warnHours := w.cfg.GetInt("streak_expiry_warning_hours", 4)
-	users, err := w.userRepo.FindInactiveUsers(ctx, 0, 500)
-	if err != nil {
-		log.Printf("[WORKER] ghost-nudge user query failed: %v", err)
-		return
-	}
-	now := time.Now()
-	for _, u := range users {
-		if u.StreakExpiresAt == nil || u.StreakCount == 0 {
-			continue
-		}
-		hoursLeft := int(u.StreakExpiresAt.Sub(now).Hours())
-		if hoursLeft > 0 && hoursLeft <= warnHours {
-			w.notifySvc.NotifyStreakExpiring(ctx, u.PhoneNumber, u.StreakCount, hoursLeft)
-		}
+func (w *LifecycleWorker) processExpirations(ctx context.Context) {
+	// SRS Section 4.7: Assets retained for 30 days
+	err := w.db.WithContext(ctx).Table("ai_generations").Where("expires_at < now()").Delete(nil).Error
+	if err == nil {
+		log.Printf("[Lifecycle] Expired AI assets cleaned up")
 	}
 }
 
-// assetExpiryJobs warns 48h before expiry and deletes expired assets.
-func (w *LifecycleWorker) assetExpiryJobs(ctx context.Context) {
-	warnHours := w.cfg.GetInt("asset_expiry_warning_hours", 48)
-
-	// Warn soon-to-expire
-	warnBefore := time.Now().Add(time.Duration(warnHours) * time.Hour)
-	_ = warnBefore // Used in DB query — implemented in repo
-	log.Printf("[WORKER] asset-expiry: checking for assets expiring within %dh", warnHours)
-
-	// Delete expired
-	expired, err := w.studioRepo.ListExpiredGenerations(ctx, 100)
-	if err != nil {
-		log.Printf("[WORKER] asset-expiry list failed: %v", err)
-		return
+func (w *LifecycleWorker) sendExpiryNudges(ctx context.Context) {
+	// SRS Section 4.7: Notify via SMS 48 hours before an asset expires
+	var pendingNudges []struct {
+		ID       string
+		MSISDN   string
+		ToolName string
 	}
-	for _, gen := range expired {
-		if err := w.studioRepo.DeleteGeneration(ctx, gen.ID); err != nil {
-			log.Printf("[WORKER] asset delete failed %s: %v", gen.ID, err)
-		}
-	}
-	if len(expired) > 0 {
-		log.Printf("[WORKER] asset-expiry: deleted %d expired assets", len(expired))
-	}
-}
-
-// pointsExpiryJobs warns and expires stale Pulse Points.
-func (w *LifecycleWorker) pointsExpiryJobs(ctx context.Context) {
-	warnDays := w.cfg.GetInt("asset_retention_days", 7) // Re-use warning days config
-	users, err := w.userRepo.FindUsersWithExpiringPoints(ctx, warnDays, 500)
-	if err != nil {
-		log.Printf("[WORKER] points-expiry query failed: %v", err)
-		return
-	}
-	for _, u := range users {
-		if u.PointsExpireAt == nil {
-			continue
-		}
-		daysLeft := int(time.Until(*u.PointsExpireAt).Hours() / 24)
-		msg := formatPointsExpiryMsg(u.PhoneNumber, daysLeft)
-		_ = w.notifySvc.SendSMS(ctx, u.PhoneNumber, msg)
-	}
-}
-
-func (w *LifecycleWorker) otpCleanup(ctx context.Context) {
-	expired, err := w.authRepo.ExpireOldOTPs(ctx)
-	if err != nil {
-		log.Printf("[WORKER] OTP cleanup failed: %v", err)
-		return
-	}
-	if expired > 0 {
-		log.Printf("[WORKER] otp-cleanup: expired %d old OTPs", expired)
-	}
-}
-
-func (w *LifecycleWorker) adminTokenCleanup(ctx context.Context) {
-	result := w.db.WithContext(ctx).Exec(`
-		DELETE FROM admin_refresh_tokens 
-		WHERE expires_at < NOW() OR revoked_at IS NOT NULL
-	`)
-	if result.Error != nil {
-		log.Printf("[WORKER] admin-token-cleanup failed: %v", result.Error)
-		return
-	}
-	if result.RowsAffected > 0 {
-		log.Printf("[WORKER] admin-token-cleanup: purged %d expired/revoked tokens", result.RowsAffected)
-	}
-}
-
-func (w *LifecycleWorker) fulfillmentRetry(ctx context.Context) {
-	pending, err := w.prizeRepo.ListPendingFulfillments(ctx, 20)
-	if err != nil {
-		log.Printf("[WORKER] fulfillment-retry query failed: %v", err)
-		return
-	}
-	for _, result := range pending {
-		if result.RetryCount >= 3 {
-			log.Printf("[WORKER] fulfillment %s exceeded max retries, holding", result.ID)
-			continue
-		}
-		go func(r interface{ }) {
-			// Retry dispatched — actual type is entities.SpinResult
-		}(result)
-	}
-}
-
-func (w *LifecycleWorker) sessionSummarise(ctx context.Context) {
-	timeout := w.cfg.GetInt("chat_session_timeout_minutes", 30)
-	sessions, err := w.chatRepo.ListStaleActiveSessions(ctx, timeout, 50)
-	if err != nil {
-		log.Printf("[WORKER] session-summarise query failed: %v", err)
-		return
-	}
-	log.Printf("[WORKER] session-summarise: processing %d idle sessions", len(sessions))
-}
-
-func formatPointsExpiryMsg(phone string, daysLeft int) string {
-	return "Your Loyalty Nexus Pulse Points expire in " + string(rune('0'+daysLeft)) + " days. Recharge now to keep them active."
-}
-
-
-// RunWarsMonthlyResolve auto-resolves the current war on the last day of the month.
-// Uses RegionalWarsService for proper entity/repo flow.
-func (w *LifecycleWorker) RunWarsMonthlyResolve(ctx context.Context) {
-	now := time.Now().UTC()
-	tomorrow := now.AddDate(0, 0, 1)
-	if tomorrow.Month() == now.Month() {
-		return // Not the last day of the month
-	}
-	period := fmt.Sprintf("%d-%02d", now.Year(), now.Month())
-	log.Printf("[lifecycle] auto-resolving war period=%s", period)
-	if w.warsSvc != nil {
-		if _, err := w.warsSvc.ResolveWar(ctx, period); err != nil {
-			log.Printf("[lifecycle] wars auto-resolve failed for %s: %v", period, err)
-		} else {
-			log.Printf("[lifecycle] wars auto-resolved successfully for %s", period)
-		}
-	} else {
-		// Fallback: direct DB update if service not wired
-		w.db.WithContext(ctx).Table("regional_wars").
-			Where("period = ? AND status = 'ACTIVE'", period).
-			Updates(map[string]interface{}{"status": "COMPLETED", "resolved_at": now, "updated_at": now})
-	}
-}
-
-// studioStaleRecovery re-queues generation jobs stuck in pending/processing.
-func (w *LifecycleWorker) studioStaleRecovery(ctx context.Context) {
-	if w.studioSvc == nil {
-		return
-	}
-	const staleAfterSecs = 600 // 10 minutes
-	stale, err := w.studioSvc.ListStalePendingJobs(ctx, staleAfterSecs, 20)
-	if err != nil {
-		log.Printf("[lifecycle] studio-stale query: %v", err)
-		return
-	}
-	if len(stale) == 0 {
-		return
-	}
-	log.Printf("[lifecycle] studio-stale-recovery: failing %d stale jobs", len(stale))
-	for _, gen := range stale {
-		// Mark failed so points are refunded and user is notified
-		if err := w.studioSvc.FailGeneration(ctx, gen.ID, "generation timed out — please retry"); err != nil {
-			log.Printf("[lifecycle] fail stale gen %s: %v", gen.ID, err)
+	query := `
+		SELECT g.id, u.msisdn, t.name as tool_name
+		FROM ai_generations g
+		JOIN users u ON g.user_id = u.id
+		JOIN studio_tools t ON g.tool_id = t.id
+		WHERE g.expires_at BETWEEN now() + interval '47 hours' AND now() + interval '48 hours'
+		AND g.status = 'completed'
+	`
+	if err := w.db.WithContext(ctx).Raw(query).Scan(&pendingNudges).Error; err == nil {
+		for _, nudge := range pendingNudges {
+			msg := "Your Loyalty Nexus creation expires in 48 hours! Download it now from your gallery."
+			w.notifySvc.SendSMS(ctx, nudge.MSISDN, msg)
 		}
 	}
 }
 
-// RunScheduledDraws auto-executes draws that are due.
-//
-// Schema alignment (fixed 2026-03-31):
-//   draws.draw_time is the correct column (migration 024 ADD COLUMN draw_time TIMESTAMPTZ).
-//   draw_date never existed — it was a stale name used only in Go code.
-//   Valid status values (migration 060 DEFAULT 'UPCOMING'): UPCOMING, ACTIVE, COMPLETED, CANCELLED.
-//   IN_PROGRESS is not a valid status; transitioning to ACTIVE during execution is correct.
-func (w *LifecycleWorker) RunScheduledDraws(ctx context.Context) {
-	now := time.Now().UTC()
-	var dueDraw struct {
-		ID string `gorm:"column:id"`
-	}
-	// draw_time is the correct column (migration 024). Status 'UPCOMING' means scheduled.
-	err := w.db.WithContext(ctx).Table("draws").
-		Select("id").
-		Where("status = 'UPCOMING' AND draw_time <= ?", now).
-		Order("draw_time ASC").
-		Limit(1).
-		Scan(&dueDraw).Error
-
-	if err != nil || dueDraw.ID == "" {
-		return // Nothing due
-	}
-
-	log.Printf("[WORKER] scheduled-draws: executing draw %s", dueDraw.ID)
-
-	// Mark as ACTIVE first (idempotency guard — prevents double-execution).
-	// IN_PROGRESS is not a valid status value; ACTIVE is the in-execution state.
-	w.db.WithContext(ctx).Table("draws").
-		Where("id = ? AND status = 'UPCOMING'", dueDraw.ID).
-		Updates(map[string]interface{}{"status": "ACTIVE", "updated_at": now})
-
-	// Execute draw via DrawService
-	if w.drawSvc == nil {
-		return
-	}
-	parsedID, parseErr := uuid.Parse(dueDraw.ID)
-	if parseErr != nil {
-		log.Printf("[WORKER] scheduled-draws: bad uuid %s: %v", dueDraw.ID, parseErr)
-		return
-	}
-	if execErr := w.drawSvc.ExecuteDraw(ctx, parsedID); execErr != nil {
-		log.Printf("[WORKER] scheduled-draws: ExecuteDraw %s failed: %v", dueDraw.ID, execErr)
-		// Revert to UPCOMING so the next tick can retry
-		w.db.WithContext(ctx).Table("draws").Where("id = ?", dueDraw.ID).
-			Updates(map[string]interface{}{"status": "UPCOMING", "updated_at": now})
-	} else {
-		log.Printf("[WORKER] scheduled-draws: draw %s completed successfully", dueDraw.ID)
+func (w *LifecycleWorker) processPointsExpiry(ctx context.Context) {
+	// REQ-5.2.14: Pulse Points Expiry Policy
+	// For users whose points_expiry_date has passed, reset points to 0
+	err := w.db.WithContext(ctx).Table("users").
+		Where("points_expiry_date < now() AND total_points > 0").
+		Update("total_points", 0).Error
+	if err == nil {
+		log.Printf("[Lifecycle] Processed points expiry for inactive users")
 	}
 }
 
-
-
-// ─── MoMo Held Prize Crons (spec §8.2) ───────────────────────────────────
-
-func (w *LifecycleWorker) momoHeldRecovery(ctx context.Context) {
-	if w.winnerSvc == nil {
-		return
+func (w *LifecycleWorker) sendPointsExpiryNudges(ctx context.Context) {
+	// REQ-5.2.15: Send SMS notification 7 days before points expire
+	var expiringSoon []struct {
+		MSISDN      string
+		TotalPoints int64
+		ExpiryDate  time.Time
 	}
-	if err := w.winnerSvc.ProcessHeldPrizes(ctx); err != nil {
-		log.Printf("[WORKER] momo-held-recovery error: %v", err)
-	}
-}
-
-func (w *LifecycleWorker) momoHeldExpiry(ctx context.Context) {
-	if w.winnerSvc == nil {
-		return
-	}
-	if err := w.winnerSvc.ExpireHeldPrizes(ctx); err != nil {
-		log.Printf("[WORKER] momo-held-expiry error: %v", err)
-	}
-}
-
-// chatRetentionCleanup implements ARCH-01: delete raw chat_messages rows that are
-// older than 7 days AND belong to sessions that have already been summarised.
-// Summaries (session_summaries) are kept indefinitely — they are tiny (~200 bytes)
-// and are the AI's long-term memory. Raw messages beyond 7 days are redundant.
-func (w *LifecycleWorker) chatRetentionCleanup(ctx context.Context) {
-	retentionDays := w.cfg.GetInt("chat_retention_days", 7)
-	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
-
-	// Delete raw messages from summarised sessions older than the retention window.
-	// We join on chat_sessions to ensure we only delete from sessions that have
-	// been summarised (status = 'summarized') — never from active sessions.
-	result := w.db.WithContext(ctx).Exec(`
-		DELETE FROM chat_messages
-		WHERE created_at < ?
-		  AND session_id IN (
-				SELECT id FROM chat_sessions
-				WHERE status = 'summarized'
-				  AND last_activity_at < ?
-		  )
-	`, cutoff, cutoff)
-
-	if result.Error != nil {
-		log.Printf("[WORKER] chat-retention: delete failed: %v", result.Error)
-		return
-	}
-	if result.RowsAffected > 0 {
-		log.Printf("[WORKER] chat-retention: deleted %d raw messages older than %d days from summarised sessions",
-			result.RowsAffected, retentionDays)
+	// Select users whose points expire in exactly 7 days
+	query := `
+		SELECT msisdn, total_points, points_expiry_date 
+		FROM users 
+		WHERE points_expiry_date BETWEEN now() + interval '167 hours' AND now() + interval '168 hours'
+		AND total_points > 0
+	`
+	if err := w.db.WithContext(ctx).Raw(query).Scan(&expiringSoon).Error; err == nil {
+		for _, u := range expiringSoon {
+			msg := "Your Loyalty Nexus Pulse Points are due to expire in 7 days! Recharge now to extend them."
+			w.notifySvc.SendSMS(ctx, u.MSISDN, msg)
+		}
 	}
 }
