@@ -72,9 +72,11 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
   const [uploading,    setUploading]    = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Multi-scene builder
-  const [scenes,     setScenes]     = useState<string[]>([]);
-  const [newScene,   setNewScene]   = useState('');
-  const [showScenes, setShowScenes] = useState(false);
+  const [scenes,          setScenes]          = useState<string[]>([]);
+  const [newScene,        setNewScene]        = useState('');
+  const [showScenes,      setShowScenes]      = useState(false);
+  // Motion intensity: 1 = subtle, 5 = extreme (Runway-style slider)
+  const [motionIntensity, setMotionIntensity] = useState<number>(3);
 
   // Web Speech API mic
   const { speechState, speechError, interimText, handleMicClick } =
@@ -148,6 +150,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
         scenes:            scenes.length > 0 ? scenes : undefined,
         audio_direction:   audioDir.trim() || undefined,
         music_style:       musicStyle.trim() || undefined,
+        motion_intensity:  motionIntensity,
       },
     };
     onSubmit(payload);
@@ -493,6 +496,53 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
           )}
         </div>
       )}
+      {/* ── Motion Intensity slider (Runway-style) ── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
+            Motion Intensity
+          </label>
+          <span className={cn(
+            'text-xs font-semibold px-2 py-0.5 rounded-full border',
+            motionIntensity <= 1 ? 'bg-sky-600/20 border-sky-500/40 text-sky-300' :
+            motionIntensity <= 2 ? 'bg-teal-600/20 border-teal-500/40 text-teal-300' :
+            motionIntensity <= 3 ? 'bg-blue-600/20 border-blue-500/40 text-blue-300' :
+            motionIntensity <= 4 ? 'bg-amber-600/20 border-amber-500/40 text-amber-300' :
+                                   'bg-red-600/20 border-red-500/40 text-red-300',
+          )}>
+            {['Subtle', 'Gentle', 'Balanced', 'Dynamic', 'Extreme'][motionIntensity - 1]}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-white/25 text-[10px] w-8 text-right">Subtle</span>
+          <input
+            type="range"
+            min={1}
+            max={5}
+            step={1}
+            value={motionIntensity}
+            onChange={(e) => setMotionIntensity(Number(e.target.value))}
+            className="flex-1 accent-blue-500 cursor-pointer h-1.5 rounded-full"
+          />
+          <span className="text-white/25 text-[10px] w-8">Extreme</span>
+        </div>
+        <div className="flex justify-between mt-1.5 px-11">
+          {[1,2,3,4,5].map((v) => (
+            <button
+              key={v}
+              onClick={() => setMotionIntensity(v)}
+              className={cn(
+                'w-1.5 h-1.5 rounded-full transition-all',
+                motionIntensity === v ? 'bg-blue-400 scale-150' : 'bg-white/20 hover:bg-white/40',
+              )}
+            />
+          ))}
+        </div>
+        <p className="text-white/20 text-[10px] mt-1.5 text-center">
+          Controls how much movement and camera dynamics appear in the generated video
+        </p>
+      </div>
+
       {/* ── Generate button ── */}
       <button
         onClick={handleSubmit}

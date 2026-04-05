@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Loader2, Sparkles, Info, Shuffle, ChevronDown, ChevronUp, Wand2, Mic, MicOff, Upload, X, ImageIcon, CheckCircle2 } from 'lucide-react';
+import { Loader2, Sparkles, Info, Shuffle, ChevronDown, ChevronUp, Wand2, Mic, MicOff, Upload, X, ImageIcon, CheckCircle2, Settings2, Dices, Lock, Unlock } from 'lucide-react';
 import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
@@ -64,6 +64,17 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
   const [refStrength,   setRefStrength]   = useState(0.3); // 0–1, how much the reference influences output
   const [showRefSection, setShowRefSection] = useState(false);
   const refFileRef = useRef<HTMLInputElement>(null);
+
+  // ── Advanced settings (Midjourney-style) ───────────────────────────────────
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [seed,         setSeed]         = useState<number | null>(null);
+  const [seedLocked,   setSeedLocked]   = useState(false);
+
+  function randomSeed() {
+    const s = Math.floor(Math.random() * 2_147_483_647);
+    setSeed(s);
+    setSeedLocked(false);
+  }
 
   // ── Web Speech API mic ──────────────────────────────────────────────────
   const { speechState, speechError, interimText, handleMicClick } =
@@ -133,6 +144,7 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
         quality:               showQuality ? quality : undefined,
         num_images:            numImages > 1 ? numImages : undefined,
         image_prompt_strength: refUploadedUrl ? refStrength : undefined,
+        seed: seed ?? undefined,
       },
     };
     onSubmit(payload);
@@ -467,6 +479,84 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
           )}
         </div>
       )}
+
+      {/* ── Advanced Settings (Midjourney-style) ── */}
+      <div>
+        <button
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="flex items-center gap-2 text-white/35 hover:text-white/60 text-xs transition-colors w-full"
+        >
+          <Settings2 size={12} />
+          <span className="font-medium">Advanced settings</span>
+          {seed !== null && (
+            <span className="ml-1 text-purple-300/70 font-mono text-[10px]">seed: {seed}</span>
+          )}
+          {showAdvanced ? <ChevronUp size={11} className="ml-auto" /> : <ChevronDown size={11} className="ml-auto" />}
+        </button>
+
+        {showAdvanced && (
+          <div className="mt-3 p-4 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-4">
+            {/* Seed control */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Seed</label>
+                  <span className="text-white/20 text-[10px] font-normal normal-case">(reproducibility)</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={randomSeed}
+                    title="Generate a random seed"
+                    className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-white/40 hover:text-purple-300 hover:border-purple-500/30 transition-all"
+                  >
+                    <Dices size={10} /> Random
+                  </button>
+                  {seed !== null && (
+                    <button
+                      onClick={() => setSeedLocked((v) => !v)}
+                      title={seedLocked ? 'Unlock seed (allow variation)' : 'Lock seed (reproduce exact result)'}
+                      className={cn(
+                        'flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border transition-all',
+                        seedLocked
+                          ? 'bg-purple-600/20 border-purple-500/40 text-purple-300'
+                          : 'bg-white/5 border-white/10 text-white/40 hover:border-white/25',
+                      )}
+                    >
+                      {seedLocked ? <Lock size={10} /> : <Unlock size={10} />}
+                      {seedLocked ? 'Locked' : 'Lock'}
+                    </button>
+                  )}
+                  {seed !== null && (
+                    <button
+                      onClick={() => { setSeed(null); setSeedLocked(false); }}
+                      className="text-white/25 hover:text-white/55 transition-colors text-[10px]"
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  max={2147483647}
+                  value={seed ?? ''}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    setSeed(isNaN(v) ? null : Math.max(0, Math.min(2147483647, v)));
+                  }}
+                  placeholder="e.g. 42  (leave blank for random)"
+                  className="nexus-input flex-1 text-sm font-mono"
+                />
+              </div>
+              <p className="text-white/20 text-[11px] mt-1.5 leading-relaxed">
+                Same seed + same prompt = same image every time. Use this to reproduce a result or make controlled variations.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ── Generate button ── */}
       <button

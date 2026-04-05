@@ -890,6 +890,13 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 			return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
 		}
 		// ── Hardcoded fallback ───────────────────────────────────────────────
+		// Extract user-supplied seed from extra_params (sent by ImageCreator Advanced Settings)
+		var userSeed int64
+		if env.Extra != nil {
+			if s, ok := env.Extra["seed"].(float64); ok && s > 0 {
+				userSeed = int64(s)
+			}
+		}
 		// tier 1: HuggingFace FLUX.1-Schnell (free, uses HF_TOKEN)
 		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
 			url, err := o.callHFFluxSchnell(ctx, hfKey, prompt)
@@ -898,8 +905,8 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 			}
 			log.Printf("[AIStudio] HF FLUX.1-Schnell failed: %v", err)
 		}
-		// tier 2: Pollinations.ai FLUX (100% free, no key required)
-		if url, err := o.callPollinationsImage(ctx, prompt, env.AspectRatio); err == nil {
+		// tier 2: Pollinations.ai FLUX — pass user seed for reproducible generation
+		if url, err := o.callPollinationsImageWithSeed(ctx, prompt, userSeed, env.AspectRatio); err == nil {
 			return &studioProviderResult{OutputURL: url, Provider: "pollinations/flux", CostMicros: 0}, nil
 		}
 		// tier 3: FAL.AI FLUX-dev (paid fallback)
@@ -1090,6 +1097,19 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 	if slug == "video-cinematic" {
 		imgURL := env.ImageURL
 		motionPrompt := o.enhanceVideoPrompt(ctx, env.Prompt)
+		// Inject motion intensity hint into prompt (sent by VideoCreator slider)
+		if mi, ok := env.Extra["motion_intensity"].(float64); ok && mi > 0 {
+			motionHints := map[int]string{
+				1: "very subtle motion, minimal movement",
+				2: "gentle motion, slow and smooth",
+				3: "balanced motion, natural movement",
+				4: "dynamic motion, expressive movement",
+				5: "extreme motion, high energy, dramatic movement",
+			}
+			if hint, ok2 := motionHints[int(mi)]; ok2 {
+				motionPrompt = motionPrompt + ". Motion style: " + hint
+			}
+		}
 		if imgURL == "" {
 			return nil, fmt.Errorf("video-cinematic: image_url is required")
 		}
@@ -1111,9 +1131,21 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 	// video-veo: Premium text-to-video with Grok (xAI) as Tier 1
 	// Tier 1: Grok Imagine Video (xAI) — $0.05/sec, top-tier quality, native audio
 	// Tier 2: Google Veo 3.1 (Pollinations) — $0.150/sec
-	// Tier 3: wan-fast (FREE)
 	if slug == "video-veo" {
 		prompt := o.enhanceVideoPrompt(ctx, env.Prompt)
+		// Inject motion intensity hint into prompt (sent by VideoCreator slider)
+		if mi, ok := env.Extra["motion_intensity"].(float64); ok && mi > 0 {
+			motionHints := map[int]string{
+				1: "very subtle motion, minimal movement",
+				2: "gentle motion, slow and smooth",
+				3: "balanced motion, natural movement",
+				4: "dynamic motion, expressive movement",
+				5: "extreme motion, high energy, dramatic movement",
+			}
+			if hint, ok2 := motionHints[int(mi)]; ok2 {
+				prompt = prompt + ". Motion style: " + hint
+			}
+		}
 		// Tier 1: Grok Imagine Video (xAI) — $0.05/sec
 		if o.grokClient != nil {
 			duration := env.Duration
@@ -2826,8 +2858,17 @@ func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt
 // NOTE (2026-03-26): Pollinations removed anonymous access — sk_ key is now REQUIRED
 // for ALL models including free ones. Requests without a key return HTTP 401.
 func (o *AIStudioOrchestrator) callPollinationsImage(ctx context.Context, prompt string, aspectRatio ...string) (string, error) {
+	return o.callPollinationsImageWithSeed(ctx, prompt, 0, aspectRatio...)
+}
+
+// callPollinationsImageWithSeed is like callPollinationsImage but accepts an explicit seed.
+// Pass seed=0 to use a random seed (default behaviour).
+func (o *AIStudioOrchestrator) callPollinationsImageWithSeed(ctx context.Context, prompt string, userSeed int64, aspectRatio ...string) (string, error) {
 	encoded := url.PathEscape(prompt)
 	seed := time.Now().UnixNano() % 999983
+	if userSeed > 0 {
+		seed = userSeed
+	}
 	// Map aspect_ratio to width/height for Pollinations image API
 	ar := "1:1"
 	if len(aspectRatio) > 0 && aspectRatio[0] != "" {

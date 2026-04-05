@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Loader2, Music, ChevronDown, ChevronUp, Sparkles, Shuffle, Plus, Mic, MicOff } from 'lucide-react';
+import { Loader2, Music, ChevronDown, ChevronUp, Sparkles, Shuffle, Plus, Mic, MicOff, PenLine, Wand2 } from 'lucide-react';
 import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
@@ -204,6 +204,9 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
   // BG Music scene
   const [bgScene, setBgScene] = useState('');
 
+  // Suno-style dual-mode: 'simple' = style description only, 'custom' = lyrics front-and-centre
+  const [inputMode, setInputMode] = useState<'simple' | 'custom'>('simple');
+
   // UI toggles — lyrics always open for song-creator
   const [showLyricsBox, setShowLyricsBox] = useState(ctx.mode === 'song-creator');
 
@@ -287,7 +290,7 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
       prompt:          tagPrefix + prompt.trim() + moodCue + energyCue + bpmCue + modeCue,
       duration,
       vocals:          ctx.showVocals ? vocals : (mode === 'song-creator' ? true : false),
-      lyrics:          ctx.showLyrics && lyrics.trim() ? lyrics.trim() : undefined,
+      lyrics:          (inputMode === 'custom' || ctx.showLyrics) && lyrics.trim() ? lyrics.trim() : undefined,
       style_tags:      selectedTags.length > 0 ? selectedTags : undefined,
       negative_prompt: negativePrompt.trim() || undefined,
       extra_params: {
@@ -327,6 +330,34 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
               }}
             />
           ))}
+        </div>
+      )}
+
+      {/* ── Suno-style Simple / Custom mode toggle (song-creator only) ── */}
+      {mode === 'song-creator' && (
+        <div className="flex rounded-xl overflow-hidden border border-white/10 w-full">
+          <button
+            onClick={() => setInputMode('simple')}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-semibold transition-all',
+              inputMode === 'simple'
+                ? 'bg-amber-500 text-black'
+                : 'text-white/55 hover:text-white/80',
+            )}
+          >
+            <Wand2 size={12} /> Simple
+          </button>
+          <button
+            onClick={() => { setInputMode('custom'); setShowLyricsBox(true); }}
+            className={cn(
+              'flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-semibold transition-all',
+              inputMode === 'custom'
+                ? 'bg-amber-500 text-black'
+                : 'text-white/55 hover:text-white/80',
+            )}
+          >
+            <PenLine size={12} /> Custom Lyrics
+          </button>
         </div>
       )}
 
@@ -391,6 +422,60 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── Custom mode: Lyrics editor shown FIRST (Suno-style) ── */}
+      {mode === 'song-creator' && inputMode === 'custom' && (
+        <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="text-amber-300 text-[11px] uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                <PenLine size={12} /> Your Lyrics
+              </label>
+              <p className="text-white/30 text-[10px] mt-0.5">Write your verses, chorus and bridge — the AI will sing them exactly as written.</p>
+            </div>
+            <button
+              onClick={handleLyricsMic}
+              disabled={lyricsSpeech === 'processing'}
+              title={lyricsSpeech === 'listening' ? 'Stop listening' : 'Dictate your lyrics'}
+              className={cn(
+                'w-7 h-7 rounded-lg flex items-center justify-center transition-all border',
+                lyricsSpeech === 'listening'
+                  ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+                  : 'bg-white/5 text-white/30 hover:text-white/60 hover:bg-white/10 border-transparent',
+              )}
+            >
+              {lyricsSpeech === 'listening' ? <MicOff size={12} /> : <Mic size={12} />}
+            </button>
+          </div>
+          {/* Section tag quick-insert helpers */}
+          <div className="flex flex-wrap gap-1.5">
+            {LYRIC_SECTION_TAGS.map((tag) => (
+              <button
+                key={tag}
+                onClick={() => insertLyricTag(tag)}
+                className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md border border-white/10 text-white/40 hover:border-amber-500/40 hover:text-amber-400 transition-all font-mono"
+              >
+                <Plus size={9} />{tag}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={lyrics}
+            onChange={(e) => setLyrics(e.target.value)}
+            placeholder={'[Verse 1]\nWrite your verse here…\n\n[Chorus]\nWrite your chorus here…\n\n[Bridge]\nWrite your bridge here…'}
+            rows={8}
+            autoFocus
+            className="nexus-input resize-none w-full text-sm leading-relaxed font-mono"
+          />
+          {lyricsSpeech === 'listening' && (
+            <p className="text-[11px] text-red-300 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+              Listening… {lyricsInterim || 'dictate your lyrics'}
+            </p>
+          )}
+          <p className="text-white/20 text-[10px]">Add a style direction below to guide the AI on genre, mood and vibe.</p>
         </div>
       )}
 

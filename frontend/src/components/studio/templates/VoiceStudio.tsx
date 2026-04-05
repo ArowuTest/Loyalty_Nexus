@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Loader2, Sparkles, Play, Clock, Mic, MicOff } from 'lucide-react';
+import { useState, useRef, useCallback } from 'react';
+import { Loader2, Sparkles, Play, Square, Clock, Mic, MicOff } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 import { useSpeechToText } from '@/hooks/useSpeechToText';
@@ -21,6 +21,9 @@ const DEFAULT_VOICES = [
   { id: 'willow',  name: 'Willow',  tone: 'Soft & Thoughtful',     category: 'Audiobooks',     gender: 'F' },
   { id: 'jessica', name: 'Jessica', tone: 'Bright & Upbeat',       category: 'Characters',     gender: 'F' },
 ];
+
+// Short, natural demo phrase used for voice previews (same across all voices so users can compare fairly)
+const PREVIEW_PHRASE = "Hello! This is how I sound. I'm ready to narrate your content.";
 
 const DEFAULT_LANGUAGES = [
   { code: 'en', label: 'English',    flag: '🇬🇧' },
@@ -87,6 +90,108 @@ function estimateDuration(text: string, speed: number): string {
   return `~${Math.round(seconds / 60)}m ${seconds % 60}s`;
 }
 
+// ── Voice preview hook ─────────────────────────────────────────────────────────
+// Fetches a short TTS sample from the backend /studio/generate endpoint using
+// the narrate-pro tool, then plays it via the Web Audio API.
+// Only one preview plays at a time; calling previewVoice() while another is
+// playing stops the current one first.
+function useVoicePreview() {
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const [loadingId,    setLoadingId]    = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Cache: voiceId → audio URL (avoids re-fetching the same voice)
+  const cacheRef = useRef<Record<string, string>>({});
+
+  const stopPreview = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    setPreviewingId(null);
+  }, []);
+
+  const previewVoice = useCallback(async (voiceId: string) => {
+    // Toggle off if already playing this voice
+    if (previewingId === voiceId) {
+      stopPreview();
+      return;
+    }
+    // Stop any currently playing preview
+    stopPreview();
+
+    // Check cache first
+    if (cacheRef.current[voiceId]) {
+      const audio = new Audio(cacheRef.current[voiceId]);
+      audioRef.current = audio;
+      setPreviewingId(voiceId);
+      audio.play().catch(() => {});
+      audio.onended = () => setPreviewingId(null);
+      return;
+    }
+
+    // Fetch preview from backend — use the /studio/generate endpoint with narrate-pro
+    setLoadingId(voiceId);
+    try {
+      const token = typeof window !== 'undefined'
+        ? (localStorage.getItem('nexus_token') ?? '')
+        : '';
+
+      // Step 1: Submit generation
+      const genRes = await fetch('/api/v1/studio/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          tool_slug: 'narrate-pro',
+          prompt: PREVIEW_PHRASE,
+          voice_id: voiceId,
+          extra_params: { speed: 1.0, format: 'mp3' },
+        }),
+      });
+
+      if (!genRes.ok) throw new Error('preview request failed');
+      const genData = await genRes.json();
+      const genId: string = genData.generation_id ?? genData.id;
+      if (!genId) throw new Error('no generation id');
+
+      // Step 2: Poll for result (max 15s)
+      let audioURL = '';
+      for (let i = 0; i < 15; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const statusRes = await fetch(`/api/v1/studio/generate/${genId}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!statusRes.ok) continue;
+        const statusData = await statusRes.json();
+        if (statusData.status === 'completed' && statusData.output_url) {
+          audioURL = statusData.output_url;
+          break;
+        }
+        if (statusData.status === 'failed') break;
+      }
+
+      if (!audioURL) throw new Error('preview timed out');
+
+      // Cache and play
+      cacheRef.current[voiceId] = audioURL;
+      const audio = new Audio(audioURL);
+      audioRef.current = audio;
+      setPreviewingId(voiceId);
+      audio.play().catch(() => {});
+      audio.onended = () => setPreviewingId(null);
+    } catch {
+      // Silently fail — preview is a nice-to-have, not critical
+    } finally {
+      setLoadingId(null);
+    }
+  }, [previewingId, stopPreview]);
+
+  return { previewingId, loadingId, previewVoice, stopPreview };
+}
+
 export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
   const cfg        = tool.ui_config ?? {};
   const voices     = (cfg.voices    ?? DEFAULT_VOICES) as VoiceEntry[];
@@ -102,6 +207,9 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
   const [speed,       setSpeed]       = useState<number>(1.0);
   const [format,      setFormat]      = useState<string>('mp3');
   const [voiceFilter, setVoiceFilter] = useState('');
+
+  // ── Voice preview ─────────────────────────────────────────────────────────
+  const { previewingId, loadingId, previewVoice } = useVoicePreview();
 
   // ── Web Speech API mic — dictate the text to narrate ─────────────────────
   const { speechState, speechError, interimText, handleMicClick, isMicBusy } =
@@ -172,7 +280,7 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Choose Voice</label>
-          <span className="text-white/25 text-[10px]">{voices.length} voices available</span>
+          <span className="text-white/25 text-[10px]">{voices.length} voices · tap ▶ to preview</span>
         </div>
 
         {voices.length > 6 && (
@@ -187,43 +295,80 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
 
         <div className="max-h-56 overflow-y-auto pr-0.5 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
           <div className="grid grid-cols-2 gap-1.5">
-            {filteredVoices.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => setVoiceId(v.id)}
-                className={cn(
-                  'flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-all',
-                  voiceId === v.id
-                    ? 'bg-green-600/15 border-green-500/50'
-                    : 'border-white/10 hover:border-white/20 hover:bg-white/[0.03]',
-                )}
-              >
-                <div className={cn(
-                  'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 bg-gradient-to-br',
-                  voiceId === v.id
-                    ? (AVATAR_GRADIENTS[v.id] ?? 'from-green-600 to-teal-700')
-                    : 'from-white/10 to-white/5',
-                )}>
-                  <span className={voiceId === v.id ? 'text-white' : 'text-white/50'}>
-                    {v.name[0]}
-                  </span>
-                </div>
-                <div className="min-w-0">
-                  <p className={cn('text-xs font-semibold truncate', voiceId === v.id ? 'text-green-200' : 'text-white/70')}>
-                    {v.name}
-                  </p>
-                  <p className="text-[9px] text-white/30 truncate">{v.tone}</p>
-                </div>
-                {voiceId === v.id && (
-                  <Play size={10} className="text-green-400 flex-shrink-0 ml-auto" />
-                )}
-              </button>
-            ))}
+            {filteredVoices.map((v) => {
+              const isSelected  = voiceId === v.id;
+              const isPreviewing = previewingId === v.id;
+              const isLoading_  = loadingId === v.id;
+
+              return (
+                <button
+                  key={v.id}
+                  onClick={() => setVoiceId(v.id)}
+                  className={cn(
+                    'group flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-all',
+                    isSelected
+                      ? 'bg-green-600/15 border-green-500/50'
+                      : 'border-white/10 hover:border-white/20 hover:bg-white/[0.03]',
+                  )}
+                >
+                  {/* Avatar */}
+                  <div className={cn(
+                    'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 bg-gradient-to-br',
+                    isSelected
+                      ? (AVATAR_GRADIENTS[v.id] ?? 'from-green-600 to-teal-700')
+                      : 'from-white/10 to-white/5',
+                  )}>
+                    <span className={isSelected ? 'text-white' : 'text-white/50'}>
+                      {v.name[0]}
+                    </span>
+                  </div>
+
+                  {/* Name + tone */}
+                  <div className="min-w-0 flex-1">
+                    <p className={cn('text-xs font-semibold truncate', isSelected ? 'text-green-200' : 'text-white/70')}>
+                      {v.name}
+                    </p>
+                    <p className="text-[9px] text-white/30 truncate">{v.tone}</p>
+                  </div>
+
+                  {/* Preview button — ElevenLabs style: small play/stop icon on the right */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation(); // don't also select the voice
+                      previewVoice(v.id);
+                    }}
+                    title={isPreviewing ? 'Stop preview' : `Preview ${v.name}'s voice`}
+                    className={cn(
+                      'flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-all',
+                      isPreviewing
+                        ? 'bg-green-500/30 border border-green-500/60 text-green-300'
+                        : isLoading_
+                          ? 'bg-white/5 border border-white/10 text-white/20'
+                          : 'bg-white/5 border border-white/10 text-white/30 opacity-0 group-hover:opacity-100 hover:bg-green-600/20 hover:border-green-500/40 hover:text-green-300',
+                    )}
+                  >
+                    {isLoading_ ? (
+                      <Loader2 size={9} className="animate-spin" />
+                    ) : isPreviewing ? (
+                      <Square size={8} className="fill-current" />
+                    ) : (
+                      <Play size={9} className="ml-0.5" />
+                    )}
+                  </button>
+                </button>
+              );
+            })}
           </div>
           {filteredVoices.length === 0 && (
             <p className="text-white/30 text-xs text-center py-4">No voices match &quot;{voiceFilter}&quot;</p>
           )}
         </div>
+
+        {/* Preview hint */}
+        <p className="text-white/20 text-[10px] mt-1.5 text-center">
+          Hover a voice card and tap ▶ to hear a sample · previews use 0 PulsePoints
+        </p>
       </div>
 
       {/* ── Language ── */}

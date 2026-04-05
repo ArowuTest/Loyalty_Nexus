@@ -1918,9 +1918,10 @@ function renderTemplate(
 
 // ─── Tool drawer ──────────────────────────────────────────────────────────────
 function ToolDrawer({
-  tool, onClose, userPoints, onGenerated,
+  tool, onClose, userPoints, onGenerated, onContinueInChat,
 }: {
   tool: Tool; onClose: () => void; userPoints: number; onGenerated?: () => void;
+  onContinueInChat?: (text: string) => void;
 }) {
   // pendingPayload holds the GeneratePayload from the template until the user
   // confirms in the ConfirmModal. null = no payload ready yet.
@@ -2396,6 +2397,22 @@ function ToolDrawer({
                           <RefreshCw size={14} /> Generate Again
                         </button>
                       </div>
+                      {/* Continue in Chat — only for text/knowledge tools, not audio/image/video */}
+                      {onContinueInChat && !AUDIO_SLUGS.has(slug) && !IMAGE_SLUGS.has(slug) && !VIDEO_SLUGS.has(slug) && (
+                        <button
+                          onClick={() => {
+                            const snippet = (inlineResult.output_text ?? '').slice(0, 800);
+                            const prefill = `I just generated this with ${tool.name}:\n\n${snippet}${(inlineResult.output_text ?? '').length > 800 ? '\n…(truncated)' : ''}\n\nCan you help me refine or build on this?`;
+                            onContinueInChat(prefill);
+                            onClose();
+                          }}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                     bg-blue-600/20 border border-blue-500/30 text-blue-300
+                                     text-sm font-semibold hover:bg-blue-600/30 transition-colors"
+                        >
+                          <MessageSquare size={14} /> Continue in Chat
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -3555,6 +3572,14 @@ function StudioPageInner() {
             onClose={() => setSelectedTool(null)}
             userPoints={userPoints}
             onGenerated={() => { mutateGallery(); }}
+            onContinueInChat={(prefill) => {
+              setInput(prefill);
+              setChatMode('general');
+              setActiveTab('chat');
+              setSelectedTool(null);
+              // Focus chat input after tab switch
+              setTimeout(() => inputRef.current?.focus(), 150);
+            }}
           />
         )}
       </AnimatePresence>
