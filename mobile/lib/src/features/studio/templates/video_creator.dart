@@ -67,6 +67,7 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
   String _aspect       = '16:9';
   int    _duration     = 8;
   String? _cameraMove;
+  int    _motionIntensity = 3; // 1=Subtle, 2=Gentle, 3=Balanced, 4=Dynamic, 5=Intense
   final List<String> _selectedStyles = [];
   final List<TextEditingController> _sceneCtrlList = [];
 
@@ -149,9 +150,12 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
         ? '\n\nScene breakdown:\n${scenes.asMap().entries.map((e) => 'Scene ${e.key + 1}: ${e.value}').join('\n')}'
         : '';
     final audioDirSuffix = _audioDirCtrl.text.trim().isNotEmpty ? '. Audio: ${_audioDirCtrl.text.trim()}.' : '';
+    final intensityLabels = ['subtle', 'gentle', 'balanced', 'dynamic', 'intense'];
+    final intensityLabel = intensityLabels[_motionIntensity - 1];
+    final motionSuffix = '. Motion: $intensityLabel intensity.';
 
     final payload = GeneratePayload(
-      prompt: stylePrefix + _promptCtrl.text.trim() + cameraSuffix + scenesSuffix + audioDirSuffix,
+      prompt: stylePrefix + _promptCtrl.text.trim() + cameraSuffix + motionSuffix + scenesSuffix + audioDirSuffix,
       aspectRatio: _aspect,
       duration: _duration,
       styleTags: selStyles.isNotEmpty ? List.from(selStyles) : null,
@@ -159,12 +163,83 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
       imageUrl: _imageUrl,
       extraParams: {
         if (_cameraMove != null) 'camera_movement': _cameraMove,
+        'motion_intensity': _motionIntensity,
         if (scenes.isNotEmpty) 'scenes': scenes,
         if (_audioDirCtrl.text.trim().isNotEmpty) 'audio_direction': _audioDirCtrl.text.trim(),
         if (_musicCtrl.text.trim().isNotEmpty) 'music_style': _musicCtrl.text.trim(),
       },
     );
     p.onSubmit(payload);
+  }
+
+  Widget _buildMotionIntensitySlider() {
+    const labels = ['Subtle', 'Gentle', 'Balanced', 'Dynamic', 'Intense'];
+    const colors = [
+      Color(0xFF06B6D4), // cyan - subtle
+      Color(0xFF10B981), // green - gentle
+      Color(0xFFF59E0B), // amber - balanced
+      Color(0xFFEF4444), // red - dynamic
+      Color(0xFF8B5CF6), // purple - intense
+    ];
+    final activeColor = colors[_motionIntensity - 1];
+    final label = labels[_motionIntensity - 1];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            buildSectionLabel('Motion Intensity'),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: activeColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: activeColor.withValues(alpha: 0.3)),
+              ),
+              child: Text(
+                label,
+                style: TextStyle(color: activeColor, fontSize: 11, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            activeTrackColor: activeColor,
+            inactiveTrackColor: Colors.white.withValues(alpha: 0.1),
+            thumbColor: activeColor,
+            overlayColor: activeColor.withValues(alpha: 0.15),
+            trackHeight: 4,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+          ),
+          child: Slider(
+            value: _motionIntensity.toDouble(),
+            min: 1,
+            max: 5,
+            divisions: 4,
+            onChanged: (v) => setState(() => _motionIntensity = v.round()),
+          ),
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: labels.map((l) => Text(
+            l,
+            style: TextStyle(
+              color: labels[_motionIntensity - 1] == l
+                  ? activeColor
+                  : Colors.white.withValues(alpha: 0.3),
+              fontSize: 10,
+              fontWeight: labels[_motionIntensity - 1] == l
+                  ? FontWeight.w700
+                  : FontWeight.normal,
+            ),
+          )).toList(),
+        ),
+      ],
+    );
   }
 
   @override
@@ -440,6 +515,10 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
             ],
           ),
         ),
+        const SizedBox(height: 16),
+
+        // ── Motion Intensity ──
+        _buildMotionIntensitySlider(),
         const SizedBox(height: 16),
 
         // ── Negative prompt ──

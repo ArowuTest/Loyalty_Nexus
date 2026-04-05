@@ -79,12 +79,16 @@ class ImageCreatorTemplate extends ConsumerStatefulWidget {
 class _ImageCreatorTemplateState extends ConsumerState<ImageCreatorTemplate> {
   final _promptCtrl  = TextEditingController();
   final _negCtrl     = TextEditingController();
+  final _seedCtrl    = TextEditingController();
 
   String _aspect     = '1:1';
   String _quality    = 'standard';
   int    _numImages  = 1;
   double _refStrength = 0.7;
   final List<String> _selectedStyles = [];
+
+  // Advanced settings
+  bool   _useFixedSeed = false;
 
   // Reference image upload
   String? _refPreview;
@@ -169,6 +173,8 @@ class _ImageCreatorTemplateState extends ConsumerState<ImageCreatorTemplate> {
         if (showQuality) 'quality': _quality,
         if (_numImages > 1) 'num_images': _numImages,
         if (_refUploadedUrl != null) 'image_prompt_strength': _refStrength,
+        if (_useFixedSeed && _seedCtrl.text.trim().isNotEmpty)
+          'seed': int.tryParse(_seedCtrl.text.trim()) ?? 0,
       },
     );
     p.onSubmit(payload);
@@ -178,6 +184,7 @@ class _ImageCreatorTemplateState extends ConsumerState<ImageCreatorTemplate> {
   void dispose() {
     _promptCtrl.dispose();
     _negCtrl.dispose();
+    _seedCtrl.dispose();
     super.dispose();
   }
 
@@ -344,6 +351,91 @@ class _ImageCreatorTemplateState extends ConsumerState<ImageCreatorTemplate> {
             controller: _negCtrl,
             placeholder: 'Things to avoid: blurry, low quality, watermark, extra fingers, distorted…',
             maxLines: 2,
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // ── Advanced Settings (Seed control — Midjourney-style) ──
+        CollapsibleSection(
+          title: 'Advanced Settings',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Seed',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _useFixedSeed
+                              ? 'Fixed — reproduce exact results'
+                              : 'Random — unique result each time',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.45),
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _useFixedSeed,
+                    onChanged: (v) => setState(() => _useFixedSeed = v),
+                    activeColor: const Color(0xFF7C3AED),
+                  ),
+                ],
+              ),
+              if (_useFixedSeed) ...[  
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _seedCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'Enter seed number (e.g. 42)',
+                    hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.3), fontSize: 13),
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.05),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFF7C3AED)),
+                    ),
+                    suffixIcon: TextButton(
+                      onPressed: () {
+                        final rng = (DateTime.now().millisecondsSinceEpoch % 999983);
+                        setState(() => _seedCtrl.text = rng.toString());
+                      },
+                      child: Text(
+                        'Random',
+                        style: TextStyle(
+                          color: const Color(0xFF7C3AED).withValues(alpha: 0.8),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
         const SizedBox(height: 24),

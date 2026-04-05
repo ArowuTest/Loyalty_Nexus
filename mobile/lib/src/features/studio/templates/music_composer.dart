@@ -166,6 +166,9 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
 
   final List<String> _selectedTags = [];
 
+  // Suno-style input mode toggle (song-creator only)
+  String _inputMode = 'simple'; // 'simple' | 'custom'
+
   // Speech-to-text
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _micAvailable = false;
@@ -217,7 +220,13 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
 
   void _handleSubmit() {
     final p = widget.props;
-    if (!p.canAfford || p.isLoading || _promptCtrl.text.trim().isEmpty) return;
+    // In custom mode, lyrics are required; in simple mode, prompt is required
+    final isCustom = ctx.mode == 'song-creator' && _inputMode == 'custom';
+    final promptEmpty = _promptCtrl.text.trim().isEmpty;
+    final lyricsEmpty = _lyricsCtrl.text.trim().isEmpty;
+    if (!p.canAfford || p.isLoading) return;
+    if (isCustom && lyricsEmpty) return;
+    if (!isCustom && promptEmpty) return;
 
     final tagPrefix   = _selectedTags.isNotEmpty ? '[${_selectedTags.join(', ')}] ' : '';
     final moodCue     = _mood != null ? ' $_mood mood.' : '';
@@ -240,13 +249,20 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
       modeCue = vocalsCue;
     }
 
+    // In custom mode, use lyrics as the primary creative input
+    final effectiveLyrics = isCustom
+        ? _lyricsCtrl.text.trim()
+        : (ctx.showLyrics && _lyricsCtrl.text.trim().isNotEmpty ? _lyricsCtrl.text.trim() : null);
+
+    final effectivePrompt = isCustom && promptEmpty
+        ? '${tagPrefix}Song with custom lyrics$moodCue$energyCue$bpmCue$modeCue'
+        : tagPrefix + _promptCtrl.text.trim() + moodCue + energyCue + bpmCue + modeCue;
+
     final payload = GeneratePayload(
-      prompt: tagPrefix + _promptCtrl.text.trim() + moodCue + energyCue + bpmCue + modeCue,
+      prompt: effectivePrompt,
       duration: _duration,
       vocals: ctx.showVocals ? _vocals : (ctx.mode == 'song-creator' ? true : false),
-      lyrics: ctx.showLyrics && _lyricsCtrl.text.trim().isNotEmpty
-          ? _lyricsCtrl.text.trim()
-          : null,
+      lyrics: effectiveLyrics,
       styleTags: _selectedTags.isNotEmpty ? List.from(_selectedTags) : null,
       negativePrompt: _negCtrl.text.trim().isNotEmpty ? _negCtrl.text.trim() : null,
       extraParams: {
@@ -296,6 +312,24 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
         ),
         const SizedBox(height: 16),
 
+        // ── Suno-style input mode toggle (song-creator only) ──
+        if (ctx.mode == 'song-creator') ...[  
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Row(
+              children: [
+                _inputModeTab('simple', 'Simple', Icons.auto_awesome_rounded),
+                _inputModeTab('custom', 'Custom Lyrics', Icons.lyrics_rounded),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
         // ── Genre tags ──
         buildSectionLabel('Genre / Style'),
         buildChipRow(
@@ -312,17 +346,40 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
         ),
         const SizedBox(height: 16),
 
-        // ── Main prompt ──
-        buildSectionLabel(ctx.promptLabel),
-        buildTextArea(
-          controller: _promptCtrl,
-          placeholder: ctx.promptHint,
-          maxLines: 4,
-          maxLength: 500,
-          onMicTap: _micAvailable ? () => _toggleMic(false) : null,
-          micActive: _micListening,
-        ),
-        const SizedBox(height: 8),
+        // ── Custom Lyrics (prominent in custom mode) ──
+        if (ctx.mode == 'song-creator' && _inputMode == 'custom') ...[  
+          buildSectionLabel('Your Lyrics'),
+          buildTextArea(
+            controller: _lyricsCtrl,
+            placeholder: '[Verse 1]\nWrite your lyrics here…\n\n[Chorus]\nYour chorus…',
+            maxLines: 8,
+            maxLength: 2000,
+            onMicTap: _micAvailable ? () => _toggleMic(true) : null,
+            micActive: _lyricsMicListening,
+          ),
+          const SizedBox(height: 12),
+          buildSectionLabel('Style Description (optional)'),
+          buildTextArea(
+            controller: _promptCtrl,
+            placeholder: 'e.g. Afrobeats, upbeat, female vocals…',
+            maxLines: 2,
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // ── Main prompt (simple mode) ──
+        if (!(ctx.mode == 'song-creator' && _inputMode == 'custom')) ...[  
+          buildSectionLabel(ctx.promptLabel),
+          buildTextArea(
+            controller: _promptCtrl,
+            placeholder: ctx.promptHint,
+            maxLines: 4,
+            maxLength: 500,
+            onMicTap: _micAvailable ? () => _toggleMic(false) : null,
+            micActive: _micListening,
+          ),
+          const SizedBox(height: 8),
+        ],
 
         // ── Inspirations ──
         SingleChildScrollView(
@@ -460,8 +517,8 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
           const SizedBox(height: 16),
         ],
 
-        // ── Lyrics (song-creator) ──
-        if (ctx.showLyrics) ...[
+        // ── Lyrics (simple mode only — as collapsible) ──
+        if (ctx.showLyrics && _inputMode == 'simple') ...[  
           CollapsibleSection(
             title: 'Custom Lyrics (optional)',
             child: buildTextArea(
@@ -558,6 +615,42 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _inputModeTab(String mode, String label, IconData icon) {
+    final selected = _inputMode == mode;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _inputMode = mode),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFF10B981).withValues(alpha: 0.15) : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(
+              color: selected ? const Color(0xFF10B981).withValues(alpha: 0.5) : Colors.transparent,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 14,
+                color: selected ? const Color(0xFF10B981) : Colors.white.withValues(alpha: 0.45)),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? Colors.white : Colors.white.withValues(alpha: 0.45),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
@@ -146,9 +147,9 @@ const _audioSlugs = {
   'instrumental','transcribe','transcribe-african','podcast',
 };
 const _videoSlugs = {
-  'animate-photo','video-premium','video-cinematic','video-veo',
+  'animate-photo','animate-my-photo','video-premium','video-cinematic','video-veo',
   'video-edit','video-editor','video-extend','video-extender',
-  'video-multi-scene','video-story','video-jingle',
+  'video-multi-scene','video-story','my-video-story','video-jingle',
 };
 const _codeSlugs  = {'code-helper'};
 const _webSlugs   = {'web-search-ai'};
@@ -576,6 +577,13 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
                 _openTool(tool);
                 _tabs.animateTo(1);
               });
+            },
+            onContinueInChat: (prefill) {
+              _chatCtrl.text = prefill;
+              _chatCtrl.selection = TextSelection.fromPosition(
+                  TextPosition(offset: prefill.length));
+              setState(() { _chatMode = ChatMode.general; });
+              _tabs.animateTo(0);
             },
           ),
         ])),
@@ -1547,9 +1555,11 @@ class _GalleryTab extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final ValueChanged<Generation> onRegenerate;
   final ValueChanged<String> onDelete;
+  final ValueChanged<String> onContinueInChat;
   const _GalleryTab({
     required this.galleryState, required this.onRefresh,
     required this.onRegenerate, required this.onDelete,
+    required this.onContinueInChat,
   });
 
   @override
@@ -1614,6 +1624,7 @@ class _GalleryTab extends StatelessWidget {
                 gen: gallery[i],
                 onRegenerate: onRegenerate,
                 onDelete: () => _confirmDelete(context, gallery[i].id),
+                onContinueInChat: onContinueInChat,
               ),
             ),
           ),
@@ -1648,7 +1659,8 @@ class _GenerationCard extends StatelessWidget {
   final Generation gen;
   final ValueChanged<Generation> onRegenerate;
   final VoidCallback onDelete;
-  const _GenerationCard({required this.gen, required this.onRegenerate, required this.onDelete});
+  final ValueChanged<String> onContinueInChat;
+  const _GenerationCard({required this.gen, required this.onRegenerate, required this.onDelete, required this.onContinueInChat});
 
   @override
   Widget build(BuildContext context) {
@@ -1697,7 +1709,7 @@ class _GenerationCard extends StatelessWidget {
         if (gen.status == 'processing' || gen.status == 'pending')
           _ProcessingView(gen: gen)
         else if (gen.status == 'completed')
-          _CompletedView(gen: gen, onRegenerate: onRegenerate)
+          _CompletedView(gen: gen, onRegenerate: onRegenerate, onContinueInChat: onContinueInChat)
         else if (gen.status == 'failed')
           _FailedView(gen: gen),
 
@@ -1791,7 +1803,8 @@ class _ProcessingView extends StatelessWidget {
 class _CompletedView extends StatelessWidget {
   final Generation gen;
   final ValueChanged<Generation> onRegenerate;
-  const _CompletedView({required this.gen, required this.onRegenerate});
+  final ValueChanged<String> onContinueInChat;
+  const _CompletedView({required this.gen, required this.onRegenerate, required this.onContinueInChat});
 
   @override
   Widget build(BuildContext context) {
@@ -1801,7 +1814,7 @@ class _CompletedView extends StatelessWidget {
       if (gen.isAudio && !gen.isVideo) return _AudioOutput(gen: gen, onRegenerate: onRegenerate);
       return _UrlOutput(gen: gen);
     }
-    if (gen.outputText != null) return _TextOutput(gen: gen, onRegenerate: onRegenerate);
+    if (gen.outputText != null) return _TextOutput(gen: gen, onRegenerate: onRegenerate, onContinueInChat: onContinueInChat);
     return const SizedBox.shrink();
   }
 }
@@ -1837,72 +1850,243 @@ class _ImageOutput extends StatelessWidget {
   ]);
 }
 
-class _AudioOutput extends StatelessWidget {
+class _AudioOutput extends StatefulWidget {
   final Generation gen;
   final ValueChanged<Generation> onRegenerate;
   const _AudioOutput({required this.gen, required this.onRegenerate});
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 14),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: NexusColors.green.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: NexusColors.green.withValues(alpha: 0.2)),
+  State<_AudioOutput> createState() => _AudioOutputState();
+}
+
+class _AudioOutputState extends State<_AudioOutput> {
+  late final AudioPlayer _player;
+  bool _loading = false;
+  bool _playing = false;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  StreamSubscription? _posSub, _durSub, _stateSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _player = AudioPlayer();
+    _posSub = _player.positionStream.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+    _durSub = _player.durationStream.listen((d) {
+      if (mounted) setState(() => _duration = d ?? Duration.zero);
+    });
+    _stateSub = _player.playerStateStream.listen((s) {
+      if (mounted) setState(() => _playing = s.playing);
+      if (s.processingState == ProcessingState.completed) {
+        _player.seek(Duration.zero);
+        _player.pause();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _posSub?.cancel();
+    _durSub?.cancel();
+    _stateSub?.cancel();
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _togglePlay() async {
+    if (_loading) return;
+    if (_player.processingState == ProcessingState.idle) {
+      setState(() => _loading = true);
+      try {
+        await _player.setUrl(widget.gen.outputUrl!);
+      } catch (_) {
+        setState(() => _loading = false);
+        return;
+      }
+      setState(() => _loading = false);
+    }
+    if (_playing) {
+      await _player.pause();
+    } else {
+      await _player.play();
+    }
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = _duration.inMilliseconds > 0
+        ? (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: NexusColors.green.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: NexusColors.green.withValues(alpha: 0.2)),
+          ),
+          child: Column(children: [
+            Row(children: [
+              // Play / Pause button
+              GestureDetector(
+                onTap: _togglePlay,
+                child: Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(
+                    color: NexusColors.green.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: NexusColors.green.withValues(alpha: 0.4)),
+                  ),
+                  child: _loading
+                      ? const Padding(
+                          padding: EdgeInsets.all(10),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2, color: NexusColors.green),
+                        )
+                      : Icon(
+                          _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                          color: NexusColors.green, size: 22),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(widget.gen.toolName,
+                  style: const TextStyle(color: NexusColors.textPrimary,
+                    fontWeight: FontWeight.w600, fontSize: 13)),
+                const SizedBox(height: 2),
+                Text(_duration > Duration.zero
+                    ? '${_fmt(_position)} / ${_fmt(_duration)}'
+                    : 'Tap to play',
+                  style: const TextStyle(color: NexusColors.green, fontSize: 11)),
+              ])),
+            ]),
+            const SizedBox(height: 10),
+            // Progress bar
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 4,
+                backgroundColor: NexusColors.green.withValues(alpha: 0.15),
+                valueColor: const AlwaysStoppedAnimation<Color>(NexusColors.green),
+              ),
+            ),
+          ]),
         ),
-        child: Row(children: [
-          const Icon(Icons.audio_file_rounded, color: NexusColors.green, size: 28),
-          const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(gen.toolName, style: const TextStyle(color: NexusColors.textPrimary,
-              fontWeight: FontWeight.w600, fontSize: 13)),
-            const Text('Audio file ready',
-              style: TextStyle(color: NexusColors.green, fontSize: 11)),
-          ])),
+        const SizedBox(height: 8),
+        Row(children: [
+          _ActionBtn('Download', Icons.download_rounded,
+            () => launchUrl(Uri.parse(widget.gen.outputUrl!))),
+          const SizedBox(width: 8),
+          _ActionBtn('Regenerate', Icons.refresh_rounded, () => widget.onRegenerate(widget.gen)),
         ]),
-      ),
-      const SizedBox(height: 8),
-      Row(children: [
-        _ActionBtn('Download MP3', Icons.download_rounded,
-          () => launchUrl(Uri.parse(gen.outputUrl!))),
-        const SizedBox(width: 8),
-        _ActionBtn('Regenerate', Icons.refresh_rounded, () => onRegenerate(gen)),
       ]),
-    ]),
-  );
+    );
+  }
 }
 
 class _VideoOutput extends StatelessWidget {
   final Generation gen;
   final ValueChanged<Generation> onRegenerate;
   const _VideoOutput({required this.gen, required this.onRegenerate});
+
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 14),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(
-        height: 140,
-        decoration: BoxDecoration(
-          color: const Color(0x1Aef4444),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0x33ef4444)),
+  Widget build(BuildContext context) {
+    // Derive a thumbnail URL from common CDN patterns (Cloudinary, Mux, etc.).
+    // Falls back to a styled placeholder when no thumbnail is available.
+    final url = gen.outputUrl!;
+    String? thumbUrl;
+    if (url.contains('cloudinary.com')) {
+      // Convert .mp4 → .jpg thumbnail via Cloudinary transformation
+      thumbUrl = url.replaceAll('/upload/', '/upload/w_640,h_360,c_fill,so_2/').replaceAll('.mp4', '.jpg');
+    } else if (url.contains('mux.com') && url.contains('stream.mux.com')) {
+      // Mux thumbnail: https://image.mux.com/{playback_id}/thumbnail.jpg
+      final match = RegExp(r'stream\.mux\.com/([^/]+)').firstMatch(url);
+      if (match != null) thumbUrl = 'https://image.mux.com/${match.group(1)}/thumbnail.jpg';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        GestureDetector(
+          onTap: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: thumbUrl != null
+                    ? Image.network(
+                        thumbUrl,
+                        width: double.infinity,
+                        height: 180,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _VideoPlaceholder(),
+                      )
+                    : _VideoPlaceholder(),
+              ),
+              // Play overlay
+              Container(
+                width: 56, height: 56,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
+                ),
+                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 32),
+              ),
+              // "Tap to play" label
+              Positioned(
+                bottom: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Text('Tap to play in browser',
+                    style: TextStyle(color: Colors.white70, fontSize: 11)),
+                ),
+              ),
+            ],
+          ),
         ),
-        child: const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.play_circle_filled_rounded, size: 56, color: Color(0xFFef4444)),
-          SizedBox(height: 6),
-          Text('Video ready', style: TextStyle(color: Color(0xFFef4444), fontSize: 12)),
-        ])),
-      ),
-      const SizedBox(height: 8),
-      Row(children: [
-        _ActionBtn('Download Video', Icons.download_rounded,
-          () => launchUrl(Uri.parse(gen.outputUrl!), mode: LaunchMode.externalApplication)),
-        const SizedBox(width: 8),
-        _ActionBtn('Regenerate', Icons.refresh_rounded, () => onRegenerate(gen)),
+        const SizedBox(height: 8),
+        Row(children: [
+          _ActionBtn('Play', Icons.play_circle_outline_rounded,
+            () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+            color: const Color(0xFFef4444)),
+          const SizedBox(width: 8),
+          _ActionBtn('Download', Icons.download_rounded,
+            () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication)),
+          const SizedBox(width: 8),
+          _ActionBtn('Regenerate', Icons.refresh_rounded, () => onRegenerate(gen)),
+        ]),
       ]),
-    ]),
+    );
+  }
+}
+
+class _VideoPlaceholder extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity, height: 180,
+    decoration: BoxDecoration(
+      color: const Color(0x1Aef4444),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0x33ef4444)),
+    ),
+    child: const Center(child: Icon(Icons.movie_rounded, size: 48, color: Color(0x80ef4444))),
   );
 }
 
@@ -1926,7 +2110,8 @@ class _UrlOutput extends StatelessWidget {
 class _TextOutput extends StatelessWidget {
   final Generation gen;
   final ValueChanged<Generation> onRegenerate;
-  const _TextOutput({required this.gen, required this.onRegenerate});
+  final ValueChanged<String> onContinueInChat;
+  const _TextOutput({required this.gen, required this.onRegenerate, required this.onContinueInChat});
 
   @override
   Widget build(BuildContext context) {
@@ -1986,6 +2171,11 @@ class _TextOutput extends StatelessWidget {
             }),
             const SizedBox(width: 8),
             _ActionBtn('Regenerate', Icons.refresh_rounded, () => onRegenerate(gen)),
+            const SizedBox(width: 8),
+            _ActionBtn('Chat', Icons.chat_bubble_outline_rounded, () {
+              final snippet = text.length > 300 ? '${text.substring(0, 300)}…' : text;
+              onContinueInChat('I just generated this:\n\n$snippet\n\nCan you help me refine it?');
+            }, color: NexusColors.primary),
           ]),
         ],
       ]),
@@ -1997,7 +2187,8 @@ class _ActionBtn extends StatelessWidget {
   final String label;
   final IconData icon;
   final VoidCallback onTap;
-  const _ActionBtn(this.label, this.icon, this.onTap);
+  final Color? color;
+  const _ActionBtn(this.label, this.icon, this.onTap, {this.color});
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
@@ -2007,9 +2198,9 @@ class _ActionBtn extends StatelessWidget {
         color: NexusColors.background, borderRadius: BorderRadius.circular(8),
         border: Border.all(color: NexusColors.border)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 12, color: NexusColors.textSecondary),
+        Icon(icon, size: 12, color: color ?? NexusColors.textSecondary),
         const SizedBox(width: 5),
-        Text(label, style: const TextStyle(color: NexusColors.textSecondary,
+        Text(label, style: TextStyle(color: color ?? NexusColors.textSecondary,
           fontSize: 11, fontWeight: FontWeight.w500)),
       ]),
     ),

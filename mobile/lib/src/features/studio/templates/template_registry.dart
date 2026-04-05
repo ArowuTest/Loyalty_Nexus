@@ -13,6 +13,7 @@ export 'video_animator.dart';
 export 'video_editor.dart';
 export 'video_extender.dart';
 export 'video_multi_scene.dart';
+export 'video_script.dart';
 export 'voice_studio.dart';
 export 'transcribe.dart';
 export 'vision_ask.dart';
@@ -29,6 +30,7 @@ import 'video_animator.dart';
 import 'video_editor.dart';
 import 'video_extender.dart';
 import 'video_multi_scene.dart';
+import 'video_script.dart';
 import 'voice_studio.dart';
 import 'transcribe.dart';
 import 'vision_ask.dart';
@@ -85,6 +87,8 @@ class TemplateRegistry {
         return VideoExtenderTemplate(props: props);
       case 'video-multi-scene':
         return VideoMultiSceneTemplate(props: props);
+      case 'video-script':
+        return VideoScriptTemplate(props: props);
 
       // ── Voice & Audio ──────────────────────────────────────────────────────────────
       case 'voice-studio':

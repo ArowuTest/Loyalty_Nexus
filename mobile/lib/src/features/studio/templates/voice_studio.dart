@@ -4,8 +4,16 @@
 // Payload: prompt (text), voice_id, language, extra_params { speed, format }
 
 import 'package:flutter/material.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'template_types.dart';
+
+const _kBaseUrl = String.fromEnvironment(
+  'API_URL', defaultValue: 'https://loyalty-nexus-api.onrender.com/api/v1');
+
+const _kPreviewPhrase = 'Hello! I am your AI voice assistant, ready to bring your words to life.';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -73,6 +81,12 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
   double _speed    = 1.0;
   String _format   = 'mp3';
 
+  // Voice preview (ElevenLabs-style)
+  final AudioPlayer _previewPlayer = AudioPlayer();
+  final Map<String, String> _previewCache = {}; // voiceId → audio URL
+  String? _previewingVoiceId;
+  bool _previewLoading = false;
+
   // Speech-to-text
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _micAvailable = false;
@@ -82,6 +96,56 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
   void initState() {
     super.initState();
     _initSpeech();
+    _previewPlayer.playerStateStream.listen((state) {
+      if (state.processingState == ProcessingState.completed) {
+        if (mounted) setState(() => _previewingVoiceId = null);
+      }
+    });
+  }
+
+  Future<void> _previewVoice(String voiceId) async {
+    // Stop if already playing this voice
+    if (_previewingVoiceId == voiceId) {
+      await _previewPlayer.stop();
+      if (mounted) setState(() { _previewingVoiceId = null; _previewLoading = false; });
+      return;
+    }
+    // Stop any other preview
+    await _previewPlayer.stop();
+    if (mounted) setState(() { _previewingVoiceId = voiceId; _previewLoading = true; });
+
+    try {
+      String? audioUrl = _previewCache[voiceId];
+      if (audioUrl == null) {
+        // Fetch from backend TTS preview endpoint (no points charged)
+        const storage = FlutterSecureStorage();
+        final token = await storage.read(key: 'nexus_token');
+        final dio = Dio(BaseOptions(
+          baseUrl: _kBaseUrl,
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 30),
+          headers: {
+            'Content-Type': 'application/json',
+            if (token != null) 'Authorization': 'Bearer \$token',
+          },
+        ));
+        final resp = await dio.post<Map<String, dynamic>>(
+          '/studio/tts-preview',
+          data: {'voice_id': voiceId, 'text': _kPreviewPhrase},
+        );
+        audioUrl = (resp.data?['output_url'] ?? resp.data?['url']) as String?;
+        if (audioUrl != null) _previewCache[voiceId] = audioUrl;
+      }
+      if (audioUrl != null && mounted) {
+        await _previewPlayer.setUrl(audioUrl);
+        await _previewPlayer.play();
+        if (mounted) setState(() => _previewLoading = false);
+      } else {
+        if (mounted) setState(() { _previewingVoiceId = null; _previewLoading = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _previewingVoiceId = null; _previewLoading = false; });
+    }
   }
 
   Future<void> _initSpeech() async {
@@ -129,6 +193,7 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
   void dispose() {
     _textCtrl.dispose();
     _filterCtrl.dispose();
+    _previewPlayer.dispose();
     super.dispose();
   }
 
@@ -266,11 +331,13 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
               final v = voices[i];
               final isSelected = _voiceId == v['id'];
               final vColor = _catColors[v['category']] ?? const Color(0xFF7C3AED);
+              final isPreviewing = _previewingVoiceId == v['id'];
+              final isPreviewLoading = _previewLoading && isPreviewing;
               return GestureDetector(
                 onTap: () => setState(() => _voiceId = v['id']!),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding: const EdgeInsets.only(left: 10, right: 4, top: 6, bottom: 6),
                   decoration: BoxDecoration(
                     color: isSelected ? vColor.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.03),
                     borderRadius: BorderRadius.circular(10),
@@ -279,26 +346,59 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
                       width: isSelected ? 1.5 : 1,
                     ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  child: Row(
                     children: [
-                      Text(
-                        v['name']!,
-                        style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.75),
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              v['name']!,
+                              style: TextStyle(
+                                color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.75),
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
+                            ),
+                            Text(
+                              v['tone']!,
+                              style: TextStyle(
+                                color: isSelected ? vColor.withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.35),
+                                fontSize: 10,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
                       ),
-                      Text(
-                        v['tone']!,
-                        style: TextStyle(
-                          color: isSelected ? vColor.withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.35),
-                          fontSize: 10,
+                      // ElevenLabs-style preview button
+                      GestureDetector(
+                        onTap: () => _previewVoice(v['id']!),
+                        child: Container(
+                          width: 26,
+                          height: 26,
+                          decoration: BoxDecoration(
+                            color: isPreviewing
+                                ? vColor.withValues(alpha: 0.25)
+                                : Colors.white.withValues(alpha: 0.06),
+                            shape: BoxShape.circle,
+                          ),
+                          child: isPreviewLoading
+                              ? Padding(
+                                  padding: const EdgeInsets.all(6),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.5,
+                                    color: vColor,
+                                  ),
+                                )
+                              : Icon(
+                                  isPreviewing ? Icons.stop_rounded : Icons.play_arrow_rounded,
+                                  size: 14,
+                                  color: isPreviewing ? vColor : Colors.white.withValues(alpha: 0.4),
+                                ),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
