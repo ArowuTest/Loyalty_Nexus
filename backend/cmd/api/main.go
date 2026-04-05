@@ -214,9 +214,9 @@ func main() {
 		authSvc       := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
 		adminAuthSvc  := services.NewAdminAuthService(db)           // RBAC email+password auth for admins; seeds admin from ADMIN_SEED_EMAIL/PASSWORD env vars on first run
 		fulfillSvc    := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
-		rechargeSvc   := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
 		drawSvc       := services.NewDrawService(db)
 		drawWindowSvc := services.NewDrawWindowService(db)
+		rechargeSvc   := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db, drawWindowSvc)
 		mtnPushSvc    := services.NewMTNPushService(db, userRepo, txRepo, drawSvc, drawWindowSvc, notifySvc, cfg)
 		spinSvc       := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
 		studioSvc     := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)

@@ -40,11 +40,12 @@ type PaystackCharge struct {
 }
 
 type RechargeService struct {
-	userRepo  repositories.UserRepository
-	txRepo    repositories.TransactionRepository
-	notifySvc *NotificationService
-	cfg       *config.ConfigManager
-	db        *gorm.DB
+	userRepo       repositories.UserRepository
+	txRepo         repositories.TransactionRepository
+	notifySvc      *NotificationService
+	cfg            *config.ConfigManager
+	db             *gorm.DB
+	drawWindowSvc  *DrawWindowService // resolves which draws a recharge qualifies for
 }
 
 func NewRechargeService(
@@ -53,13 +54,15 @@ func NewRechargeService(
 	ns *NotificationService,
 	cfg *config.ConfigManager,
 	db *gorm.DB,
+	dws *DrawWindowService,
 ) *RechargeService {
 	return &RechargeService{
-		userRepo:  ur,
-		txRepo:    tr,
-		notifySvc: ns,
-		cfg:       cfg,
-		db:        db,
+		userRepo:      ur,
+		txRepo:        tr,
+		notifySvc:     ns,
+		cfg:           cfg,
+		db:            db,
+		drawWindowSvc: dws,
 	}
 }
 
@@ -209,6 +212,31 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 		streakExpiresAt := time.Now().Add(time.Duration(streakHours) * time.Hour)
 		if err := s.userRepo.UpdateStreak(ctx, user.ID, newStreak, streakExpiresAt); err != nil {
 			return err
+		}
+
+		// ── Insert draw_entries rows for qualifying draws ────────────────────
+		// Every draw_naira_per_entry naira recharge = 1 draw entry ticket.
+		// Entries are written into each active draw whose window this recharge falls into.
+		if drawEntriesEarned > 0 && s.drawWindowSvc != nil {
+			qualifyingDraws, qErr := s.drawWindowSvc.ResolveQualifyingDraws(context.Background(), time.Now())
+			if qErr == nil {
+				for _, qd := range qualifyingDraws {
+					entry := map[string]interface{}{
+						"id":            uuid.New(),
+						"draw_id":        qd.DrawID,
+						"user_id":        user.ID,
+						"msisdn":         user.PhoneNumber,
+						"entry_source":   "recharge",
+						"amount":         amountKobo,
+						"entries_count":  drawEntriesEarned,
+						"created_at":     time.Now(),
+					}
+					if err := dbTx.Table("draw_entries").Create(&entry).Error; err != nil {
+						log.Printf("[Recharge] draw entry insert failed draw=%s user=%s: %v", qd.DrawID, user.ID, err)
+						// non-fatal — continue processing
+					}
+				}
+			}
 		}
 
 		// ── Update user recharge stats ────────────────────────────────────────
