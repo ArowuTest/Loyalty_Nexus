@@ -17,20 +17,24 @@ UPDATE prize_pool SET color_scheme = '#10b981' WHERE is_active = true AND (color
 UPDATE prize_pool SET color_scheme = '#FFD700' WHERE is_active = true AND (color_scheme IS NULL OR color_scheme = '') AND prize_type = 'momo_cash';
 
 -- Seed the daily draw schedule (DAILY draw, Mon–Sun, WAT 21:00)
--- This ensures ResolveQualifyingDraws returns the active draw on every recharge.
+-- draw_day_of_week must be 0–6 per CHECK constraint; for DAILY draws the scheduler
+-- uses WindowOpenDOW/WindowCloseDOW for window logic, not DrawDayOfWeek.
+-- We insert 7 rows (one per day) so every day of the week is covered.
 INSERT INTO draw_schedules (
   id, draw_name, draw_type,
   draw_day_of_week, draw_time_wat,
   window_open_dow, window_open_time,
   window_close_dow, window_close_time,
   cutoff_hour_utc, is_active, sort_order
-) VALUES (
-  gen_random_uuid(), 'Daily Draw', 'DAILY',
-  -1, '21:00:00',
-  -1, '00:00:00',
-  -1, '20:59:59',
-  20, true, 1
-) ON CONFLICT DO NOTHING;
+) VALUES
+  (gen_random_uuid(), 'Daily Draw — Sunday',    'DAILY', 0, '21:00:00', 0, '00:00:00', 0, '20:59:59', 20, true, 10),
+  (gen_random_uuid(), 'Daily Draw — Monday',    'DAILY', 1, '21:00:00', 1, '00:00:00', 1, '20:59:59', 20, true, 11),
+  (gen_random_uuid(), 'Daily Draw — Tuesday',   'DAILY', 2, '21:00:00', 2, '00:00:00', 2, '20:59:59', 20, true, 12),
+  (gen_random_uuid(), 'Daily Draw — Wednesday', 'DAILY', 3, '21:00:00', 3, '00:00:00', 3, '20:59:59', 20, true, 13),
+  (gen_random_uuid(), 'Daily Draw — Thursday',  'DAILY', 4, '21:00:00', 4, '00:00:00', 4, '20:59:59', 20, true, 14),
+  (gen_random_uuid(), 'Daily Draw — Friday',    'DAILY', 5, '21:00:00', 5, '00:00:00', 5, '20:59:59', 20, true, 15),
+  (gen_random_uuid(), 'Daily Draw — Saturday',  'DAILY', 6, '21:00:00', 6, '00:00:00', 6, '20:59:59', 20, true, 16)
+ON CONFLICT DO NOTHING;
 
 -- Create the first active daily draw record for April 2026 (if not already present)
 INSERT INTO draws (
