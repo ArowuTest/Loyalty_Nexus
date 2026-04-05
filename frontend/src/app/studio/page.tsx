@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import {
   MusicComposer, ImageCreator, ImageEditor, ImageCompose,
-  VideoCreator, VideoAnimator, VideoEditor, VideoExtender, VideoMultiScene, VoiceStudio,
+  VideoCreator, VideoAnimator, VideoEditor, VideoExtender, VideoMultiScene, VideoScript, VoiceStudio,
   Transcribe, VisionAsk, KnowledgeDoc,
 } from "../../components/studio/templates";
 import type { GeneratePayload } from "../../components/studio/templates";
@@ -1908,6 +1908,7 @@ function renderTemplate(
     case "video-editor":       return <VideoEditor       {...props} />;
     case "video-extender":     return <VideoExtender     {...props} />;
     case "video-multi-scene":  return <VideoMultiScene  {...props} />;
+    case "video-script":       return <VideoScript       {...props} />;
     case "voice-studio":    return <VoiceStudio    {...props} />;
     case "transcribe":      return <Transcribe     {...props} />;
     case "vision-ask":      return <VisionAsk      {...props} />;

@@ -28,6 +28,7 @@ export type UITemplate =
   | 'video-editor'
   | 'video-extender'
   | 'video-multi-scene'
+  | 'video-script'
   | 'voice-studio'
   | 'transcribe'
   | 'vision-ask'
@@ -136,6 +137,10 @@ export interface UIConfig {
   placeholder_prompt?: string;          // story prompt placeholder
   aspect_ratio_options?: AspectRatioOption[];  // alias for aspect_ratios
   submit_label?: string;                // custom generate button label
+  // video-script
+  max_scenes?: number;                  // max number of scenes (default 6)
+  max_characters?: number;              // max number of characters (default 5)
+  default_duration_script?: number;     // default video duration in seconds for VideoScript
 }
 
 export interface StudioTool {

@@ -975,8 +975,13 @@ func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL s
 func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	// Remap alias slugs to canonical ones
 	switch slug {
-	case "animate-my-photo", "my-video-story":
+	case "animate-my-photo":
+		// Single-image animation — maps to the animate-photo path
 		slug = "animate-photo"
+	case "my-video-story":
+		// Script-driven multi-scene animation — maps to the video-story
+		// multi-image path (Grok reference-image / Kling multi-image)
+		slug = "video-story"
 	}
 
 	// ── video-edit: Natural language video editing via Grok Imagine ───────────────────────────
@@ -1113,14 +1118,14 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		if imgURL == "" {
 			return nil, fmt.Errorf("video-cinematic: image_url is required")
 		}
-		// Tier 1: wan-fast (Wan 2.2) — FREE, 91.4% success
-		vidURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imgURL, motionPrompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration))
+		// Tier 1: wan-fast (Wan 2.2) — FREE, 91.4% success; audio=true enables ambient sound
+		vidURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imgURL, motionPrompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 		}
 		log.Printf("[AIStudio] wan-fast failed for video-cinematic: %v — trying p-video", err)
-		// Tier 2: p-video (Pruna p-video) — FREE, 100% success (ltx-2 was OFF, replaced)
-		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", imgURL, motionPrompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration))
+		// Tier 2: p-video (Pruna p-video) — FREE, 100% success; audio=true enables ambient sound
+		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", imgURL, motionPrompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 		}
@@ -1181,14 +1186,14 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/veo", CostMicros: 400000}, nil
 		}
 		log.Printf("[AIStudio] Veo failed for video-veo: %v — falling back to wan-fast (FREE)", err)
-		// Fallback 1: wan-fast text-to-video (FREE) — NOT seedance (also paid)
-		vidURL, err = o.callPollinationsVideoModel(ctx, "wan-fast", "", prompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration))
+		// Fallback 1: wan-fast text-to-video (FREE) — NOT seedance (also paid); audio=true
+		vidURL, err = o.callPollinationsVideoModel(ctx, "wan-fast", "", prompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 		}
 		log.Printf("[AIStudio] wan-fast fallback failed for video-veo: %v — trying p-video", err)
-		// Fallback 2: p-video (Pruna p-video) — FREE, 100% success
-		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", "", prompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration))
+		// Fallback 2: p-video (Pruna p-video) — FREE, 100% success; audio=true
+		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", "", prompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 		}
@@ -1265,20 +1270,20 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		log.Printf("[AIStudio] FAL video failed: %v", err)
 	}
 
-	// Tier 2: Pollinations wan-fast / Wan 2.2 — FREE, 91.4% success
+	// Tier 2: Pollinations wan-fast / Wan 2.2 — FREE, 91.4% success; audio=true for ambient sound
 	// NOTE: seedance is PAID (1.8 pollen/M) — never use as a free fallback
 	motionDesc := o.enhanceVideoPrompt(ctx, env.Prompt)
 	if motionDesc == "" {
 		motionDesc = "animate this image with subtle cinematic motion, smooth camera movement, natural lighting"
 	}
-	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, motionDesc, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration)); err == nil {
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, motionDesc, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true"); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 	} else {
 		log.Printf("[AIStudio] Pollinations wan-fast failed: %v — trying p-video", err)
 	}
 
-	// Tier 3: Pollinations p-video (Pruna) — FREE, 100% success (ltx-2 was OFF, replaced)
-	if videoURL, err := o.callPollinationsVideoModel(ctx, "p-video", imageURL, motionDesc, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration)); err == nil {
+	// Tier 3: Pollinations p-video (Pruna) — FREE, 100% success; audio=true for ambient sound
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "p-video", imageURL, motionDesc, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true"); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 	} else {
 		log.Printf("[AIStudio] Pollinations p-video failed: %v", err)
@@ -1808,21 +1813,22 @@ func (o *AIStudioOrchestrator) assembleVideoJingle(ctx context.Context, env prom
 	var videoURL string
 	// If user uploaded an image, animate it; otherwise text-to-video
 	if env.ImageURL != "" {
-		if url, err := o.callPollinationsVideoModel(ctx, "wan-fast", env.ImageURL, videoPrompt, 180, env.AspectRatio, "15"); err == nil {
+		// audio=true: video-jingle always wants sound (the music track is merged in later)
+		if url, err := o.callPollinationsVideoModel(ctx, "wan-fast", env.ImageURL, videoPrompt, 180, env.AspectRatio, "15", "true"); err == nil {
 			videoURL = url
 		} else {
 			log.Printf("[AIStudio] video-jingle: wan-fast image-to-video failed: %v", err)
 		}
 	}
 	if videoURL == "" {
-		if url, err := o.callPollinationsVideoModel(ctx, "wan-fast", "", videoPrompt, 180, env.AspectRatio, "15"); err == nil {
+		if url, err := o.callPollinationsVideoModel(ctx, "wan-fast", "", videoPrompt, 180, env.AspectRatio, "15", "true"); err == nil {
 			videoURL = url
 		} else {
 			log.Printf("[AIStudio] video-jingle: wan-fast text-to-video failed: %v", err)
 		}
 	}
 	if videoURL == "" {
-		if url, err := o.callPollinationsVideoModel(ctx, "p-video", "", videoPrompt, 180, env.AspectRatio, "15"); err == nil {
+		if url, err := o.callPollinationsVideoModel(ctx, "p-video", "", videoPrompt, 180, env.AspectRatio, "15", "true"); err == nil {
 			videoURL = url
 		} else {
 			log.Printf("[AIStudio] video-jingle: p-video fallback failed: %v", err)
@@ -2426,7 +2432,8 @@ func (o *AIStudioOrchestrator) callFALVideo(ctx context.Context, falKey, model, 
 // callFALMultiImageVideo calls the FAL Kling v1.6 multi-image-to-video endpoint.
 // Accepts 2-4 image URLs and a story prompt, returns a video URL.
 func (o *AIStudioOrchestrator) callFALMultiImageVideo(ctx context.Context, falKey string, imageURLs []string, prompt string, env promptEnvelope) (string, error) {
-	const model = "fal-ai/kling-video/v1.6-standard/multi-image-to-video"
+	// Upgraded from v1.6-standard to v2.6-pro for native audio generation support
+	const model = "fal-ai/kling-video/v2.6/pro/multi-image-to-video"
 
 	if prompt == "" {
 		prompt = "Create a smooth cinematic video transitioning between these scenes with natural motion"
@@ -2463,10 +2470,11 @@ func (o *AIStudioOrchestrator) callFALMultiImageVideo(ctx context.Context, falKe
 	}
 
 	payload := map[string]interface{}{
-		"prompt":       prompt,
-		"image_list":   images,
-		"duration":     durationStr,
-		"aspect_ratio": aspectRatio,
+		"prompt":         prompt,
+		"image_list":     images,
+		"duration":       durationStr,
+		"aspect_ratio":   aspectRatio,
+		"generate_audio": true, // Kling v2.6 native audio generation
 	}
 
 	body, _ := json.Marshal(payload)
