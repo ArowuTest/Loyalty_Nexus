@@ -5,7 +5,7 @@ run:
 
 # Note: linter selection is controlled via the CI workflow args:
 #   --enable-only=govet,errcheck,staticcheck
-# This config file only provides settings and issue exclusions.
+# This config file only provides settings and per-rule exclusions.
 
 linters:
   settings:
@@ -16,7 +16,6 @@ linters:
       # that is more informative than enforced Go-doc style for HTTP handlers.
       checks: ["all", "-ST1020"]
 
-issues:
   exclusions:
     rules:
       # wars_ws.go uses nhooyr.io/websocket which is maintained as
