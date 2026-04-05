@@ -27,39 +27,39 @@ func NewAuthService(ar repositories.AuthRepository, ur repositories.UserReposito
 	}
 }
 
-func (s *AuthService) SendLoginOTP(ctx context.Context, msisdn string) error {
+func (s *AuthService) SendLoginOTP(ctx context.Context, phoneNumber string) error {
 	code := s.generateNumericOTP(6)
 
 	otp := &entities.AuthOTP{
-		MSISDN:    msisdn,
-		Code:      code,
-		Purpose:   entities.PurposeLogin,
-		Status:    "pending",
-		ExpiresAt: time.Now().Add(10 * time.Minute),
+		PhoneNumber: phoneNumber,
+		Code:        code,
+		Purpose:     entities.OTPLogin,
+		Status:      "pending",
+		ExpiresAt:   time.Now().Add(10 * time.Minute),
 	}
 
 	if err := s.authRepo.CreateOTP(ctx, otp); err != nil {
 		return err
 	}
 
-	return s.notifySvc.SendTemplateSMS(ctx, msisdn, "otp_delivery", map[string]string{"code": code})
+	return s.notifySvc.SendTemplateSMS(ctx, phoneNumber, "otp_delivery", map[string]string{"code": code})
 }
 
-func (s *AuthService) VerifyLogin(ctx context.Context, msisdn, code string) (string, error) {
-	otp, err := s.authRepo.FindPendingOTP(ctx, msisdn, code, entities.PurposeLogin)
+func (s *AuthService) VerifyLogin(ctx context.Context, phoneNumber, code string) (string, error) {
+	otp, err := s.authRepo.FindPendingOTP(ctx, phoneNumber, code, entities.OTPLogin)
 	if err != nil {
 		return "", fmt.Errorf("invalid or expired code")
 	}
 
 	s.authRepo.MarkOTPUsed(ctx, otp.ID)
 
-	user, err := s.userRepo.FindByMSISDN(ctx, msisdn)
+	user, err := s.userRepo.FindByPhoneNumber(ctx, phoneNumber)
 	if err != nil {
 		user = &entities.User{
-			ID:       uuid.New(),
-			MSISDN:   msisdn,
-			UserCode: fmt.Sprintf("NEX%s", uuid.New().String()[:6]),
-			Tier:     "BRONZE",
+			ID:          uuid.New(),
+			PhoneNumber: phoneNumber,
+			UserCode:    fmt.Sprintf("NEX%s", uuid.New().String()[:6]),
+			Tier:        "BRONZE",
 		}
 		s.userRepo.Create(ctx, user)
 	}
