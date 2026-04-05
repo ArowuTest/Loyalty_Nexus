@@ -17,11 +17,12 @@ linters:
       checks: ["all", "-ST1020"]
 
 issues:
-  exclude-rules:
-    # wars_ws.go uses nhooyr.io/websocket which is maintained as
-    # github.com/coder/websocket (same library, different import path).
-    # All deprecated call sites have //nolint:staticcheck inline.
-    - path: wars_ws\.go
-      linters:
-        - staticcheck
-      text: "SA1019"
+  exclusions:
+    rules:
+      # wars_ws.go uses nhooyr.io/websocket which is maintained as
+      # github.com/coder/websocket (same library, different import path).
+      # All deprecated call sites have //nolint:staticcheck inline.
+      - path: wars_ws\.go
+        linters:
+          - staticcheck
+        text: "SA1019"
