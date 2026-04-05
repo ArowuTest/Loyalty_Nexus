@@ -128,8 +128,6 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 		if timeSinceLast <= streakWindow {
 			user.StreakCount++
 		} else {
-			// Check if we can apply grace day (REQ-5.2.13)
-			// Simple logic: if within (36h + 24h) and grace remains
 			if timeSinceLast <= (streakWindow + 24*time.Hour) && user.StreakFreezeGraceUsed < graceLimit {
 				user.StreakCount++
 				user.StreakFreezeGraceUsed++
@@ -162,22 +160,37 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	pointsEarned := int64(nairaAmount * rate * globalMultiplier)
 
 	// 3. Bonus Triggers
+	
+	// First Recharge Bonus (REQ-5.2.8)
 	var firstBonus int64
 	if isFirstRecharge {
 		db.Table("program_bonuses").Where("event_type = 'first_recharge' AND is_active = true").Pluck("bonus_points", &firstBonus)
 		pointsEarned += firstBonus
 	}
 
+	// Streak milestone bonus (REQ-5.2.9)
 	var streakBonus int64
 	db.Table("program_bonuses").
 		Where("event_type = 'streak_milestone' AND threshold = ? AND is_active = true", user.StreakCount).
 		Pluck("bonus_points", &streakBonus)
 	pointsEarned += streakBonus
 
+	// Referral Bonus (REQ-5.2.10)
+	if isFirstRecharge && user.ReferredByID != nil {
+		var referralPoints int64
+		db.Table("program_bonuses").Where("event_type = 'referral_completion' AND is_active = true").Pluck("bonus_points", &referralPoints)
+		if referralPoints > 0 {
+			pointsEarned += referralPoints
+			// Award referrer too
+			db.Model(&entities.User{}).Where("id = ?", user.ReferredByID).Update("total_points", gorm.Expr("total_points + ?", referralPoints))
+			log.Printf("[Worker] Referral Bonus awarded to referrer of %s", user.MSISDN)
+		}
+	}
+
 	user.TotalPoints += pointsEarned
 	user.TotalRechargeAmount += event.Amount
 
-	// REQ-5.2.14: Update Points Expiry (Rolling 90 days default)
+	// Points Expiry
 	expiryDays := cfg.GetInt("points_expiry_days", 90)
 	user.PointsExpiryDate = now.Add(time.Duration(expiryDays) * 24 * time.Hour)
 

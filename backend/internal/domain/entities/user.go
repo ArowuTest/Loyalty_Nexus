@@ -22,9 +22,12 @@ type User struct {
 	MoMoVerified        bool      `json:"momo_verified" gorm:"default:false"`
 	MoMoVerifiedAt      time.Time `json:"momo_verified_at"`
 	
-	// NEW: REQ-5.2.13, REQ-5.2.14
 	StreakFreezeGraceUsed int       `json:"streak_freeze_grace_used" gorm:"default:0"`
 	PointsExpiryDate      time.Time `json:"points_expiry_date"`
+	
+	// NEW: REQ-1.4, REQ-5.2.10
+	PwaInstalled bool       `json:"pwa_installed" gorm:"default:false"`
+	ReferredByID *uuid.UUID `json:"referred_by_id"`
 	
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
