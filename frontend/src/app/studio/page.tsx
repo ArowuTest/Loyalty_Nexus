@@ -1110,7 +1110,9 @@ function ChatBubble({ msg }: { msg: Message }) {
 }
 
 // ─── Tool Card ────────────────────────────────────────────────────────────────
-const CHAT_REDIRECT_SLUGS = new Set(["web-search-ai", "code-helper"]);
+// CHAT_REDIRECT_SLUGS: clicking these tool cards opens the Chat tab instead of the ToolDrawer.
+// code-helper is in Build category and uses the ToolDrawer — only web-search-ai redirects to Chat.
+const CHAT_REDIRECT_SLUGS = new Set(["web-search-ai"]);
 
 function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () => void; userPoints?: number }) {
   const cfg         = catCfg(tool.category);
@@ -2658,7 +2660,7 @@ function StudioPageInner() {
       setChatMode("general"); setActiveTab("chat"); return;
     }
     if (slugParam === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); return; }
-    if (slugParam === "code-helper")   { setChatMode("code");   setActiveTab("chat"); return; }
+    // code-helper opens the ToolDrawer (Build category) — do not redirect to Chat tab
     const match = tools.find((t: Tool) => t.slug === slugParam);
     if (match) {
       setSelectedTool(match);
@@ -3315,11 +3317,7 @@ function StudioPageInner() {
                     return (
                       <button
                         key={cat}
-                        onClick={() => {
-                          // Clicking "Chat" pill switches to the Chat tab directly
-                          if (cat === "Chat") { setActiveTab("chat"); return; }
-                          setActiveCategory(activeCategory === cat ? null : cat);
-                        }}
+                        onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
                         className={cn(
                           "flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-all font-medium flex items-center gap-1",
                           activeCategory === cat
@@ -3403,7 +3401,6 @@ function StudioPageInner() {
                             userPoints={userPoints}
                             onClick={() => {
                               if (tool.slug === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); }
-                              else if (tool.slug === "code-helper") { setChatMode("code"); setActiveTab("chat"); }
                               else if (tool.slug === "nexus-chat" || tool.slug === "ask-nexus") { setChatMode("general"); setActiveTab("chat"); }
                               else { setSelectedTool(tool); }
                             }}
@@ -3434,9 +3431,6 @@ function StudioPageInner() {
                               // Chat tools switch to Chat tab with correct mode
                               if (tool.slug === "web-search-ai") {
                                 setChatMode("search");
-                                setActiveTab("chat");
-                              } else if (tool.slug === "code-helper") {
-                                setChatMode("code");
                                 setActiveTab("chat");
                               } else if (tool.slug === "nexus-chat" || tool.slug === "ask-nexus") {
                                 setChatMode("general");
