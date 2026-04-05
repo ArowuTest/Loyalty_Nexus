@@ -155,35 +155,59 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 	rate := tier.PointsPerNaira
 	if rate == 0 { rate = 0.004 } 
 
+	// ── REQ-5.2.5 to 5.2.7: Advanced Multipliers ─────────────────────────────
 	globalMultiplier := cfg.GetFloat("global_points_multiplier", 1.0)
+	
+	// Scheduled and Segment multipliers (REQ-5.2.6, 5.2.7)
+	var activeMultipliers []float64
+	db.Table("scheduled_multipliers").
+		Where("is_active = true AND now() BETWEEN start_time AND end_time").
+		Where("(segment_type = 'global') OR (segment_type = 'state' AND segment_value = ?) OR (segment_type = 'inactive_users' AND ? > 7)", 
+			user.State, time.Since(lastActivity).Hours()/24).
+		Pluck("multiplier", &activeMultipliers)
+	
+	maxScheduledMult := 1.0
+	for _, m := range activeMultipliers {
+		if m > maxScheduledMult { maxScheduledMult = m }
+	}
+
+	// Innovation: Regional Wars (Strategy Doc Section 4)
+	regionalMultiplier := 1.0
+	if user.State != "" {
+		var reg struct {
+			GoldenHourMultiplier float64
+			IsGoldenHour bool
+			BaseMultiplier float64
+		}
+		if err := db.Table("regional_settings").Where("region_name = ?", user.State).First(&reg).Error; err == nil {
+			regionalMultiplier = reg.BaseMultiplier
+			if reg.IsGoldenHour { regionalMultiplier = reg.GoldenHourMultiplier }
+		}
+	}
+
+	finalMultiplier := globalMultiplier * maxScheduledMult * regionalMultiplier
 	nairaAmount := float64(event.Amount) / 100
-	pointsEarned := int64(nairaAmount * rate * globalMultiplier)
+	pointsEarned := int64(nairaAmount * rate * finalMultiplier)
 
 	// 3. Bonus Triggers
-	
-	// First Recharge Bonus (REQ-5.2.8)
 	var firstBonus int64
 	if isFirstRecharge {
 		db.Table("program_bonuses").Where("event_type = 'first_recharge' AND is_active = true").Pluck("bonus_points", &firstBonus)
 		pointsEarned += firstBonus
 	}
 
-	// Streak milestone bonus (REQ-5.2.9)
 	var streakBonus int64
 	db.Table("program_bonuses").
 		Where("event_type = 'streak_milestone' AND threshold = ? AND is_active = true", user.StreakCount).
 		Pluck("bonus_points", &streakBonus)
 	pointsEarned += streakBonus
 
-	// Referral Bonus (REQ-5.2.10)
 	if isFirstRecharge && user.ReferredByID != nil {
 		var referralPoints int64
 		db.Table("program_bonuses").Where("event_type = 'referral_completion' AND is_active = true").Pluck("bonus_points", &referralPoints)
 		if referralPoints > 0 {
 			pointsEarned += referralPoints
-			// Award referrer too
 			db.Model(&entities.User{}).Where("id = ?", user.ReferredByID).Update("total_points", gorm.Expr("total_points + ?", referralPoints))
-			log.Printf("[Worker] Referral Bonus awarded to referrer of %s", user.MSISDN)
 		}
 	}
 
@@ -213,7 +237,7 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 		Amount:      event.Amount,
 		PointsDelta: pointsEarned,
 		CreatedAt:   time.Now(),
-		Metadata:    map[string]any{"ref": event.Ref, "first_recharge": isFirstRecharge},
+		Metadata:    map[string]any{"ref": event.Ref, "first_recharge": isFirstRecharge, "multiplier": finalMultiplier},
 	}
 	tr.Save(ctx, tx)
 }
