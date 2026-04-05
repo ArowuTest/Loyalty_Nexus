@@ -121,7 +121,7 @@ func (s *StudioService) RequestGeneration(
 			PointsDeducted: 0,
 			CreatedAt:      now,
 			UpdatedAt:      now,
-			ExpiresAt:      now.AddDate(0, 0, 30),
+			ExpiresAt:      now.Add(48 * time.Hour), // 48-hour asset window — provider CDN URLs expire
 		}
 		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if err := s.studioRepo.CreateGenerationTx(ctx, tx, gen); err != nil {
@@ -168,7 +168,7 @@ func (s *StudioService) RequestGeneration(
 		PointsDeducted: tool.PointCost,
 		CreatedAt:      now,
 		UpdatedAt:      now,
-		ExpiresAt:      now.AddDate(0, 0, 30), // 30-day asset retention
+		ExpiresAt:      now.Add(48 * time.Hour), // 48-hour asset window — provider CDN URLs expire
 	}
 
 	// 7. Atomic: deduct wallet + ledger entry + create job
