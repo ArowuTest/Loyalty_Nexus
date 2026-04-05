@@ -237,7 +237,7 @@ func buildRouter(t *testing.T, db *gorm.DB) *http.ServeMux {
 	mtnPushSvc    := services.NewMTNPushService(db, userRepo, txRepo, drawSvc, drawWindowSvc, notifySvc, cfg)
 
 	// RechargeService (needed for NewRechargeHandlerWithMTN)
-	rechargeSvc := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db)
+	rechargeSvc := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db, drawWindowSvc)
 
 	// EventQueue stub — nil is safe because MTN push doesn't use the queue
 	rechargeH := handlers.NewRechargeHandlerWithMTN(rechargeSvc, mtnPushSvc, nil)
