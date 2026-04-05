@@ -99,6 +99,7 @@ const _typeConfig = {
   'wars_result':  (emoji: '🌍', color: Color(0xFF10b981)),
   'bonus_pulse':  (emoji: '⚡', color: Color(0xFF5F72F9)),
   'marketing':    (emoji: '📢', color: Color(0xFF06b6d4)),
+  'referral':     (emoji: '👥', color: Color(0xFF22c55e)),
 };
 
 ({String emoji, Color color}) _cfg(String? type) =>
