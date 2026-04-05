@@ -2046,10 +2046,9 @@ function ToolDrawer({
         initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
         ref={drawerScrollRef}
-        className="fixed bottom-0 left-0 right-0 z-40 max-h-[92vh] overflow-y-auto
-                   md:relative md:inset-auto md:max-h-none"
+        className="fixed bottom-0 left-0 right-0 z-50 max-h-[92vh] overflow-y-auto"
       >
-        <div className="glass border border-white/[0.08] m-2 md:m-0 overflow-hidden">
+        <div className="glass border border-white/[0.08] m-2 overflow-hidden">
           {/* Top colour stripe — maps to category colour */}
           <div className={cn("h-1 w-full bg-gradient-to-r", cfg.color.replace("/20","/70").replace("/10","/50"))} />
 
@@ -2630,6 +2629,11 @@ function StudioPageInner() {
   const sessionId = sessionIds.current[chatMode] || `sess_${chatMode}_${Date.now()}`;
   const searchParams    = useSearchParams();
   const [selectedTool,   setSelectedTool]   = useState<Tool | null>(null);
+  // Helper: open a tool drawer and immediately scroll to top so the drawer is visible
+  const openTool = useCallback((tool: Tool | null) => {
+    setSelectedTool(tool);
+    if (tool) window.scrollTo({ top: 0, behavior: "instant" });
+  }, []);
   const [searchQuery,    setSearchQuery]    = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [introDismissed, setIntroDismissed] = useState<boolean>(true);
@@ -2720,7 +2724,7 @@ function StudioPageInner() {
     // code-helper opens the ToolDrawer (Build category) — do not redirect to Chat tab
     const match = tools.find((t: Tool) => t.slug === slugParam);
     if (match) {
-      setSelectedTool(match);
+      openTool(match);
       setActiveTab("tools");
     }
     // Only run once when tools load and slug is present
@@ -3466,7 +3470,7 @@ function StudioPageInner() {
                             onClick={() => {
                               if (tool.slug === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); }
                               else if (CHAT_TAB_SLUGS.has(tool.slug)) { setChatMode("general"); setActiveTab("chat"); }
-                              else { setSelectedTool(tool); }
+                              else { openTool(tool); }
                             }}
                           />
                         ))}
@@ -3500,7 +3504,7 @@ function StudioPageInner() {
                                 setChatMode("general");
                                 setActiveTab("chat");
                               } else {
-                                setSelectedTool(tool);
+                                openTool(tool);
                               }
                             }}
                           />
@@ -3560,7 +3564,7 @@ function StudioPageInner() {
                         gen={gen}
                         onRegenerate={(g) => {
                           const tool = tools.find((t) => t.slug === g.tool_slug);
-                          if (tool) { setSelectedTool(tool); setActiveTab("tools"); }
+                          if (tool) { openTool(tool); setActiveTab("tools"); }
                         }}
                       />
                     ))}
@@ -3586,7 +3590,7 @@ function StudioPageInner() {
         {selectedTool && (
           <ToolDrawer
             tool={selectedTool}
-            onClose={() => setSelectedTool(null)}
+            onClose={() => openTool(null)}
             userPoints={userPoints}
             onGenerated={() => { mutateGallery(); }}
             onContinueInChat={(prefill) => {
