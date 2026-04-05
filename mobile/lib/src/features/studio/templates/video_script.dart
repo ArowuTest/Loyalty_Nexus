@@ -85,7 +85,11 @@ class _Character {
 class _DialogueLine {
   String characterId;
   String text;
-  _DialogueLine({this.characterId = _kNarratorId, this.text = ''});
+
+  _DialogueLine(this.characterId, this.text);
+
+  /// Convenience factory: narrator line with empty text (default state).
+  factory _DialogueLine.empty() => _DialogueLine(_kNarratorId, '');
 }
 
 class _SceneSlot {
@@ -98,18 +102,28 @@ class _SceneSlot {
 
   _SceneSlot({
     required this.id,
-    this.imageFile,
-    this.imageUrl,
-    this.uploadedUrl = '',
-    this.direction = '',
-    List<_DialogueLine>? dialogue,
-  }) : dialogue = dialogue ?? [_DialogueLine()];
+    required this.imageFile,
+    required this.imageUrl,
+    required this.uploadedUrl,
+    required this.direction,
+    required this.dialogue,
+  });
+
+  /// Convenience factory: empty scene with default values.
+  factory _SceneSlot.empty(String id) => _SceneSlot(
+    id: id,
+    imageFile: null,
+    imageUrl: null,
+    uploadedUrl: '',
+    direction: '',
+    dialogue: [_DialogueLine.empty()],
+  );
 
   bool get hasImage => imageFile != null || (imageUrl?.isNotEmpty ?? false) || uploadedUrl.isNotEmpty;
   bool get hasContent => hasImage || direction.isNotEmpty || dialogue.any((l) => l.text.isNotEmpty);
 }
 
-_SceneSlot _emptyScene(String id) => _SceneSlot(id: id);
+// _SceneSlot.empty(id) is the canonical way to create an empty scene.
 
 // ── Widget ─────────────────────────────────────────────────────────────────────
 
@@ -142,7 +156,7 @@ class _VideoScriptTemplateState extends ConsumerState<VideoScriptTemplate> {
   @override
   void initState() {
     super.initState();
-    _scenes = [_emptyScene('s1'), _emptyScene('s2')];
+    _scenes = [_SceneSlot.empty('s1'), _SceneSlot.empty('s2')];
     _expandedSceneId = 's1';
   }
 
@@ -203,7 +217,7 @@ class _VideoScriptTemplateState extends ConsumerState<VideoScriptTemplate> {
     if (_scenes.length >= 6) return;
     final id = 's${DateTime.now().millisecondsSinceEpoch}';
     setState(() {
-      _scenes.add(_emptyScene(id));
+      _scenes.add(_SceneSlot.empty(id));
       _expandedSceneId = id;
     });
   }
@@ -218,7 +232,7 @@ class _VideoScriptTemplateState extends ConsumerState<VideoScriptTemplate> {
   void _addDialogueLine(String sceneId) {
     setState(() {
       final scene = _scenes.firstWhere((s) => s.id == sceneId);
-      scene.dialogue.add(_DialogueLine());
+      scene.dialogue.add(_DialogueLine.empty());
     });
   }
 
