@@ -749,6 +749,7 @@ func (h *AdminHandler) CreateStudioTool(w http.ResponseWriter, r *http.Request) 
 		Icon:         body.Icon,
 		SortOrder:    body.SortOrder,
 		IsActive:     true,
+		UIConfig:     entities.UIConfig{}, // default empty JSON object to satisfy NOT NULL
 	}
 
 	if err := h.studioSvc.UpsertTool(r.Context(), &tool); err != nil {
