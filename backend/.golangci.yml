@@ -1,14 +1,20 @@
+version: "2"
+
 run:
   timeout: 5m
 
-# Note: linter selection is controlled entirely by the CI workflow flags:
-#   --disable=typecheck --enable=govet,errcheck,staticcheck
-# This config file only provides settings and issue exclusions — no linter
-# enable/disable directives here to avoid conflicting with CLI flags.
+# Note: linter selection is controlled via the CI workflow args:
+#   --enable-only=govet,errcheck,staticcheck
+# This config file only provides settings and issue exclusions.
 
-linters-settings:
-  staticcheck:
-    checks: ["all"]
+linters:
+  settings:
+    staticcheck:
+      # Enable all staticcheck checks except ST1020 (exported method comment format).
+      # ST1020 is excluded because handler methods use route-description comments
+      # (e.g. "// ── GET /api/v1/draws") as an intentional architectural convention
+      # that is more informative than enforced Go-doc style for HTTP handlers.
+      checks: ["all", "-ST1020"]
 
 issues:
   exclude-rules:

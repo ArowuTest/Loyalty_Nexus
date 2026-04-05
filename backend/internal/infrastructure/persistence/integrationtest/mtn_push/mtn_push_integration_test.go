@@ -57,9 +57,15 @@ import (
 // ─── TestMain ─────────────────────────────────────────────────────────────────
 
 func TestMain(m *testing.M) {
-	os.Setenv("JWT_SECRET", "test-jwt-secret-mtn-push-32bytes!!")
-	os.Setenv("AES_256_KEY", "test-aes-key-32bytes-padding-xxx!")
-	os.Setenv("MTN_PUSH_SECRET", "test-mtn-hmac-secret")
+	if err := os.Setenv("JWT_SECRET", "test-jwt-secret-mtn-push-32bytes!!"); err != nil {
+		panic("TestMain: set JWT_SECRET: " + err.Error())
+	}
+	if err := os.Setenv("AES_256_KEY", "test-aes-key-32bytes-padding-xxx!"); err != nil {
+		panic("TestMain: set AES_256_KEY: " + err.Error())
+	}
+	if err := os.Setenv("MTN_PUSH_SECRET", "test-mtn-hmac-secret"); err != nil {
+		panic("TestMain: set MTN_PUSH_SECRET: " + err.Error())
+	}
 	os.Exit(m.Run())
 }
 
@@ -118,7 +124,11 @@ func openTestDB(t *testing.T) *gorm.DB {
 	sqlDB.SetMaxOpenConns(5)
 	sqlDB.SetMaxIdleConns(2)
 	// Close the pool when the test finishes to release connections back to Postgres.
-	t.Cleanup(func() { sqlDB.Close() })
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Logf("openDB cleanup: sqlDB.Close: %v", err)
+		}
+	})
 	return db
 }
 

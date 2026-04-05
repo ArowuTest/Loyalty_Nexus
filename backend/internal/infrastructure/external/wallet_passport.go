@@ -177,7 +177,7 @@ func (w *WalletPassportAdapter) PushUpdate(ctx context.Context, userID string, p
 		log.Printf("[WalletPassport] PushUpdate: HTTP error: %v", err)
 		return nil // non-fatal
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		log.Printf("[WalletPassport] PushUpdate: upstream returned HTTP %d", resp.StatusCode)
 	}

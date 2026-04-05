@@ -144,7 +144,7 @@ func (h *USSDHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, response)
+	_, _ = fmt.Fprint(w, response) // USSD response write failures are non-actionable
 }
 
 // loadOrCreateSession loads an existing session or returns a new one.
@@ -571,7 +571,7 @@ func (h *USSDHandler) processMenu(ctx context.Context, session *entities.USSDSes
 func (h *USSDHandler) lookupUser(ctx context.Context, phone string) (*entities.User, *entities.Wallet, error) {
 	user, err := h.userRepo.FindByPhoneNumber(ctx, phone)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Account not found. Download the Loyalty Nexus app to register.")
+		return nil, nil, fmt.Errorf("account not found — download the Loyalty Nexus app to register")
 	}
 	wallet, err := h.userRepo.GetWallet(ctx, user.ID)
 	if err != nil {

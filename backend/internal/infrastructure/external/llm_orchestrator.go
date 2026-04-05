@@ -220,9 +220,10 @@ func (o *LLMOrchestrator) recordProviderUse(ctx context.Context, provider LLMPro
 			TS     int64  `json:"ts"`
 		}
 		reason := "provider_change"
-		if status == "limit_reached" {
+		switch status {
+		case "limit_reached":
 			reason = "rate_limit"
-		} else if status == "error" {
+		case "error":
 			reason = "error"
 		}
 		entry := switchEntry{From: prev, To: string(provider), Reason: reason, TS: now.Unix()}
@@ -583,13 +584,13 @@ func (o *LLMOrchestrator) callPollinationsChat(ctx context.Context, sk string, p
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations chat request: %w", err)
+		return "", fmt.Errorf("pollinations chat request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Pollinations chat %d: %s", resp.StatusCode, string(raw[:min(300, len(raw))]))
+		return "", fmt.Errorf("pollinations chat %d: %s", resp.StatusCode, string(raw[:min(300, len(raw))]))
 	}
 
 	var parsed struct {
@@ -601,13 +602,13 @@ func (o *LLMOrchestrator) callPollinationsChat(ctx context.Context, sk string, p
 		Error *struct{ Message string `json:"message"` } `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", fmt.Errorf("Pollinations chat parse: %w", err)
+		return "", fmt.Errorf("pollinations chat parse: %w", err)
 	}
 	if parsed.Error != nil {
-		return "", fmt.Errorf("Pollinations chat API error: %s", parsed.Error.Message)
+		return "", fmt.Errorf("pollinations chat API error: %s", parsed.Error.Message)
 	}
 	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("Pollinations chat: no choices returned")
+		return "", fmt.Errorf("pollinations chat: no choices returned")
 	}
 	return parsed.Choices[0].Message.Content, nil
 }
@@ -723,7 +724,7 @@ func (a *GroqAdapter) Complete(ctx context.Context, systemPrompt, userPrompt str
 	if err != nil {
 		return "", fmt.Errorf("groq http: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Choices []struct {
@@ -787,7 +788,7 @@ func (a *GeminiAdapter) Complete(ctx context.Context, systemPrompt, userPrompt s
 	if err != nil {
 		return "", fmt.Errorf("gemini http: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Candidates []struct {
@@ -852,7 +853,7 @@ func (a *DeepSeekAdapter) Complete(ctx context.Context, systemPrompt, userPrompt
 	if err != nil {
 		return "", fmt.Errorf("deepseek http: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Choices []struct {
@@ -928,7 +929,7 @@ func (a *GrokAdapter) GenerateImage(ctx context.Context, prompt string, resoluti
 	if err != nil {
 		return "", fmt.Errorf("grok image http: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Data []struct {
@@ -989,7 +990,7 @@ func (a *GrokAdapter) ComposeImages(ctx context.Context, prompt string, imageURL
 	if err != nil {
 		return "", fmt.Errorf("grok compose http: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("grok compose %d: %s", resp.StatusCode, truncateGrokStr(string(raw), 300))
@@ -1115,7 +1116,11 @@ func (a *GrokAdapter) GenerateVideo(ctx context.Context, req GrokVideoRequest) (
 	if err != nil {
 		return "", fmt.Errorf("grok video submit: %w", err)
 	}
-	defer initResp.Body.Close()
+	defer func() {
+		if err := initResp.Body.Close(); err != nil {
+			log.Printf("[GrokAdapter] initResp body close: %v", err)
+		}
+	}()
 	initBody, _ := io.ReadAll(initResp.Body)
 	if initResp.StatusCode != http.StatusOK && initResp.StatusCode != http.StatusCreated && initResp.StatusCode != http.StatusAccepted {
 		return "", fmt.Errorf("grok video submit %d: %s", initResp.StatusCode, truncateGrokStr(string(initBody), 300))
@@ -1171,7 +1176,9 @@ func (a *GrokAdapter) GenerateVideo(ctx context.Context, req GrokVideoRequest) (
 			continue
 		}
 		pollBody, _ := io.ReadAll(pollResp.Body)
-		pollResp.Body.Close()
+		if err := pollResp.Body.Close(); err != nil {
+			log.Printf("[GrokAdapter] pollResp body close: %v", err)
+		}
 
 		var pollResult struct {
 			Status string `json:"status"`

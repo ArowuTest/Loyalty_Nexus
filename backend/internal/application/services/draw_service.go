@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -522,7 +523,11 @@ func (svc *DrawService) ExportDrawEntries(ctx context.Context, drawID uuid.UUID,
 	if err != nil {
 		return "", fmt.Errorf("create CSV: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("[DrawService] ExportEligibleEntries: file close: %v", err)
+		}
+	}()
 
 	w := csv.NewWriter(f)
 	defer w.Flush()
@@ -585,7 +590,11 @@ func (svc *DrawService) ImportWinners(ctx context.Context, drawID uuid.UUID, csv
 	if err != nil {
 		return nil, fmt.Errorf("open CSV: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("[DrawService] ImportWinners: file close: %v", err)
+		}
+	}()
 
 	reader := csv.NewReader(f)
 	header, err := reader.Read()

@@ -1,3 +1,4 @@
+// Package entities defines the core domain models for the Loyalty Nexus platform.
 package entities
 
 import (

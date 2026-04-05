@@ -104,7 +104,7 @@ func (w *WinnerService) getMoMoToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("momo token request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("momo token failed (%d): %s", resp.StatusCode, string(body))
@@ -135,7 +135,7 @@ func (w *WinnerService) VerifyMoMoAccount(ctx context.Context, msisdn string) (b
 	if err != nil {
 		return false, fmt.Errorf("momo account check: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 
 	// Sandbox returns 200 with {"result": true} for active accounts
@@ -209,7 +209,7 @@ func (w *WinnerService) DisburseToMoMo(ctx context.Context, spinResultID uuid.UU
 	if err != nil {
 		return fmt.Errorf("momo transfer initiation: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(resp.Body)
 
 	// 202 Accepted = transfer initiated successfully
@@ -241,7 +241,7 @@ func (w *WinnerService) pollMoMoTransfer(ctx context.Context, token, referenceID
 		}
 
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		var status momoTransferStatus
 		if err := json.Unmarshal(body, &status); err != nil {

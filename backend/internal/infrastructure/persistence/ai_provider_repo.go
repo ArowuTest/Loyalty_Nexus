@@ -1,3 +1,5 @@
+// Package persistence implements the repository layer for Loyalty Nexus,
+// providing database access via GORM for all domain entities.
 package persistence
 
 import (

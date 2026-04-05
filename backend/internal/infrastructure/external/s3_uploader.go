@@ -93,7 +93,7 @@ func (u *AwsS3Uploader) Upload(ctx context.Context, key string, data []byte, con
 	if err != nil {
 		return "", fmt.Errorf("S3 upload: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated &&
 		resp.StatusCode != http.StatusNoContent {
@@ -186,7 +186,7 @@ func (u *AwsS3Uploader) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return fmt.Errorf("S3 delete: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)

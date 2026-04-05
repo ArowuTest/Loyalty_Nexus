@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -114,7 +115,7 @@ func (e *TextExtractor) fetchAndExtract(ctx context.Context, targetURL string) (
 	if err != nil {
 		return "", fmt.Errorf("fetch URL: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("HTTP %d fetching URL", resp.StatusCode)
@@ -141,7 +142,7 @@ func (e *TextExtractor) fetchText(ctx context.Context, targetURL string) (string
 	if err != nil {
 		return "", fmt.Errorf("fetch URL: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("HTTP %d fetching document", resp.StatusCode)
@@ -226,7 +227,11 @@ func extractPDFBytes(data []byte) (string, error) {
 	if err != nil {
 		return "[PDF received — could not create temp directory for extraction.]", nil
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			log.Printf("[TextExtractor] temp dir cleanup: %v", err)
+		}
+	}()
 
 	pdfPath := filepath.Join(tmpDir, "input.pdf")
 	if writeErr := os.WriteFile(pdfPath, data, 0600); writeErr != nil {

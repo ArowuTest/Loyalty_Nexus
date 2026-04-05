@@ -66,7 +66,7 @@ func (g *ProductionImageGenerator) generateViaHuggingFace(ctx context.Context, p
 	if err != nil {
 		return "", fmt.Errorf("huggingface request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("huggingface returned %d", resp.StatusCode)
@@ -103,7 +103,7 @@ func (g *ProductionImageGenerator) generateViaFAL(ctx context.Context, prompt st
 	if err != nil {
 		return "", fmt.Errorf("fal.ai request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -146,7 +146,7 @@ func (g *ProductionImageGenerator) removeViaRembg(ctx context.Context, imageURL 
 	if err != nil {
 		return "", fmt.Errorf("rembg request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("rembg returned %d", resp.StatusCode)
@@ -184,7 +184,9 @@ func (g *ProductionImageGenerator) removeViaPhotoroom(ctx context.Context, image
 	if _, err := fmt.Fprint(fw, imageURL); err != nil {
 		return "", err
 	}
-	mw.Close()
+	if err := mw.Close(); err != nil {
+		return "", fmt.Errorf("photoroom multipart close: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://sdk.photoroom.com/v1/segment", &bodyBuf)
@@ -198,7 +200,7 @@ func (g *ProductionImageGenerator) removeViaPhotoroom(ctx context.Context, image
 	if err != nil {
 		return "", fmt.Errorf("photoroom request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("photoroom returned %d", resp.StatusCode)
@@ -245,7 +247,7 @@ func (g *ProductionImageGenerator) falVideoRequest(ctx context.Context, endpoint
 	if err != nil {
 		return "", fmt.Errorf("fal video request (%s): %w", endpoint, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -301,7 +303,7 @@ func (a *FalAIAdapter) Generate(ctx context.Context, prompt string) (string, err
 	if err != nil {
 		return "", fmt.Errorf("fal.ai request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -358,7 +360,7 @@ func (a *HuggingFaceAdapter) Generate(ctx context.Context, prompt string) (strin
 	if err != nil {
 		return "", fmt.Errorf("huggingface request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("huggingface returned %d", resp.StatusCode)

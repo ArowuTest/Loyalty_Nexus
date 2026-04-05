@@ -1892,7 +1892,7 @@ func (h *AdminHandler) UploadMTNPushCSV(w http.ResponseWriter, r *http.Request) 
 		jsonError(w, "field 'file' is required", http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // multipart file close errors are non-actionable
 
 	note := r.FormValue("note")
 

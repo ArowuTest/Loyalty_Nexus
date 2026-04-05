@@ -73,7 +73,7 @@ func (h *StudioHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing file field"})
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // multipart file close errors are non-actionable
 
 	contentType := header.Header.Get("Content-Type")
 	if contentType == "" {

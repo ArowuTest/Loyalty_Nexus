@@ -97,9 +97,9 @@ func (n *NotificationService) sendViaTermii(ctx context.Context, phone, message 
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("Termii HTTP %d", resp.StatusCode)
+		return fmt.Errorf("termii HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -169,7 +169,7 @@ func (n *NotificationService) SendPush(ctx context.Context, fcmToken, title, bod
 		if err != nil {
 			return fmt.Errorf("FCM v1 HTTP: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode >= 400 {
 			return fmt.Errorf("FCM v1 HTTP %d", resp.StatusCode)
 		}
@@ -202,7 +202,7 @@ func (n *NotificationService) SendPush(ctx context.Context, fcmToken, title, bod
 	if err != nil {
 		return fmt.Errorf("FCM legacy HTTP: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("FCM legacy HTTP %d", resp.StatusCode)
 	}

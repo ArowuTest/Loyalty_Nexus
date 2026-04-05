@@ -50,8 +50,8 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           working-directory: backend
-          version: v1.64.8
-          args: --timeout=5m --disable=typecheck --enable=govet,errcheck,staticcheck
+          version: v2.1.6
+          args: --timeout=5m --enable-only=govet,errcheck,staticcheck
 
       - name: Run migrations
         working-directory: backend

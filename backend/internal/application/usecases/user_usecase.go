@@ -1,3 +1,4 @@
+// Package usecases provides application use-case orchestrators for Loyalty Nexus.
 package usecases
 
 import (

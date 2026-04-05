@@ -47,11 +47,15 @@ func TestMain(m *testing.M) {
 	// JWT_SECRET and AES_256_KEY are required by NewAuthService at construction
 	// time. Set test-only values here so callers never need to export them.
 	if os.Getenv("JWT_SECRET") == "" {
-		os.Setenv("JWT_SECRET", "integration-test-jwt-secret-32ch!")
+		if err := os.Setenv("JWT_SECRET", "integration-test-jwt-secret-32ch!"); err != nil {
+			panic("TestMain: set JWT_SECRET: " + err.Error())
+		}
 	}
 	if os.Getenv("AES_256_KEY") == "" {
 		// 64 hex chars = 32 bytes
-		os.Setenv("AES_256_KEY", "0000000000000000000000000000000000000000000000000000000000000000")
+		if err := os.Setenv("AES_256_KEY", "0000000000000000000000000000000000000000000000000000000000000000"); err != nil {
+			panic("TestMain: set AES_256_KEY: " + err.Error())
+		}
 	}
 	os.Exit(m.Run())
 }
@@ -194,7 +198,7 @@ func do(t *testing.T, srv *httptest.Server, method, path, tok string, body inter
 
 func decodeJSON(t *testing.T, resp *http.Response, dest interface{}) {
 	t.Helper()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
 		t.Fatalf("decode response JSON: %v", err)
 	}
@@ -594,7 +598,7 @@ func TestHTTP_CreatePrize_Postgres(t *testing.T) {
 		if resp.StatusCode != http.StatusCreated {
 			var errBody map[string]string
 			json.NewDecoder(resp.Body).Decode(&errBody) //nolint:errcheck
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			t.Fatalf("expected 201, got %d: %v", resp.StatusCode, errBody)
 		}
 
@@ -643,7 +647,7 @@ func TestHTTP_CreatePrize_MissingName_Returns400(t *testing.T) {
 			"prize_type":             "airtime",
 			"win_probability_weight": float64(50),
 		})
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("expected 400, got %d", resp.StatusCode)
 		}
@@ -669,7 +673,7 @@ func TestHTTP_CreatePrize_ExceedsBudget_Returns400(t *testing.T) {
 			"prize_type":             "airtime",
 			"win_probability_weight": float64(2),
 		})
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("expected 400 for budget overflow, got %d", resp.StatusCode)
 		}
@@ -726,7 +730,7 @@ func TestHTTP_GetPrize_NotFound_Returns404(t *testing.T) {
 	defer srv.Close()
 
 	resp := do(t, srv, "GET", "/api/v1/admin/prizes/"+uuid.New().String(), tok, nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
@@ -812,7 +816,7 @@ func TestHTTP_DeletePrize_Postgres(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("expected 200, got %d", resp.StatusCode)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		// Verify is_active = false in the real Postgres row
 		var isActive bool
@@ -907,10 +911,10 @@ func TestHTTP_ReorderPrizes_Postgres(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			var errBody map[string]interface{}
 			json.NewDecoder(resp.Body).Decode(&errBody) //nolint:errcheck
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, errBody)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		// Verify sort_order in the real DB
 		type row struct {
@@ -996,7 +1000,7 @@ func TestHTTP_AdminAuth_Rejected_Without_Token(t *testing.T) {
 	}
 	for _, path := range paths {
 		resp := do(t, srv, "GET", path, "", nil) // no token
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Errorf("path %s: expected 401, got %d", path, resp.StatusCode)
 		}
@@ -1015,7 +1019,7 @@ func TestHTTP_AdminAuth_Rejected_With_Invalid_Token(t *testing.T) {
 	resp := do(t, srv, "GET", "/api/v1/admin/prizes",
 		"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiJ0ZXN0IiwiaXNfYWRtaW4iOnRydWV9.INVALIDSIG",
 		nil)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401 for invalid token, got %d", resp.StatusCode)
 	}
@@ -1084,7 +1088,7 @@ func TestHTTP_ExportClaims_Postgres(t *testing.T) {
 	defer srv.Close()
 
 	resp := do(t, srv, "GET", "/api/v1/admin/spin/claims/export", tok, nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}

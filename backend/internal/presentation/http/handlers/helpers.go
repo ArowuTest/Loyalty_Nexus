@@ -13,6 +13,6 @@ func writeJSON(w http.ResponseWriter, code int, payload interface{}) {
 
 // decodeJSON decodes the request body into v.
 func decodeJSON(r *http.Request, v interface{}) error {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }() // close error is non-actionable on request bodies
 	return json.NewDecoder(r.Body).Decode(v)
 }

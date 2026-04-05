@@ -1,3 +1,4 @@
+// Package repositories defines the repository interfaces for the Loyalty Nexus domain layer.
 package repositories
 
 import (

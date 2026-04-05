@@ -84,7 +84,7 @@ func (a *GeminiKnowledgeAdapter) callGeminiKnowledge(ctx context.Context, prompt
 	if err != nil {
 		return "", fmt.Errorf("gemini knowledge request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)

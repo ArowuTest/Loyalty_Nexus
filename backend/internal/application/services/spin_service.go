@@ -83,7 +83,7 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 		return nil, fmt.Errorf("spin count check failed: %w", err)
 	}
 	if dailySpins >= dailyCap {
-		return nil, fmt.Errorf("daily spin limit reached (%d/%d). Recharge more today to unlock additional spins!", dailySpins, dailyCap)
+		return nil, fmt.Errorf("daily spin limit reached (%d/%d) — recharge more today to unlock additional spins", dailySpins, dailyCap)
 	}
 
 	// --- Step 2: Daily liability cap ---
@@ -98,7 +98,7 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 		return nil, fmt.Errorf("wallet not found")
 	}
 	if wallet.SpinCredits < 1 {
-		return nil, fmt.Errorf("no spin credits. Recharge ₦%d to earn one!",
+		return nil, fmt.Errorf("no spin credits — recharge ₦%d to earn one",
 			s.cfg.GetInt64("spin_trigger_naira", 1000))
 	}
 
@@ -147,16 +147,17 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 		fulfillStatus := entities.FulfillPending
 		claimStatus := entities.ClaimPending
 
-		if prize.PrizeType == entities.PrizeTryAgain {
+		switch prize.PrizeType {
+		case entities.PrizeTryAgain:
 			fulfillStatus = entities.FulfillNA
 			claimStatus = entities.ClaimClaimed // No claim needed
-		} else if prize.PrizeType == entities.PrizePulsePoints {
+		case entities.PrizePulsePoints:
 			// Points are auto-credited immediately, no claim needed
 			claimStatus = entities.ClaimClaimed
-		} else if prize.PrizeType == entities.PrizeAirtime || prize.PrizeType == entities.PrizeDataBundle {
+		case entities.PrizeAirtime, entities.PrizeDataBundle:
 			// Airtime and Data require user to click "Claim" before fulfillment
 			fulfillStatus = entities.FulfillPendingClaim
-		} else if prize.PrizeType == entities.PrizeMoMoCash {
+		case entities.PrizeMoMoCash:
 			if !user.MoMoVerified {
 				fulfillStatus = entities.FulfillPendingMoMo
 			} else {
@@ -685,7 +686,7 @@ func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*
 	progressPercent := 0.0
 
 	allTiers, _ := tierCalc.GetAllTiersFromDB()
-	var currentTierIdx int = -1
+	currentTierIdx := -1
 	if currentTier, err := tierCalc.GetSpinTierFromDB(todayAmountKobo); err == nil && currentTier.SpinsPerDay > 0 {
 		dailyCap = currentTier.SpinsPerDay
 		currentTierName = currentTier.TierDisplayName

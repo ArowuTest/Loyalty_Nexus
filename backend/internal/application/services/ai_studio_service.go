@@ -1491,7 +1491,7 @@ func (o *AIStudioOrchestrator) callAssemblyAIFull(ctx context.Context, apiKey, a
 	if err != nil {
 		return "", fmt.Errorf("AssemblyAI submit: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var jobResp struct {
 		ID     string `json:"id"`
 		Status string `json:"status"`
@@ -1524,7 +1524,9 @@ func (o *AIStudioOrchestrator) callAssemblyAIFull(ctx context.Context, apiKey, a
 			} `json:"utterances"`
 		}
 		_ = json.NewDecoder(pollResp.Body).Decode(&result)
-		pollResp.Body.Close()
+		if err := pollResp.Body.Close(); err != nil {
+			log.Printf("[Studio] AssemblyAI poll body close: %v", err)
+		}
 		switch result.Status {
 		case "completed":
 			// If speaker labels requested and utterances available, format them
@@ -1797,7 +1799,7 @@ func (o *AIStudioOrchestrator) assembleVideoJingle(ctx context.Context, env prom
 			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, musicAPIURL, nil)
 			req.Header.Set("Authorization", "Bearer "+polKey)
 			if resp, err := o.httpClient.Do(req); err == nil {
-				defer resp.Body.Close()
+				defer func() { _ = resp.Body.Close() }()
 				if resp.StatusCode == http.StatusOK {
 					raw, _ := io.ReadAll(resp.Body)
 					if len(raw) > 1000 {
@@ -1936,13 +1938,13 @@ func (o *AIStudioOrchestrator) callGeminiFlash(ctx context.Context, systemPrompt
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Gemini request: %w", err)
+		return "", fmt.Errorf("gemini request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Gemini %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+		return "", fmt.Errorf("gemini %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 
 	var result struct {
@@ -1958,13 +1960,13 @@ func (o *AIStudioOrchestrator) callGeminiFlash(ctx context.Context, systemPrompt
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return "", fmt.Errorf("Gemini parse: %w", err)
+		return "", fmt.Errorf("gemini parse: %w", err)
 	}
 	if result.Error != nil {
-		return "", fmt.Errorf("Gemini API error: %s", result.Error.Message)
+		return "", fmt.Errorf("gemini API error: %s", result.Error.Message)
 	}
 	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("Gemini: no content returned")
+		return "", fmt.Errorf("gemini: no content returned")
 	}
 	return result.Candidates[0].Content.Parts[0].Text, nil
 }
@@ -2028,7 +2030,7 @@ func (o *AIStudioOrchestrator) callOpenAICompatible(ctx context.Context, endpoin
 	if err != nil {
 		return "", fmt.Errorf("HTTP: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -2083,7 +2085,7 @@ func (o *AIStudioOrchestrator) callHFFluxSchnell(ctx context.Context, hfKey, pro
 	if err != nil {
 		return "", fmt.Errorf("HF request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusServiceUnavailable {
 		return "", fmt.Errorf("HF model loading, retry in ~20s")
@@ -2123,7 +2125,7 @@ func (o *AIStudioOrchestrator) callFALFlux(ctx context.Context, falKey, prompt s
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -2182,7 +2184,7 @@ func (o *AIStudioOrchestrator) callFALFluxUltra(
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("FAL Ultra %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
@@ -2228,7 +2230,7 @@ func (o *AIStudioOrchestrator) callFALImageEdit(ctx context.Context, falKey, ima
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("FAL image-edit %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
@@ -2258,7 +2260,7 @@ func (o *AIStudioOrchestrator) callRembgService(ctx context.Context, serviceURL,
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("rembg %d", resp.StatusCode)
@@ -2294,7 +2296,7 @@ func (o *AIStudioOrchestrator) callFALBgRemover(ctx context.Context, falKey, ima
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -2316,7 +2318,9 @@ func (o *AIStudioOrchestrator) callRemoveBg(ctx context.Context, apiKey, imageUR
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("image_url", imageURL)
 	_ = w.WriteField("size", "auto")
-	w.Close()
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("remove.bg multipart close: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://api.remove.bg/v1.0/removebg", &buf)
@@ -2330,7 +2334,7 @@ func (o *AIStudioOrchestrator) callRemoveBg(ctx context.Context, apiKey, imageUR
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -2413,7 +2417,7 @@ func (o *AIStudioOrchestrator) callFALVideo(ctx context.Context, falKey, model, 
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -2490,7 +2494,7 @@ func (o *AIStudioOrchestrator) callFALMultiImageVideo(ctx context.Context, falKe
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -2533,23 +2537,23 @@ func (o *AIStudioOrchestrator) callGoogleCloudTTS(ctx context.Context, apiKey, t
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Google TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+		return "", fmt.Errorf("google TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
 	}
 
 	var result struct {
 		AudioContent string `json:"audioContent"` // base64-encoded MP3
 	}
 	if err := json.Unmarshal(raw, &result); err != nil || result.AudioContent == "" {
-		return "", fmt.Errorf("Google TTS parse failed")
+		return "", fmt.Errorf("google TTS parse failed")
 	}
 
 	audioData, err := base64.StdEncoding.DecodeString(result.AudioContent)
 	if err != nil {
-		return "", fmt.Errorf("Google TTS decode: %w", err)
+		return "", fmt.Errorf("google TTS decode: %w", err)
 	}
 	return o.uploadOrDataURI(ctx, audioData, "audio/mpeg", "narrations/"+uuid.New().String()+".mp3"), nil
 }
@@ -2578,11 +2582,11 @@ func (o *AIStudioOrchestrator) callElevenLabsTTS(ctx context.Context, apiKey, vo
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	audio, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ElevenLabs TTS %d: %s", resp.StatusCode, truncateStr(string(audio), 200))
+		return "", fmt.Errorf("elevenLabs TTS %d: %s", resp.StatusCode, truncateStr(string(audio), 200))
 	}
 	return o.uploadOrDataURI(ctx, audio, "audio/mpeg", "narrations/"+uuid.New().String()+".mp3"), nil
 }
@@ -2606,7 +2610,7 @@ func (o *AIStudioOrchestrator) callHuggingFaceTTS(ctx context.Context, hfKey, te
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	audio, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -2636,7 +2640,7 @@ func (o *AIStudioOrchestrator) callAssemblyAI(ctx context.Context, apiKey, audio
 	if err != nil {
 		return "", fmt.Errorf("AssemblyAI submit: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var jobResp struct {
 		ID     string `json:"id"`
@@ -2671,7 +2675,9 @@ func (o *AIStudioOrchestrator) callAssemblyAI(ctx context.Context, apiKey, audio
 		if decErr := json.NewDecoder(pollResp.Body).Decode(&result); decErr != nil {
 			log.Printf("[Studio] AssemblyAI poll decode error: %v", decErr)
 		}
-		pollResp.Body.Close()
+		if err := pollResp.Body.Close(); err != nil {
+			log.Printf("[Studio] AssemblyAI poll body close: %v", err)
+		}
 
 		switch result.Status {
 		case "completed":
@@ -2691,19 +2697,23 @@ func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audi
 	// Step 1: Download the audio file from the URL.
 	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, audioURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("Groq Whisper download request: %w", err)
+		return "", fmt.Errorf("groq Whisper download request: %w", err)
 	}
 	dlResp, err := o.httpClient.Do(dlReq)
 	if err != nil {
-		return "", fmt.Errorf("Groq Whisper download: %w", err)
+		return "", fmt.Errorf("groq Whisper download: %w", err)
 	}
-	defer dlResp.Body.Close()
+	defer func() {
+		if err := dlResp.Body.Close(); err != nil {
+			log.Printf("[AIStudio] Groq Whisper dlResp body close: %v", err)
+		}
+	}()
 	if dlResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Groq Whisper: audio download failed with status %d", dlResp.StatusCode)
+		return "", fmt.Errorf("groq Whisper: audio download failed with status %d", dlResp.StatusCode)
 	}
 	audioBytes, err := io.ReadAll(dlResp.Body)
 	if err != nil {
-		return "", fmt.Errorf("Groq Whisper: read audio bytes: %w", err)
+		return "", fmt.Errorf("groq Whisper: read audio bytes: %w", err)
 	}
 
 	// Step 2: POST as multipart/form-data with the file bytes.
@@ -2714,12 +2724,14 @@ func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audi
 	_ = w.WriteField("response_format", "json")
 	fw, err := w.CreateFormFile("file", "audio.mp3")
 	if err != nil {
-		return "", fmt.Errorf("Groq Whisper form: %w", err)
+		return "", fmt.Errorf("groq Whisper form: %w", err)
 	}
 	if _, err = fw.Write(audioBytes); err != nil {
-		return "", fmt.Errorf("Groq Whisper write form: %w", err)
+		return "", fmt.Errorf("groq Whisper write form: %w", err)
 	}
-	w.Close()
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("groq Whisper multipart close: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://api.groq.com/openai/v1/audio/transcriptions", &buf)
@@ -2733,20 +2745,20 @@ func (o *AIStudioOrchestrator) callGroqWhisper(ctx context.Context, apiKey, audi
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Groq Whisper %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+		return "", fmt.Errorf("groq Whisper %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
 	}
 	var result struct {
 		Text string `json:"text"`
 	}
 	if decErr := json.Unmarshal(raw, &result); decErr != nil {
-		return "", fmt.Errorf("Groq Whisper decode: %w", decErr)
+		return "", fmt.Errorf("groq Whisper decode: %w", decErr)
 	}
 	if result.Text == "" {
-		return "", fmt.Errorf("Groq Whisper: no transcription returned")
+		return "", fmt.Errorf("groq Whisper: no transcription returned")
 	}
 	return result.Text, nil
 }
@@ -2770,11 +2782,11 @@ func (o *AIStudioOrchestrator) callGoogleTranslate(ctx context.Context, apiKey, 
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Google Translate %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+		return "", fmt.Errorf("google Translate %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
 	}
 
 	var result struct {
@@ -2785,10 +2797,10 @@ func (o *AIStudioOrchestrator) callGoogleTranslate(ctx context.Context, apiKey, 
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return "", fmt.Errorf("Google Translate parse: %w", err)
+		return "", fmt.Errorf("google Translate parse: %w", err)
 	}
 	if len(result.Data.Translations) == 0 {
-		return "", fmt.Errorf("Google Translate: no translation returned")
+		return "", fmt.Errorf("google Translate: no translation returned")
 	}
 	return result.Data.Translations[0].TranslatedText, nil
 }
@@ -2823,7 +2835,7 @@ func (o *AIStudioOrchestrator) callHFMusicGen(ctx context.Context, token, prompt
 	if err != nil {
 		return "", fmt.Errorf("HF MusicGen request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusServiceUnavailable {
 		return "", fmt.Errorf("HF MusicGen model loading — retry in 20s")
@@ -2913,18 +2925,18 @@ func (o *AIStudioOrchestrator) callPollinationsImageWithSeed(ctx context.Context
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations image request: %w", err)
+		return "", fmt.Errorf("pollinations image request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Pollinations image %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+		return "", fmt.Errorf("pollinations image %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
 	}
 
 	imgBytes, err := io.ReadAll(resp.Body)
 	if err != nil || len(imgBytes) < 1000 {
-		return "", fmt.Errorf("Pollinations image: response too small (%d bytes)", len(imgBytes))
+		return "", fmt.Errorf("pollinations image: response too small (%d bytes)", len(imgBytes))
 	}
 
 	// Detect content type from response header (may be image/jpeg or image/png)
@@ -2974,18 +2986,18 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations TTS request: %w", err)
+		return "", fmt.Errorf("pollinations TTS request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Pollinations TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 100))
+		return "", fmt.Errorf("pollinations TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 100))
 	}
 
 	audioBytes, err := io.ReadAll(resp.Body)
 	if err != nil || len(audioBytes) < 500 {
-		return "", fmt.Errorf("Pollinations TTS: response too small")
+		return "", fmt.Errorf("pollinations TTS: response too small")
 	}
 
 	fileName := fmt.Sprintf("studio/narrate/pollinations_%d.mp3", time.Now().UnixNano())
@@ -3035,16 +3047,16 @@ func (o *AIStudioOrchestrator) callPollinationsTTSFull(ctx context.Context, text
 	req.Header.Set("Authorization", "Bearer "+sk)
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations TTS request: %w", err)
+		return "", fmt.Errorf("pollinations TTS request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Pollinations TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 100))
+		return "", fmt.Errorf("pollinations TTS %d: %s", resp.StatusCode, truncateStr(string(raw), 100))
 	}
 	audioBytes, err := io.ReadAll(resp.Body)
 	if err != nil || len(audioBytes) < 500 {
-		return "", fmt.Errorf("Pollinations TTS: response too small")
+		return "", fmt.Errorf("pollinations TTS: response too small")
 	}
 	mimeType := "audio/mpeg"
 	ext := "mp3"
@@ -3128,18 +3140,18 @@ func (o *AIStudioOrchestrator) callPollinationsVideoModel(ctx context.Context, m
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations %s video request: %w", model, err)
+		return "", fmt.Errorf("pollinations %s video request: %w", model, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Pollinations %s video %d: %s", model, resp.StatusCode, truncateStr(string(raw), 200))
+		return "", fmt.Errorf("pollinations %s video %d: %s", model, resp.StatusCode, truncateStr(string(raw), 200))
 	}
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil || len(raw) < 1000 {
-		return "", fmt.Errorf("Pollinations %s video: response too small (%d bytes)", model, len(raw))
+		return "", fmt.Errorf("pollinations %s video: response too small (%d bytes)", model, len(raw))
 	}
 
 	key := fmt.Sprintf("studio/video/%s_%d.mp4", model, time.Now().UnixNano())
@@ -3173,11 +3185,11 @@ func (o *AIStudioOrchestrator) callMubert(ctx context.Context, apiKey, prompt st
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Mubert %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+		return "", fmt.Errorf("mubert %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
 	}
 
 	var result struct {
@@ -3193,17 +3205,17 @@ func (o *AIStudioOrchestrator) callMubert(ctx context.Context, apiKey, prompt st
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return "", fmt.Errorf("Mubert parse: %w", err)
+		return "", fmt.Errorf("mubert parse: %w", err)
 	}
 	if result.Status != 1 {
 		errText := "unknown error"
 		if result.Error != nil {
 			errText = fmt.Sprintf("code %d: %s", result.Error.Code, result.Error.Text)
 		}
-		return "", fmt.Errorf("Mubert API error — %s", errText)
+		return "", fmt.Errorf("mubert API error — %s", errText)
 	}
 	if len(result.Data.Tasks) == 0 || result.Data.Tasks[0].MusicURL == "" {
-		return "", fmt.Errorf("Mubert: no track URL in response")
+		return "", fmt.Errorf("mubert: no track URL in response")
 	}
 	return result.Data.Tasks[0].MusicURL, nil
 }
@@ -3251,7 +3263,7 @@ func (o *AIStudioOrchestrator) callSunoMusic(ctx context.Context, apiKey, prompt
 	if err != nil {
 		return "", "", fmt.Errorf("suno: submit error: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var submitResp struct {
 		Code int    `json:"code"`
@@ -3304,12 +3316,16 @@ func (o *AIStudioOrchestrator) callSunoMusic(ctx context.Context, apiKey, prompt
 				ErrorMessage string `json:"errorMessage"`
 			} `json:"data"`
 		}
-		if err := json.NewDecoder(pollResp.Body).Decode(&statusResp); err != nil {
-			pollResp.Body.Close()
-			log.Printf("[AIStudio] Suno poll decode error (will retry): %v", err)
-			continue
-		}
-		pollResp.Body.Close()
+			if err := json.NewDecoder(pollResp.Body).Decode(&statusResp); err != nil {
+				if cerr := pollResp.Body.Close(); cerr != nil {
+					log.Printf("[AIStudio] Suno pollResp body close: %v", cerr)
+				}
+				log.Printf("[AIStudio] Suno poll decode error (will retry): %v", err)
+				continue
+			}
+			if err := pollResp.Body.Close(); err != nil {
+				log.Printf("[AIStudio] Suno pollResp body close: %v", err)
+			}
 
 			switch statusResp.Data.Status {
 			case "SUCCESS", "FIRST_SUCCESS":
@@ -3354,11 +3370,11 @@ func (o *AIStudioOrchestrator) callElevenLabsMusic(ctx context.Context, apiKey, 
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	audio, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ElevenLabs music %d: %s", resp.StatusCode, truncateStr(string(audio), 200))
+		return "", fmt.Errorf("elevenLabs music %d: %s", resp.StatusCode, truncateStr(string(audio), 200))
 	}
 	return o.uploadOrDataURI(ctx, audio, "audio/mpeg", "music/"+uuid.New().String()+".mp3"), nil
 }
@@ -3579,13 +3595,13 @@ func (o *AIStudioOrchestrator) callPollinationsOpenAIChat(ctx context.Context, s
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations chat request: %w", err)
+		return "", fmt.Errorf("pollinations chat request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Pollinations chat %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+		return "", fmt.Errorf("pollinations chat %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 
 	var parsed struct {
@@ -3597,13 +3613,13 @@ func (o *AIStudioOrchestrator) callPollinationsOpenAIChat(ctx context.Context, s
 		Error *struct{ Message string `json:"message"` } `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", fmt.Errorf("Pollinations chat parse: %w", err)
+		return "", fmt.Errorf("pollinations chat parse: %w", err)
 	}
 	if parsed.Error != nil {
-		return "", fmt.Errorf("Pollinations chat API error: %s", parsed.Error.Message)
+		return "", fmt.Errorf("pollinations chat API error: %s", parsed.Error.Message)
 	}
 	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("Pollinations chat: no choices returned")
+		return "", fmt.Errorf("pollinations chat: no choices returned")
 	}
 	return parsed.Choices[0].Message.Content, nil
 }
@@ -3650,13 +3666,13 @@ func (o *AIStudioOrchestrator) callPollinationsGPTImage(ctx context.Context, pro
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations GPTImage request: %w", err)
+		return "", fmt.Errorf("pollinations GPTImage request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Pollinations GPTImage %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+		return "", fmt.Errorf("pollinations GPTImage %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 
 	var parsed struct {
@@ -3666,7 +3682,7 @@ func (o *AIStudioOrchestrator) callPollinationsGPTImage(ctx context.Context, pro
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Data) == 0 {
-		return "", fmt.Errorf("Pollinations GPTImage parse: empty data")
+		return "", fmt.Errorf("pollinations GPTImage parse: empty data")
 	}
 	item := parsed.Data[0]
 	if item.URL != "" {
@@ -3675,12 +3691,12 @@ func (o *AIStudioOrchestrator) callPollinationsGPTImage(ctx context.Context, pro
 	if item.B64JSON != "" {
 		imgBytes, err := base64.StdEncoding.DecodeString(item.B64JSON)
 		if err != nil {
-			return "", fmt.Errorf("Pollinations GPTImage base64 decode: %w", err)
+			return "", fmt.Errorf("pollinations GPTImage base64 decode: %w", err)
 		}
 		key := fmt.Sprintf("studio/ai-photo/%s_%d.png", model, time.Now().UnixNano())
 		return o.uploadOrDataURI(ctx, imgBytes, "image/png", key), nil
 	}
-	return "", fmt.Errorf("Pollinations GPTImage: no url or b64_json in response")
+	return "", fmt.Errorf("pollinations GPTImage: no url or b64_json in response")
 }
 
 // callPollinationsKontextAlt performs image-to-image editing via Pollinations p-image-edit (Pruna).
@@ -3700,7 +3716,11 @@ func (o *AIStudioOrchestrator) callPollinationsKontextAlt(ctx context.Context, i
 	if err != nil {
 		return "", fmt.Errorf("p-image-edit: download image: %w", err)
 	}
-	defer dlResp.Body.Close()
+	defer func() {
+		if err := dlResp.Body.Close(); err != nil {
+			log.Printf("[AIStudio] p-image-edit dlResp body close: %v", err)
+		}
+	}()
 	imgBytes, err := io.ReadAll(dlResp.Body)
 	if err != nil || len(imgBytes) < 500 {
 		return "", fmt.Errorf("p-image-edit: image download failed or too small")
@@ -3718,7 +3738,9 @@ func (o *AIStudioOrchestrator) callPollinationsKontextAlt(ctx context.Context, i
 	if _, err = fw.Write(imgBytes); err != nil {
 		return "", err
 	}
-	mw.Close()
+	if err := mw.Close(); err != nil {
+		return "", fmt.Errorf("p-image-edit multipart close: %w", err)
+	}
 
 	// Step 3: POST to edits endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -3732,13 +3754,13 @@ func (o *AIStudioOrchestrator) callPollinationsKontextAlt(ctx context.Context, i
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations p-image-edit request: %w", err)
+		return "", fmt.Errorf("pollinations p-image-edit request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Pollinations p-image-edit %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+		return "", fmt.Errorf("pollinations p-image-edit %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 
 	var parsed struct {
@@ -3748,7 +3770,7 @@ func (o *AIStudioOrchestrator) callPollinationsKontextAlt(ctx context.Context, i
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Data) == 0 {
-		return "", fmt.Errorf("Pollinations p-image-edit parse: empty data")
+		return "", fmt.Errorf("pollinations p-image-edit parse: empty data")
 	}
 	item := parsed.Data[0]
 	if item.URL != "" {
@@ -3757,12 +3779,12 @@ func (o *AIStudioOrchestrator) callPollinationsKontextAlt(ctx context.Context, i
 	if item.B64JSON != "" {
 		outBytes, err := base64.StdEncoding.DecodeString(item.B64JSON)
 		if err != nil {
-			return "", fmt.Errorf("Pollinations p-image-edit b64 decode: %w", err)
+			return "", fmt.Errorf("pollinations p-image-edit b64 decode: %w", err)
 		}
 		key := fmt.Sprintf("studio/photo-editor/p-image-edit_%d.png", time.Now().UnixNano())
 		return o.uploadOrDataURI(ctx, outBytes, "image/png", key), nil
 	}
-	return "", fmt.Errorf("Pollinations p-image-edit: no url or b64_json in response")
+	return "", fmt.Errorf("pollinations p-image-edit: no url or b64_json in response")
 }
 
 // callPollinationsWhisperAfrican transcribes audio using Pollinations Whisper with African language support.
@@ -3776,16 +3798,20 @@ func (o *AIStudioOrchestrator) callPollinationsWhisperAfrican(ctx context.Contex
 	// Step 1: Download audio bytes
 	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, audioURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("Whisper African: build download request: %w", err)
+		return "", fmt.Errorf("whisper African: build download request: %w", err)
 	}
 	dlResp, err := o.httpClient.Do(dlReq)
 	if err != nil {
-		return "", fmt.Errorf("Whisper African: download audio: %w", err)
+		return "", fmt.Errorf("whisper African: download audio: %w", err)
 	}
-	defer dlResp.Body.Close()
+	defer func() {
+		if err := dlResp.Body.Close(); err != nil {
+			log.Printf("[AIStudio] Whisper African dlResp body close: %v", err)
+		}
+	}()
 	audioBytes, err := io.ReadAll(dlResp.Body)
 	if err != nil || len(audioBytes) < 100 {
-		return "", fmt.Errorf("Whisper African: audio download failed or too small")
+		return "", fmt.Errorf("whisper African: audio download failed or too small")
 	}
 
 	// Step 2: Build multipart body
@@ -3800,7 +3826,9 @@ func (o *AIStudioOrchestrator) callPollinationsWhisperAfrican(ctx context.Contex
 	if _, err = fw.Write(audioBytes); err != nil {
 		return "", err
 	}
-	mw.Close()
+	if err := mw.Close(); err != nil {
+		return "", fmt.Errorf("whisper African multipart close: %w", err)
+	}
 
 	// Step 3: POST to Pollinations Whisper endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -3814,20 +3842,20 @@ func (o *AIStudioOrchestrator) callPollinationsWhisperAfrican(ctx context.Contex
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations Whisper African request: %w", err)
+		return "", fmt.Errorf("pollinations Whisper African request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Pollinations Whisper African %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+		return "", fmt.Errorf("pollinations Whisper African %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 
 	var result struct {
 		Text string `json:"text"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil || result.Text == "" {
-		return "", fmt.Errorf("Pollinations Whisper African: no transcription returned")
+		return "", fmt.Errorf("pollinations Whisper African: no transcription returned")
 	}
 	return result.Text, nil
 }
@@ -3863,19 +3891,19 @@ func (o *AIStudioOrchestrator) callPollinationsElevenMusic(ctx context.Context, 
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Pollinations ElevenMusic request: %w", err)
+		return "", fmt.Errorf("pollinations ElevenMusic request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Pollinations ElevenMusic %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+		return "", fmt.Errorf("pollinations ElevenMusic %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 
 	// GET /audio returns raw MP3 bytes directly
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil || len(raw) < 1000 {
-		return "", fmt.Errorf("Pollinations ElevenMusic: response too small (%d bytes)", len(raw))
+		return "", fmt.Errorf("pollinations ElevenMusic: response too small (%d bytes)", len(raw))
 	}
 
 	suffix := "song"
@@ -3955,7 +3983,11 @@ func (o *AIStudioOrchestrator) callGeminiWithDocument(ctx context.Context, syste
 		log.Printf("[AIStudio] callGeminiWithDocument: fetch failed (%v) — falling back to text-only", err)
 		return o.callGeminiFlash(ctx, systemPrompt, userPrompt)
 	}
-	defer docResp.Body.Close()
+	defer func() {
+		if err := docResp.Body.Close(); err != nil {
+			log.Printf("[AIStudio] callGeminiWithDocument: body close: %v", err)
+		}
+	}()
 	docBytes, err := io.ReadAll(io.LimitReader(docResp.Body, 50<<20)) // 50 MB limit
 	if err != nil {
 		return o.callGeminiFlash(ctx, systemPrompt, userPrompt)
@@ -4025,12 +4057,12 @@ func (o *AIStudioOrchestrator) callGeminiWithDocument(ctx context.Context, syste
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("Gemini document request: %w", err)
+		return "", fmt.Errorf("gemini document request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Gemini document %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
+		return "", fmt.Errorf("gemini document %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 	var result struct {
 		Candidates []struct {
@@ -4045,13 +4077,13 @@ func (o *AIStudioOrchestrator) callGeminiWithDocument(ctx context.Context, syste
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return "", fmt.Errorf("Gemini document parse: %w", err)
+		return "", fmt.Errorf("gemini document parse: %w", err)
 	}
 	if result.Error != nil {
-		return "", fmt.Errorf("Gemini document API error: %s", result.Error.Message)
+		return "", fmt.Errorf("gemini document API error: %s", result.Error.Message)
 	}
 	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("Gemini document: no content returned")
+		return "", fmt.Errorf("gemini document: no content returned")
 	}
 	return result.Candidates[0].Content.Parts[0].Text, nil
 }

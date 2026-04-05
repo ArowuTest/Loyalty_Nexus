@@ -121,7 +121,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req.Header.Set("Authorization", "Bearer "+key)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 || resp.StatusCode == 201 {
 			return true, fmt.Sprintf("HTTP %d OK", resp.StatusCode)
 		}
@@ -133,7 +133,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 { return true, "HTTP 200 OK" }
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 
@@ -143,7 +143,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req.Header.Set("Authorization", "Bearer "+key)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 { return true, "HTTP 200 OK" }
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 
@@ -153,7 +153,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req.Header.Set("Authorization", "Bearer "+key)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 { return true, "HTTP 200 OK (authenticated)" }
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 
@@ -163,7 +163,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req.Header.Set("Authorization", "Key "+key)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 || resp.StatusCode == 401 {
 			if resp.StatusCode == 200 { return true, "HTTP 200 OK" }
 			return false, "HTTP 401 — invalid FAL key"
@@ -176,7 +176,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req.Header.Set("xi-api-key", key)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 { return true, "HTTP 200 OK" }
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 
@@ -186,7 +186,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req.Header.Set("Authorization", key)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 { return true, "HTTP 200 OK" }
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 
@@ -196,7 +196,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 { return true, "HTTP 200 OK" }
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 
@@ -205,7 +205,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 { return true, "HTTP 200 OK" }
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 
@@ -215,7 +215,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req.Header.Set("Authorization", "Bearer "+key)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 { return true, "HTTP 200 OK" }
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 
@@ -226,7 +226,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, svcURL+"/health", nil)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 { return true, "HTTP 200 OK" }
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 
@@ -236,7 +236,7 @@ func pingProvider(ctx context.Context, p *entities.AIProviderConfig) (bool, stri
 		req.Header.Set("X-Api-Key", key)
 		resp, err := client.Do(req)
 		if err != nil { return false, err.Error() }
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 { return true, "HTTP 200 OK" }
 		return false, fmt.Sprintf("HTTP %d", resp.StatusCode)
 

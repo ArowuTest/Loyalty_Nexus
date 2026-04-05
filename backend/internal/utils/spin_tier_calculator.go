@@ -1,3 +1,5 @@
+// Package utils provides internal utility helpers for the Loyalty Nexus backend,
+// including spin-tier calculation logic.
 package utils
 
 import (

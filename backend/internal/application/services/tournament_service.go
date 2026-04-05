@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"database/sql"
+	"log"
 )
 
 type RegionRank struct {
@@ -33,7 +34,11 @@ func (s *TournamentService) GetLeaderboard(ctx context.Context) ([]RegionRank, e
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("[TournamentService] GetLeaderboard: rows close: %v", err)
+		}
+	}()
 
 	var ranks []RegionRank
 	for rows.Next() {

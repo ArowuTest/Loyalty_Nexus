@@ -1,3 +1,5 @@
+// Package utils provides shared utility helpers for the Loyalty Nexus backend,
+// including JWT generation/validation, spin-tier calculation, and other common functions.
 package utils
 
 import (

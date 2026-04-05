@@ -1,3 +1,4 @@
+// Package handlers provides HTTP request handlers for the Loyalty Nexus API.
 package handlers
 
 import (

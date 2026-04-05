@@ -1,3 +1,4 @@
+// Package services implements the application-layer business logic for Loyalty Nexus.
 package services
 
 import (
@@ -42,7 +43,7 @@ const (
 	refreshTokenTTL = 7 * 24 * time.Hour
 )
 
-// ─── LoginResult holds both tokens returned on successful login ───────────────
+// LoginResult holds both tokens returned on successful login.
 type LoginResult struct {
 	AccessToken  string
 	RefreshToken string

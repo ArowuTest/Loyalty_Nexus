@@ -1,3 +1,5 @@
+// Package config provides a database-backed, hot-reloadable configuration
+// manager for the Loyalty Nexus backend.
 package config
 
 import (
@@ -75,9 +77,12 @@ func (c *ConfigManager) Refresh(ctx context.Context) error {
 	for _, r := range rows {
 		// Wrap plain values in JSON quotes if they are not already valid JSON.
 		raw := json.RawMessage(r.Value)
-		if len(r.Value) == 0 || (r.Value[0] != '{' && r.Value[0] != '[' && r.Value[0] != '"' &&
-			!((r.Value[0] >= '0' && r.Value[0] <= '9') || r.Value[0] == '-') &&
-			r.Value != "true" && r.Value != "false" && r.Value != "null") {
+		// Wrap plain string values in JSON quotes if they are not already valid JSON
+		// (i.e. not an object, array, quoted string, number, bool literal, or null).
+		isJSON := len(r.Value) > 0 && (r.Value[0] == '{' || r.Value[0] == '[' || r.Value[0] == '"' ||
+			(r.Value[0] >= '0' && r.Value[0] <= '9') || r.Value[0] == '-' ||
+			r.Value == "true" || r.Value == "false" || r.Value == "null")
+		if !isJSON {
 			raw = json.RawMessage(`"` + r.Value + `"`)
 		}
 		c.cache[r.Key] = raw

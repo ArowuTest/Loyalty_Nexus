@@ -1,3 +1,5 @@
+// Package external provides adapters for third-party integrations used by the Loyalty Nexus backend,
+// including payment providers, AI services, storage backends, and notification gateways.
 package external
 
 import (

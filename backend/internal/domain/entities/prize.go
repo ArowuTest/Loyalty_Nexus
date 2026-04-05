@@ -90,7 +90,7 @@ type PrizePoolEntry struct {
 
 func (PrizePoolEntry) TableName() string { return "prize_pool" }
 
-// SpinWheel is the assembled payload sent to the frontend.
+// SpinWheelPayload is the assembled spin-wheel payload sent to the frontend.
 type SpinWheelPayload struct {
 	Slots        []SpinSlot `json:"slots"`
 	RequiredCredits int      `json:"required_credits"`

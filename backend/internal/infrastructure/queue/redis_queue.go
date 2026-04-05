@@ -1,3 +1,4 @@
+// Package queue provides a Redis-backed job queue for background task processing.
 package queue
 
 import (

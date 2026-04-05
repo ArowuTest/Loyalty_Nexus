@@ -156,8 +156,14 @@ func TestPassportService_QR(t *testing.T) {
 	cfg := config.NewConfigManagerNoRefresh(db)
 	svc := services.NewPassportService(db, cfg)
 
-	os.Setenv("PASSPORT_QR_SECRET", "test-secret")
-	defer os.Unsetenv("PASSPORT_QR_SECRET")
+	if err := os.Setenv("PASSPORT_QR_SECRET", "test-secret"); err != nil {
+		t.Fatalf("set PASSPORT_QR_SECRET: %v", err)
+	}
+	defer func() {
+		if err := os.Unsetenv("PASSPORT_QR_SECRET"); err != nil {
+			t.Logf("unset PASSPORT_QR_SECRET: %v", err)
+		}
+	}()
 
 	userID := uuid.New()
 	qr, err := svc.GenerateQRPayload(userID)

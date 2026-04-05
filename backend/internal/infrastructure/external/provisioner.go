@@ -67,7 +67,7 @@ func (v *VTPassAdapter) post(ctx context.Context, path string, payload map[strin
 	if err != nil {
 		return "", fmt.Errorf("VTPass request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Code    string `json:"code"`

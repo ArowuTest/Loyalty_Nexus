@@ -1,3 +1,4 @@
+// Package middleware provides HTTP middleware for the Loyalty Nexus API server.
 package middleware
 
 import (

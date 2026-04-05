@@ -77,7 +77,7 @@ func (m *MTNMomoAdapter) Disburse(ctx context.Context, phone string, amountNaira
 	if err != nil {
 		return "", fmt.Errorf("MoMo disburse request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 202 {
 		return ref, nil // Accepted — poll for completion
@@ -103,7 +103,7 @@ func (m *MTNMomoAdapter) VerifyAccount(ctx context.Context, phone string) (strin
 	if err != nil {
 		return "", false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 200 {
 		var info struct {
@@ -133,7 +133,7 @@ func (m *MTNMomoAdapter) GetTransactionStatus(ctx context.Context, momoRef strin
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Status string `json:"status"` // SUCCESSFUL | FAILED | PENDING
@@ -154,7 +154,7 @@ func (m *MTNMomoAdapter) getAccessToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var tok struct {
 		AccessToken string `json:"access_token"`

@@ -197,7 +197,7 @@ func (s *s3Storage) put(ctx context.Context, key string, body io.Reader, size in
 	if err != nil {
 		return "", fmt.Errorf("S3 PUT: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusNoContent {
 		raw, _ := io.ReadAll(resp.Body)
@@ -296,7 +296,7 @@ func (g *gcsStorage) uploadBytes(ctx context.Context, key string, data []byte, c
 	if err != nil {
 		return "", fmt.Errorf("GCS upload: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		raw, _ := io.ReadAll(resp.Body)
@@ -338,7 +338,7 @@ func (g *gcsStorage) Delete(ctx context.Context, key string) error {
 	if err != nil {
 		return fmt.Errorf("GCS delete: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -397,7 +397,7 @@ func (g *gcsStorage) bearerToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("GCS token request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var tokenResp struct {
 		AccessToken string `json:"access_token"`

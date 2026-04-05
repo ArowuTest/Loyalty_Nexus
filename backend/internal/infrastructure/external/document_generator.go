@@ -91,7 +91,7 @@ func (a *AssemblyAIAdapter) submitTranscript(ctx context.Context, audioURL strin
 	if err != nil {
 		return "", fmt.Errorf("assemblyai submit: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		raw, _ := io.ReadAll(resp.Body)
@@ -122,7 +122,7 @@ func (a *AssemblyAIAdapter) pollTranscript(ctx context.Context, jobID string) (t
 	if err != nil {
 		return "", false, fmt.Errorf("assemblyai poll: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -190,7 +190,7 @@ func (a *GoogleTranslateAdapter) Translate(ctx context.Context, text, targetLang
 	if err != nil {
 		return "", fmt.Errorf("google translate request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -280,7 +280,7 @@ func (a *DocumentAutomationAdapter) callGemini(ctx context.Context, prompt strin
 	if err != nil {
 		return "", fmt.Errorf("gemini request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)

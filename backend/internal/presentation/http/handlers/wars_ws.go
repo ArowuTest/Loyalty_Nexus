@@ -158,11 +158,11 @@ func (h *WarsHandler) LiveLeaderboard(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ctx.Done():
-			conn.Close(websocket.StatusNormalClosure, "done") //nolint:staticcheck
+			_ = conn.Close(websocket.StatusNormalClosure, "done") //nolint:staticcheck
 			return
 		case msg, ok := <-client.send:
 			if !ok {
-				conn.Close(websocket.StatusNormalClosure, "hub closed") //nolint:staticcheck
+				_ = conn.Close(websocket.StatusNormalClosure, "hub closed") //nolint:staticcheck
 				return
 			}
 			if err := wsjson.Write(ctx, conn, msg); err != nil {
