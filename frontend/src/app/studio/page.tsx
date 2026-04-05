@@ -119,8 +119,11 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "my-ai-photo":         { time: "~8 sec",   output: "1024×1024 image",               tip: "Add style words: 'photorealistic', 'vibrant', 'cinematic'" },
   "background-remover":  { time: "~5 sec",   output: "Transparent PNG",               tip: "Works best with clear subject vs background" },
   "animate-my-photo":    { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
-  "my-video-story":      { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
+  "my-video-story":      { time: "~2 min",   output: "Script-driven story video",       tip: "Add 2+ scenes with images and dialogue for best results" },
   "video-story":         { time: "~3 min",   output: "Multi-scene story video",         tip: "Use 2–4 images; describe each scene for best transitions" },
+  "video-jingle":        { time: "~3 min",   output: "Video + AI vocal jingle",         tip: "Combine a photo with a brand jingle for a full ad" },
+  "video-edit":          { time: "~2 min",   output: "Edited video clip",               tip: "Describe the edit: 'add slow motion', 'crop to 9:16'" },
+  "video-extend":        { time: "~2 min",   output: "Extended video clip",             tip: "Paste your video URL and describe how to extend it" },
   "my-marketing-jingle": { time: "~25 sec",  output: "AI music jingle",               tip: "Add brand name and target emotion in prompt" },
   "my-podcast":          { time: "~90 sec",  output: "2-host AI podcast audio",       tip: "Give a clear topic — the AI writes the full script" },
   "local-translation":   { time: "~3 sec",   output: "Translated text",               tip: "Format: type your text, select target language" },
@@ -129,9 +132,9 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
 };
 
 // ─── Output type helpers ──────────────────────────────────────────────────────
-const IMAGE_SLUGS  = new Set(["ai-photo","ai-photo-pro","ai-photo-max","ai-photo-dream","photo-editor","animate-photo","my-ai-photo","background-remover","bg-remover"]);
+const IMAGE_SLUGS  = new Set(["ai-photo","ai-photo-pro","ai-photo-max","ai-photo-dream","photo-editor","bg-remover","image-compose"]);
 const AUDIO_SLUGS  = new Set(["narrate","narrate-pro","bg-music","jingle","my-marketing-jingle","song-creator","instrumental","transcribe","transcribe-african","podcast","my-podcast"]);
-const VIDEO_SLUGS  = new Set(["animate-photo","video-premium","video-cinematic","video-veo","animate-my-photo","my-video-story","video-story"]);
+const VIDEO_SLUGS  = new Set(["animate-my-photo","video-premium","video-cinematic","video-veo","my-video-story","video-story","video-jingle","video-edit","video-extend"]);
 const CODE_SLUGS   = new Set(["code-helper"]);
 const VISION_SLUGS = new Set(["image-analyser","ask-my-photo"]);
 const WEB_SLUGS    = new Set(["web-search-ai"]);
@@ -216,6 +219,7 @@ const NEW_TOOL_SLUGS = new Set([
   "narrate-pro","transcribe-african",
   "ai-photo-pro","ai-photo-max","ai-photo-dream","photo-editor",
   "song-creator","instrumental","video-cinematic","video-veo",
+  "animate-my-photo","my-video-story",
 ]);
 
 // ─── Dual / special input sets ────────────────────────────────────────────────
@@ -237,12 +241,13 @@ const GENRE_CHIPS = ["Afrobeats","Gospel","Hip Hop","Amapiano","Jazz","Classical
 
 // ─── Alias / duplicate slugs hidden from the tool grid ────────────────────────
 // These are backend aliases for canonical tools. We hide them to avoid clutter
-// and show only the ~28 canonical tools to users.
+// and show only the canonical tools to users.
+// NOTE: animate-my-photo and my-video-story are intentionally NOT hidden —
+// they are distinct user-facing tools with their own UI templates.
 const HIDDEN_ALIAS_SLUGS = new Set([
   "my-ai-photo",         // alias → ai-photo
   "background-remover",  // alias → bg-remover
-  "animate-my-photo",    // alias → animate-photo
-  "my-video-story",      // alias → animate-photo
+  "animate-photo",       // legacy slug → superseded by animate-my-photo (user-facing)
   "my-marketing-jingle", // alias → jingle
   "my-podcast",          // alias → podcast
   "local-translation",   // alias → translate
@@ -251,9 +256,13 @@ const HIDDEN_ALIAS_SLUGS = new Set([
   "business-plan",       // alias → bizplan
   "summary",             // alias → research-brief
   "ai-chat",             // handled via Chat tab — not a standalone tool card
-  "nexus-chat",         // handled via Chat tab → general mode
-  "ask-nexus",          // handled via Chat tab → general mode
+  "nexus-chat",          // handled via Chat tab → general mode
 ]);
+
+// Chat-tab tools: shown in search results but route to Chat tab when clicked.
+// These are NOT in HIDDEN_ALIAS_SLUGS so they appear in search, but the
+// tool grid onClick handler routes them to the Chat tab instead of a drawer.
+const CHAT_TAB_SLUGS = new Set(["ask-nexus", "nexus-chat", "ai-chat"]);
 
 // ─── Placeholders ─────────────────────────────────────────────────────────────
 const PLACEHOLDERS: Record<string, string> = {
@@ -2723,13 +2732,20 @@ function StudioPageInner() {
     try { localStorage.setItem("nexus_studio_intro_dismissed", "true"); } catch { /* ignore */ }
   }, []);
 
-  // Canonical tools — excludes alias/duplicate slugs for a cleaner grid
-  const canonicalTools = tools.filter((t) => !HIDDEN_ALIAS_SLUGS.has(t.slug));
+  // Canonical tools — excludes alias/duplicate slugs and pure chat-tab tools from the main grid.
+  // Chat-tab tools (ask-nexus etc.) are excluded from the grid but still appear in search results
+  // via the searchableTools set below.
+  const canonicalTools = tools.filter((t) => !HIDDEN_ALIAS_SLUGS.has(t.slug) && !CHAT_TAB_SLUGS.has(t.slug));
+  // searchableTools includes chat-tab tools so they appear in search results
+  const searchableTools = tools.filter((t) => !HIDDEN_ALIAS_SLUGS.has(t.slug));
   // Build categories from visible tools, then ensure "Chat" is always present
   // (defensive guard: even if all Chat-category tools are hidden, the pill stays)
   const derivedCats = [...new Set(canonicalTools.map((t) => t.category))];
   const categories  = derivedCats.includes("Chat") ? derivedCats : ["Chat", ...derivedCats];
-  const filteredTools = canonicalTools.filter((t) => {
+  // When searching, include chat-tab tools so Ask Nexus / Nexus AI appear in results.
+  // When browsing (no search query), use only canonicalTools to keep the grid clean.
+  const toolsForFilter = searchQuery ? searchableTools : canonicalTools;
+  const filteredTools = toolsForFilter.filter((t) => {
     const matchesSearch = !searchQuery ||
       t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.description.toLowerCase().includes(searchQuery.toLowerCase());
@@ -3449,7 +3465,7 @@ function StudioPageInner() {
                             userPoints={userPoints}
                             onClick={() => {
                               if (tool.slug === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); }
-                              else if (tool.slug === "nexus-chat" || tool.slug === "ask-nexus") { setChatMode("general"); setActiveTab("chat"); }
+                              else if (CHAT_TAB_SLUGS.has(tool.slug)) { setChatMode("general"); setActiveTab("chat"); }
                               else { setSelectedTool(tool); }
                             }}
                           />
@@ -3480,7 +3496,7 @@ function StudioPageInner() {
                               if (tool.slug === "web-search-ai") {
                                 setChatMode("search");
                                 setActiveTab("chat");
-                              } else if (tool.slug === "nexus-chat" || tool.slug === "ask-nexus") {
+                              } else if (CHAT_TAB_SLUGS.has(tool.slug)) {
                                 setChatMode("general");
                                 setActiveTab("chat");
                               } else {
