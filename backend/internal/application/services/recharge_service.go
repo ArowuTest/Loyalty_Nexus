@@ -159,7 +159,7 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 		newDrawCounter := effectiveDrawCounter + amountKobo
 		drawEntriesEarned := int(newDrawCounter / drawThresholdKobo)
 		newDrawCounter = newDrawCounter % drawThresholdKobo
-		_ = drawEntriesEarned // tracked via draw_counter; entries credited by draw_service
+		// drawEntriesEarned is accumulated in draw_entries_today so the dashboard can show it
 
 		// ── Spin Credits (tiered daily cumulative) ────────────────────────────
 		// The ONLY tiered reward. Based on cumulative daily recharge crossing
@@ -169,6 +169,13 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 		)
 
 		// ── Update wallet atomically ──────────────────────────────────────────
+		// Reset draw_entries_today if it's a new WAT day
+		isNewDay := wallet.DailyRechargeDate == nil || wallet.DailyRechargeDate.Before(todayWAT)
+		newDrawEntriesToday := gorm.Expr("draw_entries_today + ?", drawEntriesEarned)
+		if isNewDay {
+			newDrawEntriesToday = gorm.Expr("?", drawEntriesEarned) // reset to today's count
+		}
+
 		walletUpdates := map[string]interface{}{
 			"pulse_points":        gorm.Expr("pulse_points + ?", ptsEarned),
 			"lifetime_points":     gorm.Expr("lifetime_points + ?", ptsEarned),
@@ -177,6 +184,8 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 			"daily_recharge_kobo": newDailyKobo,
 			"daily_recharge_date": newDailyDate,
 			"daily_spins_awarded": newDailySpinsAwarded,
+			"draw_entries_today":  newDrawEntriesToday,
+			"draw_entries_date":   todayWAT,
 		}
 		if spinCreditsEarned > 0 {
 			walletUpdates["spin_credits"] = gorm.Expr("spin_credits + ?", spinCreditsEarned)

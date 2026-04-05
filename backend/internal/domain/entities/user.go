@@ -83,6 +83,10 @@ type Wallet struct {
 	DailyRechargeKobo int64      `db:"daily_recharge_kobo"   gorm:"column:daily_recharge_kobo"   json:"daily_recharge_kobo"`
 	DailyRechargeDate *time.Time `db:"daily_recharge_date"   gorm:"column:daily_recharge_date"   json:"daily_recharge_date,omitempty"`
 	DailySpinsAwarded int        `db:"daily_spins_awarded"   gorm:"column:daily_spins_awarded"   json:"daily_spins_awarded"`
+	// DrawEntriesToday: number of draw entries earned today (resets at midnight WAT).
+	// Every ₦200 recharge = 1 entry into the next day's daily draw.
+	DrawEntriesToday  int        `db:"draw_entries_today"    gorm:"column:draw_entries_today"    json:"draw_entries_today"`
+	DrawEntriesDate   *time.Time `db:"draw_entries_date"     gorm:"column:draw_entries_date"     json:"draw_entries_date,omitempty"`
 	UpdatedAt         time.Time  `db:"updated_at"            gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 

@@ -722,7 +722,7 @@ export default function DashboardPage() {
   const { data: bonusData } = useSWR("/user/bonus-pulse", fetcher);
   const p = profile as { phone_number?: string; tier?: string; streak_count?: number; total_spins?: number; studio_use_count?: number } | undefined;
   // Use SWR data when available, fall back to persisted store value to avoid flash-to-zero
-  const w = (wallet ?? storedWallet) as { pulse_points?: number; spin_credits?: number; lifetime_points?: number } | undefined;
+  const w = (wallet ?? storedWallet) as { pulse_points?: number; spin_credits?: number; lifetime_points?: number; draw_entries_today?: number } | undefined;
   const b = bonusData as { total_bonus?: number } | undefined;
 
   const tier        = (p?.tier ?? "BRONZE").toUpperCase();
@@ -747,10 +747,12 @@ export default function DashboardPage() {
     ? `${phone.slice(0, 4)}****${phone.slice(-4)}`
     : phone || "Loading…";
 
+  const drawEntriesToday = w?.draw_entries_today ?? 0;
+
   const STATS = [
-    { icon: RotateCcw, label: "Total Spins",  value: totalSpins.toLocaleString(),  color: "#5f72f9", sub: "All time" },
-    { icon: Wand2,     label: "Studio Uses",  value: studioUses.toLocaleString(),  color: "#8B5CF6", sub: "All time" },
-    { icon: Award,     label: "Bonus Awards", value: formatPoints(totalBonus),     color: "#F5A623", sub: "Total earned" },
+    { icon: RotateCcw, label: "Total Spins",        value: totalSpins.toLocaleString(),       color: "#5f72f9", sub: "All time" },
+    { icon: Wand2,     label: "Studio Uses",        value: studioUses.toLocaleString(),       color: "#8B5CF6", sub: "All time" },
+    { icon: Award,     label: "Bonus Awards",       value: formatPoints(totalBonus),          color: "#F5A623", sub: "Total earned" },
   ];
 
   return (
@@ -869,6 +871,29 @@ export default function DashboardPage() {
               <p className="text-white/30 text-[10px] mt-1">{sub}</p>
             </motion.div>
           ))}
+
+          {/* ── Daily Draw Entries card ── */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 + STATS.length * 0.04 }}
+            className="rounded-2xl p-4 relative overflow-hidden"
+            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(16,185,129,0.18)" }}>
+            {/* green glow accent */}
+            <div className="absolute top-0 right-0 w-16 h-16 pointer-events-none"
+              style={{ background: "radial-gradient(circle, rgba(16,185,129,0.12) 0%, transparent 70%)", transform: "translate(20%,-20%)" }} />
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.25)" }}>
+                <Gift size={14} className="text-emerald-400" />
+              </div>
+              <p className="text-[11px] font-black text-white/50 uppercase tracking-wide">Draw Entries</p>
+            </div>
+            <p className="text-white font-black text-2xl leading-none">
+              {drawEntriesToday}
+              <span className="text-emerald-400 text-sm font-bold ml-1">ticket{drawEntriesToday !== 1 ? "s" : ""}</span>
+            </p>
+            <p className="text-white/30 text-[10px] mt-1">Today · resets midnight WAT</p>
+            <p className="text-white/20 text-[9px] mt-0.5">₦200 recharge = 1 lottery entry</p>
+          </motion.div>
         </motion.div>
 
         {/* ── Spin & Win (full width) ── */}

@@ -5,9 +5,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mime/mime.dart';
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
-// Inject via: flutter run --dart-define=API_URL=https://api.yourdomain.com/api/v1
+// Inject via: flutter run --dart-define=API_URL=https://loyalty-nexus-api.onrender.com/api/v1
 const _baseUrl = String.fromEnvironment(
-  'API_URL', defaultValue: 'https://loyaltynexus.ng/api/v1');
+  'API_URL', defaultValue: 'https://loyalty-nexus-api.onrender.com/api/v1');
 
 // ─── Dio Provider ─────────────────────────────────────────────────────────────
 
