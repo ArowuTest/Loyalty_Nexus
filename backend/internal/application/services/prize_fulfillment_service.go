@@ -80,7 +80,7 @@ func (s *PrizeFulfillmentService) fulfillAirtime(ctx context.Context, result *en
 		return err
 	}
 
-	s.notifySvc.NotifyPrizeWon(ctx, user.PhoneNumber,
+	s.notifySvc.SendSMS(ctx, user.PhoneNumber,
 		fmt.Sprintf("You won ₦%.0f airtime! It has been credited to %s.", result.PrizeValue, user.PhoneNumber))
 	return nil
 }
@@ -99,7 +99,7 @@ func (s *PrizeFulfillmentService) fulfillData(ctx context.Context, result *entit
 	}
 
 	_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillCompleted, vtRef, "")
-	s.notifySvc.NotifyPrizeWon(ctx, user.PhoneNumber,
+	s.notifySvc.SendSMS(ctx, user.PhoneNumber,
 		fmt.Sprintf("You won %.0fMB data bundle! It has been added to %s.", result.PrizeValue, user.PhoneNumber))
 	return nil
 }
@@ -113,7 +113,7 @@ func (s *PrizeFulfillmentService) fulfillMoMo(ctx context.Context, result *entit
 	if !user.MoMoVerified || user.MoMoNumber == "" {
 		// Hold the prize — user needs to link MoMo first
 		_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillPendingMoMo, "", "")
-		s.notifySvc.NotifyPrizeWon(ctx, user.PhoneNumber,
+		s.notifySvc.SendSMS(ctx, user.PhoneNumber,
 			fmt.Sprintf("You won ₦%.0f MoMo Cash! Link your MTN MoMo number in the app to receive it.", result.PrizeValue))
 		return nil
 	}
@@ -130,7 +130,7 @@ func (s *PrizeFulfillmentService) fulfillMoMo(ctx context.Context, result *entit
 	_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillCompleted, momoRef, "")
 	_ = s.updateClaimedAt(ctx, result.ID, now)
 
-	s.notifySvc.NotifyPrizeWon(ctx, user.PhoneNumber,
+	s.notifySvc.SendSMS(ctx, user.PhoneNumber,
 		fmt.Sprintf("₦%.0f MoMo Cash has been sent to %s! Check your MoMo wallet.", result.PrizeValue, user.MoMoNumber))
 	return nil
 }

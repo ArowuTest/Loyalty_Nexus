@@ -46,7 +46,7 @@ func (s *AuthService) SendLoginOTP(ctx context.Context, phoneNumber string) erro
 }
 
 func (s *AuthService) VerifyLogin(ctx context.Context, phoneNumber, code string) (string, error) {
-	otp, err := s.authRepo.FindPendingOTP(ctx, phoneNumber, code, entities.OTPLogin)
+	otp, err := s.authRepo.FindLatestPendingOTP(ctx, phoneNumber, code, entities.OTPLogin)
 	if err != nil {
 		return "", fmt.Errorf("invalid or expired code")
 	}
