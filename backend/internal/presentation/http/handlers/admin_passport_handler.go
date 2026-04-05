@@ -138,7 +138,7 @@ func (h *AdminHandler) GetPassportStats(w http.ResponseWriter, r *http.Request) 
 		removalRatePct = float64(removedApple) / float64(totalEverApple) * 100
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	jsonOK(w, map[string]interface{}{
 		"total_passports":        totalPassports,
 		"apple_wallet_downloads": appleDownloads,
 		"google_wallet_saves":    googleSaves,
@@ -197,7 +197,7 @@ func (h *AdminHandler) GetGhostNudgeLog(w http.ResponseWriter, r *http.Request) 
 		logs = []NudgeLog{}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	jsonOK(w, map[string]interface{}{
 		"logs":  logs,
 		"total": len(logs),
 	})
@@ -255,7 +255,7 @@ func (h *AdminHandler) GetUSSDSessions(w http.ResponseWriter, r *http.Request) {
 		sessions = []USSDSessionRow{}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	jsonOK(w, map[string]interface{}{
 		"sessions": sessions,
 		"total":    len(sessions),
 	})
