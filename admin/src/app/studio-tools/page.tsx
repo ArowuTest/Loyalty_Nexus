@@ -108,17 +108,36 @@ function StatCard({ icon, label, value, color }: {
 }
 
 // ─── Create Tool Modal ────────────────────────────────────────────────────────
+const UI_TEMPLATES = [
+  { value: "knowledge-doc",    label: "📄 Knowledge Doc" },
+  { value: "music-composer",   label: "🎵 Music Composer" },
+  { value: "image-creator",    label: "🖼️ Image Creator" },
+  { value: "image-editor",     label: "✏️ Image Editor" },
+  { value: "image-compose",    label: "🎨 Image Compose" },
+  { value: "video-creator",    label: "🎬 Video Creator" },
+  { value: "video-animator",   label: "🎞️ Video Animator" },
+  { value: "video-editor",     label: "🎥 Video Editor" },
+  { value: "video-extender",   label: "⏩ Video Extender" },
+  { value: "video-multi-scene",label: "🎭 Video Multi-Scene" },
+  { value: "voice-studio",     label: "🎙️ Voice Studio" },
+  { value: "transcribe",       label: "📝 Transcribe" },
+  { value: "vision-ask",       label: "👁️ Vision Ask" },
+  { value: "chat",             label: "💬 Chat" },
+] as const;
+
 interface CreateForm {
   name: string; slug: string; description: string; category: string;
   point_cost: string; provider: string; provider_tool: string;
   icon: string; sort_order: string;
   entry_point_cost: string; refund_window_mins: string; refund_pct: string; is_free: boolean;
+  ui_template: string;
 }
 
 const EMPTY_FORM: CreateForm = {
   name: "", slug: "", description: "", category: "Chat",
   point_cost: "10", provider: "", provider_tool: "", icon: "✨", sort_order: "100",
   entry_point_cost: "0", refund_window_mins: "5", refund_pct: "100", is_free: false,
+  ui_template: "knowledge-doc",
 };
 
 function CreateModal({ onClose, onCreated }: {
@@ -153,6 +172,7 @@ function CreateModal({ onClose, onCreated }: {
         refund_window_mins: parseInt(form.refund_window_mins, 10) || 0,
         refund_pct: Math.min(100, Math.max(0, parseInt(form.refund_pct, 10) || 100)),
         is_free: form.is_free,
+        ui_template: form.ui_template || "knowledge-doc",
       });
       onCreated(tool);
       onClose();
@@ -230,6 +250,18 @@ function CreateModal({ onClose, onCreated }: {
                 onChange={e => set("point_cost", e.target.value)} />
             </label>
           </div>
+
+          {/* UI Template */}
+          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <span style={{ color: MUTED, fontSize: 11, fontWeight: 600 }}>UI TEMPLATE *</span>
+            <select required style={inp()} value={form.ui_template}
+              onChange={e => set("ui_template", e.target.value)}>
+              {UI_TEMPLATES.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+            <span style={{ color: MUTED, fontSize: 10 }}>Controls which input form users see for this tool.</span>
+          </label>
 
           {/* Row: provider + provider_tool */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -527,6 +559,7 @@ interface EditState {
   refund_window_mins: string;
   refund_pct: string;
   is_free: boolean;
+  ui_template: string;
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -586,6 +619,7 @@ export default function StudioToolsPage() {
       refund_window_mins: String(t.refund_window_mins ?? 0),
       refund_pct: String(t.refund_pct ?? 100),
       is_free: t.is_free ?? false,
+      ui_template: t.ui_template || "knowledge-doc",
     });
     setError(null);
   };
@@ -608,6 +642,7 @@ export default function StudioToolsPage() {
         refund_window_mins: parseInt(editState.refund_window_mins, 10) || 0,
         refund_pct: Math.min(100, Math.max(0, parseInt(editState.refund_pct, 10) || 100)),
         is_free: editState.is_free,
+        ui_template: editState.ui_template || "knowledge-doc",
       });
       setSavedId(tool.id);
       setEditId(null); setEditState(null);
@@ -741,7 +776,7 @@ export default function StudioToolsPage() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${BORDER}` }}>
-                  {["Tool", "Category", "Provider / Model", "Point Cost", "Entry Gate", "Status", "Gen Today", "Success", "Actions"].map(h => (
+                  {["Tool", "Category", "UI Template", "Provider / Model", "Point Cost", "Entry Gate", "Status", "Gen Today", "Success", "Actions"].map(h => (
                     <th key={h} style={{
                       padding: "12px 16px", textAlign: "left",
                       color: MUTED, fontSize: 10, fontWeight: 700,
@@ -788,6 +823,19 @@ export default function StudioToolsPage() {
                         {/* Category */}
                         <td style={{ padding: "13px 16px" }}>
                           <Badge label={t.category} />
+                        </td>
+
+                        {/* UI Template */}
+                        <td style={{ padding: "13px 16px" }}>
+                          <span style={{
+                            fontSize: 11, fontFamily: "monospace",
+                            color: "#a78bfa",
+                            background: "rgba(167,139,250,0.1)",
+                            border: "1px solid rgba(167,139,250,0.25)",
+                            borderRadius: 6, padding: "2px 7px",
+                          }}>
+                            {t.ui_template || "knowledge-doc"}
+                          </span>
                         </td>
 
                         {/* Provider / Model */}
@@ -963,11 +1011,11 @@ export default function StudioToolsPage() {
                         </td>
                       </tr>
 
-                      {/* Inline edit expanded row for description */}
+                      {/* Inline edit expanded row for description + ui_template */}
                       {isEditing && editState && (
                         <tr style={{ borderBottom: !isLast ? `1px solid ${BORDER}` : "none", background: "rgba(95,114,249,0.03)" }}>
-                          <td colSpan={8} style={{ padding: "12px 16px 16px" }}>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 10, maxWidth: 600 }}>
+                          <td colSpan={10} style={{ padding: "12px 16px 16px" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 200px 80px", gap: 10, maxWidth: 760 }}>
                               <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                                 <span style={{ color: MUTED, fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>Description</span>
                                 <textarea rows={2} style={{ ...inp(), resize: "vertical" as const }}
@@ -975,6 +1023,18 @@ export default function StudioToolsPage() {
                                   onChange={e => setEditState(prev => prev ? { ...prev, description: e.target.value } : prev)}
                                   placeholder="Tool description…"
                                 />
+                              </label>
+                              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                <span style={{ color: MUTED, fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>UI Template</span>
+                                <select style={inp()}
+                                  value={editState.ui_template}
+                                  onChange={e => setEditState(prev => prev ? { ...prev, ui_template: e.target.value } : prev)}
+                                >
+                                  {UI_TEMPLATES.map(tmpl => (
+                                    <option key={tmpl.value} value={tmpl.value}>{tmpl.label}</option>
+                                  ))}
+                                </select>
+                                <span style={{ color: MUTED, fontSize: 10 }}>Input form shown to users</span>
                               </label>
                               <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                                 <span style={{ color: MUTED, fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>Icon</span>

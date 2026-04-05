@@ -681,20 +681,59 @@ func (h *AdminHandler) UpdateStudioTool(w http.ResponseWriter, r *http.Request) 
 		id = r.PathValue("key")
 	}
 	var body struct {
-		PointCost int64 `json:"point_cost"`
-		IsActive  *bool `json:"is_active"`
+		PointCost        int64   `json:"point_cost"`
+		IsActive         *bool   `json:"is_active"`
+		Provider         *string `json:"provider"`
+		Description      *string `json:"description"`
+		Icon             *string `json:"icon"`
+		UITemplate       *string `json:"ui_template"`
+		EntryPointCost   *int64  `json:"entry_point_cost"`
+		RefundWindowMins *int    `json:"refund_window_mins"`
+		RefundPct        *int    `json:"refund_pct"`
+		IsFree           *bool   `json:"is_free"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || id == "" {
 		jsonError(w, "id/key and body required", http.StatusBadRequest)
 		return
 	}
-	// Build dynamic update
+	// Build dynamic update — only include fields that were explicitly sent
 	updates := map[string]interface{}{"updated_at": time.Now()}
 	if body.PointCost >= 0 {
 		updates["point_cost"] = body.PointCost
 	}
 	if body.IsActive != nil {
 		updates["is_active"] = *body.IsActive
+	}
+	if body.Provider != nil {
+		updates["provider"] = *body.Provider
+	}
+	if body.Description != nil {
+		updates["description"] = *body.Description
+	}
+	if body.Icon != nil {
+		updates["icon"] = *body.Icon
+	}
+	if body.UITemplate != nil && *body.UITemplate != "" {
+		updates["ui_template"] = *body.UITemplate
+	}
+	if body.EntryPointCost != nil {
+		updates["entry_point_cost"] = *body.EntryPointCost
+	}
+	if body.RefundWindowMins != nil {
+		updates["refund_window_mins"] = *body.RefundWindowMins
+	}
+	if body.RefundPct != nil {
+		pct := *body.RefundPct
+		if pct < 0 {
+			pct = 0
+		}
+		if pct > 100 {
+			pct = 100
+		}
+		updates["refund_pct"] = pct
+	}
+	if body.IsFree != nil {
+		updates["is_free"] = *body.IsFree
 	}
 	// Try by UUID first, fall back to slug
 	result := h.db.WithContext(r.Context()).
@@ -714,15 +753,20 @@ func (h *AdminHandler) UpdateStudioTool(w http.ResponseWriter, r *http.Request) 
 // POST /api/v1/admin/studio-tools
 func (h *AdminHandler) CreateStudioTool(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name         string `json:"name"`
-		Slug         string `json:"slug"`
-		Description  string `json:"description"`
-		Category     string `json:"category"`
-		PointCost    int64  `json:"point_cost"`
-		Provider     string `json:"provider"`
-		ProviderTool string `json:"provider_tool"`
-		Icon         string `json:"icon"`
-		SortOrder    int    `json:"sort_order"`
+		Name             string `json:"name"`
+		Slug             string `json:"slug"`
+		Description      string `json:"description"`
+		Category         string `json:"category"`
+		PointCost        int64  `json:"point_cost"`
+		Provider         string `json:"provider"`
+		ProviderTool     string `json:"provider_tool"`
+		Icon             string `json:"icon"`
+		SortOrder        int    `json:"sort_order"`
+		UITemplate       string `json:"ui_template"`
+		EntryPointCost   int64  `json:"entry_point_cost"`
+		RefundWindowMins int    `json:"refund_window_mins"`
+		RefundPct        int    `json:"refund_pct"`
+		IsFree           bool   `json:"is_free"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid body", http.StatusBadRequest)
@@ -737,19 +781,40 @@ func (h *AdminHandler) CreateStudioTool(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Default ui_template to knowledge-doc if not specified
+	uiTemplate := body.UITemplate
+	if uiTemplate == "" {
+		uiTemplate = "knowledge-doc"
+	}
+	// Clamp refund_pct to 0-100; default to 100 if not provided
+	refundPct := body.RefundPct
+	if refundPct == 0 {
+		refundPct = 100
+	}
+	if refundPct < 0 {
+		refundPct = 0
+	}
+	if refundPct > 100 {
+		refundPct = 100
+	}
 	tool := entities.StudioTool{
-		ID:           uuid.New(),
-		Name:         body.Name,
-		Slug:         body.Slug,
-		Description:  body.Description,
-		Category:     entities.ToolCategory(body.Category),
-		PointCost:    body.PointCost,
-		Provider:     body.Provider,
-		ProviderTool: body.ProviderTool,
-		Icon:         body.Icon,
-		SortOrder:    body.SortOrder,
-		IsActive:     true,
-		UIConfig:     entities.UIConfig{}, // default empty JSON object to satisfy NOT NULL
+		ID:               uuid.New(),
+		Name:             body.Name,
+		Slug:             body.Slug,
+		Description:      body.Description,
+		Category:         entities.ToolCategory(body.Category),
+		PointCost:        body.PointCost,
+		Provider:         body.Provider,
+		ProviderTool:     body.ProviderTool,
+		Icon:             body.Icon,
+		SortOrder:        body.SortOrder,
+		IsActive:         true,
+		UITemplate:       uiTemplate,
+		EntryPointCost:   body.EntryPointCost,
+		RefundWindowMins: body.RefundWindowMins,
+		RefundPct:        refundPct,
+		IsFree:           body.IsFree,
+		UIConfig:         entities.UIConfig{}, // default empty JSON object to satisfy NOT NULL
 	}
 
 	if err := h.studioSvc.UpsertTool(r.Context(), &tool); err != nil {
