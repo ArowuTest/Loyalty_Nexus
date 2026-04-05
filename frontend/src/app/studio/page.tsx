@@ -78,6 +78,7 @@ interface Generation {
   refund_pts?: number;
   refund_window_mins?: number;
   refund_pct?: number;
+  expires_at?: string;
 }
 
 // ─── Tool Meta ─────────────────────────────────────────────────────────────────
@@ -1461,6 +1462,11 @@ function renderSlideDeck(text: string) {
 }
 // ─── Generation card ──────────────────────────────────────────────────────────
 function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?: (gen: Generation) => void }) {
+  // Expiry logic — provider CDN URLs last ~48 hrs
+  const isExpired = gen.expires_at ? new Date(gen.expires_at) < new Date() : false;
+  const expiresInHrs = gen.expires_at
+    ? Math.max(0, Math.round((new Date(gen.expires_at).getTime() - Date.now()) / 3_600_000))
+    : null;
   const isImage       = IMAGE_SLUGS.has(gen.tool_slug);
   const isAudio       = AUDIO_SLUGS.has(gen.tool_slug);
   const isVideo       = VIDEO_SLUGS.has(gen.tool_slug);
@@ -1507,6 +1513,16 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
           </span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Expiry badge */}
+          {gen.status === "completed" && gen.expires_at && (
+            isExpired
+              ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/20 font-bold">Expired</span>
+              : expiresInHrs !== null && expiresInHrs <= 12
+                ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/20 font-bold">⚠ {expiresInHrs}h left</span>
+                : expiresInHrs !== null
+                  ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/5 text-white/30 border border-white/10">{expiresInHrs}h</span>
+                  : null
+          )}
           <span className="text-white/25 text-[10px]">{timeAgo(gen.created_at)}</span>
           <StatusPill status={gen.status} />
         </div>
@@ -1554,8 +1570,22 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
         </div>
       )}
 
+      {/* ── Expired: show overlay + regenerate ── */}
+      {gen.status === "completed" && isExpired && (
+        <div className="rounded-2xl border border-red-500/20 bg-red-950/20 p-4 text-center space-y-2">
+          <p className="text-red-300 text-xs font-semibold">⏰ Asset expired — provider URL is no longer available</p>
+          <p className="text-white/30 text-[10px]">Re-run this generation to get a fresh copy</p>
+          {onRegenerate && (
+            <button onClick={() => onRegenerate(gen)}
+              className="mt-1 flex items-center gap-1.5 mx-auto px-3 py-1.5 rounded-lg bg-gold-500/15 text-gold-300 border border-gold-500/25 text-xs font-semibold hover:bg-gold-500/25 transition-all">
+              <RotateCcw size={11} /> Regenerate
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ── Completed: URL outputs ── */}
-      {gen.status === "completed" && gen.output_url && (
+      {gen.status === "completed" && gen.output_url && !isExpired && (
         <div className="space-y-2 rounded-xl overflow-hidden">
           {isImage && !isVideo && (
             <div className="space-y-3">
