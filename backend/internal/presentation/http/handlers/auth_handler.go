@@ -34,16 +34,15 @@ func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		MSISDN       string `json:"msisdn"`
-		Code         string `json:"code"`
-		ReferralCode string `json:"referral_code"`
+		MSISDN string `json:"msisdn"`
+		Code   string `json:"code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", 400)
 		return
 	}
 
-	token, err := h.authService.VerifyLogin(r.Context(), req.MSISDN, req.Code, req.ReferralCode)
+	token, err := h.authService.VerifyLogin(r.Context(), req.MSISDN, req.Code)
 	if err != nil {
 		http.Error(w, err.Error(), 401)
 		return

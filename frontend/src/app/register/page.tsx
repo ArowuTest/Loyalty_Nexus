@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Smartphone, Sparkles, MapPin, ArrowRight, Loader2, UserPlus } from 'lucide-react';
+import { Smartphone, Sparkles, MapPin, ArrowRight, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
 const NIGERIAN_STATES = [
@@ -18,7 +18,7 @@ export default function Register() {
   const [msisdn, setMsisdn] = useState('');
   const [otp, setOtp] = useState('');
   const [state, setState] = useState('');
-  const [referralCode, setReferralCode] = useState('');
+
   const [step, setStep] = useState(1); // 1: MSISDN, 2: OTP
   const [isLoading, setIsLoading] = useState(false);
 
@@ -83,17 +83,7 @@ export default function Register() {
                     </select>
                   </div>
 
-                  {/* Referral Support (REQ-5.2.10) */}
-                  <div className="relative group">
-                    <UserPlus className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-brand-gold transition-colors" size={20} />
-                    <input 
-                      type="text" 
-                      placeholder="Referral Code (Optional)"
-                      value={referralCode}
-                      onChange={(e) => setReferralCode(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-14 pr-6 text-sm font-bold text-white placeholder:text-slate-700 focus:outline-none focus:border-brand-gold/50 transition-all"
-                    />
-                  </div>
+
                 </div>
 
                 <button 

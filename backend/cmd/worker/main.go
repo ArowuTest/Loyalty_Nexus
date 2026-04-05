@@ -202,14 +202,7 @@ func processRecharge(ctx context.Context, event queue.RechargeEvent, ur reposito
 		Pluck("bonus_points", &streakBonus)
 	pointsEarned += streakBonus
 
-	if isFirstRecharge && user.ReferredByID != nil {
-		var referralPoints int64
-		db.Table("program_bonuses").Where("event_type = 'referral_completion' AND is_active = true").Pluck("bonus_points", &referralPoints)
-		if referralPoints > 0 {
-			pointsEarned += referralPoints
-			db.Model(&entities.User{}).Where("id = ?", user.ReferredByID).Update("total_points", gorm.Expr("total_points + ?", referralPoints))
-		}
-	}
+	// Referral bonus removed — feature not approved for this release.
 
 	user.TotalPoints += pointsEarned
 	user.TotalRechargeAmount += event.Amount

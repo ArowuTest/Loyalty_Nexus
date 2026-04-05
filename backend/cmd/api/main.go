@@ -57,8 +57,7 @@ func main() {
 	// Services & UseCases
 	notifySvc := services.NewNotificationService(db, os.Getenv("TERMII_API_KEY"))
 	monetSvc := services.NewMonetizationService(db)
-	referralSvc := services.NewReferralService(userRepo, db)
-	authSvc := services.NewAuthService(authRepo, userRepo, referralSvc, notifySvc, os.Getenv("JWT_SECRET"))
+	authSvc := services.NewAuthService(authRepo, userRepo, notifySvc, os.Getenv("JWT_SECRET"))
 	userUC := usecases.NewUserUseCase(userRepo)
 	hlrSvc := services.NewHLRService(hlrRepo)
 	momoSvc := services.NewMoMoService(&external.MTNMomoAdapter{})

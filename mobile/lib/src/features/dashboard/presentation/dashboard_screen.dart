@@ -1005,7 +1005,6 @@ class _TxRow extends StatelessWidget {
     if (t.contains('recharge')) return '⚡';
     if (t.contains('spin'))     return '🎡';
     if (t.contains('studio'))   return '🧠';
-    if (t.contains('referral')) return '👥';
     if (t.contains('bonus'))    return '🎁';
     return '📊';
   }
@@ -1014,7 +1013,6 @@ class _TxRow extends StatelessWidget {
     if (t.contains('recharge')) return 'Recharge Earned';
     if (t.contains('spin'))     return 'Spin Used';
     if (t.contains('studio'))   return 'AI Studio';
-    if (t.contains('referral')) return 'Referral Bonus';
     if (t.contains('bonus'))    return 'Bonus Award';
     return t.isNotEmpty ? t.replaceAll('_', ' ').toUpperCase() : 'Transaction';
   }
