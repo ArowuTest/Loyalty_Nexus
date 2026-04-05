@@ -281,7 +281,7 @@ func TestUSSDHandler_UnknownUser(t *testing.T) {
 	h := newHandler(t, db)
 
 	res := post(t, h, "s3", "0000000000003", "1")
-	if !strings.HasPrefix(res, "END Account not found") {
+	if !strings.HasPrefix(res, "END account not found") {
 		t.Errorf("expected account-not-found, got: %s", res)
 	}
 }
