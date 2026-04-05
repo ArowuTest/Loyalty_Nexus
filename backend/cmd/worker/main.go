@@ -1,236 +1,115 @@
+// Build: 2026-03-29T01:38:39Z
 package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+
 	"loyalty-nexus/internal/application/services"
-	"loyalty-nexus/internal/domain/entities"
-	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
-	"loyalty-nexus/internal/infrastructure/persistence"
-	"loyalty-nexus/internal/infrastructure/queue"
 	"loyalty-nexus/internal/infrastructure/external"
+	"loyalty-nexus/internal/infrastructure/persistence"
 )
 
 func main() {
-	dsn := os.Getenv("DATABASE_URL")
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// ─── Database ─────────────────────────────────────────────
+	// Retry DB connection up to 10 times with 3s backoff.
+	var (
+		db  *gorm.DB
+		err error
+	)
+	for attempt := 1; attempt <= 30; attempt++ {
+		db, err = gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{
+			// Only log actual errors — suppresses noisy "record not found" from First() calls
+			Logger: logger.Default.LogMode(logger.Error),
+		})
+		if err == nil {
+			break
+		}
+		log.Printf("[WORKER] DB connect attempt %d/30 failed: %v — retrying in 3s...", attempt, err)
+		time.Sleep(3 * time.Second)
+	}
 	if err != nil {
-		log.Fatalf("Failed to connect to DB: %v", err)
+		log.Fatalf("[WORKER] DB connect failed after 30 attempts: %v", err)
 	}
+	log.Println("[WORKER] DB connected")
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr: os.Getenv("REDIS_URL"),
-	})
-
-	userRepo := persistence.NewPostgresUserRepository(db)
-	txRepo := persistence.NewPostgresTransactionRepository(db)
-	hlrRepo := persistence.NewPostgresHLRRepository(db)
-	fraudGuard := services.NewFraudGuard(db)
-	hlrSvc := services.NewHLRService(hlrRepo)
-	monetizationSvc := services.NewMonetizationService(db)
-	
-	walletAdapter := &external.RebitesWalletAdapter{} 
-	passportSvc := services.NewPassportService(walletAdapter) 
-
-	cfg := config.NewConfigManager(db)
-	cfg.Refresh(context.Background())
-
-	ctx := context.Background()
-	streamName := "recharge_stream"
-	groupName := "nexus_processors"
-
-	rdb.XGroupCreateMkStream(ctx, streamName, groupName, "0")
-
-	log.Printf("Loyalty Nexus Worker started.")
-
-	for {
-		entries, err := rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group:    groupName,
-			Consumer: "worker-1",
-			Streams:  []string{streamName, ">"},
-			Count:    10,
-			Block:    0,
-		}).Result()
-
-		if err != nil {
-			time.Sleep(2 * time.Second)
-			continue
-		}
-
-		for _, stream := range entries {
-			for _, msg := range stream.Messages {
-				var event queue.RechargeEvent
-				json.Unmarshal([]byte(msg.Values["payload"].(string)), &event)
-
-				// 1. Fraud Check
-				isFraud, reason, _ := fraudGuard.IsFraudulent(ctx, event.MSISDN, event.Amount)
-				if isFraud {
-					log.Printf("[Worker] Fraud Blocked: %s | Reason: %s", event.MSISDN, reason)
-					rdb.XAck(ctx, streamName, groupName, msg.ID)
-					continue
-				}
-
-				// 2. HLR Validation
-				if os.Getenv("OPERATION_MODE") == "integrated" {
-					hlrSvc.DetectNetwork(ctx, event.MSISDN, nil)
-				}
-
-				processRecharge(ctx, event, userRepo, txRepo, cfg, db, passportSvc, monetizationSvc)
-				rdb.XAck(ctx, streamName, groupName, msg.ID)
-			}
-		}
-	}
-}
-
-func processRecharge(ctx context.Context, event queue.RechargeEvent, ur repositories.UserRepository, tr repositories.TransactionRepository, cfg *config.ConfigManager, db *gorm.DB, ps *services.PassportService, ms *services.MonetizationService) {
-	isFirstRecharge := false
-	user, err := ur.FindByMSISDN(ctx, event.MSISDN)
-	
-	lastActivity := time.Time{}
-	if err == nil {
-		lastActivity = user.LastVisitAt
-	}
-
-	if err != nil {
-		isFirstRecharge = true
-		user = &entities.User{
-			ID:        uuid.New(),
-			MSISDN:    event.MSISDN,
-			UserCode:  fmt.Sprintf("NEX%s", uuid.New().String()[:6]),
-			Tier:      "BRONZE",
-			IsActive:  true,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-		if err := ur.Create(ctx, user); err != nil {
-			log.Printf("Failed to create user: %v", err)
-			return
-		}
-	}
-
-	// 1. Streak Calculation (REQ-2.5) with Grace Period (REQ-5.2.13)
-	streakWindow := time.Duration(cfg.GetInt("streak_window_hours", 36)) * time.Hour
-	graceLimit := cfg.GetInt("streak_freeze_grace_days_per_month", 1)
-	
-	now := time.Now()
-	if !user.LastVisitAt.IsZero() {
-		timeSinceLast := time.Since(user.LastVisitAt)
-		if timeSinceLast <= streakWindow {
-			user.StreakCount++
-		} else {
-			if timeSinceLast <= (streakWindow + 24*time.Hour) && user.StreakFreezeGraceUsed < graceLimit {
-				user.StreakCount++
-				user.StreakFreezeGraceUsed++
-				log.Printf("[Worker] Grace Day Applied for %s", user.MSISDN)
-			} else {
-				user.StreakCount = 1
-			}
-		}
+	// ─── Redis ────────────────────────────────────────────────
+	// redis.ParseURL handles redis://, rediss://, and plain host:port formats.
+	var rdb *redis.Client
+	if redisOpts, parseErr := redis.ParseURL(os.Getenv("REDIS_URL")); parseErr == nil {
+		rdb = redis.NewClient(redisOpts)
 	} else {
-		user.StreakCount = 1
+		rdb = redis.NewClient(&redis.Options{
+			Addr:     os.Getenv("REDIS_URL"),
+			Password: os.Getenv("REDIS_PASSWORD"),
+		})
 	}
-	user.LastVisitAt = now
+	_ = rdb
 
-	// 2. Dynamic Point Earning
-	var tier struct {
-		PointsPerNaira float64
-	}
-	db.Table("recharge_tiers").
-		Where("min_amount_kobo <= ? AND is_active = true", event.Amount).
-		Order("min_amount_kobo DESC").
-		Limit(1).
-		Select("points_per_naira").
-		Scan(&tier)
-	
-	rate := tier.PointsPerNaira
-	if rate == 0 { rate = 0.004 } 
+	// ─── Config ───────────────────────────────────────────────
+	cfg := config.NewConfigManager(db)
 
-	// ── REQ-5.2.5 to 5.2.7: Advanced Multipliers ─────────────────────────────
-	globalMultiplier := cfg.GetFloat("global_points_multiplier", 1.0)
-	
-	// Scheduled and Segment multipliers (REQ-5.2.6, 5.2.7)
-	var activeMultipliers []float64
-	db.Table("scheduled_multipliers").
-		Where("is_active = true AND now() BETWEEN start_time AND end_time").
-		Where("(segment_type = 'global') OR (segment_type = 'state' AND segment_value = ?) OR (segment_type = 'inactive_users' AND ? > 7)", 
-			user.State, time.Since(lastActivity).Hours()/24).
-		Pluck("multiplier", &activeMultipliers)
-	
-	maxScheduledMult := 1.0
-	for _, m := range activeMultipliers {
-		if m > maxScheduledMult { maxScheduledMult = m }
-	}
+	// ─── Repositories ─────────────────────────────────────────
+	userRepo   := persistence.NewPostgresUserRepository(db)
+	txRepo     := persistence.NewPostgresTransactionRepository(db)
+	studioRepo := persistence.NewPostgresStudioRepository(db)
+	prizeRepo  := persistence.NewPostgresPrizeRepository(db)
+	authRepo   := persistence.NewPostgresAuthRepository(db)
+	chatRepo   := persistence.NewPostgresChatRepository(db)
+	warsRepo   := persistence.NewPostgresWarsRepository(db)
 
-	// Innovation: Regional Wars (Strategy Doc Section 4)
-	regionalMultiplier := 1.0
-	if user.State != "" {
-		var reg struct {
-			GoldenHourMultiplier float64
-			IsGoldenHour bool
-			BaseMultiplier float64
-		}
-		if err := db.Table("regional_settings").Where("region_name = ?", user.State).First(&reg).Error; err == nil {
-			regionalMultiplier = reg.BaseMultiplier
-			if reg.IsGoldenHour { regionalMultiplier = reg.GoldenHourMultiplier }
-		}
+	// ─── Services ─────────────────────────────────────────────
+	notifySvc  := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
+	drawSvc    := services.NewDrawService(db)
+	fulfillSvc := services.NewPrizeFulfillmentService(
+		prizeRepo, userRepo,
+		external.NewVTPassAdapter(),
+		external.NewMTNMomoAdapter(),
+		notifySvc, cfg,
+	)
+	winnerSvc := services.NewWinnerService(db, userRepo, prizeRepo, notifySvc)
+	studioSvc := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
+	warsSvc   := services.NewRegionalWarsService(warsRepo, userRepo, txRepo, cfg, db)
+
+	// Bootstrap current month's war
+	if bootstrapErr := warsSvc.EnsureActiveWar(context.Background(), 50_000_000); bootstrapErr != nil {
+		log.Printf("[WORKER] EnsureActiveWar: %v", bootstrapErr)
 	}
 
-	finalMultiplier := globalMultiplier * maxScheduledMult * regionalMultiplier
-	nairaAmount := float64(event.Amount) / 100
-	pointsEarned := int64(nairaAmount * rate * finalMultiplier)
+	// ─── Ghost Nudge + Wallet Sync Worker (REQ-4.4) ───────────
+	// Interval, warning hours, and min streak are all read from ConfigManager:
+	//   ghost_nudge_interval_minutes  (default 60)
+	//   ghost_nudge_warning_hours     (default 4)
+	//   ghost_nudge_min_streak        (default 3)
+	// Zero values are never hardcoded — all come from platform_config table.
+	passportSvc      := services.NewPassportService(db, cfg)
+	ghostNudgeWorker := services.NewGhostNudgeWorker(db, cfg, passportSvc, notifySvc)
+	ghostNudgeWorker.Start()
+	defer ghostNudgeWorker.Stop()
 
-	// 3. Bonus Triggers
-	var firstBonus int64
-	if isFirstRecharge {
-		db.Table("program_bonuses").Where("event_type = 'first_recharge' AND is_active = true").Pluck("bonus_points", &firstBonus)
-		pointsEarned += firstBonus
-	}
+	// ─── Lifecycle Worker ─────────────────────────────────────
+	worker := services.NewLifecycleWorker(
+		db,
+		userRepo, studioRepo, prizeRepo, authRepo, chatRepo,
+		warsRepo,
+		fulfillSvc, drawSvc, winnerSvc,
+		warsSvc, studioSvc,
+		notifySvc, cfg,
+	)
 
-	var streakBonus int64
-	db.Table("program_bonuses").
-		Where("event_type = 'streak_milestone' AND threshold = ? AND is_active = true", user.StreakCount).
-		Pluck("bonus_points", &streakBonus)
-	pointsEarned += streakBonus
-
-	// Referral bonus removed — feature not approved for this release.
-
-	user.TotalPoints += pointsEarned
-	user.TotalRechargeAmount += event.Amount
-
-	// Points Expiry
-	expiryDays := cfg.GetInt("points_expiry_days", 90)
-	user.PointsExpiryDate = now.Add(time.Duration(expiryDays) * 24 * time.Hour)
-
-	// Spin Credit Threshold
-	spinThreshold := int64(cfg.GetInt("recharge_to_spin_naira", 1000) * 100)
-	if user.TotalRechargeAmount >= spinThreshold {
-		user.TotalRechargeAmount -= spinThreshold
-		user.SpinCredits++
-	}
-
-	ur.Update(ctx, user)
-	ms.TrackRechargeActivity(ctx, user.ID, user.MSISDN, event.Amount, lastActivity)
-	ps.SyncWallet(ctx, user.ID.String(), user.TotalPoints, user.StreakCount, 500) 
-
-	tx := &entities.Transaction{
-		ID:          uuid.New(),
-		MSISDN:      event.MSISDN,
-		UserID:      user.ID,
-		Type:        entities.TxTypeVisit,
-		Amount:      event.Amount,
-		PointsDelta: pointsEarned,
-		CreatedAt:   time.Now(),
-		Metadata:    map[string]any{"ref": event.Ref, "first_recharge": isFirstRecharge, "multiplier": finalMultiplier},
-	}
-	tr.Save(ctx, tx)
+	log.Println("[WORKER] Starting Loyalty Nexus background worker")
+	worker.Run(ctx)
 }
