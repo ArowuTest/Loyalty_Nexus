@@ -82,7 +82,7 @@ export default function PrivacyPage() {
             <p className="mb-3">We share your data only with:</p>
             <ul className="list-disc pl-5 space-y-2">
               <li><strong className="text-white">MTN Nigeria:</strong> To verify recharge eligibility and subscriber status.</li>
-              <li><strong className="text-white">AI Providers:</strong> Your prompts are sent to Groq, Google Gemini, ElevenLabs, and Pollinations to generate outputs. These providers process data under their own privacy policies and do not retain prompts beyond the API request lifecycle.</li>
+              <li><strong className="text-white">AI Providers:</strong> Your prompts are processed by our AI infrastructure partners to generate outputs. These providers process data under their own privacy policies and do not retain prompts beyond the API request lifecycle.</li>
               <li><strong className="text-white">Payment Partners:</strong> Your bank details are shared with our payment processor solely for prize disbursement.</li>
               <li><strong className="text-white">Legal Authorities:</strong> When required by Nigerian law or a valid court order.</li>
             </ul>

@@ -130,7 +130,7 @@ export default function VideoScript({ tool, onSubmit, isLoading, userPoints }: T
 
   const canAfford   = tool.is_free || userPoints >= tool.point_cost;
   const filledScenes = scenes.filter(s => s.uploadedUrl || s.imageUrl.trim() || s.imageFile);
-  const isValid     = filledScenes.length >= 2 && !uploading;
+  const isValid     = filledScenes.length >= 1 && !uploading;
 
   // ── Character helpers ──────────────────────────────────────────────────────
   function addCharacter() {
@@ -703,7 +703,7 @@ export default function VideoScript({ tool, onSubmit, isLoading, userPoints }: T
       {/* ── Validation hint ── */}
       {!isValid && (
         <p className="text-amber-400/60 text-xs text-center">
-          Add background images to at least 2 scenes to generate your video
+          Upload a background image to at least 1 scene to generate your video
         </p>
       )}
 

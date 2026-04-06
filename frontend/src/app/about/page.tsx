@@ -86,7 +86,7 @@ export default function AboutPage() {
           {[
             { Icon: Users,      label: "B2B2C Model",       desc: "We work through MTN to reach every subscriber" },
             { Icon: Globe,      label: "Pan-African Vision", desc: "Nigeria first, then Ghana, Kenya, and beyond" },
-            { Icon: Cpu,        label: "AI-Powered Core",   desc: "Groq, Gemini, ElevenLabs in every tool" },
+            { Icon: Cpu,        label: "AI-Powered Core",   desc: "Advanced AI models powering every creative tool" },
             { Icon: TrendingUp, label: "Real ROI",           desc: "Measurable ARPU lift and churn reduction for MNOs" },
           ].map(({ Icon, label, desc }) => (
             <div key={label} className="p-4 rounded-xl border border-white/[0.06] bg-white/[0.02]">

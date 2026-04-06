@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 
 // FraudService detects suspicious activity and records fraud events.
 // Implements SEC-005 through SEC-010 from the Master Spec.
+// All detection thresholds are read from the network_configs table — zero hardcoding.
 type FraudService struct {
 	db *gorm.DB
 }
@@ -34,17 +36,29 @@ type FraudEvent struct {
 
 func (FraudEvent) TableName() string { return "fraud_events" }
 
-// ── Detection thresholds ───────────────────────────────────────────────────
-const (
-	maxRechargePer24h    = 20           // max recharge events per user per 24h
-	maxSpinPer24h        = 10           // max spins per user per 24h
-	minRechargeKobo      = 10_000       // ₦100 minimum legitimate recharge
-	duplicateTxWindow    = 5 * time.Minute
-)
+// ── Config helpers ─────────────────────────────────────────────────────────────
+// getConfigInt reads an integer value from network_configs, falling back to defaultVal.
+func (svc *FraudService) getConfigInt(ctx context.Context, key string, defaultVal int64) int64 {
+	var raw string
+	err := svc.db.WithContext(ctx).Table("network_configs").
+		Where("key = ?", key).
+		Pluck("value", &raw).Error
+	if err != nil || raw == "" {
+		return defaultVal
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return v
+}
 
 // CheckRecharge analyses a recharge webhook for fraud signals.
 // Call this inside recharge_service.go before committing points.
 func (svc *FraudService) CheckRecharge(ctx context.Context, userID uuid.UUID, amountKobo int64, reference string) error {
+	duplicateTxWindowSecs := svc.getConfigInt(ctx, "fraud_duplicate_tx_window_seconds", 300) // default 5 min
+	duplicateTxWindow := time.Duration(duplicateTxWindowSecs) * time.Second
+
 	// 1 — duplicate reference within window
 	var dupCount int64
 	svc.db.WithContext(ctx).Table("transactions").
@@ -57,6 +71,7 @@ func (svc *FraudService) CheckRecharge(ctx context.Context, userID uuid.UUID, am
 	}
 
 	// 2 — velocity: too many recharges in 24h
+	maxRechargePer24h := svc.getConfigInt(ctx, "fraud_max_recharge_per_24h", 20)
 	var txCount int64
 	svc.db.WithContext(ctx).Table("transactions").
 		Where("user_id = ? AND type = 'CREDIT' AND created_at > ?",
@@ -69,9 +84,10 @@ func (svc *FraudService) CheckRecharge(ctx context.Context, userID uuid.UUID, am
 	}
 
 	// 3 — suspiciously small recharge (micro-farming)
+	minRechargeKobo := svc.getConfigInt(ctx, "fraud_min_recharge_kobo", 10_000) // ₦100
 	if amountKobo > 0 && amountKobo < minRechargeKobo {
 		svc.record(ctx, userID, "MICRO_RECHARGE", "LOW",
-			fmt.Sprintf("amount %d kobo below threshold", amountKobo))
+			fmt.Sprintf("amount %d kobo below threshold %d", amountKobo, minRechargeKobo))
 		// Don't block, just log
 	}
 	return nil
@@ -79,6 +95,7 @@ func (svc *FraudService) CheckRecharge(ctx context.Context, userID uuid.UUID, am
 
 // CheckSpin validates a spin attempt for abuse.
 func (svc *FraudService) CheckSpin(ctx context.Context, userID uuid.UUID) error {
+	maxSpinPer24h := svc.getConfigInt(ctx, "fraud_max_spin_per_24h", 10)
 	var spinCount int64
 	svc.db.WithContext(ctx).Table("spin_results").
 		Where("user_id = ? AND created_at > ?", userID, time.Now().Add(-24*time.Hour)).
@@ -128,10 +145,10 @@ func (svc *FraudService) record(ctx context.Context, userID uuid.UUID, ruleName,
 	now := time.Now()
 	var phone string
 	svc.db.WithContext(ctx).Table("users").Where("id = ?", userID).Pluck("phone_number", &phone)
-	
+
 	// details is JSONB in DB, so we wrap it in a JSON object
 	detailsJSON := fmt.Sprintf(`{"reason": "%s"}`, details)
-	
+
 	ev := FraudEvent{
 		ID:          uuid.New(),
 		UserID:      userID,

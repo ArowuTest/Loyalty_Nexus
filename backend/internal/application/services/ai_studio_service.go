@@ -979,9 +979,8 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		// Single-image animation — maps to the animate-photo path
 		slug = "animate-photo"
 	case "my-video-story":
-		// Script-driven multi-scene animation — maps to the video-story
-		// multi-image path (Grok reference-image / Kling multi-image)
-		slug = "video-story"
+		// Script-driven animation — handled separately below (accepts 1+ images).
+		// Do NOT remap to video-story which requires 2+ images.
 	}
 
 	// ── video-edit: Natural language video editing via Grok Imagine ───────────────────────────
@@ -1042,6 +1041,61 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		}
 		costMicros := 50000 * duration // $0.05/sec
 		return &studioProviderResult{OutputURL: url, Provider: "grok/imagine-video-extend", CostMicros: costMicros}, nil
+	}
+
+	// ── my-video-story: script-driven animation (1+ images) ──────────────────────────────────────
+	// Same provider chain as video-story but requires only 1 image.
+	if slug == "my-video-story" {
+		imageURLsRaw := env.Extra["image_urls"]
+		var imageURLs []string
+		if arr, ok := imageURLsRaw.([]interface{}); ok {
+			for _, v := range arr {
+				if s, ok2 := v.(string); ok2 && s != "" {
+					imageURLs = append(imageURLs, s)
+				}
+			}
+		}
+		// Also accept a single image_url field for single-scene stories
+		if len(imageURLs) == 0 && env.ImageURL != "" {
+			imageURLs = []string{env.ImageURL}
+		}
+		if len(imageURLs) < 1 {
+			return nil, fmt.Errorf("my-video-story: at least 1 image is required")
+		}
+		prompt := o.enhanceVideoPrompt(ctx, env.Prompt)
+		// Tier 1: Grok reference-image mode (supports up to 7 images)
+		if o.grokClient != nil {
+			duration := env.Duration
+			if duration <= 0 {
+				duration = 10
+			}
+			grokReq := external.GrokVideoRequest{
+				Prompt:             prompt,
+				ReferenceImageURLs: imageURLs,
+				Duration:           duration,
+				AspectRatio:        env.AspectRatio,
+				Resolution:         "720p",
+			}
+			if url, err := o.grokClient.GenerateVideo(ctx, grokReq); err == nil {
+				costMicros := 50000 * duration
+				return &studioProviderResult{OutputURL: url, Provider: "grok/imagine-reference", CostMicros: costMicros}, nil
+			} else {
+				log.Printf("[AIStudio] Grok reference-image failed for my-video-story: %v — falling back to Kling", err)
+			}
+		}
+		// Tier 2: FAL Kling v1.6 multi-image fallback
+		if len(imageURLs) > 4 {
+			imageURLs = imageURLs[:4]
+		}
+		falKey := os.Getenv("FAL_API_KEY")
+		if falKey == "" {
+			return nil, fmt.Errorf("my-video-story: FAL_API_KEY not configured")
+		}
+		vidURL, err := o.callFALMultiImageVideo(ctx, falKey, imageURLs, prompt, env)
+		if err != nil {
+			return nil, fmt.Errorf("my-video-story: %w", err)
+		}
+		return &studioProviderResult{OutputURL: vidURL, Provider: "fal.ai/kling-multi-image", CostMicros: 56000}, nil
 	}
 
 	// ── video-story: multi-scene image-to-video ────────────────────────────────────────────────────

@@ -45,6 +45,22 @@ func main() {
 		port = p
 	}
 	mux := http.NewServeMux()
+
+	// ─── Static file server for local asset storage (dev / Render free tier) ──
+	// When STORAGE_BACKEND=local (or auto-detected), uploaded files are stored
+	// under LOCAL_STORAGE_BASE_PATH and served at /assets/... so that external
+	// AI APIs (Grok, FAL, Pollinations) can fetch them via a public HTTPS URL.
+	// On Render, set LOCAL_STORAGE_BASE_URL=https://<service>.onrender.com/assets
+	// to make the returned upload URLs publicly accessible.
+	{
+		basePath := os.Getenv("LOCAL_STORAGE_BASE_PATH")
+		if basePath == "" {
+			basePath = "/tmp/nexus-assets"
+		}
+		_ = os.MkdirAll(basePath, 0755)
+		mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(basePath))))
+	}
+
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "1.0.0"}); err != nil {
@@ -311,9 +327,13 @@ func main() {
 
 
 		// ─── Webhooks (public — signature-verified internally) ────
+		// Paystack webhook is always registered (used in both Independent and Integrated modes)
 		mux.HandleFunc("POST /api/v1/recharge/paystack-webhook", rechargeH.PaystackWebhook)
-		mux.HandleFunc("POST /api/v1/recharge/mno-webhook", rechargeH.MNOWebhook)
-		mux.HandleFunc("POST /api/v1/recharge/mtn-push", rechargeH.MTNPushWebhook)
+		// MNO webhook routes are only registered in Integrated mode (direct MNO cooperation)
+		if !cfg.IsIndependentMode() {
+			mux.HandleFunc("POST /api/v1/recharge/mno-webhook", rechargeH.MNOWebhook)
+			mux.HandleFunc("POST /api/v1/recharge/mtn-push", rechargeH.MTNPushWebhook)
+		}
 
 		// ─── USSD (public — HMAC-verified) ───────────────────────
 		mux.HandleFunc("POST /api/v1/ussd", ussdH.Handle)

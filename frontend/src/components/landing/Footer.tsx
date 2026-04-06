@@ -212,7 +212,7 @@ export default function Footer() {
             <span className="text-white/15 text-[11px]">·</span>
             <Link href="/terms"   className="text-[11px] text-white/25 hover:text-white/50 transition-colors">Terms of Service</Link>
             <span className="text-white/15 text-[11px]">·</span>
-            <p className="text-[11px] text-white/20">Powered by Groq · Google Gemini · ElevenLabs · AssemblyAI</p>
+            <p className="text-[11px] text-white/20">Powered by Nexus AI Engine</p>
           </div>
         </div>
       </div>

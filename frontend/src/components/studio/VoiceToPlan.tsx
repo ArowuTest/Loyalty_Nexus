@@ -158,7 +158,7 @@ export default function VoiceToBusinessPlan() {
           <div>
             <h1 className="text-lg font-black tracking-tight italic uppercase leading-none">Voice to Plan</h1>
             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-brand-gold mt-1 italic">
-              AssemblyAI Transcription + Gemini Business Plan
+              AI Voice Transcription + Business Plan Generator
             </p>
           </div>
         </div>

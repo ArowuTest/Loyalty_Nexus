@@ -32,9 +32,9 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
   const cfg       = tool.ui_config ?? {};
   const styleTags = cfg.style_tags ?? DEFAULT_STYLE_TAGS;
   // video-premium uses Kling (5/10s only); video-cinematic uses Wan (5/8/10s)
-  // animate-photo now uses Grok image-to-video as Tier 1 (2–15s)
+  // animate-my-photo uses Grok image-to-video as Tier 1 (2–15s)
   const isKling   = tool.slug === 'video-premium';
-  const isGrok    = tool.slug === 'animate-photo' || tool.slug === 'video-premium';
+  const isGrok    = tool.slug === 'animate-my-photo' || tool.slug === 'animate-photo' || tool.slug === 'video-premium';
   const durations = cfg.duration_options ?? (isKling ? KLING_DURATIONS : isGrok ? GROK_DURATIONS : WAN_DURATIONS);
 
   // ── Start image state ──────────────────────────────────────────────────────

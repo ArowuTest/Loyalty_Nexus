@@ -96,7 +96,7 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "animate-photo":      { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
   "video-cinematic":    { time: "~90 sec",  output: "Cinematic 5s video",            tip: "Describe motion: 'slow zoom in', 'camera pan left'" },
   "video-premium":      { time: "~2 min",   output: "HD video clip",                 tip: "More detail in prompt = better camera movement" },
-  "video-veo":          { time: "~3 min",   output: "Google Veo video",              tip: "Describe the scene like a film director would" },
+  "video-veo":          { time: "~3 min",   output: "Cinematic AI video",             tip: "Describe the scene like a film director would" },
   "narrate":            { time: "~4 sec",   output: "MP3 audio file",                tip: "Keep text under 500 words for best quality" },
   "narrate-pro":        { time: "~5 sec",   output: "MP3 with premium voice",        tip: "Try 'coral' for warm tone, 'onyx' for deep voice" },
   "transcribe":         { time: "~6 sec",   output: "Text transcript",               tip: "Paste a direct link to an MP3 or WAV file" },
@@ -3355,9 +3355,9 @@ function StudioPageInner() {
 
                 {/* Hint text */}
                 <p className="text-white/15 text-[10px] text-center mt-2">
-                  {chatMode === 'general' ? 'Nexus AI · Powered by Gemini · Free to use · Shift+Enter for new line' :
+                  {chatMode === 'general' ? 'Nexus AI · Free to use · Shift+Enter for new line' :
                    chatMode === 'search'  ? 'Live web search · Real-time data · Free · Shift+Enter for new line' :
-                                           'Qwen Coder · Supports all languages · Free · Shift+Enter for new line'}
+                                           'Code Assistant · Supports all languages · Free · Shift+Enter for new line'}
                 </p>
               </div>
             </motion.div>

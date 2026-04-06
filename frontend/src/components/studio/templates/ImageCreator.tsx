@@ -30,10 +30,10 @@ const PROMPT_INSPIRATIONS = [
 ];
 
 const MODEL_IDENTITY: Record<string, { label: string; desc: string; color: string; dot: string }> = {
-  'ai-photo':       { label: 'FLUX',           desc: 'Fast, high-quality image generation',     color: 'text-purple-300 bg-purple-600/15 border-purple-500/30',  dot: 'bg-purple-400' },
-  'ai-photo-pro':   { label: 'GPT-Image',       desc: 'OpenAI GPT-Image · detailed realism',     color: 'text-blue-300 bg-blue-600/15 border-blue-500/30',        dot: 'bg-blue-400' },
-  'ai-photo-max':   { label: 'GPT-Image Large', desc: 'Max quality · 2× detail, slower',         color: 'text-indigo-300 bg-indigo-600/15 border-indigo-500/30',  dot: 'bg-indigo-400' },
-  'ai-photo-dream': { label: 'Seedream',        desc: 'Dreamlike aesthetics · stylised outputs', color: 'text-pink-300 bg-pink-600/15 border-pink-500/30',        dot: 'bg-pink-400' },
+  'ai-photo':       { label: 'Nexus Vision',    desc: 'Fast, high-quality image generation',     color: 'text-purple-300 bg-purple-600/15 border-purple-500/30',  dot: 'bg-purple-400' },
+  'ai-photo-pro':   { label: 'Nexus Vision Pro', desc: 'Nexus Vision Pro · detailed realism',      color: 'text-blue-300 bg-blue-600/15 border-blue-500/30',        dot: 'bg-blue-400' },
+  'ai-photo-max':   { label: 'Nexus Vision Max', desc: 'Maximum quality · 2× detail, slower',       color: 'text-indigo-300 bg-indigo-600/15 border-indigo-500/30',  dot: 'bg-indigo-400' },
+  'ai-photo-dream': { label: 'Nexus Dream',      desc: 'Dreamlike aesthetics · stylised outputs', color: 'text-pink-300 bg-pink-600/15 border-pink-500/30',        dot: 'bg-pink-400' },
 };
 
 const NUM_IMAGE_OPTIONS = [1, 2, 4] as const;
@@ -228,7 +228,7 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
         )}
       </div>
 
-      {/* ── Quality toggle (GPT-Image only) ── */}
+      {/* ── Quality toggle (Pro/Max models only) ── */}
       {showQuality && (
         <div>
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Quality</label>
