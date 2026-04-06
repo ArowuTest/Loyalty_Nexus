@@ -7,7 +7,7 @@ import {
   Share2, QrCode, RefreshCw, Wallet, Smartphone,
   Trophy, Zap, Crown, Diamond, CheckCircle2, Clock,
 } from "lucide-react";
-import QRCode from "qrcode";
+import { QRCodeSVG } from "qrcode.react";
 import AppShell from "@/components/layout/AppShell";
 import { api, PassportData, WalletPassURLs, BadgeDefinition, PassportEvent } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -139,7 +139,7 @@ function getTierProgress(tier: string, lifetimePoints: number, nextTier: string)
 export default function PassportPage() {
   const [passport, setPassport]       = useState<PassportData | null>(null);
   const [walletURLs, setWalletURLs]   = useState<WalletPassURLs | null>(null);
-  const [qrDataURL, setQrDataURL]     = useState<string | null>(null);
+  const [qrPayload, setQrPayload]     = useState<string | null>(null);
   const [events, setEvents]           = useState<PassportEvent[] | null>(null);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [loading, setLoading]         = useState(true);
@@ -175,19 +175,12 @@ export default function PassportPage() {
     }
   }, []);
 
-  // ── QR: fetch raw payload from backend, render to PNG data URL client-side ──
+  // ── QR: fetch raw payload from backend, render inline SVG client-side ──
   const loadQR = useCallback(async () => {
     try {
       setQrLoading(true);
       const data = await api.getPassportQR();
-      // Generate a QR code PNG from the raw payload string
-      const dataURL = await QRCode.toDataURL(data.qr_payload, {
-        width: 256,
-        margin: 2,
-        color: { dark: "#0f172a", light: "#ffffff" },
-        errorCorrectionLevel: "M",
-      });
-      setQrDataURL(dataURL);
+      setQrPayload(data.qr_payload);
     } catch {
       // Non-fatal — QR is optional
     } finally {
@@ -221,7 +214,7 @@ export default function PassportPage() {
 
   const handleShowQR = () => {
     setShowQR(true);
-    if (!qrDataURL) loadQR();
+    if (!qrPayload) loadQR();
   };
 
   const handleShare = async () => {
@@ -542,7 +535,7 @@ export default function PassportPage() {
       <AnimatePresence>
         {showQR && (
           <QRModal
-            qrDataURL={qrDataURL}
+            qrPayload={qrPayload}
             loading={qrLoading}
             tier={passport.tier}
             onClose={() => setShowQR(false)}
@@ -774,12 +767,12 @@ function ActivityFeed({ events, loading }: { events: PassportEvent[] | null; loa
 // ─── QR Modal ─────────────────────────────────────────────────────────────────
 
 function QRModal({
-  qrDataURL,
+  qrPayload,
   loading,
   tier,
   onClose,
 }: {
-  qrDataURL: string | null;
+  qrPayload: string | null;
   loading: boolean;
   tier: string;
   onClose: () => void;
@@ -810,9 +803,15 @@ function QRModal({
         )}>
           {loading ? (
             <RefreshCw size={32} className="text-nexus-400 animate-spin" />
-          ) : qrDataURL ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={qrDataURL} alt="Passport QR Code" className="w-full h-full object-cover" />
+          ) : qrPayload ? (
+            <QRCodeSVG
+              value={qrPayload}
+              size={192}
+              bgColor="#ffffff"
+              fgColor="#0f172a"
+              level="M"
+              className="rounded-xl"
+            />
           ) : (
             <div className="text-center">
               <QrCode size={48} className="text-white/20 mx-auto mb-2" />
