@@ -3355,9 +3355,9 @@ function StudioPageInner() {
 
                 {/* Hint text */}
                 <p className="text-white/15 text-[10px] text-center mt-2">
-                  {chatMode === 'general' ? 'Nexus AI · Powered by Gemini · Free to use' :
-                   chatMode === 'search'  ? 'Live web search · Real-time data · Free' :
-                                           'Qwen Coder · Supports all languages · Free'}
+                  {chatMode === 'general' ? 'Nexus AI · Powered by Gemini · Free to use · Shift+Enter for new line' :
+                   chatMode === 'search'  ? 'Live web search · Real-time data · Free · Shift+Enter for new line' :
+                                           'Qwen Coder · Supports all languages · Free · Shift+Enter for new line'}
                 </p>
               </div>
             </motion.div>
