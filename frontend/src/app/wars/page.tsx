@@ -79,7 +79,7 @@ function NoActiveWar() {
         <p className="text-brand-gold text-xs font-black uppercase tracking-widest">Watch out for the next event</p>
         <p className="text-white/60 text-xs">Admins announce new wars each month</p>
       </div>
-      <div className="grid grid-cols-3 gap-3 w-full max-w-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-sm">
         {[
           { icon: <TrendingUp size={16} />, label: "Earn Points", sub: "Recharge to earn", color: "text-nexus-400" },
           { icon: <Users size={16} />, label: "Set State", sub: "In Settings", color: "text-green-400" },
@@ -208,7 +208,7 @@ export default function RegionalWarsPage() {
             )}
 
             {/* How it works */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
               {[
                 { icon: <TrendingUp size={18} />, label: "Earn points", sub: "Recharge more", color: "text-nexus-400" },
                 { icon: <Users size={18} />, label: "Team up", sub: "Your state rises", color: "text-green-400" },

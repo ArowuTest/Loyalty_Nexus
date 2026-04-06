@@ -12,8 +12,8 @@ import {
 
 const NAV_ITEMS = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Home"       },
-  { href: "/spin",      icon: Zap,             label: "Wheel Spin" },
-  { href: "/studio",    icon: Wand2,           label: "AI Studio"  },
+  { href: "/spin",      icon: Zap,             label: "Spin"       },
+  { href: "/studio",    icon: Wand2,           label: "Studio"     },
   { href: "/wars",      icon: Trophy,          label: "Wars"       },
   { href: "/prizes",    icon: Gift,            label: "Prizes"     },
 ];
@@ -39,9 +39,10 @@ function getInitials(user: { display_name?: string; phone_number?: string } | nu
 export default function AppShell({ children }: { children: ReactNode }) {
   const router   = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, _hasHydrated, logout, user } = useStore();
+  const { isAuthenticated, _hasHydrated, logout, user, wallet } = useStore();
   const tier      = (user?.tier ?? "BRONZE").toUpperCase();
   const tierColor = TIER_COLORS[tier] ?? "#CD7F32";
+  const points    = wallet?.pulse_points;
 
   // Profile dropdown
   const [dropOpen, setDropOpen] = useState(false);
@@ -119,7 +120,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 } : {}}
               >
                 <item.icon size={15} />
-                {item.label}
+                {item.label === "Spin" ? "Wheel Spin" : item.label}
               </Link>
             );
           })}
@@ -219,42 +220,92 @@ export default function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      {/* ── Main content ── */}
-      <main className="flex-1 pb-24 md:pb-8">{children}</main>
-
-      {/* ── Mobile bottom nav ── */}
-      <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 flex justify-around py-2 z-50"
+      {/* ── Mobile top bar ── */}
+      <header
+        className="md:hidden flex items-center justify-between px-4 py-3 sticky top-0 z-50"
         style={{
           background: "rgba(13,14,20,0.94)",
           backdropFilter: "blur(20px)",
           WebkitBackdropFilter: "blur(20px)",
-          borderTop: "1px solid rgba(255,255,255,0.06)",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}
       >
-        {NAV_ITEMS.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/");
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-[52px]"
-              style={{ color: active ? "var(--gold)" : "rgba(255,255,255,0.35)" }}
-            >
-              <item.icon size={20} />
-              <span className="text-[9px] font-black uppercase tracking-wide">{item.label}</span>
-            </Link>
-          );
-        })}
-        {/* Profile icon — mobile */}
-        <Link
-          href="/profile"
-          className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all min-w-[52px]"
-          style={{ color: pathname === "/profile" ? "var(--gold)" : "rgba(255,255,255,0.35)" }}
-        >
-          <User size={20} />
-          <span className="text-[9px] font-black uppercase tracking-wide">Profile</span>
+        {/* Logo */}
+        <Link href="/" className="flex items-center gap-2">
+          <div
+            className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.25)" }}
+          >
+            <Zap size={14} style={{ color: "var(--gold)" }} />
+          </div>
+          <span className="font-black text-[14px] text-white tracking-tight">Loyalty Nexus</span>
         </Link>
+
+        {/* Right: points + profile */}
+        <div className="flex items-center gap-2">
+          {/* Points pill */}
+          {points !== undefined && (
+            <div
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black"
+              style={{ background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.25)", color: "var(--gold)" }}
+            >
+              <Zap size={11} />
+              {points >= 1000 ? `${(points / 1000).toFixed(1)}K` : points.toLocaleString()}
+            </div>
+          )}
+
+          {/* Profile avatar → profile page */}
+          <Link href="/profile">
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-black"
+              style={{ background: `${tierColor}22`, border: `1.5px solid ${tierColor}55`, color: tierColor }}
+            >
+              {initials}
+            </div>
+          </Link>
+        </div>
+      </header>
+
+      {/* ── Main content ── */}
+      {/* Studio manages its own height/overflow; other pages need bottom-nav padding */}
+      <main className={cn("flex-1", pathname !== "/studio" && "pb-24 md:pb-8")}>{children}</main>
+
+      {/* ── Mobile bottom nav ── */}
+      <nav
+        className="md:hidden fixed bottom-0 left-0 right-0 z-50"
+        style={{
+          background: "rgba(13,14,20,0.96)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+          paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        }}
+      >
+        <div className="flex justify-around py-2">
+          {NAV_ITEMS.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all min-w-[48px]"
+                style={{ color: active ? "var(--gold)" : "rgba(255,255,255,0.35)" }}
+              >
+                <item.icon size={20} />
+                <span className="text-[9px] font-black uppercase tracking-wide leading-none">{item.label}</span>
+              </Link>
+            );
+          })}
+          {/* Profile icon — mobile */}
+          <Link
+            href="/profile"
+            className="flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all min-w-[48px]"
+            style={{ color: pathname === "/profile" ? "var(--gold)" : "rgba(255,255,255,0.35)" }}
+          >
+            <User size={20} />
+            <span className="text-[9px] font-black uppercase tracking-wide leading-none">Profile</span>
+          </Link>
+        </div>
       </nav>
     </div>
   );

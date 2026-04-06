@@ -48,6 +48,12 @@
 
   html { scroll-behavior: smooth; }
 
+  /* ── iOS viewport fix ── */
+  html, body {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: none;
+  }
+
   body {
     background-color: var(--surface-0);
     color: var(--fg);
@@ -211,6 +217,32 @@
   /* ── No scrollbar ── */
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* ── Scrollbar hide (alias) ── */
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* ── Mobile safe area utilities ── */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .pb-safe-nav {
+    /* bottom nav height (64px) + safe area */
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* ── Touch target minimum size ── */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* ── Mobile-optimised input ── */
+  @media (max-width: 767px) {
+    input, textarea, select {
+      font-size: 16px; /* prevents iOS zoom on focus */
+    }
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════

@@ -2103,8 +2103,9 @@ function ToolDrawer({
         transition={{ type: "spring", damping: 30, stiffness: 300 }}
         ref={drawerScrollRef}
         className="fixed bottom-0 left-0 right-0 z-50 max-h-[92vh] overflow-y-auto"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
-        <div className="glass border border-white/[0.08] m-2 overflow-hidden">
+        <div className="glass border border-white/[0.08] m-2 mb-0 md:mb-2 overflow-hidden">
           {/* Top colour stripe — maps to category colour */}
           <div className={cn("h-1 w-full bg-gradient-to-r", cfg.color.replace("/20","/70").replace("/10","/50"))} />
 
@@ -3047,7 +3048,8 @@ function StudioPageInner() {
       />
 
       {/* ── Full-viewport Studio shell ── */}
-      <div className="flex h-[calc(100vh-57px)] overflow-hidden">
+      {/* Desktop: 57px header; Mobile: 52px header + 64px bottom nav = 116px */}
+      <div className="flex h-[calc(100vh-116px)] md:h-[calc(100vh-57px)] overflow-hidden">
 
         {/* ═══════════════════════════════════════════════════════════════════
             LEFT SIDEBAR — ChatGPT/Claude style
@@ -3385,12 +3387,15 @@ function StudioPageInner() {
               </div>
 
               {/* ── Sticky bottom input bar — Claude/ChatGPT style ── */}
-              <div className={cn(
-                'flex-shrink-0 border-t px-4 md:px-8 py-4',
-                chatMode === 'code'   ? 'border-green-500/10 bg-gray-950/30' :
-                chatMode === 'search' ? 'border-sky-500/10 bg-sky-950/10' :
-                                        'border-white/[0.06]'
-              )}>
+              <div
+                className={cn(
+                  'flex-shrink-0 border-t px-4 md:px-8 py-4',
+                  chatMode === 'code'   ? 'border-green-500/10 bg-gray-950/30' :
+                  chatMode === 'search' ? 'border-sky-500/10 bg-sky-950/10' :
+                                          'border-white/[0.06]'
+                )}
+                style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+              >
                 {/* Attachment preview pill */}
                 {chatAttachFile && (
                   <div className={cn(

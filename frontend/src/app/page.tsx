@@ -707,7 +707,7 @@ export default function HomePage() {
                 </div>
               </div>
               {/* Live leaderboard preview */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 {[
                   { state: "Lagos",  pts: "84,231", rank: 1, color: "#F5A623" },
                   { state: "Abuja",  pts: "71,840", rank: 2, color: "#C0C0C0" },
