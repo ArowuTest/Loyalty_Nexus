@@ -32,6 +32,7 @@ export type UITemplate =
   | 'voice-studio'
   | 'transcribe'
   | 'vision-ask'
+  | 'code-pro'
   | 'knowledge-doc';
 
 export interface AspectRatioOption {

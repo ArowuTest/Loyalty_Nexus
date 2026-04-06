@@ -10,6 +10,7 @@ export { default as VideoMultiScene }  from './VideoMultiScene';
 export { default as VoiceStudio }      from './VoiceStudio';
 export { default as Transcribe }       from './Transcribe';
 export { default as VisionAsk }        from './VisionAsk';
+export { default as CodePro }          from './CodePro';
 export { default as KnowledgeDoc }     from './KnowledgeDoc';
 export { default as VideoScript }      from './VideoScript';
 export type { TemplateProps, GeneratePayload } from './types';
