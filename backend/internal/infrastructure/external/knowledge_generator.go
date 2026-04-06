@@ -151,8 +151,14 @@ func buildKnowledgePrompt(topic, toolType string, sources []string) string {
 			topic)
 	case "slide-deck":
 		prompt = fmt.Sprintf(
-			"Create a slide deck outline for: %s. "+
-				"Return JSON: {\"title\": \"\", \"slides\": [{\"title\": \"\", \"content\": \"\", \"notes\": \"\"}]}",
+			"You are a professional presentation designer. Create a detailed slide deck for: %s. "+
+				"Return ONLY valid JSON in this exact schema — no markdown, no explanation, no extra keys: "+
+				"{\"title\": \"<deck title>\", \"subtitle\": \"<optional tagline>\", "+
+				"\"slides\": [{\"number\": 1, \"title\": \"<slide title>\", \"subtitle\": \"<optional>\", "+
+				"\"bullets\": [\"<point 1>\", \"<point 2>\", \"<point 3>\"], "+
+				"\"speaker_notes\": \"<what the presenter should say>\"}]}. "+
+				"Include 8-12 slides. Each slide must have 3-5 bullet points. "+
+				"Make it professional, data-driven, and suitable for a Nigerian business audience.",
 			topic)
 	case "infographic":
 		prompt = fmt.Sprintf(

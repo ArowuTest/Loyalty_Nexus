@@ -14,7 +14,7 @@ import {
   Brain, Video, X, Info, Play, LayoutGrid, MessageSquare, History,
   Code2, Copy, Check, Download, RotateCcw, Zap, CreditCard,
   TrendingUp, Timer, ChevronDown, Lock, Activity,
-  Paperclip, AlertCircle, Search, Plus,
+  Paperclip, AlertCircle, Search, Plus, FileDown,
 } from "lucide-react";
 import {
   MusicComposer, ImageCreator, ImageEditor, ImageCompose,
@@ -28,6 +28,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { downloadCode, getExtensionForLanguage } from "./code-download-utils";
 import { downloadAsPDF, downloadAsMarkdown, DOCUMENT_TOOL_SLUGS } from "./pdf-utils";
+import { downloadAsPPTX, parseSlideDeckJSON } from "./pptx-utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Tool {
@@ -107,6 +108,11 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "song-creator":       { time: "~2 min",   output: "Full AI song with vocals",      tip: "Afrobeats, Gospel, Amapiano — be specific about genre" },
   "instrumental":       { time: "~2 min",   output: "Instrumental music track",      tip: "Describe instruments: 'piano, strings, light percussion'" },
   "code-helper":        { time: "~5 sec",   output: "Code + explanation",            tip: "Mention the programming language in your prompt" },
+  // ── Gemma 4 / Nexus AI Tools ──────────────────────────────────────────────────────────────────────────────────────
+  "code-pro":           { time: "~6 sec",   output: "Code + visual debug analysis",   tip: "Attach a screenshot of the error or UI bug for best results" },
+  "doc-analyzer":       { time: "~8 sec",   output: "Structured document analysis",   tip: "Upload a PDF, invoice, or chart — or paste a question" },
+  "localize-ui":        { time: "~10 sec",  output: "Translation table + notes",      tip: "Upload a screenshot of your app UI to translate all text" },
+  "nexus-agent":        { time: "~15 sec",  output: "Multi-step workflow result",     tip: "Describe a complex task — Nexus AI will break it into steps" },
   "study-guide":        { time: "~8 sec",   output: "Structured study guide",        tip: "Add 'for WAEC' or 'for university level' for focus" },
   "quiz":               { time: "~6 sec",   output: "10 multiple-choice questions",  tip: "Specify difficulty: 'easy', 'intermediate', 'expert'" },
   "mindmap":            { time: "~5 sec",   output: "Interactive mind map",          tip: "One topic at a time gives the best results" },
@@ -135,15 +141,18 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
 const IMAGE_SLUGS  = new Set(["ai-photo","ai-photo-pro","ai-photo-max","ai-photo-dream","photo-editor","bg-remover","image-compose"]);
 const AUDIO_SLUGS  = new Set(["narrate","narrate-pro","bg-music","jingle","my-marketing-jingle","song-creator","instrumental","transcribe","transcribe-african","podcast","my-podcast"]);
 const VIDEO_SLUGS  = new Set(["animate-my-photo","video-premium","video-cinematic","video-veo","my-video-story","video-story","video-jingle","video-edit","video-extend"]);
-const CODE_SLUGS   = new Set(["code-helper"]);
+const CODE_SLUGS   = new Set(["code-helper", "code-pro"]);
 const VISION_SLUGS = new Set(["image-analyser","ask-my-photo"]);
 const WEB_SLUGS    = new Set(["web-search-ai"]);
 const JSON_SLUGS   = new Set(["quiz","quiz-me","mindmap","mind-map","slide-deck"]);
-// Document tools that should offer PDF + Markdown download
+// Slide-deck tools that generate a real PPTX file
+const PPTX_SLUGS = new Set(["slide-deck"]);
+// Document tools that should offer PDF + Markdown download (all except PPTX which gets its own button)
 const DOC_EXPORT_SLUGS = new Set([
   "bizplan", "business-plan", "business-plan-summary",
   "study-guide", "research-brief", "deep-research-brief",
-  "slide-deck", "infographic", "summary"
+  "infographic", "summary", "voice-to-plan",
+  "translate", "local-translation",
 ]);
 
 function getOutputType(slug: string): { label: string; emoji: string; noun: string } {
@@ -220,13 +229,15 @@ const NEW_TOOL_SLUGS = new Set([
   "ai-photo-pro","ai-photo-max","ai-photo-dream","photo-editor",
   "song-creator","instrumental","video-cinematic","video-veo",
   "animate-my-photo","my-video-story",
+  // Gemma 4 / Nexus AI Tools
+  "code-pro", "doc-analyzer", "localize-ui", "nexus-agent",
 ]);
 
 // ─── Dual / special input sets ────────────────────────────────────────────────
 const DUAL_INPUT_TOOLS = new Set(["ask-my-photo","photo-editor","video-cinematic"]);
 const URL_INPUT_TOOLS  = new Set(["image-analyser","transcribe-african"]);
 const VOICE_TOOLS      = new Set(["narrate-pro"]);
-const LANG_TOOLS       = new Set(["transcribe-african"]);
+const LANG_TOOLS       = new Set(["transcribe-african", "localize-ui"]);
 
 const VOICES = ["alloy","echo","fable","onyx","nova","shimmer","coral","verse","ballad","ash","sage","amuch","dan"] as const;
 const LANGUAGES = [
@@ -284,6 +295,10 @@ const PLACEHOLDERS: Record<string, string> = {
   "image-analyser":     "Paste an image URL to analyse…",
   "ask-my-photo":       "Paste your image URL here…",
   "code-helper":        "Describe what code you need — e.g. 'Write a Python function to sort a list of dictionaries by key'…",
+  "code-pro":           "Describe your code problem — or attach a screenshot of the error, UI bug, or architecture diagram…",
+  "doc-analyzer":       "Ask a question about your document — e.g. 'Summarise the key findings' or 'Extract all invoice line items'…",
+  "localize-ui":        "Describe what you want translated — or upload a screenshot of your app UI…",
+  "nexus-agent":        "Describe your multi-step task — e.g. 'Analyse this data, find the top 3 trends, and write an executive summary'…",
   "narrate-pro":        "Type or paste the text you want narrated…",
   "transcribe-african": "Paste the URL of an audio file to transcribe…",
   "ai-photo-pro":       "Describe your photorealistic image — e.g. 'Professional headshot of a Nigerian business executive'…",
@@ -1428,16 +1443,25 @@ function renderQuiz(text: string) {
 // ─── Slide-deck renderer (module-level so both GenerationCard and ToolDrawer can use it) ─────────────────
 function renderSlideDeck(text: string) {
   let parsed: { title?: string; subtitle?: string; bullets?: string[]; notes?: string; speaker_notes?: string }[] | null = null;
+  let deckTitle: string | undefined;
   try {
     const raw = JSON.parse(text);
-    if (Array.isArray(raw)) parsed = raw;
-    else if (raw && Array.isArray(raw.slides)) parsed = raw.slides;
+    if (Array.isArray(raw)) { parsed = raw; }
+    else if (raw && Array.isArray(raw.slides)) { parsed = raw.slides; deckTitle = raw.title; }
   } catch { /* not valid JSON */ }
   if (!parsed) {
     return <p className="text-white/70 text-sm leading-relaxed whitespace-pre-wrap">{text}</p>;
   }
   return (
     <div className="space-y-3">
+      {/* Deck header */}
+      {deckTitle && (
+        <div className="flex items-center gap-2 pb-1 border-b border-white/10">
+          <span className="text-lg">📊</span>
+          <p className="text-white/90 text-sm font-bold">{deckTitle}</p>
+          <span className="ml-auto text-white/30 text-[10px]">{parsed.length} slides</span>
+        </div>
+      )}
       {parsed.map((slide, i) => (
         <div key={i} className="bg-white/5 border border-white/10 rounded-xl p-3 space-y-2">
           <div className="flex items-center gap-2">
@@ -1453,7 +1477,7 @@ function renderSlideDeck(text: string) {
             <ul className="pl-8 space-y-1">
               {slide.bullets.map((b: string, bi: number) => (
                 <li key={bi} className="text-white/65 text-xs flex items-start gap-1.5">
-                  <span className="text-indigo-400 mt-0.5 flex-shrink-0">•</span>
+                  <span className="text-indigo-400 mt-0.5 flex-shrink-0">▸</span>
                   {b}
                 </li>
               ))}
@@ -1461,7 +1485,7 @@ function renderSlideDeck(text: string) {
           )}
           {(slide.speaker_notes || slide.notes) && (
             <p className="text-white/30 text-[11px] italic pl-8 border-t border-white/5 pt-2">
-              Speaker note: {slide.speaker_notes || slide.notes}
+              🎙 {slide.speaker_notes || slide.notes}
             </p>
           )}
         </div>
@@ -1781,6 +1805,35 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                       </pre>
                     )
               }
+              {/* PPTX download for slide-deck */}
+              {gen.tool_slug === "slide-deck" && gen.output_text && (() => {
+                const deckData = parseSlideDeckJSON(gen.output_text);
+                const slideCount = deckData?.slides?.length ?? 0;
+                return (
+                  <div className="mt-2 rounded-xl border border-indigo-500/30 bg-indigo-500/8 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">📊</span>
+                      <div>
+                        <p className="text-white/90 text-xs font-bold">{deckData?.title ?? 'Presentation'}</p>
+                        <p className="text-white/40 text-[10px]">{slideCount} slides ready to download</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await downloadAsPPTX(gen.output_text ?? '', gen.tool_slug);
+                          toast.success('PPTX downloaded!');
+                        } catch (e) {
+                          toast.error('Could not generate PPTX. Try regenerating.');
+                        }
+                      }}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 text-indigo-200 text-sm font-bold transition-all"
+                    >
+                      <FileDown size={14} /> Download PowerPoint (.pptx)
+                    </button>
+                  </div>
+                );
+              })()}
               {onRegenerate && (
                 <button onClick={() => onRegenerate(gen)}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
@@ -2367,63 +2420,162 @@ function ToolDrawer({
                   )}
 
                   {/* Text result */}
-                  {inlineResult.output_text && !inlineResult.output_url && (
-                    <div className="p-4 space-y-3">
-                      <div className="rounded-xl bg-white/5 border border-white/10 p-4 max-h-72 overflow-y-auto">
-                        {(slug === 'mindmap' || slug === 'mind-map')
-                          ? renderMindMap(inlineResult.output_text)
-                          : (slug === 'quiz' || slug === 'quiz-me')
-                            ? renderQuiz(inlineResult.output_text)
-                            : (slug === 'infographic')
-                              ? renderInfographic(inlineResult.output_text)
-                              : (slug === 'slide-deck')
-                                ? renderSlideDeck(inlineResult.output_text)
-                                : (
-                                  <pre className="text-white/80 text-xs leading-relaxed whitespace-pre-wrap font-sans">
-                                    {inlineResult.output_text}
-                                  </pre>
-                                )
-                        }
+                  {inlineResult.output_text && !inlineResult.output_url && (() => {
+                    const isPPTX    = PPTX_SLUGS.has(slug);
+                    const isDocExp  = DOC_EXPORT_SLUGS.has(slug);
+                    // Extract prompt for PDF header
+                    let displayPrompt = pendingPayload?.prompt ?? '';
+                    return (
+                      <div className="p-4 space-y-3">
+                        {/* Preview area */}
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-4 max-h-72 overflow-y-auto">
+                          {(slug === 'mindmap' || slug === 'mind-map')
+                            ? renderMindMap(inlineResult.output_text)
+                            : (slug === 'quiz' || slug === 'quiz-me')
+                              ? renderQuiz(inlineResult.output_text)
+                              : (slug === 'infographic')
+                                ? renderInfographic(inlineResult.output_text)
+                                : (slug === 'slide-deck')
+                                  ? renderSlideDeck(inlineResult.output_text)
+                                  : (
+                                    <pre className="text-white/80 text-xs leading-relaxed whitespace-pre-wrap font-sans">
+                                      {inlineResult.output_text}
+                                    </pre>
+                                  )
+                          }
+                        </div>
+
+                        {/* ─── PPTX download card (slide-deck only) ───────────────────────────────────── */}
+                        {isPPTX && (() => {
+                          const deckData   = parseSlideDeckJSON(inlineResult.output_text ?? '');
+                          const slideCount = deckData?.slides?.length ?? 0;
+                          return (
+                            <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-600/15 to-purple-600/10 p-4 space-y-3">
+                              {/* Header */}
+                              <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center flex-shrink-0">
+                                  <span className="text-xl">📊</span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-white/90 text-sm font-bold truncate">{deckData?.title ?? 'Presentation Ready'}</p>
+                                  <p className="text-white/45 text-xs mt-0.5">{slideCount} slides · Branded Nexus theme · Speaker notes included</p>
+                                </div>
+                              </div>
+                              {/* Download PPTX */}
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await downloadAsPPTX(inlineResult.output_text ?? '', slug);
+                                    toast.success('✅ PowerPoint downloaded!');
+                                  } catch {
+                                    toast.error('Could not build PPTX — try regenerating.');
+                                  }
+                                }}
+                                className="w-full flex items-center justify-center gap-2.5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all shadow-lg shadow-indigo-900/40"
+                              >
+                                <FileDown size={16} /> Download PowerPoint (.pptx)
+                              </button>
+                              {/* Secondary actions */}
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => { navigator.clipboard.writeText(inlineResult.output_text ?? ''); toast.success('JSON copied!'); }}
+                                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/8 hover:bg-white/15 border border-white/10 text-white/60 text-xs font-semibold transition-all"
+                                >
+                                  <Copy size={12} /> Copy JSON
+                                </button>
+                                <button
+                                  onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/8 hover:bg-white/15 border border-white/10 text-white/60 text-xs font-semibold transition-all"
+                                >
+                                  <RefreshCw size={12} /> Generate Again
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* ─── PDF/Markdown download card (bizplan, study-guide, research-brief, etc.) ──── */}
+                        {isDocExp && !isPPTX && (
+                          <div className="rounded-2xl border border-amber-500/25 bg-gradient-to-br from-amber-600/10 to-orange-600/8 p-4 space-y-3">
+                            {/* Header */}
+                            <div className="flex items-start gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-amber-600/25 border border-amber-500/25 flex items-center justify-center flex-shrink-0">
+                                <FileDown size={18} className="text-amber-300" />
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-white/90 text-sm font-bold">Document Ready</p>
+                                <p className="text-white/45 text-xs mt-0.5">Download as a formatted PDF or Markdown file</p>
+                              </div>
+                            </div>
+                            {/* Download PDF */}
+                            <button
+                              onClick={() => downloadAsPDF(inlineResult.output_text ?? '', slug, tool.name, displayPrompt)}
+                              className="w-full flex items-center justify-center gap-2.5 py-3 rounded-xl bg-amber-600/80 hover:bg-amber-500/90 text-white text-sm font-bold transition-all shadow-lg shadow-amber-900/30"
+                            >
+                              <Download size={16} /> Save as PDF
+                            </button>
+                            {/* Secondary actions */}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => downloadAsMarkdown(inlineResult.output_text ?? '', slug, tool.name, displayPrompt)}
+                                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/8 hover:bg-white/15 border border-white/10 text-white/60 text-xs font-semibold transition-all"
+                              >
+                                <FileDown size={12} /> Download .md
+                              </button>
+                              <button
+                                onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/8 hover:bg-white/15 border border-white/10 text-white/60 text-xs font-semibold transition-all"
+                              >
+                                <RefreshCw size={12} /> Generate Again
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ─── Generic copy/generate buttons (all other text tools) ──────────────────── */}
+                        {!isPPTX && !isDocExp && (
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(inlineResult.output_text ?? "");
+                                toast.success("Copied to clipboard!");
+                              }}
+                              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                         bg-green-500/15 border border-green-500/25 text-green-300
+                                         text-sm font-semibold hover:bg-green-500/25 transition-colors"
+                            >
+                              <Copy size={14} /> Copy Text
+                            </button>
+                            <button
+                              onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                         bg-white/5 border border-white/10 text-white/60
+                                         text-sm font-semibold hover:bg-white/10 transition-colors"
+                            >
+                              <RefreshCw size={14} /> Generate Again
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Continue in Chat — only for text/knowledge tools, not audio/image/video */}
+                        {onContinueInChat && !AUDIO_SLUGS.has(slug) && !IMAGE_SLUGS.has(slug) && !VIDEO_SLUGS.has(slug) && (
+                          <button
+                            onClick={() => {
+                              const snippet = (inlineResult.output_text ?? '').slice(0, 800);
+                              const prefill = `I just generated this with ${tool.name}:\n\n${snippet}${(inlineResult.output_text ?? '').length > 800 ? '\n…(truncated)' : ''}\n\nCan you help me refine or build on this?`;
+                              onContinueInChat(prefill);
+                              onClose();
+                            }}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
+                                       bg-blue-600/20 border border-blue-500/30 text-blue-300
+                                       text-sm font-semibold hover:bg-blue-600/30 transition-colors"
+                          >
+                            <MessageSquare size={14} /> Continue in Chat
+                          </button>
+                        )}
                       </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(inlineResult.output_text ?? "");
-                            toast.success("Copied to clipboard!");
-                          }}
-                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
-                                     bg-green-500/15 border border-green-500/25 text-green-300
-                                     text-sm font-semibold hover:bg-green-500/25 transition-colors"
-                        >
-                          <Copy size={14} /> Copy Text
-                        </button>
-                        <button
-                          onClick={() => { setInlineResult(null); setPendingPayload(null); }}
-                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
-                                     bg-white/5 border border-white/10 text-white/60
-                                     text-sm font-semibold hover:bg-white/10 transition-colors"
-                        >
-                          <RefreshCw size={14} /> Generate Again
-                        </button>
-                      </div>
-                      {/* Continue in Chat — only for text/knowledge tools, not audio/image/video */}
-                      {onContinueInChat && !AUDIO_SLUGS.has(slug) && !IMAGE_SLUGS.has(slug) && !VIDEO_SLUGS.has(slug) && (
-                        <button
-                          onClick={() => {
-                            const snippet = (inlineResult.output_text ?? '').slice(0, 800);
-                            const prefill = `I just generated this with ${tool.name}:\n\n${snippet}${(inlineResult.output_text ?? '').length > 800 ? '\n…(truncated)' : ''}\n\nCan you help me refine or build on this?`;
-                            onContinueInChat(prefill);
-                            onClose();
-                          }}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
-                                     bg-blue-600/20 border border-blue-500/30 text-blue-300
-                                     text-sm font-semibold hover:bg-blue-600/30 transition-colors"
-                        >
-                          <MessageSquare size={14} /> Continue in Chat
-                        </button>
-                      )}
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Fallback: URL-only result with unknown type — only show if not already handled by slug sets */}
                   {inlineResult.output_url && !AUDIO_SLUGS.has(slug) && !IMAGE_SLUGS.has(slug) && !VIDEO_SLUGS.has(slug) &&

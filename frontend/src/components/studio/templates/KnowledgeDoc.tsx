@@ -5,7 +5,7 @@ import {
   Loader2, Sparkles, ArrowRight, Paperclip, X, FileText,
   AlertCircle, BookOpen, HelpCircle, GitBranch, Briefcase,
   Presentation, BarChart2, Mic, Globe, ChevronDown, ChevronUp,
-  FileSearch, Headphones, Network, MessageSquare, Mic2, ClipboardList,
+  FileSearch, Headphones, Network, MessageSquare, Mic2, ClipboardList, Brain,
 } from 'lucide-react';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
@@ -44,6 +44,8 @@ const DOCUMENT_UPLOAD_SLUGS = new Set([
   // Extended: additional tools that benefit from document upload
   'business-plan-summary', 'deep-research-brief', 'mind-map',
   'my-podcast', 'quiz-me', 'voice-to-plan',
+  // Gemma 4 / Nexus AI Tools
+  'doc-analyzer', 'nexus-agent',
 ]);
 
 // ─── Document type visual cards ──────────────────────────────────────────────
@@ -63,6 +65,9 @@ const DOC_TYPE_CARDS: Record<string, { icon: React.ElementType; color: string; l
   'my-podcast':            { icon: Headphones,     color: 'from-teal-600/30 to-teal-700/20 border-teal-500/40 text-teal-200',       label: 'Podcast',              desc: 'Upload source material' },
   'quiz-me':               { icon: MessageSquare,  color: 'from-green-600/30 to-green-700/20 border-green-500/40 text-green-200',   label: 'Quiz Me',              desc: 'Upload study material' },
   'voice-to-plan':         { icon: Mic2,           color: 'from-indigo-600/30 to-indigo-700/20 border-indigo-500/40 text-indigo-200', label: 'Voice to Plan',       desc: 'Upload voice notes' },
+  // Gemma 4 / Nexus AI Tools
+  'doc-analyzer':          { icon: FileSearch,     color: 'from-cyan-600/30 to-cyan-700/20 border-cyan-500/40 text-cyan-200',         label: 'Document Analyzer',   desc: 'Upload PDF, invoice, or chart' },
+  'nexus-agent':           { icon: Sparkles,       color: 'from-violet-600/30 to-violet-700/20 border-violet-500/40 text-violet-200', label: 'Nexus Agent',          desc: 'Multi-step AI workflow' },
 };
 
 // ─── Translate layout ─────────────────────────────────────────────────────────

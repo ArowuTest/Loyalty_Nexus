@@ -125,6 +125,12 @@ var slugCategory = map[string]studioToolCat{
 	"ask-nexus":             catText,   // free conversational AI
 	"nexus-chat":            catText,   // free Gemini Flash chat
 	"voice-to-plan":         catText,   // voice-to-business-plan
+
+	// ── Gemma 4 / Nexus AI Tools ────────────────────────────────────────────────────────────────────────
+	"code-pro":     catVision, // Nexus Code Pro: code + optional image upload (multimodal debugging)
+	"doc-analyzer": catVision, // Nexus Document Analyzer: PDF/image structured extraction
+	"localize-ui":  catVision, // Nexus Localization Engine: screenshot OCR + African dialect translation
+	"nexus-agent":  catText,   // Nexus Agentic Workflow Builder: multi-step agentic reasoning loop
 }
 
 // ─── Provider result ──────────────────────────────────────────────────────────────────────────────────────
@@ -352,6 +358,11 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 		slug = "ask-nexus" // both use the same free conversational AI path
 	case "voice-to-plan":
 		slug = "voice-to-plan"
+	}
+
+	// nexus-agent: multi-step agentic workflow builder
+	if slug == "nexus-agent" {
+		return o.dispatchNexusAgent(ctx, env)
 	}
 
 	// code-helper: primary via Pollinations Qwen3-Coder, fallback to Gemini Flash
@@ -3447,6 +3458,32 @@ func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug string, 
 		if imageURL == "" {
 			return nil, fmt.Errorf("ask-my-photo: image_url is required")
 		}
+
+	case "code-pro":
+		// Nexus Code Pro: multimodal code debugging.
+		// If an image is attached (screenshot, error traceback, diagram), use vision.
+		// If no image, fall through to text-only Qwen-Coder path.
+		imageURL = env.ImageURL
+		question = env.Prompt
+		if imageURL == "" {
+			// No image — route as pure code-helper text request
+			return o.dispatchCodePro(ctx, env)
+		}
+		// Image present — build a code-aware vision prompt
+		if question == "" {
+			question = "Analyse this image in the context of software development. Identify any errors, bugs, or issues visible. Explain what is wrong and provide a corrected code solution."
+		} else {
+			question = fmt.Sprintf("[Code Context] %s\n\nAnalyse the attached image carefully. If it shows an error, traceback, UI bug, or architecture diagram, use it to inform your answer. Provide a complete, production-ready solution with explanation.", question)
+		}
+
+	case "doc-analyzer":
+		// Nexus Document Analyzer: structured extraction from PDF, invoice, chart, or scanned image.
+		return o.dispatchDocAnalyzer(ctx, env)
+
+	case "localize-ui":
+		// Nexus Localization Engine: OCR + African dialect translation.
+		return o.dispatchLocalizeUI(ctx, env)
+
 	default: // image-analyser
 		// Frontend sends image_url or puts imageURL in prompt for legacy compatibility
 		imageURL = env.ImageURL
@@ -3489,6 +3526,213 @@ func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug string, 
 		return &studioProviderResult{OutputText: text, Provider: "gemini-flash/vision", CostMicros: 0}, nil
 	}
 	return nil, fmt.Errorf("vision analysis failed: all providers unavailable")
+}
+
+// ─── Nexus Code Pro ──────────────────────────────────────────────────────────
+// dispatchCodePro handles the code-pro slug when NO image is attached.
+// When an image IS attached, dispatchVision handles it directly (above).
+func (o *AIStudioOrchestrator) dispatchCodePro(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
+	codeSys := "You are Nexus Code Pro, an elite software engineer and debugging expert. " +
+		"Write production-quality, clean, well-commented code in any language. " +
+		"Always wrap code in fenced code blocks with the correct language tag (e.g. ```python, ```typescript). " +
+		"After every code block, add a concise explanation of the key logic in 2-4 bullet points. " +
+		"Include robust error handling in all examples. " +
+		"When debugging, quote the exact problematic line, explain precisely why it fails, then show the corrected version. " +
+		"For architecture questions, describe the recommended pattern and provide a working implementation."
+	// Primary: Pollinations Qwen3-Coder (best for code tasks)
+	text, err := o.callPollinationsQwenCoder(ctx, codeSys, env.Prompt)
+	if err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "pollinations/qwen-coder-pro", CostMicros: 0}, nil
+	}
+	log.Printf("[AIStudio] Code Pro Qwen-Coder failed: %v — falling back to Gemini", err)
+	// Fallback: Gemini Flash
+	text, err = o.callGeminiFlash(ctx, codeSys, env.Prompt)
+	if err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "gemini-flash/code-pro", CostMicros: 0}, nil
+	}
+	return nil, fmt.Errorf("code-pro: all providers failed: %w", err)
+}
+
+// ─── Nexus Document Analyzer ─────────────────────────────────────────────────
+// dispatchDocAnalyzer handles the doc-analyzer slug.
+// Supports PDF, text documents (via DocumentURL) and scanned images (via ImageURL).
+func (o *AIStudioOrchestrator) dispatchDocAnalyzer(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
+	docSys := "You are Nexus Document Intelligence, an expert analyst specialising in extracting structured, actionable insights from documents. " +
+		"For invoices: extract vendor, date, line items, totals, taxes, and payment terms in a clean table. " +
+		"For reports or research papers: provide an executive summary, key findings, methodology, and recommendations. " +
+		"For charts or graphs: describe the data, identify trends, and state the key insight in one sentence. " +
+		"For contracts or legal documents: summarise the parties, key obligations, dates, and any risk clauses. " +
+		"For general documents: extract the main points, structure them clearly, and answer any specific question the user has asked. " +
+		"Always format your response with clear headings. If the user asked a specific question, answer it first before the full analysis."
+
+	userQ := env.Prompt
+	if userQ == "" {
+		userQ = "Analyse this document thoroughly. Extract all key information, summarise the main points, and present the findings in a clear, structured format."
+	}
+
+	// Path 1: PDF or text document uploaded
+	if env.DocumentURL != "" {
+		text, err := o.callGeminiWithDocument(ctx, docSys, userQ, env.DocumentURL)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "gemini-flash/doc-analyzer", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] Doc Analyzer Gemini document failed: %v — trying vision fallback", err)
+	}
+
+	// Path 2: Scanned image or screenshot uploaded
+	if env.ImageURL != "" {
+		visionQ := fmt.Sprintf("%s\n\nDocument image URL: %s", userQ, env.ImageURL)
+		text, err := o.callPollinationsVision(ctx, env.ImageURL, userQ)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "pollinations/vision-doc", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] Doc Analyzer Pollinations Vision failed: %v — trying Gemini vision", err)
+		// Gemini vision fallback
+		text, err = o.callGeminiFlash(ctx, docSys, visionQ)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "gemini-flash/doc-vision", CostMicros: 0}, nil
+		}
+	}
+
+	// Path 3: Text-only question (no file uploaded)
+	if env.Prompt != "" {
+		text, err := o.callGeminiFlash(ctx, docSys, userQ)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "gemini-flash/doc-text", CostMicros: 0}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("doc-analyzer: no document or image provided, or all providers failed")
+}
+
+// ─── Nexus Localization Engine ────────────────────────────────────────────────
+// dispatchLocalizeUI handles the localize-ui slug.
+// Reads text from a screenshot via OCR and translates it into the requested African dialect.
+func (o *AIStudioOrchestrator) dispatchLocalizeUI(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
+	// Determine target language from the prompt or language field
+	targetLang := strings.ToLower(strings.TrimSpace(env.Language))
+	if targetLang == "" {
+		// Try to extract from prompt (e.g. "translate to Yoruba")
+		promptLower := strings.ToLower(env.Prompt)
+		switch {
+		case strings.Contains(promptLower, "yoruba") || strings.Contains(promptLower, "yo"):
+			targetLang = "yo"
+		case strings.Contains(promptLower, "hausa") || strings.Contains(promptLower, "ha"):
+			targetLang = "ha"
+		case strings.Contains(promptLower, "igbo") || strings.Contains(promptLower, "ig"):
+			targetLang = "ig"
+		case strings.Contains(promptLower, "pidgin") || strings.Contains(promptLower, "pcm"):
+			targetLang = "pcm"
+		default:
+			targetLang = "yo" // default to Yoruba
+		}
+	}
+
+	langNames := map[string]string{
+		"yo":  "Yoruba",
+		"ha":  "Hausa",
+		"ig":  "Igbo",
+		"pcm": "Nigerian Pidgin English",
+		"fr":  "French",
+		"en":  "English",
+	}
+	langName, ok := langNames[targetLang]
+	if !ok {
+		langName = "Yoruba"
+	}
+
+	locSys := fmt.Sprintf(
+		"You are Nexus Localize, an expert in African languages and UI/UX localisation. "+
+			"Your task is to: "+
+			"1. Extract ALL text visible in the provided screenshot or image (OCR). "+
+			"2. Translate every piece of extracted text into %s, preserving the original meaning and UI context. "+
+			"3. Present the results as a two-column table: | Original Text | %s Translation |. "+
+			"4. After the table, provide a 'Localisation Notes' section with any cultural adaptations made. "+
+			"5. For buttons, labels, and CTAs: keep translations short and action-oriented. "+
+			"6. For error messages: ensure the translated message is clear and non-technical. "+
+			"If no image is provided, translate the user's text directly into %s.",
+		langName, langName, langName,
+	)
+
+	userQ := env.Prompt
+	if userQ == "" {
+		userQ = fmt.Sprintf("Extract all text from this UI screenshot and translate everything into %s.", langName)
+	}
+
+	if env.ImageURL != "" {
+		// Primary: Pollinations Vision (best OCR accuracy)
+		text, err := o.callPollinationsVision(ctx, env.ImageURL, fmt.Sprintf("%s\n\n%s", locSys, userQ))
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "pollinations/vision-localize", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] Localize UI Pollinations Vision failed: %v — falling back to Gemini", err)
+		// Fallback: Gemini Flash with image URL in prompt
+		geminiQ := fmt.Sprintf("Image URL: %s\n\n%s", env.ImageURL, userQ)
+		text, err = o.callGeminiFlash(ctx, locSys, geminiQ)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "gemini-flash/localize", CostMicros: 0}, nil
+		}
+		return nil, fmt.Errorf("localize-ui: all vision providers failed: %w", err)
+	}
+
+	// Text-only translation (no image)
+	text, err := o.callGeminiFlash(ctx, locSys, userQ)
+	if err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "gemini-flash/localize-text", CostMicros: 0}, nil
+	}
+	return nil, fmt.Errorf("localize-ui: text translation failed: %w", err)
+}
+
+// ─── Nexus Agentic Workflow Builder ──────────────────────────────────────────
+// dispatchNexusAgent handles the nexus-agent slug.
+// Runs a multi-step agentic reasoning loop: the model plans, executes sub-tasks,
+// and synthesises a final result — all in a single streaming response.
+func (o *AIStudioOrchestrator) dispatchNexusAgent(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
+	agentSys := "You are Nexus Agent, an autonomous AI workflow engine. " +
+		"When given a complex multi-step task, you MUST follow this exact process: " +
+		"\n\n## Step 1: Task Decomposition " +
+		"\nBreak the user's request into 3-7 discrete, ordered sub-tasks. List them as a numbered plan. " +
+		"\n\n## Step 2: Sequential Execution " +
+		"\nExecute each sub-task in order. For each one, write: " +
+		"\n**Sub-task [N]: [Name]** " +
+		"\n[Your work for this sub-task] " +
+		"\n\n## Step 3: Synthesis " +
+		"\nCombine all sub-task outputs into a single, coherent final deliverable. " +
+		"\n\nRules: " +
+		"\n- Think step by step. Show your reasoning. " +
+		"\n- For data analysis tasks: show the analysis, then the insight, then the recommendation. " +
+		"\n- For writing tasks: plan the structure, write each section, then present the final document. " +
+		"\n- For research tasks: identify sources, extract key facts, then synthesise findings. " +
+		"\n- Always end with a clear, actionable \"Final Output\" section. " +
+		"\n- Be thorough. Quality over speed. The user is paying premium points for this."
+
+	userTask := env.Prompt
+	if userTask == "" {
+		return nil, fmt.Errorf("nexus-agent: task description is required")
+	}
+
+	// Enrich with any uploaded document context
+	if env.DocumentURL != "" {
+		text, err := o.callGeminiWithDocument(ctx, agentSys, userTask, env.DocumentURL)
+		if err == nil {
+			return &studioProviderResult{OutputText: text, Provider: "gemini-flash/nexus-agent-doc", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] Nexus Agent Gemini document failed: %v — falling back to text-only", err)
+	}
+
+	// Primary: Gemini Flash (best for long multi-step reasoning)
+	text, err := o.callGeminiFlash(ctx, agentSys, userTask)
+	if err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "gemini-flash/nexus-agent", CostMicros: 0}, nil
+	}
+	log.Printf("[AIStudio] Nexus Agent Gemini failed: %v — falling back to Groq", err)
+
+	// Fallback: Groq Llama-4
+	text, err = o.callGroqLlama4(ctx, agentSys, userTask)
+	if err == nil {
+		return &studioProviderResult{OutputText: text, Provider: "groq/nexus-agent", CostMicros: 0}, nil
+	}
+	return nil, fmt.Errorf("nexus-agent: all providers failed: %w", err)
 }
 
 // ─── NEW: dispatchTranscribeAfrican ──────────────────────────────────────────
