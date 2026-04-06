@@ -1956,6 +1956,8 @@ function renderTemplate(
   const props = { tool: t, onSubmit, isLoading, userPoints };
   // Normalise to kebab-case so both DB PascalCase (e.g. "MusicComposer")
   // and kebab-case (e.g. "music-composer") values match correctly.
+  // Slug-based override: code-pro always uses CodePro template regardless of DB value
+  if (tool.slug === "code-pro") return <CodePro {...props} />;
   const rawTpl = tool.ui_template ?? "";
   const tpl = rawTpl
     .replace(/([A-Z])/g, (m: string, c: string, i: number) => (i > 0 ? "-" : "") + c.toLowerCase())
