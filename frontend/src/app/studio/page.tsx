@@ -2639,7 +2639,7 @@ function StudioPageInner() {
   const [introDismissed, setIntroDismissed] = useState<boolean>(true);
   const [chatUsage,      setChatUsage]      = useState<{ used: number; limit: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef       = useRef<HTMLInputElement>(null);
+  const inputRef       = useRef<HTMLTextAreaElement>(null);
   // FEAT-02: Chat attachment state
   const chatFileInputRef = useRef<HTMLInputElement>(null);
   const [chatAttachFile,    setChatAttachFile]    = useState<File | null>(null);
@@ -2765,6 +2765,14 @@ function StudioPageInner() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
+
+  // Auto-resize chat textarea as user types
+  useEffect(() => {
+    const ta = inputRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+  }, [input]);
 
   const handleChatAttachSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -3303,12 +3311,18 @@ function StudioPageInner() {
                     className="hidden"
                   />
 
-                  {/* Text input */}
-                  <input
+                  {/* Text input — auto-expanding textarea */}
+                  <textarea
                     ref={inputRef}
+                    rows={1}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChat()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleChat();
+                      }
+                    }}
                     placeholder={
                       chatAttachURL ? 'Ask about the attached file… (or press Enter)' :
                       chatMode === 'search' ? 'Search the web — news, prices, facts…' :
@@ -3316,7 +3330,7 @@ function StudioPageInner() {
                                              'Message Nexus AI…'
                     }
                     className={cn(
-                      'flex-1 bg-transparent text-white placeholder:text-white/25 focus:outline-none text-sm py-1.5',
+                      'flex-1 bg-transparent text-white placeholder:text-white/25 focus:outline-none text-sm py-1.5 resize-none overflow-hidden leading-relaxed',
                       chatMode === 'code' ? 'font-mono' : '',
                     )}
                     disabled={sending}
