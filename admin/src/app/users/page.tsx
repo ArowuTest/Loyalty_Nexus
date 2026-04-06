@@ -131,19 +131,25 @@ export default function UsersPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(95,114,249,0.15)" }}>
-                  {["Phone", "Tier", "Streak", "Status", "Joined", "Actions"].map(h => (
+                  {["Phone", "Tier", "Pulse Pts", "Bonus Pts", "Streak", "Status", "Joined", "Actions"].map(h => (
                     <th key={h} style={{ padding: "10px 14px", textAlign: "left", color: "#828cb4", fontWeight: 600 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {users.length === 0 ? (
-                  <tr><td colSpan={6} style={{ padding: "30px 14px", textAlign: "center", color: "#828cb4" }}>No users found</td></tr>
+                  <tr><td colSpan={8} style={{ padding: "30px 14px", textAlign: "center", color: "#828cb4" }}>No users found</td></tr>
                 ) : users.map(u => (
                   <tr key={u.id} style={{ borderBottom: "1px solid rgba(95,114,249,0.07)" }}>
                     <td style={{ padding: "10px 14px", color: "#e2e8ff", fontFamily: "monospace" }}>{u.phone_number}</td>
                     <td style={{ padding: "10px 14px" }}>
                       <span style={{ color: TIER_COLORS[u.tier] || "#e2e8ff", fontWeight: 600, fontSize: 12 }}>{u.tier}</span>
+                    </td>
+                    <td style={{ padding: "10px 14px", color: "#5f72f9", fontWeight: 600, fontSize: 12 }}>
+                      {(u.pulse_points ?? 0).toLocaleString()}
+                    </td>
+                    <td style={{ padding: "10px 14px", color: "#10b981", fontWeight: 600, fontSize: 12 }}>
+                      {(u.bonus_points ?? 0).toLocaleString()}
                     </td>
                     <td style={{ padding: "10px 14px", color: "#828cb4" }}>{u.streak_count}d 🔥</td>
                     <td style={{ padding: "10px 14px" }}>
@@ -209,12 +215,14 @@ export default function UsersPage() {
               <>
                 <h2 style={{ fontSize: 16, fontWeight: 700, color: "#e2e8ff", marginBottom: 16 }}>👤 User Details</h2>
                 {[
-                  ["ID",          modal.user.id],
-                  ["Phone",       modal.user.phone_number],
-                  ["Tier",        modal.user.tier],
-                  ["Streak",      `${modal.user.streak_count} days`],
-                  ["Status",      modal.user.is_active ? "Active" : "Suspended"],
-                  ["Joined",      new Date(modal.user.created_at).toLocaleString("en-NG")],
+                  ["ID",           modal.user.id],
+                  ["Phone",        modal.user.phone_number],
+                  ["Tier",         modal.user.tier],
+                  ["Pulse Points", (modal.user.pulse_points ?? 0).toLocaleString()],
+                  ["Bonus Points", (modal.user.bonus_points ?? 0).toLocaleString()],
+                  ["Streak",       `${modal.user.streak_count} days`],
+                  ["Status",       modal.user.is_active ? "Active" : "Suspended"],
+                  ["Joined",       new Date(modal.user.created_at).toLocaleString("en-NG")],
                 ].map(([k, v]) => (
                   <div key={k} style={{ display: "flex", gap: 12, marginBottom: 8 }}>
                     <span style={{ width: 80, fontSize: 12, color: "#828cb4", flexShrink: 0 }}>{k}</span>

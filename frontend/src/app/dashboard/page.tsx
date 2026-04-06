@@ -892,7 +892,7 @@ export default function DashboardPage() {
               <span className="text-emerald-400 text-sm font-bold ml-1">ticket{drawEntriesToday !== 1 ? "s" : ""}</span>
             </p>
             <p className="text-white/30 text-[10px] mt-1">Today · resets midnight WAT</p>
-            <p className="text-white/20 text-[9px] mt-0.5">₦200 recharge = 1 lottery entry</p>
+            <p className="text-white/20 text-[9px] mt-0.5">₦200 recharge = 1 draw entry</p>
           </motion.div>
         </motion.div>
 
@@ -961,7 +961,7 @@ export default function DashboardPage() {
         >
           <div>
             <p className="text-white font-black text-sm">Recharge to earn more ⚡</p>
-            <p className="text-white/40 text-[12px] mt-0.5">₦200 = 1 Pulse Point · ₦1,000+ = free spin</p>
+            <p className="text-white/40 text-[12px] mt-0.5">₦250 = 1 Pulse Point · ₦200 = 1 Draw Entry · ₦1,000+ = free spin</p>
           </div>
           <Link href="/recharge">
             <button className="btn-gold rounded-xl h-9 px-4 text-[12px] font-black inline-flex items-center gap-1.5 flex-shrink-0">

@@ -3490,7 +3490,7 @@ function StudioPageInner() {
                                              'Message Nexus AI…'
                     }
                     className={cn(
-                      'flex-1 bg-transparent text-white placeholder:text-white/25 focus:outline-none text-sm py-1.5 resize-none overflow-hidden leading-relaxed',
+                      'flex-1 bg-transparent text-white placeholder:text-white/25 focus:outline-none text-sm py-1.5 resize-none overflow-y-auto max-h-40 leading-relaxed scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent',
                       chatMode === 'code' ? 'font-mono' : '',
                     )}
                     disabled={sending}

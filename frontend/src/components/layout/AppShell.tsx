@@ -13,7 +13,7 @@ import {
 const NAV_ITEMS = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Home"       },
   { href: "/spin",      icon: Zap,             label: "Spin"       },
-  { href: "/studio",    icon: Wand2,           label: "Studio"     },
+  { href: "/studio",    icon: Wand2,           label: "AI Studio"  },
   { href: "/wars",      icon: Trophy,          label: "Wars"       },
   { href: "/prizes",    icon: Gift,            label: "Prizes"     },
 ];

@@ -415,6 +415,7 @@ export interface User {
   last_recharge_at?: string | null;
   pulse_points?: number;
   spin_credits?: number;
+  bonus_points?: number;
 }
 export interface FraudEvent {
   id: string;

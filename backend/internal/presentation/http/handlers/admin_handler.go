@@ -197,8 +197,9 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		StreakCount int        `gorm:"column:streak_count" json:"streak_count"`
 		LastRechargeAt *time.Time `gorm:"column:last_recharge_at" json:"last_recharge_at,omitempty"`
 		CreatedAt   time.Time  `gorm:"column:created_at" json:"created_at"`
-		PulsePoints int64      `gorm:"column:pulse_points" json:"pulse_points"`
-		SpinCredits int        `gorm:"column:spin_credits" json:"spin_credits"`
+		PulsePoints  int64      `gorm:"column:pulse_points" json:"pulse_points"`
+		SpinCredits  int        `gorm:"column:spin_credits" json:"spin_credits"`
+		BonusPoints  int64      `gorm:"column:bonus_points" json:"bonus_points"`
 	}
 
 	var users []userRow
@@ -221,7 +222,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 	// Data query
 	dataQ := h.db.WithContext(r.Context()).Table("users u").
-		Select("u.id, u.phone_number, u.tier, u.state, u.is_active, u.streak_count, u.last_recharge_at, u.created_at, COALESCE(w.pulse_points,0) AS pulse_points, COALESCE(w.spin_credits,0) AS spin_credits").
+		Select("u.id, u.phone_number, u.tier, u.state, u.is_active, u.streak_count, u.last_recharge_at, u.created_at, COALESCE(w.pulse_points,0) AS pulse_points, COALESCE(w.spin_credits,0) AS spin_credits, COALESCE((SELECT SUM(points) FROM pulse_point_awards WHERE user_id = u.id),0) AS bonus_points").
 		Joins("LEFT JOIN wallets w ON w.user_id = u.id")
 	if search != "" {
 		dataQ = dataQ.Where("u.phone_number LIKE ?", "%"+search+"%")
@@ -233,7 +234,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[ListUsers] wallet join failed (%v), falling back to simple query", dbErr)
 		// Fallback: query without wallet join in case wallets table has issues
 		h.db.WithContext(r.Context()).Table("users u").
-			Select("u.id, u.phone_number, u.tier, u.state, u.is_active, u.streak_count, u.last_recharge_at, u.created_at, 0 AS pulse_points, 0 AS spin_credits").
+			Select("u.id, u.phone_number, u.tier, u.state, u.is_active, u.streak_count, u.last_recharge_at, u.created_at, 0 AS pulse_points, 0 AS spin_credits, 0 AS bonus_points").
 			Order("u.created_at DESC").Limit(limit).Offset((page-1)*limit).Find(&users)
 	}
 	if users == nil {
