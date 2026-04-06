@@ -102,7 +102,7 @@ VALUES
   'Nexus Localization Engine',
   'localize-ui',
   'Upload a screenshot of your app or marketing material. Nexus AI reads all visible text and translates it into Yoruba, Hausa, Igbo, or Nigerian Pidgin.',
-  'Language & Translation',
+  'Build',
   50,
   'pollinations',
   'gemini-vision',
