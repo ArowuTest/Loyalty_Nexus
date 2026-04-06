@@ -1,6 +1,5 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence, useScroll, useTransform, useInView } from "framer-motion";
 import {
@@ -295,16 +294,10 @@ export default function HomePage() {
   const [authOpen, setAuthOpen]           = useState(false);
   const [bannerVisible, setBannerVisible] = useState(true);
   const { isAuthenticated, _hasHydrated } = useStore();
-  const router                            = useRouter();
   const heroRef                           = useRef<HTMLElement>(null);
   const { scrollY }                       = useScroll();
   const heroY                             = useTransform(scrollY, [0, 600], [0, -80]);
   const heroOpacity                       = useTransform(scrollY, [0, 400], [1, 0.3]);
-
-  // Redirect authenticated users to dashboard
-  useEffect(() => {
-    if (_hasHydrated && isAuthenticated) router.replace("/dashboard");
-  }, [_hasHydrated, isAuthenticated, router]);
 
   const openAuth = useCallback(() => setAuthOpen(true), []);
 
@@ -314,8 +307,6 @@ export default function HomePage() {
     window.addEventListener("nexus:open-auth", handler);
     return () => window.removeEventListener("nexus:open-auth", handler);
   }, []);
-
-  if (_hasHydrated && isAuthenticated) return null;
 
   return (
     <div className="min-h-screen overflow-x-hidden" style={{ background: "#0d0e14" }}>
