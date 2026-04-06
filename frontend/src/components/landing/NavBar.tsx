@@ -7,10 +7,11 @@ import { Zap, Sparkles, Menu, X } from "lucide-react";
 import { useStore } from "@/store/useStore";
 
 const NAV_LINKS = [
-  { label: "Home",      href: "/",          anchor: null,           needsAuth: false },
-  { label: "AI Studio", href: "/studio",    anchor: "ai-studio",    needsAuth: false },
-  { label: "Dashboard", href: "/dashboard", anchor: null,           needsAuth: true  },
-  { label: "Wars",      href: "/wars",      anchor: "regional-wars", needsAuth: false },
+  { label: "Home",         href: "/",               anchor: null,            needsAuth: false },
+  { label: "How It Works", href: "/how-it-works",   anchor: null,            needsAuth: false },
+  { label: "AI Studio",   href: "/studio",         anchor: "ai-studio",     needsAuth: false },
+  { label: "Dashboard",   href: "/dashboard",      anchor: null,            needsAuth: true  },
+  { label: "Wars",        href: "/wars",           anchor: "regional-wars", needsAuth: false },
 ];
 
 const TIER_COLORS: Record<string, string> = {

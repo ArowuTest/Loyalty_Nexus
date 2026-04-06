@@ -520,6 +520,15 @@ export default function HomePage() {
               </motion.div>
             ))}
           </StaggerGrid>
+          <div className="mt-10 text-center">
+            <Link
+              href="/how-it-works"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/[0.12] text-[13px] font-semibold text-white/60 hover:text-white hover:border-white/25 transition-all"
+            >
+              Learn more about how it works
+              <ChevronRight className="w-4 h-4" />
+            </Link>
+          </div>
         </div>
       </section>
 
