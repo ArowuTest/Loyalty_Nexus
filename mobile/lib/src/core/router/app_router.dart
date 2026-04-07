@@ -16,6 +16,7 @@ import '../../features/prizes/presentation/prizes_screen.dart';
 import '../../features/prizes/presentation/draws_screen.dart';
 import '../../features/prizes/presentation/pulse_awards_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
+import '../../features/how_it_works/presentation/how_it_works_screen.dart';
 import '../auth/auth_provider.dart';
 import '../shell/main_shell.dart';
 
@@ -36,6 +37,7 @@ class AppRoutes {
   static const pulseAwards   = '/pulse-awards';
   static const notifications = '/notifications';
   static const settings      = '/settings';
+  static const howItWorks    = '/how-it-works';
 }
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -118,6 +120,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/pulse-awards',  builder: (_, __) => const PulseAwardsScreen()),
       GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
       GoRoute(path: '/settings',      builder: (_, __) => const SettingsScreen()),
+      GoRoute(path: '/how-it-works',  builder: (_, __) => const HowItWorksScreen()),
     ],
   );
 });

@@ -273,6 +273,7 @@ class _ActionGrid extends StatelessWidget {
     (icon: Icons.emoji_events_rounded,   label: 'My Prizes',          route: '/prizes',        color: NexusColors.green),
     (icon: Icons.calendar_today_rounded, label: 'Draws',              route: '/draws',         color: NexusColors.purple),
     (icon: Icons.card_giftcard_rounded,  label: 'Bonus Awards',       route: '/pulse-awards',  color: NexusColors.cyan),
+    (icon: Icons.info_outline_rounded,    label: 'How It\nWorks',      route: '/how-it-works',  color: NexusColors.primary),
     (icon: Icons.settings_outlined,      label: 'Settings',           route: '/settings',      color: NexusColors.textSecondary),
   ];
 
