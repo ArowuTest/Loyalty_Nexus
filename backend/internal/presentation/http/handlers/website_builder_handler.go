@@ -164,9 +164,7 @@ func stripMarkdownCodeBlock(s string) string {
 			break
 		}
 	}
-	if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-	}
+	s = strings.TrimSuffix(s, "```")
 	return strings.TrimSpace(s)
 }
 
@@ -200,7 +198,7 @@ p{color:rgba(255,255,255,0.5);font-size:14px;line-height:1.6}
 func serveErrorPage(w http.ResponseWriter, title, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusNotFound)
-	fmt.Fprintf(w, `<!DOCTYPE html>
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html><head><title>%s</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{background:#0a0a0f;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px}
 .card{background:rgba(255,255,255,0.05);border-radius:24px;padding:48px 32px;max-width:380px}
