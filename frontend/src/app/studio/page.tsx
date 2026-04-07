@@ -3676,7 +3676,9 @@ function StudioPageInner() {
                             userPoints={userPoints}
                             onClick={() => {
                               // Chat tools switch to Chat tab with correct mode
-                              if (tool.slug === "web-search-ai") {
+                              if (tool.slug === "website-builder") {
+                                setShowWebsiteBuilder(true);
+                              } else if (tool.slug === "web-search-ai") {
                                 setChatMode("search");
                                 setActiveTab("chat");
                               } else if (CHAT_TAB_SLUGS.has(tool.slug)) {
