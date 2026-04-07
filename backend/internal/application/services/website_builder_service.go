@@ -232,7 +232,20 @@ func websiteBuilderUserPrompt(req WebsiteBuilderRequest) string {
 		sb.WriteString("\nEmbed all photos as base64 inline images in the appropriate sections.\n")
 		sb.WriteString("IMPORTANT: The photos follow this text prompt in the multimodal request. Use them in the website.\n")
 	} else {
-		sb.WriteString("\nNo photos provided. Use solid colour cards with emoji icons instead of images.\n")
+		sb.WriteString("\nNo user photos provided. You MUST generate relevant images using Pollinations AI URLs.\n")
+		sb.WriteString("Use this exact URL format for every image in the website:\n")
+		sb.WriteString("  https://image.pollinations.ai/prompt/[DESCRIPTION]?width=800&height=500&nologo=true&model=flux\n")
+		sb.WriteString("Replace [DESCRIPTION] with a URL-encoded descriptive prompt relevant to the business.\n")
+		sb.WriteString("Examples:\n")
+		sb.WriteString("  - Hero background: https://image.pollinations.ai/prompt/modern%20professional%20Nigerian%20business%20office%20Lagos%20skyline?width=1200&height=600&nologo=true&model=flux\n")
+		sb.WriteString("  - Product image: https://image.pollinations.ai/prompt/elegant%20ankara%20fashion%20dress%20boutique%20Nigeria?width=600&height=600&nologo=true&model=flux\n")
+		sb.WriteString("  - Team/about: https://image.pollinations.ai/prompt/professional%20African%20business%20team%20smiling%20office?width=800&height=500&nologo=true&model=flux\n")
+		sb.WriteString("REQUIREMENTS:\n")
+		sb.WriteString("  - Generate at least 4-6 relevant Pollinations images throughout the website\n")
+		sb.WriteString("  - Match image prompts to the specific business type, name and services provided\n")
+		sb.WriteString("  - Use images in: hero section, about section, services/products cards, gallery\n")
+		sb.WriteString("  - Make hero image a full-width background using CSS: background-image: url('https://image.pollinations.ai/...')\n")
+		sb.WriteString("  - Add loading='lazy' to all <img> tags for performance\n")
 	}
 
 	sb.WriteString("\n=== GENERATION TIME ===\n")
