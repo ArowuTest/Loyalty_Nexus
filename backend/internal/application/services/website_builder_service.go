@@ -10,7 +10,6 @@ package services
 //   5. Served publicly at GET /s/{generation_id}
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
