@@ -284,7 +284,8 @@ func main() {
 		rechargeH := handlers.NewRechargeHandlerWithMTN(rechargeSvc, mtnPushSvc, eq)
 		spinH    := handlers.NewSpinHandler(spinSvc)
 		studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
-		studioH.SetAssetStorage(assetStorage) // enables /studio/upload endpoint
+		studioH.SetAssetStorage(assetStorage)
+		studioH.SetGeminiAdapter(gemini) // website builder multimodal
 		bonusPulseSvc := services.NewBonusPulseService(db, userRepo)
 		userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc).
 					WithBonusPulseService(bonusPulseSvc).
@@ -375,6 +376,8 @@ func main() {
 		mux.Handle("GET /api/v1/studio/tools", auth(http.HandlerFunc(studioH.ListTools)))
 		mux.Handle("GET /api/v1/studio/tools/{slug}", auth(http.HandlerFunc(studioH.GetTool)))
 		mux.Handle("POST /api/v1/studio/generate", auth(http.HandlerFunc(studioH.Generate)))
+		mux.Handle("POST /api/v1/studio/website", auth(http.HandlerFunc(studioH.BuildWebsite))) // website builder
+		mux.HandleFunc("GET /s/{id}", studioH.ServeWebsite) // public — no auth
 		mux.Handle("GET /api/v1/studio/generate/{id}", auth(http.HandlerFunc(studioH.GetGenerationStatus)))
 		mux.Handle("GET /api/v1/studio/gallery", auth(http.HandlerFunc(studioH.GetGallery)))
 		mux.Handle("POST /api/v1/studio/generate/{id}/dispute", auth(http.HandlerFunc(studioH.DisputeGeneration)))

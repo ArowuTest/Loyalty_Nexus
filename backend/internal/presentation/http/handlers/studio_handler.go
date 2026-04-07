@@ -35,6 +35,7 @@ import (
 type StudioHandler struct {
 	studioSvc    *services.StudioService
 	llmOrch      *external.LLMOrchestrator
+	gemini       *external.GeminiAdapter // used by website builder for multimodal
 	worker       *AsyncStudioWorker
 	cfg          *config.ConfigManager
 	assetStorage external.AssetStorage // optional: nil when STORAGE_BACKEND not set
@@ -49,7 +50,8 @@ func NewStudioHandler(
 	return &StudioHandler{studioSvc: ss, llmOrch: lo, worker: kb, cfg: cfg}
 }
 
-// SetAssetStorage injects the storage backend (called from main.go after init).
+// SetGeminiAdapter injects the Gemini adapter for website builder multimodal calls.
+func (h *StudioHandler) SetGeminiAdapter(g *external.GeminiAdapter) { h.gemini = g }
 func (h *StudioHandler) SetAssetStorage(s external.AssetStorage) { h.assetStorage = s }
 
 // ─── POST /api/v1/studio/upload ──────────────────────────────────────────────

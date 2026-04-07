@@ -815,6 +815,77 @@ func (a *GeminiAdapter) Complete(ctx context.Context, systemPrompt, userPrompt s
 	return result.Candidates[0].Content.Parts[0].Text, nil
 }
 
+// CompleteWithImages sends a multimodal prompt (text + base64 images) to Gemini.
+// Used by the website builder to pass product photos alongside the prompt.
+func (a *GeminiAdapter) CompleteWithImages(ctx context.Context, systemPrompt, userPrompt string, base64Images []string) (string, error) {
+	url := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s",
+		a.apiKey,
+	)
+	// Build parts: text prompt + inline image data
+	parts := []map[string]interface{}{
+		{"text": userPrompt},
+	}
+	for _, b64 := range base64Images {
+		// Each image is a base64-encoded JPEG
+		parts = append(parts, map[string]interface{}{
+			"inlineData": map[string]string{
+				"mimeType": "image/jpeg",
+				"data":     b64,
+			},
+		})
+	}
+	payload := map[string]interface{}{
+		"system_instruction": map[string]interface{}{
+			"parts": []map[string]string{{"text": systemPrompt}},
+		},
+		"contents": []map[string]interface{}{
+			{"parts": parts},
+		},
+		"generationConfig": map[string]interface{}{
+			"maxOutputTokens": 8192,
+			"temperature":     0.7,
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("gemini multimodal marshal: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("gemini multimodal request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("gemini multimodal http: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+		Error *struct {
+			Message string `json:"message"`
+			Code    int    `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("gemini multimodal decode: %w", err)
+	}
+	if result.Error != nil {
+		return "", fmt.Errorf("gemini multimodal API error %d: %s", result.Error.Code, result.Error.Message)
+	}
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("gemini multimodal: no content returned")
+	}
+	return result.Candidates[0].Content.Parts[0].Text, nil
+}
+
 // ─── DeepSeekAdapter ─────────────────────────────────────────────────────────
 
 type DeepSeekAdapter struct {
