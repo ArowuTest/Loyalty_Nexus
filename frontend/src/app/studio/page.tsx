@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback, Suspense } from "react";
+import dynamic from "next/dynamic";
+const WebsiteBuilderWizard = dynamic(() => import("@/components/studio/WebsiteBuilderWizard"), { ssr: false });
 import { motion, AnimatePresence } from "framer-motion";
 import useSWR from "swr";
 import AppShell from "@/components/layout/AppShell";
@@ -2785,6 +2787,7 @@ function StudioPageInner() {
   const sessionId = sessionIds.current[chatMode] || `sess_${chatMode}_${Date.now()}`;
   const searchParams    = useSearchParams();
   const [selectedTool,   setSelectedTool]   = useState<Tool | null>(null);
+  const [showWebsiteBuilder, setShowWebsiteBuilder] = useState(false);
   // Helper: open a tool drawer and immediately scroll to top so the drawer is visible
   const openTool = useCallback((tool: Tool | null) => {
     setSelectedTool(tool);
@@ -3038,6 +3041,7 @@ function StudioPageInner() {
   const pendingCount = gallery.filter((g) => ["pending","processing"].includes(g.status)).length;
 
   return (
+    <>
     <AppShell>
       <Toaster
         position="top-center"
@@ -3642,7 +3646,8 @@ function StudioPageInner() {
                             tool={tool}
                             userPoints={userPoints}
                             onClick={() => {
-                              if (tool.slug === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); }
+                              if (tool.slug === "website-builder") { setShowWebsiteBuilder(true); }
+                              else if (tool.slug === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); }
                               else if (CHAT_TAB_SLUGS.has(tool.slug)) { setChatMode("general"); setActiveTab("chat"); }
                               else { openTool(tool); }
                             }}
@@ -3779,5 +3784,14 @@ function StudioPageInner() {
         )}
       </AnimatePresence>
     </AppShell>
+    {/* Website Builder Wizard */}
+    {showWebsiteBuilder && (
+      <WebsiteBuilderWizard
+        pointBalance={userPoints}
+        onClose={() => setShowWebsiteBuilder(false)}
+        onSuccess={(id) => { setShowWebsiteBuilder(false); }}
+      />
+    )}
+  </>
   );
 }

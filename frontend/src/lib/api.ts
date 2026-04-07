@@ -260,6 +260,13 @@ class APIClient {
   getGenerationStatus(id: string) {
     return this.request("GET", `/studio/generate/${id}`);
   }
+  buildWebsite(payload: {
+    site_type: string;
+    fields: Record<string, string>;
+    photos: Array<{ base64: string; caption: string }>;
+  }) {
+    return this.request("POST", "/studio/website", payload);
+  }
   getGallery() { return this.request("GET", "/studio/gallery"); }
 
   /** Upload an audio or image file to cloud storage.
