@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, Suspense } from "react";
 import dynamic from "next/dynamic";
 const WebsiteBuilderWizard = dynamic(() => import("@/components/studio/WebsiteBuilderWizard"), { ssr: false });
+const NexusChatUI = dynamic(() => import("@/components/studio/NexusChatUI"), { ssr: false });
 import { motion, AnimatePresence } from "framer-motion";
 import useSWR from "swr";
 import AppShell from "@/components/layout/AppShell";
@@ -1137,9 +1138,27 @@ function ChatBubble({ msg }: { msg: Message }) {
 }
 
 // ─── Tool Card ────────────────────────────────────────────────────────────────
-// CHAT_REDIRECT_SLUGS: clicking these tool cards opens the Chat tab instead of the ToolDrawer.
-// code-helper is in Build category and uses the ToolDrawer — only web-search-ai redirects to Chat.
-const CHAT_REDIRECT_SLUGS = new Set(["web-search-ai"]);
+// CHAT_TOOL_SLUGS: clicking these tool cards opens NexusChatUI instead of ToolDrawer.
+const CHAT_TOOL_SLUGS = new Set([
+  // Chat & general
+  "ask-nexus", "nexus-chat",
+  // Code
+  "code-helper", "code-pro",
+  // Research & knowledge
+  "research-brief", "deep-research-brief",
+  // Learning
+  "mind-map", "mindmap", "study-guide", "quiz", "quiz-me",
+  // Business
+  "bizplan", "business-plan-summary",
+  // Document & analysis
+  "doc-analyzer", "image-analyser",
+  // Planning & language
+  "voice-to-plan", "local-translation", "localize-ui",
+  // Agent & search
+  "web-search-ai", "nexus-agent",
+]);
+// Legacy set kept for ToolCard badge logic
+const CHAT_REDIRECT_SLUGS = CHAT_TOOL_SLUGS;
 
 function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () => void; userPoints?: number }) {
   const cfg         = catCfg(tool.category);
@@ -2788,6 +2807,7 @@ function StudioPageInner() {
   const searchParams    = useSearchParams();
   const [selectedTool,   setSelectedTool]   = useState<Tool | null>(null);
   const [showWebsiteBuilder, setShowWebsiteBuilder] = useState(false);
+  const [chatToolSlug, setChatToolSlug] = useState<string | null>(null);
   // Helper: open a tool drawer and immediately scroll to top so the drawer is visible
   const openTool = useCallback((tool: Tool | null) => {
     setSelectedTool(tool);
@@ -3647,8 +3667,7 @@ function StudioPageInner() {
                             userPoints={userPoints}
                             onClick={() => {
                               if (tool.slug === "website-builder") { setShowWebsiteBuilder(true); }
-                              else if (tool.slug === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); }
-                              else if (CHAT_TAB_SLUGS.has(tool.slug)) { setChatMode("general"); setActiveTab("chat"); }
+                              else if (CHAT_TOOL_SLUGS.has(tool.slug)) { setChatToolSlug(tool.slug); }
                               else { openTool(tool); }
                             }}
                           />
@@ -3675,15 +3694,10 @@ function StudioPageInner() {
                             tool={tool}
                             userPoints={userPoints}
                             onClick={() => {
-                              // Chat tools switch to Chat tab with correct mode
                               if (tool.slug === "website-builder") {
                                 setShowWebsiteBuilder(true);
-                              } else if (tool.slug === "web-search-ai") {
-                                setChatMode("search");
-                                setActiveTab("chat");
-                              } else if (CHAT_TAB_SLUGS.has(tool.slug)) {
-                                setChatMode("general");
-                                setActiveTab("chat");
+                              } else if (CHAT_TOOL_SLUGS.has(tool.slug)) {
+                                setChatToolSlug(tool.slug);
                               } else {
                                 openTool(tool);
                               }
@@ -3745,7 +3759,10 @@ function StudioPageInner() {
                         gen={gen}
                         onRegenerate={(g) => {
                           const tool = tools.find((t) => t.slug === g.tool_slug);
-                          if (tool) { openTool(tool); setActiveTab("tools"); }
+                          if (tool) {
+                          if (CHAT_TOOL_SLUGS.has(tool.slug)) { setChatToolSlug(tool.slug); }
+                          else { openTool(tool); setActiveTab("tools"); }
+                        }
                         }}
                       />
                     ))}
@@ -3794,6 +3811,25 @@ function StudioPageInner() {
         onSuccess={(id) => { setShowWebsiteBuilder(false); }}
       />
     )}
+
+    {/* NexusChatUI — full-screen overlay for all chat-based tools */}
+    <AnimatePresence>
+      {chatToolSlug && (
+        <motion.div
+          initial={{ opacity: 0, y: "100%" }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: "100%" }}
+          transition={{ type: "spring", damping: 32, stiffness: 280 }}
+          className="fixed inset-0 z-50 bg-[#0c0c10]"
+          style={{ overscrollBehavior: "contain" }}
+        >
+          <NexusChatUI
+            toolSlug={chatToolSlug}
+            onClose={() => setChatToolSlug(null)}
+          />
+        </motion.div>
+      )}
+    </AnimatePresence>
   </>
   );
 }
