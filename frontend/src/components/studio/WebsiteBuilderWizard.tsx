@@ -256,16 +256,12 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
     }
   };
 
-  const siteURL = genId
-    ? `${window.location.origin}/s/${genId}`
-    : null;
-  const backendSiteURL = genId
-    ? `https://loyalty-nexus-api.onrender.com/s/${genId}`
-    : null;
+  // /s/{id} is now proxied via Next.js rewrite — use the frontend domain for all links
+  const siteURL = genId ? `${window.location.origin}/s/${genId}` : null;
 
   const copyLink = () => {
-    if (backendSiteURL) {
-      navigator.clipboard.writeText(backendSiteURL);
+    if (siteURL) {
+      navigator.clipboard.writeText(siteURL);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -555,11 +551,11 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
                         </div>
                         <div className="flex-1 mx-2 rounded-md text-[10px] text-white/30 px-2 py-1 text-center truncate"
                           style={{ background: "rgba(255,255,255,0.05)" }}>
-                          {backendSiteURL}
+                          {siteURL}
                         </div>
                       </div>
                       <iframe
-                        src={`${backendSiteURL}`}
+                        src={`${siteURL}`}
                         className="w-full"
                         style={{ height: "340px", border: "none" }}
                         title="Website preview"
@@ -573,13 +569,13 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
                         style={{ background: copied ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.08)", color: copied ? "#10b981" : "#fff", border: `1px solid ${copied ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.1)"}` }}>
                         {copied ? <><Check size={16} /> Copied!</> : <><Copy size={16} /> Copy Link</>}
                       </button>
-                      <a href={backendSiteURL || "#"} target="_blank" rel="noreferrer"
+                      <a href={siteURL || "#"} target="_blank" rel="noreferrer"
                         className="flex items-center justify-center gap-2 py-3 rounded-2xl font-bold text-sm transition-all active:scale-95"
                         style={{ background: "rgba(99,102,241,0.15)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.25)" }}>
                         <ExternalLink size={16} /> Open Site
                       </a>
                     </div>
-                    <a href={`https://wa.me/?text=${encodeURIComponent(`Check out my website: ${backendSiteURL}`)}`}
+                    <a href={`https://wa.me/?text=${encodeURIComponent(`Check out my website: ${siteURL}`)}`}
                       target="_blank" rel="noreferrer"
                       className="flex items-center justify-center gap-2 w-full py-3.5 rounded-2xl font-bold text-sm transition-all active:scale-95"
                       style={{ background: "rgba(37,211,102,0.15)", color: "#25D366", border: "1px solid rgba(37,211,102,0.25)" }}>
