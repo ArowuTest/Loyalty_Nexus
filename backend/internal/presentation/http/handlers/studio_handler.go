@@ -35,7 +35,8 @@ import (
 type StudioHandler struct {
 	studioSvc    *services.StudioService
 	llmOrch      *external.LLMOrchestrator
-	gemini       *external.GeminiAdapter // used by website builder for multimodal
+	gemini       *external.GeminiAdapter  // used by website builder for multimodal
+	deepseek     *external.DeepSeekAdapter // fallback when Gemini fails
 	worker       *AsyncStudioWorker
 	cfg          *config.ConfigManager
 	assetStorage external.AssetStorage // optional: nil when STORAGE_BACKEND not set
@@ -51,7 +52,8 @@ func NewStudioHandler(
 }
 
 // SetGeminiAdapter injects the Gemini adapter for website builder multimodal calls.
-func (h *StudioHandler) SetGeminiAdapter(g *external.GeminiAdapter) { h.gemini = g }
+func (h *StudioHandler) SetGeminiAdapter(g *external.GeminiAdapter)   { h.gemini = g }
+func (h *StudioHandler) SetDeepSeekAdapter(d *external.DeepSeekAdapter) { h.deepseek = d }
 func (h *StudioHandler) SetAssetStorage(s external.AssetStorage) { h.assetStorage = s }
 
 // ─── POST /api/v1/studio/upload ──────────────────────────────────────────────

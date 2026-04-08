@@ -775,7 +775,7 @@ func (a *GeminiAdapter) Complete(ctx context.Context, systemPrompt, userPrompt s
 		},
 		"generationConfig": map[string]interface{}{
 			"maxOutputTokens": 65536,
-			"temperature":     0.7,
+			"temperature":     0.85,
 		},
 	}
 	body, err := json.Marshal(payload)
@@ -849,7 +849,7 @@ func (a *GeminiAdapter) CompleteWithImages(ctx context.Context, systemPrompt, us
 		},
 		"generationConfig": map[string]interface{}{
 			"maxOutputTokens": 65536,
-			"temperature":     0.7,
+			"temperature":     0.85,
 		},
 	}
 	body, err := json.Marshal(payload)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -129,6 +130,12 @@ func (h *StudioHandler) BuildWebsite(w http.ResponseWriter, r *http.Request) {
 			htmlOutput, genErr = h.gemini.Complete(ctx, systemPrompt, userPrompt)
 		} else {
 			genErr = fmt.Errorf("gemini adapter not configured")
+		}
+
+		// Fallback to DeepSeek if Gemini fails
+		if genErr != nil && h.deepseek != nil {
+			log.Printf("[website-builder] Gemini failed (%v), falling back to DeepSeek", genErr)
+			htmlOutput, genErr = h.deepseek.Complete(ctx, systemPrompt, userPrompt)
 		}
 
 		if genErr != nil {

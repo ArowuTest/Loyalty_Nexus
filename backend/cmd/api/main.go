@@ -285,7 +285,8 @@ func main() {
 		spinH    := handlers.NewSpinHandler(spinSvc)
 		studioH  := handlers.NewStudioHandler(studioSvc, llmOrch, kbWorker, cfg)
 		studioH.SetAssetStorage(assetStorage)
-		studioH.SetGeminiAdapter(gemini) // website builder multimodal
+		studioH.SetGeminiAdapter(gemini)
+		studioH.SetDeepSeekAdapter(deepseek) // website builder multimodal
 		bonusPulseSvc := services.NewBonusPulseService(db, userRepo)
 		userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc).
 					WithBonusPulseService(bonusPulseSvc).
