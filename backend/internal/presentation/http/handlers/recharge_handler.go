@@ -293,13 +293,19 @@ func mapStr(m map[string]interface{}, key string) string {
 	return v
 }
 
+// normalizeNG converts any Nigerian phone format to E.164 without the plus
+// (e.g. "234XXXXXXXXX") so it matches how users are stored in the DB.
+// The user repo's phoneVariants() then also tries "+234XXXXXXXXX".
 func normalizeNG(p string) string {
 	p = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(p, " ", ""), "-", ""))
-	if strings.HasPrefix(p, "234") && len(p) == 13 {
-		return "0" + p[3:]
-	}
+	// +2348XXXXXXXXX → 2348XXXXXXXXX
 	if strings.HasPrefix(p, "+234") {
-		return "0" + p[4:]
+		return p[1:]
 	}
+	// 08XXXXXXXXX (local) → 2348XXXXXXXXX
+	if strings.HasPrefix(p, "0") && len(p) == 11 {
+		return "234" + p[1:]
+	}
+	// Already 2348XXXXXXXXX
 	return p
 }
