@@ -2092,3 +2092,39 @@ func (h *AdminHandler) ListBonusPulseAwards(w http.ResponseWriter, r *http.Reque
 		"records": records,
 	})
 }
+
+// ─── Grant Spin Credits ───────────────────────────────────────────────────────
+
+// AdjustSpinCredits adds (or removes) spin credits from a user's wallet.
+// POST /api/v1/admin/spin/grant-credits
+// Body: { "user_id": "uuid", "delta": 5, "reason": "testing" }
+func (h *AdminHandler) AdjustSpinCredits(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserID string `json:"user_id"`
+		Delta  int64  `json:"delta"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.UserID == "" || body.Delta == 0 {
+		jsonError(w, "user_id and non-zero delta required", http.StatusBadRequest)
+		return
+	}
+	now := time.Now()
+	err := h.db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		return tx.Exec(`INSERT INTO wallets (id, user_id, spin_credits, created_at, updated_at)
+			VALUES (gen_random_uuid(), ?, ?, ?, ?)
+			ON CONFLICT (user_id) DO UPDATE
+			SET spin_credits = GREATEST(0, wallets.spin_credits + EXCLUDED.spin_credits),
+			    updated_at   = EXCLUDED.updated_at`,
+			body.UserID, body.Delta, now, now).Error
+	})
+	if err != nil {
+		jsonError(w, "spin credit adjustment failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"status":  "ok",
+		"user_id": body.UserID,
+		"delta":   body.Delta,
+		"reason":  body.Reason,
+	})
+}

@@ -501,6 +501,7 @@ func main() {
 		mux.Handle("GET    /api/v1/admin/points/stats",           adminAuth(http.HandlerFunc(adminH.GetPointsStats)))
 		mux.Handle("GET    /api/v1/admin/points/history",         adminAuth(http.HandlerFunc(adminH.GetPointsHistory)))
 		mux.Handle("POST   /api/v1/admin/points/adjust",          adminAuth(http.HandlerFunc(adminH.AdjustPoints)))
+		mux.Handle("POST   /api/v1/admin/spin/grant-credits",     adminAuth(http.HandlerFunc(adminH.AdjustSpinCredits)))
 		// Recharge reward config (spin credit threshold, pulse point rate, MTN push minimum)
 		mux.Handle("GET    /api/v1/admin/recharge/config",        adminAuth(http.HandlerFunc(adminH.GetRechargeConfig)))
 		mux.Handle("PUT    /api/v1/admin/recharge/config",        adminAuth(http.HandlerFunc(adminH.UpdateRechargeConfig)))
