@@ -262,10 +262,14 @@ class APIClient {
   }
   buildWebsite(payload: {
     site_type: string;
+    vanity_slug?: string;
     fields: Record<string, string>;
     photos: Array<{ base64: string; caption: string }>;
   }) {
     return this.request("POST", "/studio/website", payload);
+  }
+  checkSlug(slug: string) {
+    return this.request("GET", `/studio/website/check-slug?slug=${encodeURIComponent(slug)}`);
   }
   getGallery() { return this.request("GET", "/studio/gallery"); }
 

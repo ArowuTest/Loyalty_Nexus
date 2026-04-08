@@ -78,6 +78,7 @@ type AIGeneration struct {
 	ToolSlug       string    `json:"tool_slug"     gorm:"column:tool_slug;default:''"`
 	Prompt         string    `json:"prompt"        gorm:"column:prompt"`
 	Status         string    `json:"status"        gorm:"column:status"` // pending | processing | completed | failed
+	VanitySlug     string    `json:"vanity_slug,omitempty"    gorm:"column:slug;uniqueIndex;default:null"` // e.g. "techvault-solutions"
 	OutputURL      string    `json:"output_url,omitempty"     gorm:"column:output_url;default:'"`
 	OutputURL2     string    `json:"output_url_2,omitempty"   gorm:"column:output_url_2;default:'"`
 	OutputText     string    `json:"output_text,omitempty"    gorm:"column:output_text;default:'"`

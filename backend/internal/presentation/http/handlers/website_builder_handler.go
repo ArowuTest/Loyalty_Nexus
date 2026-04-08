@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
 	"html/template"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -15,10 +18,31 @@ import (
 	"loyalty-nexus/internal/presentation/http/middleware"
 )
 
+// slugRe matches only lowercase letters, digits and hyphens — everything else is stripped.
+var slugRe = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// sanitizeSlug converts any string into a clean URL slug:
+//
+//	"Techvault Solutions!" → "techvault-solutions"
+func sanitizeSlug(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.ReplaceAll(s, " ", "-")
+	s = slugRe.ReplaceAllString(s, "")
+	// Collapse consecutive hyphens
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	if len(s) > 60 {
+		s = s[:60]
+	}
+	return s
+}
+
 // ─── POST /api/v1/studio/website ─────────────────────────────────────────────
-// Authenticated. Accepts WebsiteBuilderRequest JSON.
-// Deducts 25 Pulse Points, calls Gemini with multimodal prompt, stores HTML.
-// Returns generation_id + shareable public URL.
+// Authenticated. Accepts WebsiteBuilderRequest JSON (now includes optional vanity_slug).
+// Deducts 25 Pulse Points, calls Gemini, stores HTML.
+// Returns generation_id + vanity_slug + shareable public URL.
 
 func (h *StudioHandler) BuildWebsite(w http.ResponseWriter, r *http.Request) {
 	uid := r.Context().Value(middleware.ContextUserID).(string)
@@ -38,7 +62,25 @@ func (h *StudioHandler) BuildWebsite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.Photos) > 6 {
-		req.Photos = req.Photos[:6] // enforce max 6
+		req.Photos = req.Photos[:6]
+	}
+
+	// ── Resolve vanity slug ──────────────────────────────────────────────────
+	// Priority: user-provided slug → auto-generated from business_name → skip
+	vanitySlug := ""
+	if req.VanitySlug != "" {
+		vanitySlug = sanitizeSlug(req.VanitySlug)
+	} else if biz := req.Fields["business_name"]; biz != "" {
+		vanitySlug = sanitizeSlug(biz)
+	}
+
+	// Ensure uniqueness — append a short random suffix if taken
+	if vanitySlug != "" {
+		taken, _ := h.studioSvc.SlugExists(r.Context(), vanitySlug)
+		if taken {
+			// append 4-char random hex
+			vanitySlug = fmt.Sprintf("%s-%s", vanitySlug, randomHex(4))
+		}
 	}
 
 	// Find the website-builder tool
@@ -49,11 +91,17 @@ func (h *StudioHandler) BuildWebsite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Deduct points + create generation record
-	prompt := fmt.Sprintf("[website-builder] type=%s fields=%d photos=%d", req.SiteType, len(req.Fields), len(req.Photos))
+	prompt := fmt.Sprintf("[website-builder] type=%s slug=%s fields=%d photos=%d",
+		req.SiteType, vanitySlug, len(req.Fields), len(req.Photos))
 	gen, err := h.studioSvc.RequestGeneration(r.Context(), userID, tool.ID, prompt)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+
+	// Persist slug immediately (before Gemini runs) so the URL is shareable right away
+	if vanitySlug != "" {
+		_ = h.studioSvc.SetVanitySlug(r.Context(), gen.ID, vanitySlug)
 	}
 
 	// Build prompts
@@ -72,13 +120,13 @@ func (h *StudioHandler) BuildWebsite(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
-		var html string
+		var htmlOutput string
 		var genErr error
 
 		if h.gemini != nil && len(images) > 0 {
-			html, genErr = h.gemini.CompleteWithImages(ctx, systemPrompt, userPrompt, images)
+			htmlOutput, genErr = h.gemini.CompleteWithImages(ctx, systemPrompt, userPrompt, images)
 		} else if h.gemini != nil {
-			html, genErr = h.gemini.Complete(ctx, systemPrompt, userPrompt)
+			htmlOutput, genErr = h.gemini.Complete(ctx, systemPrompt, userPrompt)
 		} else {
 			genErr = fmt.Errorf("gemini adapter not configured")
 		}
@@ -89,76 +137,129 @@ func (h *StudioHandler) BuildWebsite(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Strip any markdown code blocks if Gemini wrapped the HTML
-		html = stripMarkdownCodeBlock(html)
+		htmlOutput = stripMarkdownCodeBlock(htmlOutput)
 
 		// Inject "Built with Nexus" badge just before </body>
 		badge := `<div style="position:fixed;bottom:12px;left:12px;z-index:9998;background:rgba(0,0,0,0.6);color:#fff;font-size:10px;padding:4px 8px;border-radius:20px;font-family:sans-serif;backdrop-filter:blur(4px);">⚡ Built with <a href="https://loyalty-nexus.vercel.app" style="color:#F5A623;text-decoration:none;">Nexus</a></div>`
-		html = strings.Replace(html, "</body>", badge+"</body>", 1)
+		htmlOutput = strings.Replace(htmlOutput, "</body>", badge+"</body>", 1)
 
 		_ = h.studioSvc.CompleteGeneration(ctx, gen.ID,
 			"", // no output_url (HTML is self-contained)
 			"", // no output_url_2
-			html,
+			htmlOutput,
 			"gemini/website-builder",
 			0,
 			0,
 		)
 	}()
 
-	// Return immediately with generation ID
-	publicURL := fmt.Sprintf("/s/%s", gen.ID.String())
+	// Return with slug-based public URL when available, UUID fallback otherwise
+	publicPath := fmt.Sprintf("/s/%s", gen.ID.String())
+	if vanitySlug != "" {
+		publicPath = fmt.Sprintf("/s/%s", vanitySlug)
+	}
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"generation_id": gen.ID,
+		"vanity_slug":   vanitySlug,
 		"status":        "pending",
-		"public_url":    publicURL,
+		"public_url":    publicPath,
 		"message":       "Your website is being built — usually ready in 10-15 seconds",
 	})
 }
 
+// ─── GET /api/v1/studio/website/check-slug ───────────────────────────────────
+// Authenticated. Query param: ?slug=my-business-name
+// Returns { slug, available, suggestion } — used for live slug validation in the wizard.
+
+func (h *StudioHandler) CheckSlug(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("slug")
+	if raw == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug query param required"})
+		return
+	}
+
+	clean := sanitizeSlug(raw)
+	if clean == "" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"slug":      "",
+			"available": false,
+			"error":     "slug contains no valid characters",
+		})
+		return
+	}
+
+	taken, err := h.studioSvc.SlugExists(r.Context(), clean)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not check slug"})
+		return
+	}
+
+	suggestion := clean
+	if taken {
+		suggestion = fmt.Sprintf("%s-%s", clean, randomHex(4))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"slug":       clean,
+		"available":  !taken,
+		"suggestion": suggestion,
+	})
+}
+
 // ─── GET /s/{id} ─────────────────────────────────────────────────────────────
-// Public. No auth. Serves the generated HTML directly.
+// Public. No auth. Resolves UUID or vanity slug, serves the generated HTML.
 
 func (h *StudioHandler) ServeWebsite(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
-	genID, err := uuid.Parse(idStr)
-	if err != nil {
-		http.Error(w, "Invalid site ID", http.StatusBadRequest)
-		return
-	}
 
-	gen, err := h.studioSvc.FindGenerationByID(r.Context(), genID)
-	if err != nil {
-		serveErrorPage(w, "Website not found", "This link may have expired or doesn't exist.")
-		return
+	// Try UUID first, then fall back to vanity slug lookup
+	if genID, err := uuid.Parse(idStr); err == nil {
+		g, err := h.studioSvc.FindGenerationByID(r.Context(), genID)
+		if err != nil {
+			serveErrorPage(w, "Website not found", "This link may have expired or doesn't exist.")
+			return
+		}
+		serveGenerationHTML(w, idStr, g.Status, g.ErrorMessage, g.OutputText)
+	} else {
+		g, err := h.studioSvc.FindGenerationBySlug(r.Context(), idStr)
+		if err != nil {
+			serveErrorPage(w, "Website not found", "This link may have expired or doesn't exist.")
+			return
+		}
+		serveGenerationHTML(w, idStr, g.Status, g.ErrorMessage, g.OutputText)
 	}
+}
 
-	switch gen.Status {
+func serveGenerationHTML(w http.ResponseWriter, id, status, errMsg, outputText string) {
+	switch status {
 	case "pending", "processing":
-		serveLoadingPage(w, idStr)
+		serveLoadingPage(w, id)
 		return
 	case "failed":
-		serveErrorPage(w, "Generation failed", gen.ErrorMessage)
+		serveErrorPage(w, "Generation failed", errMsg)
 		return
 	}
-
-	if gen.OutputText == "" {
+	if outputText == "" {
 		serveErrorPage(w, "Website unavailable", "This website has no content. Please regenerate.")
 		return
 	}
-
-	// Serve the HTML directly
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
-	// Allow embedding in iframes from any origin (Vercel frontend preview)
 	w.Header().Set("X-Frame-Options", "ALLOWALL")
-	_, _ = w.Write([]byte(gen.OutputText))
+	_, _ = w.Write([]byte(outputText))
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// randomHex returns n random hex bytes as a string (length = n*2).
+func randomHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 func stripMarkdownCodeBlock(s string) string {
 	s = strings.TrimSpace(s)
-	// Remove ```html or ``` prefix/suffix
 	for _, prefix := range []string{"```html\n", "```html", "```\n", "```"} {
 		if strings.HasPrefix(s, prefix) {
 			s = strings.TrimPrefix(s, prefix)

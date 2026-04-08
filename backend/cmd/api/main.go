@@ -376,8 +376,9 @@ func main() {
 		mux.Handle("GET /api/v1/studio/tools", auth(http.HandlerFunc(studioH.ListTools)))
 		mux.Handle("GET /api/v1/studio/tools/{slug}", auth(http.HandlerFunc(studioH.GetTool)))
 		mux.Handle("POST /api/v1/studio/generate", auth(http.HandlerFunc(studioH.Generate)))
-		mux.Handle("POST /api/v1/studio/website", auth(http.HandlerFunc(studioH.BuildWebsite))) // website builder
-		mux.HandleFunc("GET /s/{id}", studioH.ServeWebsite) // public — no auth
+		mux.Handle("POST /api/v1/studio/website", auth(http.HandlerFunc(studioH.BuildWebsite)))                   // website builder
+		mux.Handle("GET /api/v1/studio/website/check-slug", auth(http.HandlerFunc(studioH.CheckSlug)))             // slug availability check
+		mux.HandleFunc("GET /s/{id}", studioH.ServeWebsite) // public — no auth, resolves UUID or vanity slug
 		mux.Handle("GET /api/v1/studio/generate/{id}", auth(http.HandlerFunc(studioH.GetGenerationStatus)))
 		mux.Handle("GET /api/v1/studio/gallery", auth(http.HandlerFunc(studioH.GetGallery)))
 		mux.Handle("POST /api/v1/studio/generate/{id}/dispute", auth(http.HandlerFunc(studioH.DisputeGeneration)))

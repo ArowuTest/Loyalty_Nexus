@@ -100,6 +100,28 @@ func (r *postgresStudioRepository) FindGenerationByID(ctx context.Context, id uu
 	return &gen, nil
 }
 
+func (r *postgresStudioRepository) FindGenerationBySlug(ctx context.Context, slug string) (*entities.AIGeneration, error) {
+	var gen entities.AIGeneration
+	err := r.db.WithContext(ctx).Where("slug = ?", slug).First(&gen).Error
+	if err != nil {
+		return nil, err
+	}
+	return &gen, nil
+}
+
+func (r *postgresStudioRepository) SlugExists(ctx context.Context, slug string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&entities.AIGeneration{}).Where("slug = ?", slug).Count(&count).Error
+	return count > 0, err
+}
+
+func (r *postgresStudioRepository) SetVanitySlug(ctx context.Context, id uuid.UUID, slug string) error {
+	return r.db.WithContext(ctx).
+		Model(&entities.AIGeneration{}).
+		Where("id = ?", id).
+		Update("slug", slug).Error
+}
+
 // UpdateStatus is a minimal update used during the transition from pending→failed
 // or pending→completed when only these three fields need persisting.
 func (r *postgresStudioRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status, outputURL, errMsg string) error {

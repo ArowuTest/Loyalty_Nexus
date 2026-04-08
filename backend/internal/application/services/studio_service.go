@@ -69,6 +69,18 @@ func (s *StudioService) FindGenerationByID(ctx context.Context, id uuid.UUID) (*
 	return s.studioRepo.FindGenerationByID(ctx, id)
 }
 
+func (s *StudioService) FindGenerationBySlug(ctx context.Context, slug string) (*entities.AIGeneration, error) {
+	return s.studioRepo.FindGenerationBySlug(ctx, slug)
+}
+
+func (s *StudioService) SlugExists(ctx context.Context, slug string) (bool, error) {
+	return s.studioRepo.SlugExists(ctx, slug)
+}
+
+func (s *StudioService) SetVanitySlug(ctx context.Context, id uuid.UUID, slug string) error {
+	return s.studioRepo.SetVanitySlug(ctx, id, slug)
+}
+
 func (s *StudioService) GetUserGallery(ctx context.Context, userID uuid.UUID, limit, offset int) ([]entities.AIGeneration, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50

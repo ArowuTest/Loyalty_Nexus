@@ -44,6 +44,12 @@ type StudioRepository interface {
 
 	// FindGenerationByID fetches a generation record by primary key.
 	FindGenerationByID(ctx context.Context, id uuid.UUID) (*entities.AIGeneration, error)
+	// FindGenerationBySlug fetches a website generation by vanity slug.
+	FindGenerationBySlug(ctx context.Context, slug string) (*entities.AIGeneration, error)
+	// SlugExists returns true if the given vanity slug is already taken.
+	SlugExists(ctx context.Context, slug string) (bool, error)
+	// SetVanitySlug saves the vanity slug on a generation record.
+	SetVanitySlug(ctx context.Context, id uuid.UUID, slug string) error
 
 	// UpdateStatus sets the status, output_url, error_message, and updates updated_at.
 	UpdateStatus(ctx context.Context, id uuid.UUID, status, outputURL, errMsg string) error

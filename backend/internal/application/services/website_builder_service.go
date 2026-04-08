@@ -18,6 +18,7 @@ import (
 // WebsiteBuilderRequest is the structured input from the frontend multi-step form.
 type WebsiteBuilderRequest struct {
 	SiteType    string            `json:"site_type"`    // shop|corporate|professional|restaurant|portfolio|events|church|education
+	VanitySlug  string            `json:"vanity_slug"`  // optional — user-chosen URL slug e.g. "techvault-solutions"
 	Fields      map[string]string `json:"fields"`       // type-specific form fields
 	Photos      []WebsitePhoto    `json:"photos"`       // up to 6 photos, client-compressed
 }

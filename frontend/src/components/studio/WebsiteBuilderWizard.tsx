@@ -174,6 +174,12 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
   const [photos, setPhotos] = useState<WebsitePhoto[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [genId, setGenId] = useState<string | null>(null);
+  // vanitySlug: what the user types/edits; resolvedSlug: what comes back from the API
+  const [vanitySlug, setVanitySlug] = useState("");
+  const [slugStatus, setSlugStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
+  const [slugSuggestion, setSlugSuggestion] = useState("");
+  const [resolvedSlug, setResolvedSlug] = useState<string | null>(null);
+  const slugCheckRef = useRef<NodeJS.Timeout | null>(null);
   const [siteStatus, setSiteStatus] = useState<"pending" | "processing" | "completed" | "failed">("pending");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -190,6 +196,39 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
       .filter(f => f.required)
       .every(f => (fields[f.key] || "").trim().length > 0);
   }, [selectedType, fields]);
+
+  // ── Slug helpers ─────────────────────────────────────────────────────────
+  const toSlug = (s: string) =>
+    s.toLowerCase().trim().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+
+  const checkSlug = (slug: string) => {
+    if (slugCheckRef.current) clearTimeout(slugCheckRef.current);
+    if (!slug) { setSlugStatus("idle"); return; }
+    setSlugStatus("checking");
+    slugCheckRef.current = setTimeout(async () => {
+      try {
+        const res = await api.checkSlug(slug) as { slug: string; available: boolean; suggestion: string };
+        setSlugStatus(res.available ? "available" : "taken");
+        setSlugSuggestion(res.suggestion);
+      } catch { setSlugStatus("idle"); }
+    }, 500);
+  };
+
+  const handleSlugChange = (raw: string) => {
+    const clean = toSlug(raw);
+    setVanitySlug(clean);
+    checkSlug(clean);
+  };
+
+  // Auto-fill slug when business_name is typed (only if user hasn't manually edited it)
+  const handleFieldChange = (key: string, value: string) => {
+    setFields(p => ({ ...p, [key]: value }));
+    if (key === "business_name" && vanitySlug === toSlug(fields["business_name"] || "")) {
+      const auto = toSlug(value);
+      setVanitySlug(auto);
+      checkSlug(auto);
+    }
+  };
 
   // ── Photo upload ─────────────────────────────────────────────────────────
   const handlePhotoAdd = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -242,10 +281,12 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
     try {
       const result = await api.buildWebsite({
         site_type: selectedType.id,
+        vanity_slug: vanitySlug || undefined,
         fields,
         photos: photos.map(p => ({ base64: p.base64, caption: p.caption })),
-      }) as { generation_id: string; status: string };
+      }) as { generation_id: string; vanity_slug?: string; status: string };
       setGenId(result.generation_id);
+      setResolvedSlug(result.vanity_slug || null);
       setSiteStatus("pending");
       setStep(5);
       startPolling(result.generation_id);
@@ -256,8 +297,10 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
     }
   };
 
-  // /s/{id} is now proxied via Next.js rewrite — use the frontend domain for all links
-  const siteURL = genId ? `${window.location.origin}/s/${genId}` : null;
+  // /s/{id} is now proxied via Next.js rewrite — prefer slug URL, fall back to UUID
+  const siteURL = resolvedSlug
+    ? `${window.location.origin}/s/${resolvedSlug}`
+    : genId ? `${window.location.origin}/s/${genId}` : null;
 
   const copyLink = () => {
     if (siteURL) {
@@ -376,7 +419,7 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
                           style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
                           placeholder={f.placeholder}
                           value={fields[f.key] || ""}
-                          onChange={e => setFields(p => ({ ...p, [f.key]: e.target.value }))}
+                          onChange={e => handleFieldChange(f.key, e.target.value)}
                         />
                       ) : (
                         <input
@@ -385,11 +428,43 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
                           style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
                           placeholder={f.placeholder}
                           value={fields[f.key] || ""}
-                          onChange={e => setFields(p => ({ ...p, [f.key]: e.target.value }))}
+                          onChange={e => handleFieldChange(f.key, e.target.value)}
                         />
                       )}
                     </div>
                   ))}
+                </div>
+
+                {/* ── Vanity slug picker ──────────────────────────────── */}
+                <div className="rounded-2xl p-4 space-y-2" style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-base">🔗</span>
+                    <span className="text-white font-bold text-sm">Your site URL</span>
+                    <span className="text-white/30 text-xs font-normal">(optional)</span>
+                  </div>
+                  <p className="text-white/40 text-xs">Choose a short name for your link — auto-filled from your business name</p>
+                  <div className="flex items-center gap-0 rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.05)", border: `1px solid ${slugStatus === "available" ? "rgba(34,197,94,0.5)" : slugStatus === "taken" ? "rgba(239,68,68,0.4)" : "rgba(255,255,255,0.1)"}` }}>
+                    <span className="px-3 py-3 text-xs text-white/30 whitespace-nowrap border-r border-white/10 select-none">nexus.app/s/</span>
+                    <input
+                      type="text"
+                      className="flex-1 bg-transparent px-3 py-3 text-sm text-white placeholder:text-white/20 outline-none min-w-0"
+                      placeholder="my-business-name"
+                      value={vanitySlug}
+                      onChange={e => handleSlugChange(e.target.value)}
+                    />
+                    {slugStatus === "checking" && <span className="px-3 text-white/30 text-xs animate-pulse">...</span>}
+                    {slugStatus === "available" && <span className="px-3 text-green-400 text-xs font-bold">✓ Free</span>}
+                    {slugStatus === "taken" && <span className="px-3 text-red-400 text-xs font-bold">✗ Taken</span>}
+                  </div>
+                  {slugStatus === "taken" && slugSuggestion && (
+                    <button onClick={() => handleSlugChange(slugSuggestion)}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+                      Use <strong>{slugSuggestion}</strong> instead →
+                    </button>
+                  )}
+                  {slugStatus === "available" && vanitySlug && (
+                    <p className="text-green-400/70 text-xs">Your site will be at: <strong className="text-green-400">{typeof window !== "undefined" ? window.location.origin : "https://loyalty-nexus.vercel.app"}/s/{vanitySlug}</strong></p>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -581,7 +656,7 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
                       style={{ background: "rgba(37,211,102,0.15)", color: "#25D366", border: "1px solid rgba(37,211,102,0.25)" }}>
                       <span className="text-base">💬</span> Share on WhatsApp
                     </a>
-                    <button onClick={() => { setStep(1); setSelectedType(null); setFields({}); setPhotos([]); setGenId(null); setSiteStatus("pending"); setIsGenerating(false); setError(null); }}
+                    <button onClick={() => { setStep(1); setSelectedType(null); setFields({}); setPhotos([]); setGenId(null); setResolvedSlug(null); setVanitySlug(""); setSlugStatus("idle"); setSiteStatus("pending"); setIsGenerating(false); setError(null); }}
                       className="flex items-center justify-center gap-2 w-full py-3 rounded-2xl font-bold text-sm text-white/40 hover:text-white/70 transition-colors">
                       <RotateCcw size={14} /> Build another website
                     </button>
