@@ -58,13 +58,22 @@ type SpinOutcome struct {
 }
 
 // PlaySpin executes a single spin:
+// 0. Verify user has ≥1 spin credit (REQ-3.1) — checked first to give clear error
 // 1. Validate daily limit (REQ-3.6)
 // 2. Check daily liability cap (REQ-3.5) — force low value if hit
-// 3. Verify user has ≥1 spin credit (REQ-3.1)
-// 4. Select prize via CSPRNG (REQ-3.2)
-// 5. Atomically deduct credit + write spin result + ledger entry
-// 6. Dispatch fulfillment in background goroutine
+// 3. Select prize via CSPRNG (REQ-3.2)
+// 4. Atomically deduct credit + write spin result + ledger entry
+// 5. Dispatch fulfillment in background goroutine
 func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutcome, error) {
+	// --- Step 0: Wallet check first — gives clear error before any daily-limit math ---
+	wallet, err := s.userRepo.GetWalletForUpdate(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("wallet not found")
+	}
+	if wallet.SpinCredits < 1 {
+		return nil, fmt.Errorf("No spin credits available. Recharge ₦1,000 or more to earn a free spin!")
+	}
+
 	// --- Step 1: Daily spin limit based on tier ---
 	todayMidnight := time.Now().UTC().Truncate(24 * time.Hour).Unix()
 	todayAmountKobo, err := s.txRepo.SumAmountByUserSince(ctx, userID, todayMidnight)
@@ -91,16 +100,6 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 	capKobo := capNaira * 100
 	currentLiability, _ := s.txRepo.DailyLiabilityTotal(ctx)
 	forceLowValue := currentLiability >= capKobo
-
-	// --- Step 3: Wallet check (row-level lock) ---
-	wallet, err := s.userRepo.GetWalletForUpdate(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("wallet not found")
-	}
-	if wallet.SpinCredits < 1 {
-		return nil, fmt.Errorf("no spin credits — recharge ₦%d to earn one",
-			s.cfg.GetInt64("spin_trigger_naira", 1000))
-	}
 
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
