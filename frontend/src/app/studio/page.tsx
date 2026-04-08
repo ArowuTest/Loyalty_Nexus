@@ -270,13 +270,15 @@ const HIDDEN_ALIAS_SLUGS = new Set([
   "business-plan",       // alias → bizplan
   "summary",             // alias → research-brief
   "ai-chat",             // handled via Chat tab — not a standalone tool card
-  "nexus-chat",          // handled via Chat tab → general mode
+  // nexus-chat is now a real visible card that opens NexusChatUI — removed from hidden
 ]);
 
 // Chat-tab tools: shown in search results but route to Chat tab when clicked.
 // These are NOT in HIDDEN_ALIAS_SLUGS so they appear in search, but the
 // tool grid onClick handler routes them to the Chat tab instead of a drawer.
-const CHAT_TAB_SLUGS = new Set(["ask-nexus", "nexus-chat", "ai-chat"]);
+// CHAT_TAB_SLUGS — only ai-chat is fully hidden (pure alias); ask-nexus & nexus-chat
+// now appear as real cards that open NexusChatUI, not the old embedded Chat tab.
+const CHAT_TAB_SLUGS = new Set(["ai-chat"]);
 
 // ─── Placeholders ─────────────────────────────────────────────────────────────
 const PLACEHOLDERS: Record<string, string> = {
@@ -2895,16 +2897,13 @@ function StudioPageInner() {
   useEffect(() => {
     const slugParam = searchParams?.get("tool");
     if (!slugParam || tools.length === 0) return;
-    // Chat tools → switch to Chat tab with correct mode
-    if (slugParam === "nexus-chat" || slugParam === "ask-nexus" || slugParam === "ai-chat") {
-      setChatMode("general"); setActiveTab("chat"); return;
-    }
-    if (slugParam === "web-search-ai") { setChatMode("search"); setActiveTab("chat"); return; }
-    // code-helper opens the ToolDrawer (Build category) — do not redirect to Chat tab
+    // Chat tools → open NexusChatUI (not the old embedded chat tab)
+    if (slugParam === "ai-chat") { setChatMode("general"); setActiveTab("chat"); return; }
+    // All other tools (including ask-nexus, nexus-chat, web-search-ai) → handled below
     const match = tools.find((t: Tool) => t.slug === slugParam);
     if (match) {
-      openTool(match);
-      setActiveTab("tools");
+      if (CHAT_TOOL_SLUGS.has(match.slug)) { setChatToolSlug(match.slug); }
+      else { openTool(match); setActiveTab("tools"); }
     }
     // Only run once when tools load and slug is present
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2918,6 +2917,7 @@ function StudioPageInner() {
   // Canonical tools — excludes alias/duplicate slugs and pure chat-tab tools from the main grid.
   // Chat-tab tools (ask-nexus etc.) are excluded from the grid but still appear in search results
   // via the searchableTools set below.
+  // canonicalTools: exclude hidden aliases only. CHAT_TAB_SLUGS (ai-chat) is also hidden.
   const canonicalTools = tools.filter((t) => !HIDDEN_ALIAS_SLUGS.has(t.slug) && !CHAT_TAB_SLUGS.has(t.slug));
   // searchableTools includes chat-tab tools so they appear in search results
   const searchableTools = tools.filter((t) => !HIDDEN_ALIAS_SLUGS.has(t.slug));
