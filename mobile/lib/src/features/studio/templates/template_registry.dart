@@ -100,10 +100,11 @@ class TemplateRegistry {
       case 'vision-ask':
         return VisionAskTemplate(props: props);
 
-      // ── Chat tools ──────────────────────────────────────────────────────────────────────
-      // These should never reach TemplateRegistry (they are routed to the
-      // Chat tab by _openTool). This case is a safety net only.
       case 'chat':
+        return KnowledgeDocTemplate(props: props);
+
+      // ── Website Builder (safety net — routed directly in studio_screen) ─────────
+      case 'website-builder':
         return KnowledgeDocTemplate(props: props);
 
       // ── Document / Knowledge (default) ──────────────────────────────────────────────────────────────

@@ -11,6 +11,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
 import '../templates/template_registry.dart';
+import 'nexus_chat_screen.dart';
+import 'website_builder_screen.dart';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Providers
@@ -106,12 +108,13 @@ class StudioTool {
   );
 
   bool get isNew => _newSlugs.contains(slug);
-  bool get isChatTool =>
-      slug == 'web-search-ai' ||
-      slug == 'code-helper'   ||
-      slug == 'nexus-chat'    ||
-      slug == 'ask-nexus'     ||
-      slug == 'ai-chat';
+  bool get isChatTool => const {
+    'ask-nexus','nexus-chat','code-helper','code-pro',
+    'research-brief','deep-research-brief','mind-map','mindmap',
+    'study-guide','quiz','quiz-me','bizplan','business-plan-summary',
+    'doc-analyzer','voice-to-plan','local-translation','web-search-ai',
+    'nexus-agent','localize-ui','image-analyser','ai-chat',
+  }.contains(slug);
   bool get isPremium => pointCost >= 20;
 
   /// Converts to a Map that TemplateRegistry / TemplateProps can read.
@@ -399,7 +402,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
     _scrollToBottom();
     try {
       final res = await ref.read(studioApiProvider).sendChat(
-        text, _chatMode.toolSlug, sessionId: _sessionId);
+        text, toolSlug: _chatMode.toolSlug, sessionId: _sessionId);
       final reply    = (res as Map)['response']?.toString() ?? 'No response';
       final provider = res['provider']?.toString();
       final count    = res['message_count'] as int?;
@@ -465,15 +468,12 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
 
   // ── Launch tool ──
   void _openTool(StudioTool tool) {
-    if (tool.slug == 'web-search-ai') {
-      setState(() { _chatMode = ChatMode.search; _tabs.animateTo(0); });
-    } else if (tool.slug == 'code-helper') {
-      setState(() { _chatMode = ChatMode.code; _tabs.animateTo(0); });
-    } else if (tool.slug == 'nexus-chat' ||
-               tool.slug == 'ask-nexus'  ||
-               tool.slug == 'ai-chat') {
-      // Conversational tools → switch to Chat tab in general mode
-      setState(() { _chatMode = ChatMode.general; _tabs.animateTo(0); });
+    if (tool.slug == 'website-builder') {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => const WebsiteBuilderScreen()));
+    } else if (tool.isChatTool) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => NexusChatScreen(tool: tool)));
     } else {
       setState(() => _selectedTool = tool);
     }

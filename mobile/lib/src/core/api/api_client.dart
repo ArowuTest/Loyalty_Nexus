@@ -303,12 +303,47 @@ class StudioApi {
 
   /// Chat with AI (session-aware, supports tool-scoped context)
   Future<Map<String, dynamic>> sendChat(
-      String message, String? toolSlug, {String? sessionId}) async {
+      String message, {String? toolSlug, String? sessionId,
+      String? fileUrl, String? linkUrl, String? fileName}) async {
     final r = await _dio.apiPost<Map>('/studio/chat', data: {
       'message': message,
       if (sessionId != null) 'session_id': sessionId,
       if (toolSlug != null)  'tool_slug':  toolSlug,
+      if (fileUrl != null)   'file_url':   fileUrl,
+      if (linkUrl != null)   'link_url':   linkUrl,
+      if (fileName != null)  'file_name':  fileName,
     });
+    return Map<String, dynamic>.from(r as Map);
+  }
+
+  /// Check if a vanity slug is available
+  Future<Map<String, dynamic>> checkSlug(String slug) async {
+    try {
+      final r = await _dio.apiGet<Map>('/studio/website/check-slug',
+        query: {'slug': slug});
+      return Map<String, dynamic>.from(r as Map);
+    } catch (_) { return {'available': true}; }
+  }
+
+  /// Create a website generation job
+  Future<Map<String, dynamic>> createWebsite({
+    required String siteType,
+    String? vanitySlug,
+    required Map<String, String> fields,
+    required List<Map<String, String>> photos,
+  }) async {
+    final r = await _dio.apiPost<Map>('/studio/website', data: {
+      'site_type':   siteType,
+      if (vanitySlug != null) 'vanity_slug': vanitySlug,
+      'fields':      fields,
+      'photos':      photos,
+    });
+    return Map<String, dynamic>.from(r as Map);
+  }
+
+  /// Poll generation status
+  Future<Map<String, dynamic>> getGeneration(String id) async {
+    final r = await _dio.apiGet<Map>('/studio/generate/$id');
     return Map<String, dynamic>.from(r as Map);
   }
 
