@@ -20,15 +20,15 @@ import (
 
 // RegionalWar represents one monthly war cycle.
 type RegionalWar struct {
-	ID             uuid.UUID  `gorm:"column:id;primaryKey"        json:"id"`
-	Period         string     `gorm:"column:period;uniqueIndex"   json:"period"`           // "YYYY-MM"
-	Status         string     `gorm:"column:status"               json:"status"`           // ACTIVE|COMPLETED
-	TotalPrizeKobo int64      `gorm:"column:total_prize_kobo"     json:"total_prize_kobo"` // ₦500k default
-	StartsAt       time.Time  `gorm:"column:starts_at"            json:"starts_at"`
-	EndsAt         time.Time  `gorm:"column:ends_at"              json:"ends_at"`
-	ResolvedAt     *time.Time `gorm:"column:resolved_at"          json:"resolved_at,omitempty"`
-	CreatedAt      time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt      time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID             uuid.UUID  `db:"id" gorm:"column:id;primaryKey"        json:"id"`
+	Period         string     `db:"period" gorm:"column:period;uniqueIndex"   json:"period"`           // "YYYY-MM"
+	Status         string     `db:"status" gorm:"column:status"               json:"status"`           // ACTIVE|COMPLETED
+	TotalPrizeKobo int64      `db:"total_prize_kobo" gorm:"column:total_prize_kobo"     json:"total_prize_kobo"` // ₦500k default
+	StartsAt       time.Time  `db:"starts_at" gorm:"column:starts_at"            json:"starts_at"`
+	EndsAt         time.Time  `db:"ends_at" gorm:"column:ends_at"              json:"ends_at"`
+	ResolvedAt     *time.Time `db:"resolved_at" gorm:"column:resolved_at"          json:"resolved_at,omitempty"`
+	CreatedAt      time.Time  `db:"created_at" gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt      time.Time  `db:"updated_at" gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (RegionalWar) TableName() string { return "regional_wars" }
@@ -42,15 +42,15 @@ const (
 
 // RegionalWarWinner is written once per top-3 state when a war is resolved.
 type RegionalWarWinner struct {
-	ID          uuid.UUID `gorm:"column:id;primaryKey"     json:"id"`
-	WarID       uuid.UUID `gorm:"column:war_id;index"      json:"war_id"`
-	State       string    `gorm:"column:state"             json:"state"`
-	Rank        int       `gorm:"column:rank"              json:"rank"`
-	TotalPoints int64     `gorm:"column:total_points"      json:"total_points"`
-	PrizeKobo   int64     `gorm:"column:prize_kobo"        json:"prize_kobo"`
-	Status      string    `gorm:"column:status"            json:"status"` // PENDING|PAID
-	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID          uuid.UUID `db:"id" gorm:"column:id;primaryKey"     json:"id"`
+	WarID       uuid.UUID `db:"war_id" gorm:"column:war_id;index"      json:"war_id"`
+	State       string    `db:"state" gorm:"column:state"             json:"state"`
+	Rank        int       `db:"rank" gorm:"column:rank"              json:"rank"`
+	TotalPoints int64     `db:"total_points" gorm:"column:total_points"      json:"total_points"`
+	PrizeKobo   int64     `db:"prize_kobo" gorm:"column:prize_kobo"        json:"prize_kobo"`
+	Status      string    `db:"status" gorm:"column:status"            json:"status"` // PENDING|PAID
+	CreatedAt   time.Time `db:"created_at" gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at" gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 func (RegionalWarWinner) TableName() string { return "regional_war_winners" }
@@ -72,18 +72,18 @@ type LeaderboardEntry struct {
 // WarSecondaryDraw is created when admin triggers the secondary draw for a
 // winning state.  At most one may exist per (war, state).
 type WarSecondaryDraw struct {
-	ID                 uuid.UUID  `gorm:"column:id;primaryKey"                       json:"id"`
-	WarID              uuid.UUID  `gorm:"column:war_id;index"                        json:"war_id"`
-	State              string     `gorm:"column:state"                               json:"state"`
-	WinnerCount        int        `gorm:"column:winner_count;default:1"              json:"winner_count"`
-	PrizePerWinnerKobo int64      `gorm:"column:prize_per_winner_kobo"               json:"prize_per_winner_kobo"`
-	TotalPoolKobo      int64      `gorm:"column:total_pool_kobo"                     json:"total_pool_kobo"`
-	ParticipantCount   int        `gorm:"column:participant_count"                   json:"participant_count"`
-	Status             string     `gorm:"column:status;default:'PENDING'"            json:"status"` // PENDING|COMPLETED|CANCELLED
-	TriggeredBy        *uuid.UUID `gorm:"column:triggered_by"                        json:"triggered_by,omitempty"`
-	ExecutedAt         *time.Time `gorm:"column:executed_at"                         json:"executed_at,omitempty"`
-	CreatedAt          time.Time  `gorm:"column:created_at;autoCreateTime"           json:"created_at"`
-	UpdatedAt          time.Time  `gorm:"column:updated_at;autoUpdateTime"           json:"updated_at"`
+	ID                 uuid.UUID  `db:"id" gorm:"column:id;primaryKey"                       json:"id"`
+	WarID              uuid.UUID  `db:"war_id" gorm:"column:war_id;index"                        json:"war_id"`
+	State              string     `db:"state" gorm:"column:state"                               json:"state"`
+	WinnerCount        int        `db:"winner_count" gorm:"column:winner_count;default:1"              json:"winner_count"`
+	PrizePerWinnerKobo int64      `db:"prize_per_winner_kobo" gorm:"column:prize_per_winner_kobo"               json:"prize_per_winner_kobo"`
+	TotalPoolKobo      int64      `db:"total_pool_kobo" gorm:"column:total_pool_kobo"                     json:"total_pool_kobo"`
+	ParticipantCount   int        `db:"participant_count" gorm:"column:participant_count"                   json:"participant_count"`
+	Status             string     `db:"status" gorm:"column:status;default:'PENDING'"            json:"status"` // PENDING|COMPLETED|CANCELLED
+	TriggeredBy        *uuid.UUID `db:"triggered_by" gorm:"column:triggered_by"                        json:"triggered_by,omitempty"`
+	ExecutedAt         *time.Time `db:"executed_at" gorm:"column:executed_at"                         json:"executed_at,omitempty"`
+	CreatedAt          time.Time  `db:"created_at" gorm:"column:created_at;autoCreateTime"           json:"created_at"`
+	UpdatedAt          time.Time  `db:"updated_at" gorm:"column:updated_at;autoUpdateTime"           json:"updated_at"`
 	// Preloaded
 	Winners            []WarSecondaryDrawWinner `gorm:"-" json:"winners,omitempty"`
 }
@@ -94,21 +94,21 @@ func (WarSecondaryDraw) TableName() string { return "war_secondary_draws" }
 
 // WarSecondaryDrawWinner is one participant selected by the secondary draw engine.
 type WarSecondaryDrawWinner struct {
-	ID              uuid.UUID  `gorm:"column:id;primaryKey"                      json:"id"`
-	SecondaryDrawID uuid.UUID  `gorm:"column:secondary_draw_id;index"            json:"secondary_draw_id"`
-	WarID           uuid.UUID  `gorm:"column:war_id"                             json:"war_id"`
-	State           string     `gorm:"column:state"                              json:"state"`
-	UserID          uuid.UUID  `gorm:"column:user_id"                            json:"user_id"`
-	PhoneNumber     string     `gorm:"column:phone_number"                       json:"phone_number"`
-	Position        int        `gorm:"column:position"                           json:"position"`
-	PrizeKobo       int64      `gorm:"column:prize_kobo"                         json:"prize_kobo"`
-	MoMoNumber      string     `gorm:"column:momo_number"                        json:"momo_number,omitempty"`
-	PaymentStatus   string     `gorm:"column:payment_status;default:'PENDING_PAYMENT'" json:"payment_status"` // PENDING_PAYMENT|PAID|FAILED
-	PaidAt          *time.Time `gorm:"column:paid_at"                            json:"paid_at,omitempty"`
-	PaidBy          *uuid.UUID `gorm:"column:paid_by"                            json:"paid_by,omitempty"`
-	Notes           string     `gorm:"column:notes"                              json:"notes,omitempty"`
-	CreatedAt       time.Time  `gorm:"column:created_at;autoCreateTime"          json:"created_at"`
-	UpdatedAt       time.Time  `gorm:"column:updated_at;autoUpdateTime"          json:"updated_at"`
+	ID              uuid.UUID  `db:"id" gorm:"column:id;primaryKey"                      json:"id"`
+	SecondaryDrawID uuid.UUID  `db:"secondary_draw_id" gorm:"column:secondary_draw_id;index"            json:"secondary_draw_id"`
+	WarID           uuid.UUID  `db:"war_id" gorm:"column:war_id"                             json:"war_id"`
+	State           string     `db:"state" gorm:"column:state"                              json:"state"`
+	UserID          uuid.UUID  `db:"user_id" gorm:"column:user_id"                            json:"user_id"`
+	PhoneNumber     string     `db:"phone_number" gorm:"column:phone_number"                       json:"phone_number"`
+	Position        int        `db:"position" gorm:"column:position"                           json:"position"`
+	PrizeKobo       int64      `db:"prize_kobo" gorm:"column:prize_kobo"                         json:"prize_kobo"`
+	MoMoNumber      string     `db:"momo_number" gorm:"column:momo_number"                        json:"momo_number,omitempty"`
+	PaymentStatus   string     `db:"payment_status" gorm:"column:payment_status;default:'PENDING_PAYMENT'" json:"payment_status"` // PENDING_PAYMENT|PAID|FAILED
+	PaidAt          *time.Time `db:"paid_at" gorm:"column:paid_at"                            json:"paid_at,omitempty"`
+	PaidBy          *uuid.UUID `db:"paid_by" gorm:"column:paid_by"                            json:"paid_by,omitempty"`
+	Notes           string     `db:"notes" gorm:"column:notes"                              json:"notes,omitempty"`
+	CreatedAt       time.Time  `db:"created_at" gorm:"column:created_at;autoCreateTime"          json:"created_at"`
+	UpdatedAt       time.Time  `db:"updated_at" gorm:"column:updated_at;autoUpdateTime"          json:"updated_at"`
 }
 
 func (WarSecondaryDrawWinner) TableName() string { return "war_secondary_draw_winners" }

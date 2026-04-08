@@ -45,7 +45,7 @@ type SpinResult struct {
 	SlotIndex         int               `db:"slot_index"         gorm:"column:slot_index"                        json:"slot_index"`
 	FulfillmentStatus FulfillmentStatus `db:"fulfillment_status" gorm:"column:fulfillment_status"               json:"fulfillment_status"`
 	FulfillmentRef    string            `db:"fulfillment_ref"    gorm:"column:fulfillment_ref;default:''"        json:"fulfillment_ref,omitempty"`
-	MoMoNumber        string            `db:"momo_number"        gorm:"column:mo_mo_number;default:''"           json:"momo_number,omitempty"`
+	MoMoNumber        string            `db:"momo_number"        gorm:"column:momo_number;default:''"           json:"momo_number,omitempty"`
 	ErrorMessage      string            `db:"error_message"      gorm:"column:error_message;default:''"          json:"error_message,omitempty"`
 	RetryCount        int               `db:"retry_count"        gorm:"column:retry_count;default:0"             json:"retry_count"`
 	ClaimedAt         *time.Time        `db:"claimed_at"         gorm:"column:claimed_at"                        json:"claimed_at,omitempty"`
