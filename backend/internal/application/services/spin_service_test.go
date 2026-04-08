@@ -80,7 +80,7 @@ func setupSpinDB(t *testing.T) *gorm.DB {
 		fulfillment_status TEXT NOT NULL DEFAULT 'NA',
 		claim_status TEXT NOT NULL DEFAULT 'PENDING',
 		fulfillment_ref TEXT NOT NULL DEFAULT '',
-		mo_mo_number TEXT NOT NULL DEFAULT '',
+		momo_number TEXT NOT NULL DEFAULT '',
 		momo_claim_number TEXT NOT NULL DEFAULT '',
 		bank_account_number TEXT NOT NULL DEFAULT '',
 		bank_account_name TEXT NOT NULL DEFAULT '',
