@@ -291,6 +291,7 @@ func (h *StudioHandler) GetGenerationStatus(w http.ResponseWriter, r *http.Reque
 		"output_text":     gen.OutputText,
 		"provider":        gen.Provider,
 		"points_deducted": gen.PointsDeducted,
+		"error_message":   gen.ErrorMessage,
 		"created_at":      gen.CreatedAt,
 		"updated_at":      gen.UpdatedAt,
 	})

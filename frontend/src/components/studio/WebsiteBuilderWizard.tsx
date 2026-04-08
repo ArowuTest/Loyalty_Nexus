@@ -217,7 +217,7 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const result = await api.getGenerationStatus(id) as { status: string };
+        const result = await api.getGenerationStatus(id) as { status: string; error_message?: string };
         if (result.status === "completed") {
           clearInterval(pollRef.current!);
           setSiteStatus("completed");
@@ -225,7 +225,8 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
         } else if (result.status === "failed") {
           clearInterval(pollRef.current!);
           setSiteStatus("failed");
-          setError("Generation failed. Please try again.");
+          const reason = result.error_message || "Generation failed. Please try again.";
+          setError(reason);
           setStep(4);
           setIsGenerating(false);
         }

@@ -67,9 +67,9 @@ func (h *StudioHandler) BuildWebsite(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Call Gemini asynchronously (website generation takes 5-15 seconds)
+	// Call Gemini asynchronously (website generation can take 30-90s for rich HTML)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
 		var html string
@@ -149,7 +149,8 @@ func (h *StudioHandler) ServeWebsite(w http.ResponseWriter, r *http.Request) {
 	// Serve the HTML directly
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
-	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+	// Allow embedding in iframes from any origin (Vercel frontend preview)
+	w.Header().Set("X-Frame-Options", "ALLOWALL")
 	_, _ = w.Write([]byte(gen.OutputText))
 }
 

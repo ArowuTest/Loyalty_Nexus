@@ -756,7 +756,8 @@ type GeminiAdapter struct {
 }
 
 func NewGeminiAdapter(apiKey string) *GeminiAdapter {
-	return &GeminiAdapter{apiKey: apiKey, client: &http.Client{Timeout: 30 * time.Second}}
+	// 120s timeout — website generation via Gemini 2.5 Flash can take 45-90s for large HTML
+	return &GeminiAdapter{apiKey: apiKey, client: &http.Client{Timeout: 120 * time.Second}}
 }
 
 func (a *GeminiAdapter) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
@@ -771,6 +772,10 @@ func (a *GeminiAdapter) Complete(ctx context.Context, systemPrompt, userPrompt s
 		},
 		"contents": []map[string]interface{}{
 			{"parts": []map[string]string{{"text": userPrompt}}},
+		},
+		"generationConfig": map[string]interface{}{
+			"maxOutputTokens": 65536,
+			"temperature":     0.7,
 		},
 	}
 	body, err := json.Marshal(payload)
@@ -843,7 +848,7 @@ func (a *GeminiAdapter) CompleteWithImages(ctx context.Context, systemPrompt, us
 			{"parts": parts},
 		},
 		"generationConfig": map[string]interface{}{
-			"maxOutputTokens": 8192,
+			"maxOutputTokens": 65536,
 			"temperature":     0.7,
 		},
 	}
