@@ -71,7 +71,7 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 		return nil, fmt.Errorf("wallet not found")
 	}
 	if wallet.SpinCredits < 1 {
-		return nil, fmt.Errorf("No spin credits available. Recharge ₦1,000 or more to earn a free spin!")
+		return nil, fmt.Errorf("no spin credits available — recharge ₦1,000 or more to earn a free spin")
 	}
 
 	// --- Step 1: Daily spin limit based on tier ---
