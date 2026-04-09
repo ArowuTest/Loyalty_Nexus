@@ -216,10 +216,11 @@ func TestSpin_WithCredits_Succeeds(t *testing.T) {
 func TestSpin_DailyLimit_Enforced(t *testing.T) {
 	db := setupSpinDB(t)
 	svc := newSpinSvc(db)
-	userID := seedWalletUser(db, 10) // Bronze tier = 2 spins/day
+	// 10 credits + Bronze tier (2 spins from recharge) = cap of 12
+	userID := seedWalletUser(db, 10)
 
-	// Pre-seed 2 spin_results today to hit the Bronze cap
-	for i := 0; i < 2; i++ {
+	// Pre-seed 12 spin_results today to exactly hit the cap
+	for i := 0; i < 12; i++ {
 		db.Exec(`INSERT INTO spin_results (id, user_id, prize_type, fulfillment_status, claim_status, created_at)
 			VALUES (?,?,?,?,?,?)`,
 			uuid.New().String(), userID.String(), "try_again", "na", "claimed",
@@ -232,20 +233,30 @@ func TestSpin_DailyLimit_Enforced(t *testing.T) {
 	}
 }
 
-func TestSpin_NoRechargeToday_Blocked(t *testing.T) {
+func TestSpin_NoRechargeToday_SpinCreditsAllow(t *testing.T) {
 	db := setupSpinDB(t)
 	svc := newSpinSvc(db)
 
-	// Create user WITHOUT a recharge transaction today
+	// User with spin credits but NO recharge today.
+	// New behaviour: credits act as direct passes — spin must succeed.
 	id := uuid.New()
 	phone := "0802" + id.String()[:7]
-	db.Exec(`INSERT INTO users (id, phone_number, spin_credits) VALUES (?,?,?)`, id.String(), phone, 5)
-	db.Exec(`INSERT INTO wallets (id, user_id, spin_credits) VALUES (?,?,?)`, uuid.New().String(), id.String(), 5)
-	// No recharge transaction → daily cap = 0 → spin blocked
+	db.Exec(`INSERT INTO users (id, phone_number, spin_credits) VALUES (?,?,?)`, id.String(), phone, 3)
+	db.Exec(`INSERT INTO wallets (id, user_id, spin_credits) VALUES (?,?,?)`, uuid.New().String(), id.String(), 3)
+	// No recharge transaction → tier cap = 0, but credits = 3 → total cap = 3
 
 	_, err := svc.PlaySpin(context.Background(), id)
+	if err != nil {
+		t.Fatalf("user with spin credits should be able to spin without today recharge: %v", err)
+	}
+
+	// After 3 spins total the cap (= credits) should be exhausted
+	for i := 0; i < 2; i++ {
+		_, _ = svc.PlaySpin(context.Background(), id)
+	}
+	_, err = svc.PlaySpin(context.Background(), id)
 	if err == nil {
-		t.Fatal("expected daily limit error for user with no recharge today, got nil")
+		t.Fatal("expected daily limit error after all credits consumed, got nil")
 	}
 }
 
@@ -253,26 +264,26 @@ func TestSpin_GoldTier_AllowsFiveSpins(t *testing.T) {
 	db := setupSpinDB(t)
 	svc := newSpinSvc(db)
 
-	// Create user with ₦10,000 recharge today (1,000,000 kobo) → Gold tier = 5 spins
+	// 2 credits + Gold tier recharge (5 spins/day) = cap of 7
 	id := uuid.New()
 	phone := "0803" + id.String()[:7]
-	db.Exec(`INSERT INTO users (id, phone_number, spin_credits) VALUES (?,?,?)`, id.String(), phone, 10)
-	db.Exec(`INSERT INTO wallets (id, user_id, spin_credits) VALUES (?,?,?)`, uuid.New().String(), id.String(), 10)
+	db.Exec(`INSERT INTO users (id, phone_number, spin_credits) VALUES (?,?,?)`, id.String(), phone, 2)
+	db.Exec(`INSERT INTO wallets (id, user_id, spin_credits) VALUES (?,?,?)`, uuid.New().String(), id.String(), 2)
 	db.Exec(`INSERT INTO transactions (id, user_id, phone_number, type, amount, reference, created_at) VALUES (?,?,?,?,?,?,?)`,
 		uuid.New().String(), id.String(), phone, "recharge", 1000000, "gold_recharge_"+id.String(), time.Now().UTC().Format("2006-01-02T15:04:05Z"))
 
-	// Should be able to spin 5 times
-	for i := 0; i < 5; i++ {
+	// Should be able to spin 7 times (2 credits + 5 tier spins)
+	for i := 0; i < 7; i++ {
 		_, err := svc.PlaySpin(context.Background(), id)
 		if err != nil {
-			t.Fatalf("spin %d of 5 failed unexpectedly: %v", i+1, err)
+			t.Fatalf("spin %d of 7 failed unexpectedly: %v", i+1, err)
 		}
 	}
 
-	// 6th spin should be blocked
+	// 8th spin should be blocked
 	_, err := svc.PlaySpin(context.Background(), id)
 	if err == nil {
-		t.Fatal("expected daily limit error on 6th spin for Gold tier, got nil")
+		t.Fatal("expected daily limit error on 8th spin (cap=7), got nil")
 	}
 }
 
