@@ -145,7 +145,7 @@ func setupSpinDB(t *testing.T) *gorm.DB {
 	db.Exec(`INSERT OR IGNORE INTO spin_tiers (id, tier_name, tier_display_name, min_daily_amount, max_daily_amount, spins_per_day, sort_order) VALUES
 		(?,?,?,?,?,?,?)`, uuid.New().String(), "Silver", "Silver", 500000, 999999, 3, 3)
 	db.Exec(`INSERT OR IGNORE INTO spin_tiers (id, tier_name, tier_display_name, min_daily_amount, max_daily_amount, spins_per_day, sort_order) VALUES
-		(?,?,?,?,?,?,?)`, uuid.New().String(), "Gold", "Gold", 1000000, 9999999999, 5, 4)
+		(?,?,?,?,?,?,?)`, uuid.New().String(), "Gold", "Gold", 1000000, 4999999999, 5, 4)
 
 	// Seed a TRY_AGAIN prize (always safe — no fulfillment needed)
 	db.Exec(`INSERT INTO prize_pool (id, name, prize_type, base_value, win_probability_weight, is_active, is_no_win, no_win_message) VALUES (?,?,?,?,?,1,1,?)`,
