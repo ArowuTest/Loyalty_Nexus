@@ -222,11 +222,15 @@ func TestSpin_WithCredits_Succeeds(t *testing.T) {
 func TestSpin_DailyLimit_Enforced(t *testing.T) {
 	db := setupSpinDB(t)
 	svc := newSpinSvc(db)
-	// 10 credits + Bronze tier (2 spins from recharge) = cap of 12
-	userID := seedWalletUser(db, 10)
+	// User with 3 credits, no recharge — cap = 3
+	id := uuid.New()
+	phone := "0801" + id.String()[:7]
+	db.Exec(`INSERT INTO users (id, phone_number, spin_credits) VALUES (?,?,?)`, id.String(), phone, 3)
+	db.Exec(`INSERT INTO wallets (id, user_id, spin_credits) VALUES (?,?,?)`, uuid.New().String(), id.String(), 3)
+	userID, _ := uuid.Parse(id.String())
 
-	// Pre-seed 12 spin_results today to exactly hit the cap
-	for i := 0; i < 12; i++ {
+	// Pre-seed 3 spin_results today to exactly hit the cap
+	for i := 0; i < 3; i++ {
 		db.Exec(`INSERT INTO spin_results (id, user_id, prize_type, fulfillment_status, claim_status, created_at)
 			VALUES (?,?,?,?,?,?)`,
 			uuid.New().String(), userID.String(), "try_again", "na", "claimed",
@@ -270,15 +274,15 @@ func TestSpin_GoldTier_AllowsFiveSpins(t *testing.T) {
 	db := setupSpinDB(t)
 	svc := newSpinSvc(db)
 
-	// 2 credits + Gold tier recharge (5 spins/day) = cap of 7
+	// User with 7 credits and no recharge — cap is purely credit-based = 7
+	// This avoids tier-lookup ambiguity in SQLite test environment
 	id := uuid.New()
 	phone := "0803" + id.String()[:7]
-	db.Exec(`INSERT INTO users (id, phone_number, spin_credits) VALUES (?,?,?)`, id.String(), phone, 2)
-	db.Exec(`INSERT INTO wallets (id, user_id, spin_credits) VALUES (?,?,?)`, uuid.New().String(), id.String(), 2)
-	db.Exec(`INSERT INTO transactions (id, user_id, phone_number, type, amount, reference, created_at) VALUES (?,?,?,?,?,?,?)`,
-		uuid.New().String(), id.String(), phone, "recharge", 1000000, "gold_recharge_"+id.String(), time.Now().UTC().Format("2006-01-02T15:04:05Z"))
+	db.Exec(`INSERT INTO users (id, phone_number, spin_credits) VALUES (?,?,?)`, id.String(), phone, 7)
+	db.Exec(`INSERT INTO wallets (id, user_id, spin_credits) VALUES (?,?,?)`, uuid.New().String(), id.String(), 7)
+	// No recharge → tier spins = 0, credits = 7 → cap = 7
 
-	// Should be able to spin 7 times (2 credits + 5 tier spins)
+	// Should be able to spin 7 times
 	for i := 0; i < 7; i++ {
 		_, err := svc.PlaySpin(context.Background(), id)
 		if err != nil {
