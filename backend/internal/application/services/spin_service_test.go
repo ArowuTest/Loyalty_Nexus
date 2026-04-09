@@ -55,6 +55,15 @@ func setupSpinDB(t *testing.T) *gorm.DB {
 		spin_credits INTEGER NOT NULL DEFAULT 0,
 		lifetime_points INTEGER NOT NULL DEFAULT 0,
 		recharge_counter INTEGER NOT NULL DEFAULT 0,
+		spin_draw_counter INTEGER NOT NULL DEFAULT 0,
+		spin_counter INTEGER NOT NULL DEFAULT 0,
+		draw_counter INTEGER NOT NULL DEFAULT 0,
+		pulse_counter INTEGER NOT NULL DEFAULT 0,
+		daily_recharge_kobo INTEGER NOT NULL DEFAULT 0,
+		daily_recharge_date DATETIME,
+		daily_spins_awarded INTEGER NOT NULL DEFAULT 0,
+		draw_entries_today INTEGER NOT NULL DEFAULT 0,
+		draw_entries_date DATETIME,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
