@@ -182,7 +182,13 @@ func newSpinSvc(db *gorm.DB) *services.SpinService {
 func TestSpin_NoCredits_Fails(t *testing.T) {
 	db := setupSpinDB(t)
 	svc := newSpinSvc(db)
-	userID := seedWalletUser(db, 0) // zero credits — tier unlocked but wallet empty
+	// User with zero credits AND no recharge today — dailyCap = 0
+	id := uuid.New()
+	phone := "0800" + id.String()[:7]
+	db.Exec(`INSERT INTO users (id, phone_number, spin_credits) VALUES (?,?,?)`, id.String(), phone, 0)
+	db.Exec(`INSERT INTO wallets (id, user_id, spin_credits) VALUES (?,?,?)`, uuid.New().String(), id.String(), 0)
+	// No transaction → tier cap also 0 → total cap = 0 → blocked
+	userID, _ := uuid.Parse(id.String())
 
 	_, err := svc.PlaySpin(context.Background(), userID)
 	if err == nil {

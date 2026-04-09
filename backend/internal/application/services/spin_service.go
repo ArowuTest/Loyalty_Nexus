@@ -70,13 +70,10 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 	if err != nil {
 		return nil, fmt.Errorf("wallet not found")
 	}
-	// --- Step 1: Daily spin limit ---
-	// Spin credits act as direct passes — each credit = 1 guaranteed spin.
-	// Tier recharges grant ADDITIONAL spins on top of credits.
-	if wallet.SpinCredits < 1 {
-		return nil, fmt.Errorf("no spin credits available — recharge ₦1,000 or more to earn a free spin")
-	}
-
+	// --- Step 1: Calculate daily spin cap ---
+	// Cap = spin_credits (direct passes) + tier_spins (from today's recharge).
+	// A user with zero credits but an active tier recharge can still spin.
+	// A user with credits but no recharge today can also spin (credits are the pass).
 	todayMidnight := time.Now().UTC().Truncate(24 * time.Hour).Unix()
 	todayAmountKobo, err := s.txRepo.SumAmountByUserSince(ctx, userID, todayMidnight)
 	if err != nil {
@@ -84,10 +81,14 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 	}
 
 	tierCalc := utils.NewSpinTierCalculatorDB(s.db)
-	dailyCap := int(wallet.SpinCredits) // base cap = spin credits held
+	dailyCap := int(wallet.SpinCredits) // credits are guaranteed spins
 	if tier, err := tierCalc.GetSpinTierFromDB(todayAmountKobo); err == nil && tier.SpinsPerDay > 0 {
-		// Tier recharge grants additional spins on top of credits
-		dailyCap += tier.SpinsPerDay
+		dailyCap += tier.SpinsPerDay // tier recharge grants additional spins
+	}
+
+	// No path to spin at all
+	if dailyCap == 0 {
+		return nil, fmt.Errorf("no spin credits available — recharge ₦1,000 or more to earn a free spin")
 	}
 
 	dailySpins, err := s.prizeRepo.CountUserSpinsToday(ctx, userID)
