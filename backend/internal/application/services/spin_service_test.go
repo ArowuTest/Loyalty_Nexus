@@ -231,24 +231,22 @@ func TestSpin_WithCredits_Succeeds(t *testing.T) {
 func TestSpin_DailyLimit_Enforced(t *testing.T) {
 	db := setupSpinDB(t)
 	svc := newSpinSvc(db)
-	// User with 3 credits, no recharge — cap = 3
-	id := uuid.New()
-	phone := "0801" + id.String()[:7]
-	db.Exec(`INSERT INTO users (id, phone_number, spin_credits) VALUES (?,?,?)`, id.String(), phone, 3)
-	db.Exec(`INSERT INTO wallets (id, user_id, spin_credits) VALUES (?,?,?)`, uuid.New().String(), id.String(), 3)
-	userID, _ := uuid.Parse(id.String())
+	// User with 3 credits and a Bronze recharge today (tier cap = 2).
+	// The LOWER of credits vs tier cap applies — tier cap (2) should block at spin 3.
+	userID := seedWalletUser(db, 3) // seeds ₦2,000 recharge → Bronze → dailyCap=2
 
-	// Pre-seed 3 spin_results today to exactly hit the cap
-	for i := 0; i < 3; i++ {
-		db.Exec(`INSERT INTO spin_results (id, user_id, prize_type, fulfillment_status, claim_status, created_at)
-			VALUES (?,?,?,?,?,?)`,
-			uuid.New().String(), userID.String(), "try_again", "na", "claimed",
-			time.Now().Add(-time.Minute))
+	// Spin twice — should both succeed (within tier cap)
+	for i := 0; i < 2; i++ {
+		_, err := svc.PlaySpin(context.Background(), userID)
+		if err != nil {
+			t.Fatalf("spin %d expected to succeed: %v", i+1, err)
+		}
 	}
 
+	// 3rd spin should be blocked — tier cap (2) reached even though 1 credit remains
 	_, err := svc.PlaySpin(context.Background(), userID)
 	if err == nil {
-		t.Fatal("expected daily limit error, got nil")
+		t.Fatal("expected daily limit error on 3rd spin, got nil")
 	}
 }
 

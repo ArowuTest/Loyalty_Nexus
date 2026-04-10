@@ -70,10 +70,15 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 	if err != nil {
 		return nil, fmt.Errorf("wallet not found")
 	}
-	// --- Step 1: Calculate daily spin cap ---
-	// Cap = spin_credits (direct passes) + tier_spins (from today's recharge).
-	// A user with zero credits but an active tier recharge can still spin.
-	// A user with credits but no recharge today can also spin (credits are the pass).
+	// --- Step 1: Check spin credits ---
+	// Spin credits are awarded at recharge time (see recharge_service.go).
+	// Each credit = 1 spin. Daily limits are enforced at award time via
+	// calculateDailySpinCredits — never exceeds tier.SpinsPerDay per day.
+	// So here we simply check: does the user have any credits left?
+	if wallet.SpinCredits < 1 {
+		return nil, fmt.Errorf("no spin credits available — recharge ₦1,000 or more to earn a free spin")
+	}
+
 	todayMidnight := time.Now().UTC().Truncate(24 * time.Hour).Unix()
 	todayAmountKobo, err := s.txRepo.SumAmountByUserSince(ctx, userID, todayMidnight)
 	if err != nil {
@@ -81,21 +86,19 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 	}
 
 	tierCalc := utils.NewSpinTierCalculatorDB(s.db)
-	dailyCap := int(wallet.SpinCredits) // credits are guaranteed spins
+	dailyCap := 0
 	if tier, err := tierCalc.GetSpinTierFromDB(todayAmountKobo); err == nil && tier.SpinsPerDay > 0 {
-		dailyCap += tier.SpinsPerDay // tier recharge grants additional spins
-	}
-
-	// No path to spin at all
-	if dailyCap == 0 {
-		return nil, fmt.Errorf("no spin credits available — recharge ₦1,000 or more to earn a free spin")
+		dailyCap = tier.SpinsPerDay
 	}
 
 	dailySpins, err := s.prizeRepo.CountUserSpinsToday(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("spin count check failed: %w", err)
 	}
-	if dailySpins >= dailyCap {
+
+	// If they have a qualifying recharge today AND have hit the tier cap, block them.
+	// If they have no recharge today (dailyCap=0), credits alone allow the spin.
+	if dailyCap > 0 && dailySpins >= dailyCap {
 		return nil, fmt.Errorf("daily spin limit reached (%d/%d) — recharge more today to unlock additional spins", dailySpins, dailyCap)
 	}
 
@@ -684,17 +687,15 @@ func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*
 
 	// 2. Determine daily spin cap and current tier from cumulative amount
 	tierCalc := utils.NewSpinTierCalculatorDB(s.db)
-	// Base cap = spin credits held (each credit = 1 guaranteed spin)
-	dailyCap := int(wallet.SpinCredits)
+	dailyCap := 0
 	currentTierName := ""
 	progressPercent := 0.0
 
 	allTiers, _ := tierCalc.GetAllTiersFromDB()
 	currentTierIdx := -1
 	if currentTier, err := tierCalc.GetSpinTierFromDB(todayAmountKobo); err == nil && currentTier.SpinsPerDay > 0 {
-		dailyCap += currentTier.SpinsPerDay // tier recharge adds on top of credits
+		dailyCap = currentTier.SpinsPerDay
 		currentTierName = currentTier.TierDisplayName
-		// Find index of current tier in allTiers for progress calculation
 		for i, t := range allTiers {
 			if t.TierDisplayName == currentTier.TierDisplayName {
 				currentTierIdx = i
@@ -737,13 +738,12 @@ func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*
 		resp := &SpinEligibility{
 			Eligible:         false,
 			SpinCredits:      wallet.SpinCredits,
-			Message:          fmt.Sprintf("No spin credits. Recharge ₦%d to earn one!", trigger),
+			Message:          fmt.Sprintf("no spin credits — recharge ₦%d to earn a free spin", trigger),
 			TriggerNaira:     trigger,
 			CurrentTierName:  currentTierName,
 			TodayAmountNaira: todayAmountNaira,
 			ProgressPercent:  progressPercent,
 		}
-		// Nudge toward next tier
 		for _, t := range allTiers {
 			if t.MinDailyAmount > todayAmountKobo {
 				resp.NextTierName = t.TierDisplayName
@@ -756,8 +756,8 @@ func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*
 		return resp, nil
 	}
 
-	// If user has reached their daily cap based on their tier
-	if used >= dailyCap {
+	// If user has a qualifying recharge today AND hit the tier cap, block further spins
+	if dailyCap > 0 && used >= dailyCap {
 		resp := &SpinEligibility{
 			Eligible:         false,
 			SpinsUsedToday:   used,
@@ -782,11 +782,8 @@ func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*
 		return resp, nil
 	}
 
-	available := dailyCap - used
-	// User cannot spin more times than they have credits
-	if available > wallet.SpinCredits {
-		available = wallet.SpinCredits
-	}
+	// Available = spin credits remaining (tier cap was already enforced at award time)
+	available := wallet.SpinCredits
 
 	return &SpinEligibility{
 		Eligible:         true,
