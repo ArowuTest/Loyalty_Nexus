@@ -60,7 +60,8 @@ type DrawEntry struct {
 	PhoneNumber string     `gorm:"-"`
 	EntrySource string     `gorm:"column:entry_source"` // recharge | subscription | bonus
 	Amount      int64      `gorm:"column:amount"`        // kobo
-	TicketCount int        `gorm:"column:ticket_count"`
+	EntriesCount int       `gorm:"column:entries_count"`
+	TicketCount  int       `gorm:"-"` // GENERATED ALWAYS AS (entries_count) — read-only alias, never write
 	CreatedAt   *time.Time `gorm:"column:created_at;autoCreateTime"`
 }
 
@@ -305,7 +306,7 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 		// 3 — build weighted ticket pool (each entry.TicketCount multiplied)
 		pool := make([]DrawEntry, 0, len(entries)*2)
 		for _, e := range entries {
-			count := e.TicketCount
+			count := e.EntriesCount
 			if count < 1 {
 				count = 1
 			}
@@ -437,7 +438,7 @@ func (svc *DrawService) AddEntry(ctx context.Context, drawID, userID uuid.UUID, 
 		MSISDN:       phone,
 		EntrySource:  source,
 		Amount:       amount,
-		TicketCount:  tickets,
+		EntriesCount: tickets,
 		CreatedAt:    &now,
 	}
 	if err := svc.db.Create(&entry).Error; err != nil {
@@ -569,7 +570,7 @@ func (svc *DrawService) ProcessCSVEntries(ctx context.Context, drawID uuid.UUID,
 			DrawID:      drawID,
 			PhoneNumber: phone,
 			EntrySource: "csv_import",
-			TicketCount: tickets,
+			EntriesCount: tickets,
 			CreatedAt:   &now,
 		}
 		if err := svc.db.WithContext(ctx).Create(&entry).Error; err != nil {

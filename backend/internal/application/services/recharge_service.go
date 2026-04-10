@@ -228,7 +228,7 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 						"msisdn":       user.PhoneNumber,
 						"entry_source": "recharge",
 						"amount":       amountKobo,
-						"ticket_count": drawEntriesEarned,
+						"entries_count": drawEntriesEarned,
 						"created_at":   time.Now(),
 					}
 					if err := dbTx.Table("draw_entries").Create(&entry).Error; err != nil {
