@@ -437,7 +437,7 @@ func (svc *DrawService) AddEntry(ctx context.Context, drawID, userID uuid.UUID, 
 		MSISDN:       phone,
 		EntrySource:  source,
 		Amount:       amount,
-		EntriesCount: tickets,
+		TicketCount:  tickets,
 		CreatedAt:    &now,
 	}
 	if err := svc.db.Create(&entry).Error; err != nil {
