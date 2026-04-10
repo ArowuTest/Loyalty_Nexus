@@ -40,6 +40,15 @@ interface StudioTool {
   id: string; name: string; slug: string; icon: string;
   point_cost: number; is_free: boolean;
 }
+interface DrawWinItem {
+  draw_id: string;
+  draw_name: string;
+  position: number;
+  prize_name: string;
+  prize_value: number;
+  is_runner_up: boolean;
+  won_at: string;
+}
 
 const FALLBACK_SEGMENTS: Segment[] = [
   { label: "₦5,000",   prize_type: "momo_cash",    base_value: 500000, probability: 2,  color: "#F5A623", is_active: true },
@@ -572,7 +581,13 @@ function RecentActivity() {
     () => api.getSpinHistory() as Promise<{ history: SpinHistoryItem[] }>,
     { refreshInterval: 60000 }
   );
+  const { data: drawWinsData } = useSWR(
+    "/user/draw-wins",
+    () => api.getMyDrawWins() as Promise<{ wins: DrawWinItem[] }>,
+    { refreshInterval: 60000 }
+  );
   const history: SpinHistoryItem[] = ((historyData as { history?: SpinHistoryItem[] } | undefined)?.history ?? []).slice(0, 6);
+  const drawWins: DrawWinItem[] = ((drawWinsData as { wins?: DrawWinItem[] } | undefined)?.wins ?? []).slice(0, 2);
 
   return (
     <div className="relative rounded-2xl overflow-hidden"
@@ -587,6 +602,19 @@ function RecentActivity() {
             </button>
           </Link>
         </div>
+        {drawWins.length > 0 && (
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Trophy className="text-yellow-400" size={18} />
+              <span className="font-semibold text-yellow-300">You Won a Draw!</span>
+            </div>
+            {drawWins.slice(0, 2).map(w => (
+              <p key={w.draw_id} className="text-sm text-white/70">
+                #{w.position} in {w.draw_name} — ₦{w.prize_value.toLocaleString()}
+              </p>
+            ))}
+          </div>
+        )}
         {history.length > 0 ? (
           <div className="space-y-1">
             {history.map(item => (

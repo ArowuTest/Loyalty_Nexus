@@ -359,6 +359,9 @@ class APIClient {
   getChatUsage() { return this.request("GET", "/studio/chat/usage"); }
 
   // ── Notifications ─────────────────────────────────────────────────────────
+  getMyDrawWins() {
+    return this.request<{ wins: Array<{ draw_id: string; draw_name: string; position: number; prize_name: string; prize_value: number; is_runner_up: boolean; won_at: string }> }>("GET", "/user/draw-wins");
+  }
   getNotifications(cursor?: string) {
     return this.request("GET", "/notifications" + (cursor ? `?cursor=${cursor}` : ""));
   }

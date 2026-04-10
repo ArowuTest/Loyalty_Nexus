@@ -424,6 +424,7 @@ func main() {
 		// ─── Draws (public results) ───────────────────────────────
 		mux.Handle("GET /api/v1/draws", auth(http.HandlerFunc(drawH.ListUpcoming)))
 		mux.Handle("GET /api/v1/draws/{id}/winners", auth(http.HandlerFunc(drawH.GetWinners)))
+		mux.Handle("GET /api/v1/user/draw-wins", auth(http.HandlerFunc(drawH.GetMyWins)))
 
 		// ─── Admin routes (admin JWT required) ───────────────────
 		adminAuth := middleware.AdminAuthMiddleware(adminAuthSvc)  // Uses AdminAuthService (email+pw+RBAC)

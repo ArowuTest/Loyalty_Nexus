@@ -579,6 +579,16 @@ func (h *AdminHandler) notifyDrawWinners(drawID uuid.UUID) {
 		log.Printf("[Draw] notifyDrawWinners: failed to fetch winners for %s: %v", drawID, err)
 		return
 	}
+
+	draw, err := h.drawSvc.GetDrawByID(ctx, drawID)
+	if err != nil {
+		log.Printf("[Draw] notifyDrawWinners: failed to fetch draw %s: %v", drawID, err)
+	}
+	drawName := "Loyalty Nexus"
+	if draw != nil && draw.Name != "" {
+		drawName = draw.Name
+	}
+
 	for _, w := range winners {
 		if w.IsRunnerUp || w.PhoneNumber == "" {
 			continue
@@ -587,11 +597,20 @@ func (h *AdminHandler) notifyDrawWinners(drawID uuid.UUID) {
 			"🎉 Congratulations! You won the Loyalty Nexus draw! "+
 				"Prize: ₦%s. Your winnings will be disbursed within 24 hours. "+
 				"Ref: %s",
-			formatNaira(int64(w.PrizeValue * 100)),
+			formatNaira(int64(w.PrizeValue*100)),
 			drawID.String()[:8],
 		)
 		if err := h.notifySvc.SendSMS(ctx, w.PhoneNumber, msg); err != nil {
 			log.Printf("[Draw] SMS notification failed for %s: %v", w.PhoneNumber, err)
+		}
+		if err := h.db.WithContext(ctx).Exec(`INSERT INTO notifications (id, user_id, type, title, body, metadata, created_at)
+			VALUES (?, ?, 'draw_result', ?, ?, ?::jsonb, ?)`,
+			uuid.New(), w.UserID,
+			"🎉 You Won the Draw!",
+			fmt.Sprintf("Congratulations! You placed #%d in the %s draw. Prize: ₦%.0f", w.Position, drawName, w.PrizeValue),
+			fmt.Sprintf(`{"draw_id":"%s","position":%d,"prize_value":%.0f}`, w.DrawID, w.Position, w.PrizeValue),
+			time.Now()).Error; err != nil {
+			log.Printf("[Draw] in-app notification insert failed for user %s: %v", w.UserID, err)
 		}
 	}
 	log.Printf("[Draw] ✅ Notified %d winners for draw %s", len(winners), drawID)

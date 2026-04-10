@@ -56,15 +56,11 @@ type DrawEntry struct {
 	ID          uuid.UUID  `gorm:"column:id;primaryKey"`
 	DrawID      uuid.UUID  `gorm:"column:draw_id;index"`
 	UserID      uuid.UUID  `gorm:"column:user_id;index"`
-	// MSISDN is the real writable column. PhoneNumber is a Postgres GENERATED
-	// ALWAYS AS (msisdn) STORED alias — GORM must never SELECT or INSERT it.
 	MSISDN      string     `gorm:"column:msisdn"`
-	PhoneNumber string     `gorm:"-"` // generated always as (msisdn) stored — excluded from all GORM ops
+	PhoneNumber string     `gorm:"-"`
 	EntrySource string     `gorm:"column:entry_source"` // recharge | subscription | bonus
 	Amount      int64      `gorm:"column:amount"`        // kobo
-	// EntriesCount is the real writable column. TicketCount is a GENERATED alias.
-	EntriesCount int       `gorm:"column:entries_count"`
-	TicketCount  int       `gorm:"-"` // generated always as (entries_count) stored — excluded from all GORM ops
+	TicketCount int        `gorm:"column:ticket_count"`
 	CreatedAt   *time.Time `gorm:"column:created_at;autoCreateTime"`
 }
 
@@ -122,6 +118,8 @@ type DrawService struct {
 func NewDrawService(db *gorm.DB) *DrawService {
 	return &DrawService{db: db}
 }
+
+func (svc *DrawService) DB() *gorm.DB { return svc.db }
 
 // ─── Draw code generator ──────────────────────────────────────────────────
 
@@ -491,7 +489,7 @@ func (svc *DrawService) GetDrawWinners(ctx context.Context, drawID uuid.UUID) ([
 			Position:    w.Position,
 			PrizeType:   w.PrizeName,
 			PrizeValue:  float64(w.PrizeValue) / 100, // convert kobo → naira
-			IsRunnerUp:  false,
+			IsRunnerUp:  w.PrizeName == "Runner-Up",
 			Status:      w.ClaimStatus,
 			WonAt:       w.CreatedAt,
 		}
