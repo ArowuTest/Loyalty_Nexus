@@ -372,8 +372,10 @@ func nextDOWAfter(after time.Time, dayOfWeek int, tod timeOfDay) time.Time {
 func (s *DrawWindowService) findNextActiveDraw(ctx context.Context, drawType string, after time.Time) (*DrawRecord, error) {
 	var draw DrawRecord
 	err := s.db.WithContext(ctx).
-		Where("draw_type = ? AND status IN ('ACTIVE','UPCOMING') AND end_time > ?", drawType, after).
-		Order("draw_time ASC NULLS LAST, end_time ASC").
+		// ACTIVE draws are always eligible regardless of end_time (admin controls execution).
+		// UPCOMING draws must still be in the future.
+		Where("draw_type = ? AND status IN ('ACTIVE','UPCOMING')", drawType).
+		Order("status DESC, draw_time ASC NULLS LAST, end_time ASC"). // UPCOMING before ACTIVE
 		First(&draw).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
