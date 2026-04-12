@@ -648,6 +648,43 @@ func (h *AdminHandler) GetDrawWinners(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, winners)
 }
 
+// SeedDrawEntry allows admin to manually add a user to a draw (for testing / corrections).
+// POST /api/v1/admin/draws/{id}/entries
+// Body: { "user_id": "uuid", "msisdn": "+234...", "tickets": 1 }
+func (h *AdminHandler) SeedDrawEntry(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	drawID, err := uuid.Parse(idStr)
+	if err != nil {
+		jsonError(w, "invalid draw id", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		UserID  string `json:"user_id"`
+		MSISDN  string `json:"msisdn"`
+		Tickets int    `json:"tickets"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.UserID == "" {
+		jsonError(w, "user_id required", http.StatusBadRequest)
+		return
+	}
+	userID, err := uuid.Parse(body.UserID)
+	if err != nil {
+		jsonError(w, "invalid user_id", http.StatusBadRequest)
+		return
+	}
+	if body.Tickets < 1 {
+		body.Tickets = 1
+	}
+	if body.MSISDN == "" {
+		h.db.WithContext(r.Context()).Table("users").Where("id = ?", userID).Pluck("phone_number", &body.MSISDN)
+	}
+	if err := h.drawSvc.AddEntry(r.Context(), drawID, userID, body.MSISDN, "admin_seed", 0, body.Tickets); err != nil {
+		jsonError(w, "seed failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{"status": "ok", "draw_id": drawID, "user_id": userID, "tickets": body.Tickets})
+}
+
 func (h *AdminHandler) ExportDrawEntries(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	drawID, err := uuid.Parse(idStr)

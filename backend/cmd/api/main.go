@@ -470,6 +470,7 @@ func main() {
 		mux.Handle("POST   /api/v1/admin/draws/{id}/execute",          adminAuth(http.HandlerFunc(adminH.ExecuteDraw)))
 		mux.Handle("GET    /api/v1/admin/draws/{id}/winners",          adminAuth(http.HandlerFunc(adminH.GetDrawWinners)))
 		mux.Handle("GET    /api/v1/admin/draws/{id}/export",           adminAuth(http.HandlerFunc(adminH.ExportDrawEntries)))
+		mux.Handle("POST   /api/v1/admin/draws/{id}/entries",          adminAuth(http.HandlerFunc(adminH.SeedDrawEntry)))
 		// Draw schedules (automated recurring draws)
 		mux.Handle("GET    /api/v1/admin/draw/schedule",               adminAuth(http.HandlerFunc(adminH.GetDrawSchedule)))
 		mux.Handle("POST   /api/v1/admin/draw/schedule",               adminAuth(http.HandlerFunc(adminH.CreateDrawSchedule)))
