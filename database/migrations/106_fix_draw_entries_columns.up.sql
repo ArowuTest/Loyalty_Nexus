@@ -3,7 +3,7 @@
 -- CREATE TABLE variant ran first (016 vs 060 schemas differ).
 -- Safe to run multiple times — all ADD COLUMN IF NOT EXISTS.
 
--- Core columns from migration 016 (original schema)
+-- Core columns from migration 016 (original schema) — safe to add if missing
 ALTER TABLE draw_entries
     ADD COLUMN IF NOT EXISTS msisdn        TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS entries_count INTEGER NOT NULL DEFAULT 1,
@@ -12,8 +12,7 @@ ALTER TABLE draw_entries
     ADD COLUMN IF NOT EXISTS recharge_at   TIMESTAMPTZ;
 
 -- Generated aliases added in migration 049
--- (Only add if not already generated columns — safe with IF NOT EXISTS)
--- phone_number: alias for msisdn
+-- phone_number: GENERATED ALWAYS AS (msisdn) — only add if missing
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -25,7 +24,7 @@ BEGIN
     END IF;
 END$$;
 
--- ticket_count: alias for entries_count
+-- ticket_count: GENERATED ALWAYS AS (entries_count) — only add if missing
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -43,7 +42,15 @@ ALTER TABLE draw_winners
     ADD COLUMN IF NOT EXISTS prize_value_kobo BIGINT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS status           TEXT NOT NULL DEFAULT 'PENDING_FULFILLMENT';
 
--- Back-fill phone_number for winners that have msisdn but not phone_number
-UPDATE draw_winners
-SET phone_number = msisdn
-WHERE phone_number = '' AND msisdn IS NOT NULL AND msisdn != '';
+-- Back-fill draw_winners.phone_number from msisdn only if msisdn column exists
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'draw_winners' AND column_name = 'msisdn'
+    ) THEN
+        UPDATE draw_winners
+        SET phone_number = msisdn
+        WHERE phone_number = '' AND msisdn IS NOT NULL AND msisdn != '';
+    END IF;
+END$$;
