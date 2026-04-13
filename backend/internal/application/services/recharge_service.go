@@ -221,21 +221,22 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 			qualifyingDraws, qErr := s.drawWindowSvc.ResolveQualifyingDraws(context.Background(), time.Now())
 			if qErr == nil {
 				for _, qd := range qualifyingDraws {
-					// Try full insert; fall back to minimal if optional columns don't exist
-					rawErr := dbTx.Exec(`
-						INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count, entry_source, amount, created_at)
-						VALUES (?, ?, ?, ?, ?, 'recharge', ?, ?)`,
-						uuid.New(), qd.DrawID, user.ID, user.PhoneNumber, drawEntriesEarned, amountKobo, time.Now(),
-					).Error
-					if rawErr != nil {
-						// Fallback to minimal columns
-						if err := dbTx.Exec(`
-							INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count, created_at)
-							VALUES (?, ?, ?, ?, ?, ?)`,
-							uuid.New(), qd.DrawID, user.ID, user.PhoneNumber, drawEntriesEarned, time.Now(),
-						).Error; err != nil {
-							log.Printf("[Recharge] draw entry insert failed draw=%s user=%s: %v", qd.DrawID, user.ID, err)
-						}
+					// Schema A (016+045): msisdn, entries_count, entry_source, amount
+					// Schema B (060): phone_number, ticket_count (regular columns)
+					var deErr error
+					deErr = dbTx.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count, entry_source, amount, created_at) VALUES (?, ?, ?, ?, ?, 'recharge', ?, ?)`,
+						uuid.New(), qd.DrawID, user.ID, user.PhoneNumber, drawEntriesEarned, amountKobo, time.Now()).Error
+					if deErr != nil {
+						deErr = dbTx.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+							uuid.New(), qd.DrawID, user.ID, user.PhoneNumber, drawEntriesEarned, time.Now()).Error
+					}
+					if deErr != nil {
+						// Schema B fallback
+						deErr = dbTx.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, phone_number, ticket_count, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+							uuid.New(), qd.DrawID, user.ID, user.PhoneNumber, drawEntriesEarned, time.Now()).Error
+					}
+					if deErr != nil {
+						log.Printf("[Recharge] draw entry insert failed draw=%s user=%s: %v", qd.DrawID, user.ID, deErr)
 					}
 				}
 			}

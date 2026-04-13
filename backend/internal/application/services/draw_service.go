@@ -292,10 +292,28 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 			return fmt.Errorf("draw not found or not executable: %w", err)
 		}
 
-		// 2 — load entries (select only guaranteed columns to avoid schema issues)
+		// 2 — load entries (select only universally-present columns)
+		// Schema A: msisdn + entries_count; Schema B: phone_number + ticket_count
 		var entries []DrawEntry
-		if err := tx.Select("id, draw_id, user_id, msisdn, entries_count, created_at").Where("draw_id = ?", drawID).Find(&entries).Error; err != nil {
-			return fmt.Errorf("load entries: %w", err)
+		loadErr := tx.Select("id, draw_id, user_id, msisdn, entries_count, created_at").Where("draw_id = ?", drawID).Find(&entries).Error
+		if loadErr != nil {
+			// Schema B fallback: map phone_number -> MSISDN, ticket_count -> EntriesCount
+			type entryB struct {
+				ID          string `gorm:"column:id"`
+				DrawID      string `gorm:"column:draw_id"`
+				UserID      string `gorm:"column:user_id"`
+				PhoneNumber string `gorm:"column:phone_number"`
+				TicketCount int    `gorm:"column:ticket_count"`
+			}
+			var rawB []entryB
+			if err2 := tx.Table("draw_entries").Select("id, draw_id, user_id, phone_number, ticket_count").Where("draw_id = ?", drawID).Find(&rawB).Error; err2 != nil {
+				return fmt.Errorf("load entries: %w", err2)
+			}
+			for _, e := range rawB {
+				uid, _ := uuid.Parse(e.UserID)
+				did, _ := uuid.Parse(e.DrawID)
+				entries = append(entries, DrawEntry{UserID: uid, DrawID: did, MSISDN: e.PhoneNumber, EntriesCount: e.TicketCount})
+			}
 		}
 		if len(entries) == 0 {
 			return fmt.Errorf("no entries for draw %s", drawID)
@@ -430,21 +448,35 @@ func (svc *DrawService) AddEntry(ctx context.Context, drawID, userID uuid.UUID, 
 		tickets = 1
 	}
 	now := time.Now()
-	// Try full insert first (all columns); fall back to minimal insert if columns don't exist
-	rawErr := svc.db.WithContext(ctx).Exec(`
+	// Try inserts in order of richest → minimal schema.
+	// Different deployments have different draw_entries schemas:
+	//   Schema A (016+045+049): msisdn, entries_count, entry_source, amount (phone_number/ticket_count are GENERATED)
+	//   Schema B (060):         phone_number, ticket_count (regular columns, no msisdn, no entry_source)
+	var insertErr error
+	// Attempt 1: Schema A — full columns including entry_source
+	insertErr = svc.db.WithContext(ctx).Exec(`
 		INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count, entry_source, amount, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		uuid.New(), drawID, userID, phone, tickets, source, amount, now,
 	).Error
-	if rawErr != nil {
-		// Fallback: minimal columns that exist in ALL known schema variants
-		if err := svc.db.WithContext(ctx).Exec(`
+	if insertErr != nil {
+		// Attempt 2: Schema A minimal (no entry_source/amount)
+		insertErr = svc.db.WithContext(ctx).Exec(`
 			INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count, created_at)
 			VALUES (?, ?, ?, ?, ?, ?)`,
 			uuid.New(), drawID, userID, phone, tickets, now,
-		).Error; err != nil {
-			return fmt.Errorf("add entry: %w", err)
-		}
+		).Error
+	}
+	if insertErr != nil {
+		// Attempt 3: Schema B (migration 060) — phone_number + ticket_count are regular columns
+		insertErr = svc.db.WithContext(ctx).Exec(`
+			INSERT INTO draw_entries (id, draw_id, user_id, phone_number, ticket_count, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			uuid.New(), drawID, userID, phone, tickets, now,
+		).Error
+	}
+	if insertErr != nil {
+		return fmt.Errorf("add entry: %w", insertErr)
 	}
 	// Update total_entries on the draw
 	return svc.db.Exec("UPDATE draws SET total_entries = total_entries + ? WHERE id = ?", tickets, drawID).Error
