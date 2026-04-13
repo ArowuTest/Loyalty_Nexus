@@ -67,18 +67,16 @@ type DrawEntry struct {
 
 func (DrawEntry) TableName() string { return "draw_entries" }
 
-// DrawWinner mirrors draw_winners table.
+// DrawWinner mirrors draw_winners table (schema from migration 060).
 type DrawWinner struct {
-	ID          uuid.UUID  `gorm:"column:id;primaryKey"`
-	DrawID      uuid.UUID  `gorm:"column:draw_id;index"`
-	UserID      uuid.UUID  `gorm:"column:user_id;index"`
-	MSISDN      string     `gorm:"column:msisdn"`
-	PhoneNumber string     `gorm:"-"` // alias for msisdn — excluded from GORM ops
-	Position    int        `gorm:"column:position"`
-	PrizeName   string     `gorm:"column:prize_name"`
-	PrizeValue  int64      `gorm:"column:prize_value"`
-	ClaimStatus string     `gorm:"column:claim_status"`
-	CreatedAt   time.Time  `gorm:"column:created_at;autoCreateTime"`
+	ID             uuid.UUID  `gorm:"column:id;primaryKey"`
+	DrawID         uuid.UUID  `gorm:"column:draw_id;index"`
+	UserID         uuid.UUID  `gorm:"column:user_id;index"`
+	PhoneNumber    string     `gorm:"column:phone_number"`
+	Position       int        `gorm:"column:position"`
+	PrizeValueKobo int64      `gorm:"column:prize_value_kobo"`
+	Status         string     `gorm:"column:status"`
+	CreatedAt      time.Time  `gorm:"column:created_at;autoCreateTime"`
 }
 
 func (DrawWinner) TableName() string { return "draw_winners" }
@@ -352,15 +350,14 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 		position := 1
 		for _, w := range mainWinners {
 			row := DrawWinner{
-				ID:          uuid.New(),
-				DrawID:      drawID,
-				UserID:      w.UserID,
-				MSISDN:      w.MSISDN,
-				Position:    position,
-				PrizeName:   "Cash Prize",
-				PrizeValue:  int64(draw.PrizePool * 100), // convert to kobo
-				ClaimStatus: "PENDING",
-				CreatedAt:   now,
+				ID:             uuid.New(),
+				DrawID:         drawID,
+				UserID:         w.UserID,
+				PhoneNumber:    w.MSISDN,
+				Position:       position,
+				PrizeValueKobo: int64(draw.PrizePool * 100), // convert to kobo
+				Status:         "PENDING_FULFILLMENT",
+				CreatedAt:      now,
 			}
 			if err := tx.Create(&row).Error; err != nil {
 				return fmt.Errorf("insert winner position %d: %w", position, err)
@@ -369,15 +366,14 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 		}
 		for _, w := range runnerUps {
 			row := DrawWinner{
-				ID:          uuid.New(),
-				DrawID:      drawID,
-				UserID:      w.UserID,
-				MSISDN:      w.MSISDN,
-				Position:    position,
-				PrizeName:   "Runner-Up",
-				PrizeValue:  0,
-				ClaimStatus: "PENDING",
-				CreatedAt:   now,
+				ID:             uuid.New(),
+				DrawID:         drawID,
+				UserID:         w.UserID,
+				PhoneNumber:    w.MSISDN,
+				Position:       position,
+				PrizeValueKobo: 0,
+				Status:         "RUNNER_UP",
+				CreatedAt:      now,
 			}
 			if err := tx.Create(&row).Error; err != nil {
 				return fmt.Errorf("insert runner-up position %d: %w", position, err)
@@ -486,12 +482,12 @@ func (svc *DrawService) GetDrawWinners(ctx context.Context, drawID uuid.UUID) ([
 			ID:          w.ID,
 			DrawID:      w.DrawID,
 			UserID:      w.UserID,
-			PhoneNumber: w.MSISDN, // MSISDN is the actual phone column
+			PhoneNumber: w.PhoneNumber,
 			Position:    w.Position,
-			PrizeType:   w.PrizeName,
-			PrizeValue:  float64(w.PrizeValue) / 100, // convert kobo → naira
-			IsRunnerUp:  w.PrizeName == "Runner-Up",
-			Status:      w.ClaimStatus,
+			PrizeType:   "CASH",
+			PrizeValue:  float64(w.PrizeValueKobo) / 100, // convert kobo → naira
+			IsRunnerUp:  w.Status == "RUNNER_UP",
+			Status:      w.Status,
 			WonAt:       w.CreatedAt,
 		}
 	}

@@ -55,7 +55,6 @@ func (h *DrawHandler) GetMyWins(w http.ResponseWriter, r *http.Request) {
 		DrawID      string    `json:"draw_id"`
 		DrawName    string    `json:"draw_name"`
 		Position    int       `json:"position"`
-		PrizeName   string    `json:"prize_name"`
 		PrizeValue  float64   `json:"prize_value"`
 		IsRunnerUp  bool      `json:"is_runner_up"`
 		WonAt       time.Time `json:"won_at"`
@@ -63,9 +62,9 @@ func (h *DrawHandler) GetMyWins(w http.ResponseWriter, r *http.Request) {
 
 	var wins []myWin
 	if err := h.drawSvc.DB().WithContext(r.Context()).Raw(`
-		SELECT dw.draw_id::text AS draw_id, d.name as draw_name, dw.position, dw.prize_name,
-		       dw.prize_value::float / 100.0 as prize_value,
-		       (dw.prize_name = 'Runner-Up') as is_runner_up,
+		SELECT dw.draw_id::text AS draw_id, d.name as draw_name, dw.position,
+		       dw.prize_value_kobo::float / 100.0 as prize_value,
+		       (dw.status = 'RUNNER_UP') as is_runner_up,
 		       dw.created_at as won_at
 		FROM draw_winners dw
 		JOIN draws d ON d.id = dw.draw_id
