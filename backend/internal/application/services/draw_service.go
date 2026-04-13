@@ -285,19 +285,6 @@ func (svc *DrawService) DeleteDraw(ctx context.Context, drawID uuid.UUID) error 
 
 // ExecuteDraw selects winners for a draw using CSPRNG Fisher-Yates (SEC-009).
 func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error {
-	// Detect schema BEFORE the transaction to avoid poisoning it on a failed SELECT
-	// Schema A (016+045+049): has 'msisdn' column
-	// Schema B (060): has 'phone_number'+'ticket_count' as regular writable columns
-	// Probe draw_entries schema using a safe column check.
-	// If msisdn column exists -> Schema A; else -> Schema B (migration 060).
-	// Use a fresh DB session for the probe to avoid poisoning the main connection.
-	schemaA := true
-	probeDB := svc.db.Session(&gorm.Session{NewDB: true})
-	var probeRows []map[string]interface{}
-	if err := probeDB.Raw("SELECT msisdn FROM draw_entries WHERE 1=0").Scan(&probeRows).Error; err != nil {
-		schemaA = false
-	}
-
 	return svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1 — fetch draw
 		var draw DrawRecord
@@ -305,30 +292,24 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 			return fmt.Errorf("draw not found or not executable: %w", err)
 		}
 
-		// 2 — load entries using detected schema (avoids aborting the transaction)
+		// 2 — load entries using phone_number + ticket_count.
+		// These columns exist in BOTH schema variants:
+		//   Schema A (016+049): GENERATED ALWAYS AS (msisdn) / GENERATED ALWAYS AS (entries_count)
+		//   Schema B (060):     Regular writable columns
+		// Using them avoids any schema-detection probe that could poison the transaction.
+		type entryRow struct {
+			UserID      string `gorm:"column:user_id"`
+			PhoneNumber string `gorm:"column:phone_number"`
+			TicketCount int    `gorm:"column:ticket_count"`
+		}
+		var rawEntries []entryRow
+		if err := tx.Table("draw_entries").Select("user_id, phone_number, ticket_count").Where("draw_id = ?", drawID).Find(&rawEntries).Error; err != nil {
+			return fmt.Errorf("load entries: %w", err)
+		}
 		var entries []DrawEntry
-		if schemaA {
-			if err := tx.Select("id, draw_id, user_id, msisdn, entries_count, created_at").Where("draw_id = ?", drawID).Find(&entries).Error; err != nil {
-				return fmt.Errorf("load entries: %w", err)
-			}
-		} else {
-			// Schema B: phone_number + ticket_count are regular columns
-			type entryB struct {
-				ID          string `gorm:"column:id"`
-				DrawID      string `gorm:"column:draw_id"`
-				UserID      string `gorm:"column:user_id"`
-				PhoneNumber string `gorm:"column:phone_number"`
-				TicketCount int    `gorm:"column:ticket_count"`
-			}
-			var rawB []entryB
-			if err := tx.Table("draw_entries").Select("id, draw_id, user_id, phone_number, ticket_count").Where("draw_id = ?", drawID).Find(&rawB).Error; err != nil {
-				return fmt.Errorf("load entries: %w", err)
-			}
-			for _, e := range rawB {
-				uid, _ := uuid.Parse(e.UserID)
-				did, _ := uuid.Parse(e.DrawID)
-				entries = append(entries, DrawEntry{UserID: uid, DrawID: did, MSISDN: e.PhoneNumber, EntriesCount: e.TicketCount})
-			}
+		for _, e := range rawEntries {
+			uid, _ := uuid.Parse(e.UserID)
+			entries = append(entries, DrawEntry{UserID: uid, MSISDN: e.PhoneNumber, EntriesCount: e.TicketCount})
 		}
 		if len(entries) == 0 {
 			return fmt.Errorf("no entries for draw %s", drawID)
