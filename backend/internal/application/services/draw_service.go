@@ -53,15 +53,16 @@ func (DrawRecord) TableName() string { return "draws" }
 
 // DrawEntry mirrors draw_entries table.
 type DrawEntry struct {
-	ID          uuid.UUID  `gorm:"column:id;primaryKey"`
-	DrawID      uuid.UUID  `gorm:"column:draw_id;index"`
-	UserID      uuid.UUID  `gorm:"column:user_id;index"`
-	PhoneNumber string     `gorm:"column:phone_number"`  // live schema uses phone_number (migration 060)
-	EntrySource string     `gorm:"column:entry_source"` // recharge | subscription | bonus
-	Amount      int64      `gorm:"column:amount"`        // kobo
-	EntriesCount int       `gorm:"column:entries_count"`
-	TicketCount  int       `gorm:"-"` // GENERATED ALWAYS AS (entries_count) — read-only alias, never write
-	CreatedAt   *time.Time `gorm:"column:created_at;autoCreateTime"`
+	ID           uuid.UUID  `gorm:"column:id;primaryKey"`
+	DrawID       uuid.UUID  `gorm:"column:draw_id;index"`
+	UserID       uuid.UUID  `gorm:"column:user_id;index"`
+	MSISDN       string     `gorm:"column:msisdn"`        // writable column (migration 016)
+	PhoneNumber  string     `gorm:"-"`                    // GENERATED ALWAYS AS (msisdn) — never write
+	EntrySource  string     `gorm:"column:entry_source"`  // recharge | subscription | bonus
+	Amount       int64      `gorm:"column:amount"`        // kobo
+	EntriesCount int        `gorm:"column:entries_count"` // writable
+	TicketCount  int        `gorm:"-"`                    // GENERATED ALWAYS AS (entries_count) — never write
+	CreatedAt    *time.Time `gorm:"column:created_at;autoCreateTime"`
 }
 
 func (DrawEntry) TableName() string { return "draw_entries" }
@@ -352,7 +353,7 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 				ID:             uuid.New(),
 				DrawID:         drawID,
 				UserID:         w.UserID,
-				PhoneNumber:    w.PhoneNumber,
+				PhoneNumber:    w.MSISDN,
 				Position:       position,
 				PrizeValueKobo: int64(draw.PrizePool * 100), // convert to kobo
 				Status:         "PENDING_FULFILLMENT",
@@ -368,7 +369,7 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 				ID:             uuid.New(),
 				DrawID:         drawID,
 				UserID:         w.UserID,
-				PhoneNumber:    w.PhoneNumber,
+				PhoneNumber:    w.MSISDN,
 				Position:       position,
 				PrizeValueKobo: 0,
 				Status:         "RUNNER_UP",
@@ -430,7 +431,7 @@ func (svc *DrawService) AddEntry(ctx context.Context, drawID, userID uuid.UUID, 
 		ID:           uuid.New(),
 		DrawID:       drawID,
 		UserID:       userID,
-		PhoneNumber:  phone,
+		MSISDN:       phone,
 		EntrySource:  source,
 		Amount:       amount,
 		EntriesCount: tickets,

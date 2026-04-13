@@ -48,7 +48,7 @@ func setupDrawDB(t *testing.T) *gorm.DB {
 		id TEXT PRIMARY KEY,
 		draw_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,
-		phone_number TEXT NOT NULL DEFAULT '',
+		msisdn TEXT NOT NULL DEFAULT '',
 		entry_source TEXT NOT NULL DEFAULT 'recharge',
 		amount INTEGER NOT NULL DEFAULT 0,
 		entries_count INTEGER NOT NULL DEFAULT 1,
@@ -153,7 +153,7 @@ func TestDraw_ExecuteDraw_SelectsWinners(t *testing.T) {
 	// Seed 10 entries (more than winner_count=3)
 	for i := 0; i < 10; i++ {
 		uid := uuid.New()
-		db.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, phone_number, entries_count)
+		db.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count)
 			VALUES (?,?,?,?,?)`,
 			uuid.New().String(), drawID.String(), uid.String(),
 			"0801234"+uid.String()[:4], 1+i%3)
@@ -192,7 +192,7 @@ func TestDraw_ExecuteDraw_NoDuplicateWinners(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		uid := uuid.New()
 		userIDs[i] = uid.String()
-		db.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, phone_number) VALUES (?,?,?,?)`,
+		db.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, msisdn) VALUES (?,?,?,?)`,
 			uuid.New().String(), drawID.String(), uid.String(), "0810000"+uid.String()[:4])
 	}
 
