@@ -221,16 +221,16 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 			qualifyingDraws, qErr := s.drawWindowSvc.ResolveQualifyingDraws(context.Background(), time.Now())
 			if qErr == nil {
 				for _, qd := range qualifyingDraws {
-					entry := map[string]interface{}{
-						"id":           uuid.New(),
-						"draw_id":      qd.DrawID,
-						"user_id":      user.ID,
-						"msisdn":       user.PhoneNumber,
-						"entry_source": "recharge",
-						"amount":       amountKobo,
-						"entries_count": drawEntriesEarned,
-						"created_at":   time.Now(),
-					}
+				entry := map[string]interface{}{
+					"id":           uuid.New(),
+					"draw_id":      qd.DrawID,
+					"user_id":      user.ID,
+					"phone_number": user.PhoneNumber,
+					"entry_source": "recharge",
+					"amount":       amountKobo,
+					"entries_count": drawEntriesEarned,
+					"created_at":   time.Now(),
+				}
 					if err := dbTx.Table("draw_entries").Create(&entry).Error; err != nil {
 						log.Printf("[Recharge] draw entry insert failed draw=%s user=%s: %v", qd.DrawID, user.ID, err)
 						// non-fatal — continue processing
