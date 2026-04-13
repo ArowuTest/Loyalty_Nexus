@@ -288,10 +288,13 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 	// Detect schema BEFORE the transaction to avoid poisoning it on a failed SELECT
 	// Schema A (016+045+049): has 'msisdn' column
 	// Schema B (060): has 'phone_number'+'ticket_count' as regular writable columns
-	// Use a probe SELECT (works in both Postgres and SQLite unlike information_schema)
+	// Probe draw_entries schema using a safe column check.
+	// If msisdn column exists -> Schema A; else -> Schema B (migration 060).
+	// Use a fresh DB session for the probe to avoid poisoning the main connection.
 	schemaA := true
+	probeDB := svc.db.Session(&gorm.Session{NewDB: true})
 	var probeRows []map[string]interface{}
-	if err := svc.db.Raw("SELECT msisdn FROM draw_entries WHERE 1=0").Scan(&probeRows).Error; err != nil {
+	if err := probeDB.Raw("SELECT msisdn FROM draw_entries WHERE 1=0").Scan(&probeRows).Error; err != nil {
 		schemaA = false
 	}
 
