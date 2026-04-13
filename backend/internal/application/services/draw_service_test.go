@@ -58,11 +58,10 @@ func setupDrawDB(t *testing.T) *gorm.DB {
 		id TEXT PRIMARY KEY,
 		draw_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,
-		msisdn TEXT NOT NULL DEFAULT '',
+		phone_number TEXT NOT NULL DEFAULT '',
 		position INTEGER NOT NULL,
-		prize_name TEXT NOT NULL DEFAULT '',
-		prize_value INTEGER NOT NULL DEFAULT 0,
-		claim_status TEXT NOT NULL DEFAULT 'PENDING_FULFILLMENT',
+		prize_value_kobo INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL DEFAULT 'PENDING_FULFILLMENT',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS network_configs (
