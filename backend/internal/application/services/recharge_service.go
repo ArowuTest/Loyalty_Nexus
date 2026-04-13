@@ -221,19 +221,21 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 			qualifyingDraws, qErr := s.drawWindowSvc.ResolveQualifyingDraws(context.Background(), time.Now())
 			if qErr == nil {
 				for _, qd := range qualifyingDraws {
-				entry := map[string]interface{}{
-					"id":            uuid.New(),
-					"draw_id":       qd.DrawID,
-					"user_id":       user.ID,
-					"msisdn":        user.PhoneNumber,
-					"entry_source":  "recharge",
-					"amount":        amountKobo,
-					"entries_count": drawEntriesEarned,
-					"created_at":    time.Now(),
-				}
-					if err := dbTx.Table("draw_entries").Create(&entry).Error; err != nil {
-						log.Printf("[Recharge] draw entry insert failed draw=%s user=%s: %v", qd.DrawID, user.ID, err)
-						// non-fatal — continue processing
+					// Try full insert; fall back to minimal if optional columns don't exist
+					rawErr := dbTx.Exec(`
+						INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count, entry_source, amount, created_at)
+						VALUES (?, ?, ?, ?, ?, 'recharge', ?, ?)`,
+						uuid.New(), qd.DrawID, user.ID, user.PhoneNumber, drawEntriesEarned, amountKobo, time.Now(),
+					).Error
+					if rawErr != nil {
+						// Fallback to minimal columns
+						if err := dbTx.Exec(`
+							INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count, created_at)
+							VALUES (?, ?, ?, ?, ?, ?)`,
+							uuid.New(), qd.DrawID, user.ID, user.PhoneNumber, drawEntriesEarned, time.Now(),
+						).Error; err != nil {
+							log.Printf("[Recharge] draw entry insert failed draw=%s user=%s: %v", qd.DrawID, user.ID, err)
+						}
 					}
 				}
 			}

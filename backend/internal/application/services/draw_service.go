@@ -58,8 +58,8 @@ type DrawEntry struct {
 	UserID       uuid.UUID  `gorm:"column:user_id;index"`
 	MSISDN       string     `gorm:"column:msisdn"`        // writable column (migration 016)
 	PhoneNumber  string     `gorm:"-"`                    // GENERATED ALWAYS AS (msisdn) — never write
-	EntrySource  string     `gorm:"column:entry_source"`  // recharge | subscription | bonus
-	Amount       int64      `gorm:"column:amount"`        // kobo
+	EntrySource  string     `gorm:"-"`                    // may not exist in all schemas — use raw SQL
+	Amount       int64      `gorm:"-"`                    // may not exist in all schemas — use raw SQL
 	EntriesCount int        `gorm:"column:entries_count"` // writable
 	TicketCount  int        `gorm:"-"`                    // GENERATED ALWAYS AS (entries_count) — never write
 	CreatedAt    *time.Time `gorm:"column:created_at;autoCreateTime"`
@@ -292,9 +292,9 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 			return fmt.Errorf("draw not found or not executable: %w", err)
 		}
 
-		// 2 — load entries
+		// 2 — load entries (select only guaranteed columns to avoid schema issues)
 		var entries []DrawEntry
-		if err := tx.Where("draw_id = ?", drawID).Find(&entries).Error; err != nil {
+		if err := tx.Select("id, draw_id, user_id, msisdn, entries_count, created_at").Where("draw_id = ?", drawID).Find(&entries).Error; err != nil {
 			return fmt.Errorf("load entries: %w", err)
 		}
 		if len(entries) == 0 {
@@ -422,23 +422,29 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 // ─── Entries ──────────────────────────────────────────────────────────────
 
 // AddEntry adds a single draw entry for a user.
+// Uses raw INSERT to handle schema variance across deployments:
+//   - Guaranteed columns (migration 016 + 060): id, draw_id, user_id, msisdn, entries_count, created_at
+//   - Optional columns (migration 045+): entry_source, amount
 func (svc *DrawService) AddEntry(ctx context.Context, drawID, userID uuid.UUID, phone, source string, amount int64, tickets int) error {
 	if tickets < 1 {
 		tickets = 1
 	}
 	now := time.Now()
-	entry := DrawEntry{
-		ID:           uuid.New(),
-		DrawID:       drawID,
-		UserID:       userID,
-		MSISDN:       phone,
-		EntrySource:  source,
-		Amount:       amount,
-		EntriesCount: tickets,
-		CreatedAt:    &now,
-	}
-	if err := svc.db.Create(&entry).Error; err != nil {
-		return fmt.Errorf("add entry: %w", err)
+	// Try full insert first (all columns); fall back to minimal insert if columns don't exist
+	rawErr := svc.db.WithContext(ctx).Exec(`
+		INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count, entry_source, amount, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		uuid.New(), drawID, userID, phone, tickets, source, amount, now,
+	).Error
+	if rawErr != nil {
+		// Fallback: minimal columns that exist in ALL known schema variants
+		if err := svc.db.WithContext(ctx).Exec(`
+			INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			uuid.New(), drawID, userID, phone, tickets, now,
+		).Error; err != nil {
+			return fmt.Errorf("add entry: %w", err)
+		}
 	}
 	// Update total_entries on the draw
 	return svc.db.Exec("UPDATE draws SET total_entries = total_entries + ? WHERE id = ?", tickets, drawID).Error
