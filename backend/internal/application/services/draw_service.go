@@ -285,6 +285,16 @@ func (svc *DrawService) DeleteDraw(ctx context.Context, drawID uuid.UUID) error 
 
 // ExecuteDraw selects winners for a draw using CSPRNG Fisher-Yates (SEC-009).
 func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error {
+	// Detect schema BEFORE the transaction to avoid poisoning it on a failed SELECT
+	// Schema A (016+045+049): has 'msisdn' column
+	// Schema B (060): has 'phone_number'+'ticket_count' as regular writable columns
+	schemaA := true
+	var colCount int64
+	svc.db.Raw("SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'draw_entries' AND column_name = 'msisdn'").Scan(&colCount)
+	if colCount == 0 {
+		schemaA = false
+	}
+
 	return svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1 — fetch draw
 		var draw DrawRecord
@@ -292,12 +302,14 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 			return fmt.Errorf("draw not found or not executable: %w", err)
 		}
 
-		// 2 — load entries (select only universally-present columns)
-		// Schema A: msisdn + entries_count; Schema B: phone_number + ticket_count
+		// 2 — load entries using detected schema (avoids aborting the transaction)
 		var entries []DrawEntry
-		loadErr := tx.Select("id, draw_id, user_id, msisdn, entries_count, created_at").Where("draw_id = ?", drawID).Find(&entries).Error
-		if loadErr != nil {
-			// Schema B fallback: map phone_number -> MSISDN, ticket_count -> EntriesCount
+		if schemaA {
+			if err := tx.Select("id, draw_id, user_id, msisdn, entries_count, created_at").Where("draw_id = ?", drawID).Find(&entries).Error; err != nil {
+				return fmt.Errorf("load entries: %w", err)
+			}
+		} else {
+			// Schema B: phone_number + ticket_count are regular columns
 			type entryB struct {
 				ID          string `gorm:"column:id"`
 				DrawID      string `gorm:"column:draw_id"`
@@ -306,8 +318,8 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 				TicketCount int    `gorm:"column:ticket_count"`
 			}
 			var rawB []entryB
-			if err2 := tx.Table("draw_entries").Select("id, draw_id, user_id, phone_number, ticket_count").Where("draw_id = ?", drawID).Find(&rawB).Error; err2 != nil {
-				return fmt.Errorf("load entries: %w", err2)
+			if err := tx.Table("draw_entries").Select("id, draw_id, user_id, phone_number, ticket_count").Where("draw_id = ?", drawID).Find(&rawB).Error; err != nil {
+				return fmt.Errorf("load entries: %w", err)
 			}
 			for _, e := range rawB {
 				uid, _ := uuid.Parse(e.UserID)
