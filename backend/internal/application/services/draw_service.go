@@ -288,10 +288,10 @@ func (svc *DrawService) ExecuteDraw(ctx context.Context, drawID uuid.UUID) error
 	// Detect schema BEFORE the transaction to avoid poisoning it on a failed SELECT
 	// Schema A (016+045+049): has 'msisdn' column
 	// Schema B (060): has 'phone_number'+'ticket_count' as regular writable columns
+	// Use a probe SELECT (works in both Postgres and SQLite unlike information_schema)
 	schemaA := true
-	var colCount int64
-	svc.db.Raw("SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'draw_entries' AND column_name = 'msisdn'").Scan(&colCount)
-	if colCount == 0 {
+	var probeRows []map[string]interface{}
+	if err := svc.db.Raw("SELECT msisdn FROM draw_entries WHERE 1=0").Scan(&probeRows).Error; err != nil {
 		schemaA = false
 	}
 
