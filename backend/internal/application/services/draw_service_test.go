@@ -49,9 +49,11 @@ func setupDrawDB(t *testing.T) *gorm.DB {
 		draw_id TEXT NOT NULL,
 		user_id TEXT NOT NULL,
 		msisdn TEXT NOT NULL DEFAULT '',
+		phone_number TEXT NOT NULL DEFAULT '',
 		entry_source TEXT NOT NULL DEFAULT 'recharge',
 		amount INTEGER NOT NULL DEFAULT 0,
 		entries_count INTEGER NOT NULL DEFAULT 1,
+		ticket_count INTEGER NOT NULL DEFAULT 1,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS draw_winners (
@@ -153,10 +155,11 @@ func TestDraw_ExecuteDraw_SelectsWinners(t *testing.T) {
 	// Seed 10 entries (more than winner_count=3)
 	for i := 0; i < 10; i++ {
 		uid := uuid.New()
-		db.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, msisdn, entries_count)
-			VALUES (?,?,?,?,?)`,
-			uuid.New().String(), drawID.String(), uid.String(),
-			"0801234"+uid.String()[:4], 1+i%3)
+		phone := "0801234" + uid.String()[:4]
+		count := 1 + i%3
+		db.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, msisdn, phone_number, entries_count, ticket_count)
+			VALUES (?,?,?,?,?,?,?)`,
+			uuid.New().String(), drawID.String(), uid.String(), phone, phone, count, count)
 	}
 
 	err := svc.ExecuteDraw(context.Background(), drawID)
@@ -192,8 +195,9 @@ func TestDraw_ExecuteDraw_NoDuplicateWinners(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		uid := uuid.New()
 		userIDs[i] = uid.String()
-		db.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, msisdn) VALUES (?,?,?,?)`,
-			uuid.New().String(), drawID.String(), uid.String(), "0810000"+uid.String()[:4])
+		phone2 := "0810000" + uid.String()[:4]
+		db.Exec(`INSERT INTO draw_entries (id, draw_id, user_id, msisdn, phone_number, entries_count, ticket_count) VALUES (?,?,?,?,?,?,?)`,
+			uuid.New().String(), drawID.String(), uid.String(), phone2, phone2, 1, 1)
 	}
 
 	_ = svc.ExecuteDraw(context.Background(), drawID)
