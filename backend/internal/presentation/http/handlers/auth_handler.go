@@ -4,9 +4,36 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"loyalty-nexus/internal/application/services"
 )
+
+// normalizeE164NG converts any Nigerian phone format to canonical E.164 (+234XXXXXXXXX).
+//
+// Accepted inputs (all map to the same output, e.g. +2348027000000):
+//   - +2348027000000   → +2348027000000  (already E.164, returned as-is)
+//   - 2348027000000    → +2348027000000  (international without +)
+//   - 08027000000      → +2348027000000  (local 0XX format)
+//
+// Any other format is returned stripped of spaces and dashes but otherwise unchanged.
+func normalizeE164NG(p string) string {
+	p = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(p, " ", ""), "-", ""))
+	if strings.HasPrefix(p, "+234") {
+		// Already canonical E.164
+		return p
+	}
+	if strings.HasPrefix(p, "234") && len(p) >= 13 {
+		// International without leading +
+		return "+" + p
+	}
+	if strings.HasPrefix(p, "0") && len(p) == 11 {
+		// Local Nigerian format: 08XXXXXXXXX → +2348XXXXXXXXX
+		return "+234" + p[1:]
+	}
+	// Unknown format — return as-is so downstream phoneVariants still handles it
+	return p
+}
 
 type AuthHandler struct {
 	authSvc *services.AuthService
@@ -36,11 +63,12 @@ func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
 	if req.Purpose == "" {
 		req.Purpose = "login"
 	}
+	// Normalise to E.164 before any DB/OTP operation so every new account
+	// is created with the canonical "+234…" format and no duplicates arise.
+	req.PhoneNumber = normalizeE164NG(req.PhoneNumber)
+
 	devCode, err := h.authSvc.SendOTP(r.Context(), req.PhoneNumber, req.Purpose)
 	if err != nil {
-		// Surface the actual error so the frontend can show a meaningful message.
-		// Rate-limit errors get 429; everything else gets 400 (client-side issue)
-		// or 500 for genuine server failures.
 		statusCode := http.StatusBadRequest
 		msg := err.Error()
 		if errors.Is(err, services.ErrRateLimitExceeded) {
@@ -69,6 +97,10 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	if req.Purpose == "" {
 		req.Purpose = "login"
 	}
+	// Normalise to E.164 here too — must match the format used in SendOTP so the
+	// OTP lookup (FindLatestPendingOTP WHERE phone_number = ?) hits the right row.
+	req.PhoneNumber = normalizeE164NG(req.PhoneNumber)
+
 	token, isNew, err := h.authSvc.VerifyOTP(r.Context(), req.PhoneNumber, req.Code, req.Purpose)
 	if err != nil {
 		statusCode := http.StatusUnauthorized
@@ -79,8 +111,7 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"token":    token,
+		"token":       token,
 		"is_new_user": isNew,
 	})
 }
-

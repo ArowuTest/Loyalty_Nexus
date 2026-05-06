@@ -21,6 +21,8 @@ interface Wallet {
 interface AppState {
   token: string | null;
   user: User | null;
+  // wallet is intentionally NOT persisted — it is always fetched live from the
+  // API via SWR so that stale cached balances are never shown to users.
   wallet: Wallet | null;
   isAuthenticated: boolean;
   _hasHydrated: boolean;
@@ -36,7 +38,7 @@ export const useStore = create<AppState>()(
     (set) => ({
       token: null,
       user: null,
-      wallet: null,
+      wallet: null,           // runtime-only; cleared on every cold start
       isAuthenticated: false,
       _hasHydrated: false,
       setToken: (token) => set({ token, isAuthenticated: true }),
@@ -47,23 +49,29 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "nexus-store",
+      // ⚠️  wallet is deliberately excluded from this list.
+      // Only the auth token and lightweight user profile are persisted.
+      // Wallet balances (pulse_points, spin_credits, etc.) must always be
+      // fetched fresh from GET /api/v1/user/wallet to avoid stale-cache bugs
+      // where a user sees 0 points after an admin top-up.
       partialize: (state) => ({
         token: state.token,
         user: state.user,
-        wallet: state.wallet,
         isAuthenticated: state.isAuthenticated,
       }),
       onRehydrateStorage: () => (state) => {
-        // After localStorage hydration, mark store as ready and fix any stale flags
+        // After localStorage hydration, mark store as ready and fix any stale flags.
         if (state) {
           if (state.token && !state.isAuthenticated) {
             state.isAuthenticated = true;
           }
           // Sync the API client token so requests work immediately after page reload
-          // without waiting for a component to call api.setToken() manually
+          // without waiting for a component to call api.setToken() manually.
           if (state.token) {
             api.setToken(state.token);
           }
+          // Ensure wallet always starts null on rehydration — SWR will populate it.
+          state.wallet = null;
           state._hasHydrated = true;
         }
       },
