@@ -556,8 +556,8 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 		// Step 1: Live search (returns "" gracefully if key not set)
 		searchResults := o.searchTavily(ctx, req.Prompt, numResults)
 
-		// Step 2: Build user prompt — inject search results above the user question
-		augmentedPrompt := req.Prompt
+		// Step 2: Build augmented prompt — inject search results or honest fallback note
+		var augmentedPrompt string
 		if searchResults != "" {
 			augmentedPrompt = searchResults + "\n\nUser question: " + req.Prompt
 		} else {
