@@ -877,6 +877,22 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 		return nil, fmt.Errorf("photo-editor: all providers failed: %w", err)
 
 	default: // ai-photo — also handles ai-photo with reference image (Whisk-style)
+		// Enrich basic prompts with quality modifiers for FLUX-realism.
+		// Only append if the user hasn't already included quality keywords.
+		qualityKeywords := []string{"photo", "realistic", "4k", "8k", "hd", "cinematic", "detailed",
+			"portrait", "professional", "ultra", "sharp", "raw", "shot", "film"}
+		promptLower := strings.ToLower(prompt)
+		hasQualityKw := false
+		for _, kw := range qualityKeywords {
+			if strings.Contains(promptLower, kw) {
+				hasQualityKw = true
+				break
+			}
+		}
+		if !hasQualityKw && len(prompt) < 120 {
+			// Append quality modifiers: photorealistic, professional photography style
+			prompt = prompt + ", photorealistic, professional photography, sharp focus, high detail, natural lighting"
+		}
 		// If a reference image is provided, route to Flux Pro 1.1 Ultra for image-guided generation
 		if env.ImageURL != "" {
 			if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
@@ -1183,14 +1199,40 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		if imgURL == "" {
 			return nil, fmt.Errorf("video-cinematic: image_url is required")
 		}
+
+		// Tier 0: Grok Imagine image-to-video — fastest (~30-60s), top quality, native audio
+		if o.grokClient != nil {
+			duration := env.Duration
+			if duration <= 0 {
+				duration = 6
+			}
+			ar := env.AspectRatio
+			if ar == "" {
+				ar = "16:9"
+			}
+			grokReq := external.GrokVideoRequest{
+				Prompt:      motionPrompt,
+				ImageURL:    imgURL,
+				Duration:    duration,
+				AspectRatio: ar,
+				Resolution:  "720p",
+			}
+			if vidURL, err := o.grokClient.GenerateVideo(ctx, grokReq); err == nil {
+				costMicros := 50000 * duration
+				return &studioProviderResult{OutputURL: vidURL, Provider: "grok/imagine-i2v", CostMicros: costMicros}, nil
+			} else {
+				log.Printf("[AIStudio] Grok i2v failed for video-cinematic: %v — trying Pollinations", err)
+			}
+		}
+
 		// Tier 1: wan-fast (Wan 2.2) — FREE, 91.4% success; audio=true enables ambient sound
-		vidURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imgURL, motionPrompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
+		vidURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imgURL, motionPrompt, 300, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 		}
 		log.Printf("[AIStudio] wan-fast failed for video-cinematic: %v — trying p-video", err)
 		// Tier 2: p-video (Pruna p-video) — FREE, 100% success; audio=true enables ambient sound
-		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", imgURL, motionPrompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
+		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", imgURL, motionPrompt, 300, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 		}
@@ -1252,13 +1294,13 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		}
 		log.Printf("[AIStudio] Veo failed for video-veo: %v — falling back to wan-fast (FREE)", err)
 		// Fallback 1: wan-fast text-to-video (FREE) — NOT seedance (also paid); audio=true
-		vidURL, err = o.callPollinationsVideoModel(ctx, "wan-fast", "", prompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
+		vidURL, err = o.callPollinationsVideoModel(ctx, "wan-fast", "", prompt, 300, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 		}
 		log.Printf("[AIStudio] wan-fast fallback failed for video-veo: %v — trying p-video", err)
 		// Fallback 2: p-video (Pruna p-video) — FREE, 100% success; audio=true
-		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", "", prompt, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
+		vidURL, err = o.callPollinationsVideoModel(ctx, "p-video", "", prompt, 300, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 		}
@@ -1339,16 +1381,18 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 	// NOTE: seedance is PAID (1.8 pollen/M) — never use as a free fallback
 	motionDesc := o.enhanceVideoPrompt(ctx, env.Prompt)
 	if motionDesc == "" {
-		motionDesc = "animate this image with subtle cinematic motion, smooth camera movement, natural lighting"
+		motionDesc = "animate this image with natural, cinematic motion — gentle parallax effect, " +
+			"subtle environmental movement (leaves, water, clouds), smooth dolly camera movement, " +
+			"warm cinematic colour grade, 24fps film look"
 	}
-	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, motionDesc, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true"); err == nil {
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "wan-fast", imageURL, motionDesc, 300, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true"); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/wan-fast", CostMicros: 0}, nil
 	} else {
 		log.Printf("[AIStudio] Pollinations wan-fast failed: %v — trying p-video", err)
 	}
 
 	// Tier 3: Pollinations p-video (Pruna) — FREE, 100% success; audio=true for ambient sound
-	if videoURL, err := o.callPollinationsVideoModel(ctx, "p-video", imageURL, motionDesc, 180, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true"); err == nil {
+	if videoURL, err := o.callPollinationsVideoModel(ctx, "p-video", imageURL, motionDesc, 300, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true"); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 	} else {
 		log.Printf("[AIStudio] Pollinations p-video failed: %v", err)
@@ -2135,8 +2179,13 @@ func (o *AIStudioOrchestrator) callHFFluxSchnell(ctx context.Context, hfKey, pro
 	body, _ := json.Marshal(map[string]interface{}{
 		"inputs": prompt,
 		"parameters": map[string]interface{}{
-			"num_inference_steps": 4,
+			// FLUX.1-schnell is a distilled model: 4 steps is minimal (fast but lower quality).
+			// 8 steps gives significantly better output with only ~2× latency.
+			// Max is 28; free tier has no rate limit on steps.
+			"num_inference_steps": 8,
 			"guidance_scale":      0,
+			"width":               1024,
+			"height":              1024,
 		},
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -2171,11 +2220,13 @@ func (o *AIStudioOrchestrator) callHFFluxSchnell(ctx context.Context, hfKey, pro
 // callFALFlux calls FAL.AI FLUX-dev (paid, higher quality).
 func (o *AIStudioOrchestrator) callFALFlux(ctx context.Context, falKey, prompt string) (string, error) {
 	payload := map[string]interface{}{
-		"prompt":        prompt,
-		"image_size":    "square_hd",
-		"num_images":    1,
-		"output_format": "jpeg",
+		"prompt":              prompt,
+		"image_size":          "square_hd",
+		"num_images":          1,
+		"output_format":       "jpeg",
 		"num_inference_steps": 28,
+		"guidance_scale":      3.5,
+		"safety_tolerance":    "5", // permissive (1=strict, 6=max permissive)
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -2972,8 +3023,10 @@ func (o *AIStudioOrchestrator) callPollinationsImageWithSeed(ctx context.Context
 	case "21:9", "ultrawide":
 		width, height = 1536, 640
 	}
+	// flux-realism produces significantly higher quality photorealistic images than base flux.
+	// For AI Studio we always want the best visual quality since users spend points.
 	apiURL := fmt.Sprintf(
-		"https://gen.pollinations.ai/image/%s?model=flux&width=%d&height=%d&nologo=true&seed=%d&enhance=false",
+		"https://gen.pollinations.ai/image/%s?model=flux-realism&width=%d&height=%d&nologo=true&seed=%d&enhance=true",
 		encoded, width, height, seed,
 	)
 
@@ -3001,7 +3054,15 @@ func (o *AIStudioOrchestrator) callPollinationsImageWithSeed(ctx context.Context
 
 	imgBytes, err := io.ReadAll(resp.Body)
 	if err != nil || len(imgBytes) < 1000 {
-		return "", fmt.Errorf("pollinations image: response too small (%d bytes)", len(imgBytes))
+		// Storage not configured or response too small — return the Pollinations CDN URL directly.
+		// The constructed URL is a stable, publicly cacheable CDN link from gen.pollinations.ai.
+		// Use the final URL after any redirects; fall back to the original request URL.
+		cdnURL := apiURL
+		if resp.Request != nil && resp.Request.URL != nil {
+			cdnURL = resp.Request.URL.String()
+		}
+		log.Printf("[AIStudio] pollinations image: response small or read error (%v), returning CDN URL: %s", err, func() string { s:=cdnURL; if len(s)>80{return s[:80]}; return s }())
+		return cdnURL, nil
 	}
 
 	// Detect content type from response header (may be image/jpeg or image/png)
@@ -3015,10 +3076,16 @@ func (o *AIStudioOrchestrator) callPollinationsImageWithSeed(ctx context.Context
 	}
 
 	fileName := fmt.Sprintf("studio/ai-photo/flux_%d.%s", time.Now().UnixNano(), ext)
-	publicURL, err := o.storage.Upload(ctx, fileName, imgBytes, ct)
-	if err != nil {
-		encoded64 := base64.StdEncoding.EncodeToString(imgBytes)
-		return "data:" + ct + ";base64," + encoded64, nil
+	publicURL, uploadErr := o.storage.Upload(ctx, fileName, imgBytes, ct)
+	if uploadErr != nil {
+		// No S3/GCS configured — return the Pollinations CDN URL directly (stable, public).
+		// The frontend can load it from gen.pollinations.ai without any S3 dependency.
+		cdnURL2 := apiURL
+		if resp.Request != nil && resp.Request.URL != nil {
+			cdnURL2 = resp.Request.URL.String()
+		}
+		log.Printf("[AIStudio] pollinations image: storage upload failed (%v), returning CDN URL: %s", uploadErr, func() string { s:=cdnURL2; if len(s)>80{return s[:80]}; return s }())
+		return cdnURL2, nil
 	}
 	return publicURL, nil
 }
@@ -3203,7 +3270,10 @@ func (o *AIStudioOrchestrator) callPollinationsVideoModel(ctx context.Context, m
 	defer cancel()
 	req = req.WithContext(vidCtx)
 
-	resp, err := o.httpClient.Do(req)
+	// Use a dedicated client with a longer timeout than the outer httpClient (120s).
+	// Pollinations video generation can take 3-4 minutes for complex prompts.
+	videoClient := &http.Client{Timeout: time.Duration(timeoutSecs+30) * time.Second}
+	resp, err := videoClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("pollinations %s video request: %w", model, err)
 	}
@@ -3490,7 +3560,16 @@ func (o *AIStudioOrchestrator) dispatchVision(ctx context.Context, slug string, 
 		if imageURL == "" {
 			imageURL = env.Prompt
 		}
-		question = ""
+		// Use env.Prompt as the question if provided; otherwise use a rich default
+		question = env.Prompt
+		if question == "" || question == imageURL {
+			question = "Analyse this image in detail. Describe: (1) What you see — objects, people, text, colours, composition. " +
+				"(2) The mood, style, and context. " +
+				"(3) Any notable features — brand names, logos, faces, places, technical elements. " +
+				"(4) If it contains charts or data, extract and interpret the data. " +
+				"(5) If it contains code or a UI screenshot, identify the technology and describe the content. " +
+				"Be specific, accurate, and comprehensive."
+		}
 	}
 
 	// ── DB-first ─────────────────────────────────────────────────────────────
@@ -3943,11 +4022,12 @@ func (o *AIStudioOrchestrator) callPollinationsGPTImage(ctx context.Context, pro
 		gptQuality = "hd"
 	}
 	payload := map[string]interface{}{
-		"model":   model,
-		"prompt":  prompt,
-		"n":       1,
-		"size":    gptSize,
-		"quality": gptQuality,
+		"model":           model,
+		"prompt":          prompt,
+		"n":               1,
+		"size":            gptSize,
+		"quality":         gptQuality,
+		"response_format": "url", // always return URL (not b64_json) — avoids large base64 in DB
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -4227,7 +4307,8 @@ func (o *AIStudioOrchestrator) callPollinationsVeo(ctx context.Context, prompt, 
 	if withAudio {
 		audioOpt = "true"
 	}
-	return o.callPollinationsVideoModel(ctx, "veo", "", prompt, 180, aspectRatio, "5", audioOpt)
+	// Veo is a premium model — generation can take 2-4 minutes
+	return o.callPollinationsVideoModel(ctx, "veo", "", prompt, 360, aspectRatio, "8", audioOpt)
 }
 
 // ─── S3 upload helper ─────────────────────────────────────────────────────────
@@ -4238,8 +4319,10 @@ func (o *AIStudioOrchestrator) callPollinationsVeo(ctx context.Context, prompt, 
 func (o *AIStudioOrchestrator) uploadOrDataURI(ctx context.Context, data []byte, contentType, key string) string {
 	url, err := o.storage.Upload(ctx, key, data, contentType)
 	if err != nil {
-		log.Printf("[AIStudio] asset upload failed for %s (backend=%s): %v — using data URI",
-			key, o.storage.Provider(), err)
+		// No cloud storage configured — data URIs work but are large (stored in DB).
+		// To fix: set STORAGE_BACKEND=s3 + AWS_S3_BUCKET / STORAGE_BACKEND=gcs + GCS_BUCKET in Render env.
+		// For Pollinations images (stable CDN), the caller should return the CDN URL instead of binary.
+		log.Printf("[AIStudio] WARN: asset upload failed for %s (backend=%s): %v — returning data URI (configure cloud storage to fix)", key, o.storage.Provider(), err)
 		return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data)
 	}
 	return url
