@@ -376,31 +376,26 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	// All other slugs use the standard Chat() chain (Gemini → DeepSeek).
 	switch req.ToolSlug {
 	case "web-search-ai", "code-helper", "code-pro", "research-brief", "deep-research-brief", "nexus-agent":
-		// Resolve tool → get the tool entity so we can deduct points if needed
+		// These are all CHAT tools — always handle inline (never dispatch to async queue).
+		// For paid chat tools (research-brief, nexus-agent, etc.) deduct points here if
+		// the tool has a cost, but keep the response synchronous so the user gets an
+		// immediate answer in the chat UI rather than "check Gallery".
 		tool, err := h.studioSvc.FindToolBySlug(r.Context(), req.ToolSlug)
 		if err != nil {
-			// Tool not found — graceful fallback to general chat
+			// Tool not configured in DB — fall back to general chat
 			h.handleGeneralChat(w, r, uid, sessionID, req, attachedContext, attachedName)
 			return
 		}
 
-		// Check if user can afford it (most chat tools are free)
+		// Deduct points for paid chat tools (non-blocking — best effort)
 		if !tool.IsFree && tool.PointCost > 0 {
 			userID, _ := uuid.Parse(uid)
-			gen, genErr := h.studioSvc.RequestGeneration(r.Context(), userID, tool.ID, req.Message)
-			if genErr != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": genErr.Error()})
+			// RequestGeneration deducts points and records the job.
+			// We don't dispatch it to the async queue — the response comes inline below.
+			if _, deductErr := h.studioSvc.RequestGeneration(r.Context(), userID, tool.ID, req.Message); deductErr != nil {
+				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": deductErr.Error()})
 				return
 			}
-			// Dispatch as full generation job (async)
-			h.worker.DispatchGeneration(gen, nil)
-			writeJSON(w, http.StatusAccepted, map[string]interface{}{
-				"response":   "Processing your request… check Gallery for results.",
-				"provider":   req.ToolSlug,
-				"session_id": sessionID,
-				"generation_id": gen.ID,
-			})
-			return
 		}
 
 		// Free tool — call the AI studio orchestrator's text dispatcher inline
