@@ -71,6 +71,8 @@ services:
         sync: false
       - key: DEEPSEEK_API_KEY
         sync: false
+      - key: TAVILY_API_KEY
+        sync: false
       - key: XAI_API_KEY
         sync: false
       - key: HF_TOKEN

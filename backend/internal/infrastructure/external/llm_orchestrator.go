@@ -85,6 +85,7 @@ type LLMOrchestrator struct {
 	geminiDailyLimit int
 	rdb              *redis.Client
 	httpClient       *http.Client // shared for Pollinations helper calls
+	tavilyKey        string       // Tavily Search API key — live web search grounding
 }
 
 // ─── Constructor ─────────────────────────────────────────────────────────────
@@ -95,6 +96,7 @@ func NewLLMOrchestrator(
 	cr repositories.ChatRepository,
 	rdb *redis.Client,
 	groqLim, gemLim int,
+	tavilyKey string,
 ) *LLMOrchestrator {
 	return &LLMOrchestrator{
 		groqClient:       g,
@@ -106,6 +108,7 @@ func NewLLMOrchestrator(
 		groqDailyLimit:   groqLim,
 		geminiDailyLimit: gemLim,
 		httpClient:       &http.Client{Timeout: 60 * time.Second},
+		tavilyKey:        tavilyKey,
 	}
 }
 
@@ -257,161 +260,211 @@ func (o *LLMOrchestrator) RecordStudioToolUse(ctx context.Context, toolSlug, pro
 
 // ─── Chat ────────────────────────────────────────────────────────────────────
 
+
+// ─── searchTavily calls the Tavily Search API and returns formatted results ───
+// Returns an empty string (not an error) when the key is absent so callers
+// can always fall back to training-data responses without crashing.
+func (o *LLMOrchestrator) searchTavily(ctx context.Context, query string, maxResults int) string {
+	if o.tavilyKey == "" {
+		return ""
+	}
+	if maxResults <= 0 {
+		maxResults = 5
+	}
+	payload := map[string]interface{}{
+		"api_key":              o.tavilyKey,
+		"query":                query,
+		"max_results":          maxResults,
+		"include_answer":       true,
+		"include_raw_content":  false,
+		"search_depth":         "advanced",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.tavily.com/search", bytes.NewBuffer(body))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		log.Printf("[Tavily] request failed: %v", err)
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		Answer  string `json:"answer"`
+		Results []struct {
+			Title   string `json:"title"`
+			URL     string `json:"url"`
+			Content string `json:"content"`
+			Score   float64 `json:"score"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		log.Printf("[Tavily] parse failed: %v", err)
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("[LIVE SEARCH RESULTS]\n")
+	if result.Answer != "" {
+		sb.WriteString("Quick answer: " + result.Answer + "\n\n")
+	}
+	for i, r := range result.Results {
+		if i >= maxResults {
+			break
+		}
+		sb.WriteString(fmt.Sprintf("Source %d: %s\n", i+1, r.Title))
+		sb.WriteString(fmt.Sprintf("URL: %s\n", r.URL))
+		content := r.Content
+		if len(content) > 600 {
+			content = content[:600] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("Excerpt: %s\n\n", content))
+	}
+	sb.WriteString("[END SEARCH RESULTS]\n")
+	sb.WriteString("Today\'s date: " + time.Now().UTC().Format("Monday, January 2, 2006") + "\n")
+	return sb.String()
+}
+
+// ─── Chat handles general Nexus AI chat (ask-nexus, nexus-agent, research-brief, etc.) ─
 func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
-	// 1. Get current daily usage count
-	// Daily count retained for usage tracking; no longer used for routing.
 	_, _ = o.usageTracker.GetDailyCount(ctx, req.UserID)
 
-	// 2. Build session memory context
 	uid, _ := uuid.Parse(req.UserID)
 	memoryBlock := o.buildMemoryBlock(ctx, uid, req.SessionID, req.ToolSlug)
-
-	// 3. Build system prompt
-	// Determine system prompt based on tool slug (chat mode)
-	var basePrompt string
 	today := time.Now().UTC().Format("Monday, January 2, 2006")
+
+	// ── Per-tool system prompts ────────────────────────────────────────────────
+	var basePrompt string
 	switch req.ToolSlug {
+
 	case "web-search-ai":
-		basePrompt = "You are Nexus AI, a world-class web search assistant with real-time access to the internet. " +
-			"Today's date is " + today + ".\n\n" +
-			"Your capabilities:\n" +
-			"- You have real-time web search access. Use it to provide current, accurate, up-to-date information on any topic worldwide.\n" +
-			"- You can answer questions about global news, technology, science, business, politics, culture, sports, finance, and any other domain.\n" +
-			"- When the user's context suggests Nigerian or African relevance, naturally incorporate local insights (e.g., Nigerian regulations, Naira exchange rates, local market data, African perspectives).\n\n" +
-			"Response format rules (MUST follow every time):\n" +
-			"1. Start with a **bold one-sentence direct answer** to the question.\n" +
-			"2. Follow with 2-4 short paragraphs or bullet points of supporting detail.\n" +
-			"3. For factual questions: include specific numbers, dates, and names — never be vague.\n" +
-			"4. For news/current events: summarise key facts + their implications.\n" +
-			"5. Cite sources naturally inline (e.g., 'According to Reuters...', 'Per the World Bank...').\n" +
-			"6. End with a **Sources** section listing 2-4 sources used (publication name + brief description).\n" +
-			"7. Keep total response under 450 words unless the user explicitly asks for more.\n" +
-			"8. If search results are unclear or outdated, say so honestly and provide your best knowledge with a caveat."
-	case "code-helper":
-		basePrompt = "You are Nexus Code, a world-class programming assistant and senior software engineer. " +
-			"You have deep expertise in all major programming languages, frameworks, and software engineering best practices globally.\n\n" +
-			"Your capabilities:\n" +
-			"- Write production-quality, clean, well-commented, fully functional code in any language.\n" +
-			"- Debug errors with clear explanations of the root cause and fix.\n" +
-			"- Explain complex concepts in simple terms with practical examples.\n" +
-			"- Suggest better approaches, patterns, and optimisations based on industry best practices.\n" +
-			"- Handle web dev (React, Next.js, Node, Go, Python, SQL), mobile (Flutter, React Native, Swift, Kotlin), backend (Go, Python, Java, C#), data science (Python, R), and DevOps (Docker, CI/CD, Kubernetes).\n" +
-			"- For multi-file projects, clearly label each file with a comment like `# File: main.py` or `// File: server.js`.\n\n" +
-			"Response rules (MUST follow every time):\n" +
-			"- ALWAYS wrap code in fenced code blocks with the language name (e.g., ```python, ```javascript, ```go).\n" +
-			"- For every code block, add a brief comment at the top explaining what it does.\n" +
-			"- After the code, explain the key logic in 3-5 numbered bullet points.\n" +
-			"- If the user's code has a bug, quote the problematic line, explain why it's wrong, then show the corrected version.\n" +
-			"- Detect the programming language from context — never ask the user to specify it unless truly ambiguous.\n" +
-			"- Always include proper error handling, input validation, and edge case handling.\n" +
-			"- Write complete, runnable code — never use placeholder comments like '// TODO' or '// rest of code here'."
-	default:
-		basePrompt = "You are Nexus AI, a brilliant and versatile personal AI assistant with world-class capabilities. " +
-			"Today's date is " + today + ".\n\n" +
-			"Your personality:\n" +
-			"- Warm, intelligent, and direct — like a brilliant friend who gives real, specific advice rather than generic answers.\n" +
-			"- You have deep knowledge across all domains: science, history, technology, business, culture, health, law, finance, education, and the arts.\n" +
-			"- When the user's context suggests Nigerian or African relevance (e.g., mentions Lagos, Naira, CBN, JAMB, WAEC, NYSC), naturally incorporate local insights, examples, and context.\n\n" +
-			"Your capabilities:\n" +
-			"- Answer any question with depth, accuracy, and global or local context as appropriate.\n" +
-			"- Write and improve: business plans, emails, CVs, cover letters, proposals, essays, social media posts, and creative content.\n" +
-			"- Analyse, summarise, and explain complex documents, concepts, or situations.\n" +
-			"- Give financial, legal, and health information (always recommend consulting a professional for critical decisions).\n" +
-			"- Brainstorm ideas, help with decision-making, and provide strategic recommendations.\n\n" +
-			"Response rules (MUST follow every time):\n" +
-			"- Give complete, thorough answers — never cut off mid-thought or refuse to help unless the request is truly harmful.\n" +
-			"- Use **bold** for key terms, important points, and section headers.\n" +
-			"- Use bullet points for lists, numbered lists for steps, and paragraphs for explanations and analysis.\n" +
-			"- Match the user's tone: casual for casual messages, formal for formal requests.\n" +
-			"- Never give one-line answers to substantive questions — always provide genuine value and depth.\n" +
-			"- For writing tasks: produce the full, complete draft — never write a partial version or say 'here's a template'.\n" +
-			"- For analysis tasks: go beyond surface-level observations to provide genuine insight and actionable conclusions."
+		basePrompt = `You are Nexus Search AI. You receive live web search results and synthesise them into clear, accurate answers.
+
+RULES:
+- Answer using ONLY the [LIVE SEARCH RESULTS] provided. Do not add information from your training data unless no results were found.
+- Start with a direct, confident answer in 1-2 sentences.
+- Use bullet points or short paragraphs for supporting detail.
+- Cite sources inline: "According to [Source Name]..." or "(Source: [Title])".
+- End with a Sources section listing the URLs used.
+- If the search results do not contain enough information, say so clearly and state what you do know.
+- Keep responses focused and under 400 words unless the user asks for more.
+- Today is ` + today + `.`
+
+	case "code-helper", "code-pro":
+		basePrompt = `You are Nexus Code — a senior software engineer and expert coding assistant.
+
+RULES:
+- Always wrap code in fenced blocks with the language name (e.g. ` + "```" + `go, ` + "```" + `python).
+- Write complete, runnable code. Never use placeholder comments like // TODO.
+- Include proper error handling and edge cases.
+- After each code block, explain the key logic in 3-5 numbered points.
+- If debugging: quote the exact broken line, explain why it fails, then show the fix.
+- Match response length to question complexity. Simple questions get concise answers.`
+
+	case "research-brief":
+		basePrompt = `You are Nexus Research — a professional analyst producing structured research briefs.
+Today is ` + today + `.
+
+RULES:
+- If [LIVE SEARCH RESULTS] are provided, base your answer primarily on those sources and cite them.
+- If no search results are available, answer from training data and clearly state "Based on available knowledge (not live data):" at the start.
+- Structure output as: Executive Summary → Key Findings → Data Points → Conclusion.
+- Be specific with numbers, dates, and names. If a figure is uncertain, say so.
+- Recommend 2-3 sources for the user to verify live data.
+- Keep to 500 words unless depth is explicitly requested.`
+
+	case "deep-research-brief":
+		basePrompt = `You are Nexus Deep Research — producing comprehensive, multi-perspective research reports.
+Today is ` + today + `.
+
+RULES:
+- If [LIVE SEARCH RESULTS] are provided, cite them extensively. Cross-reference multiple sources.
+- If no results are available, state this clearly and answer from training knowledge with caveats.
+- Structure: Executive Summary → Background → Key Findings (multiple perspectives) → Data & Evidence → Analysis → Conclusion → Sources.
+- Include specific statistics, quotes, and named sources where available.
+- Flag any information that may be outdated or requires live verification.`
+
+	case "nexus-agent":
+		basePrompt = `You are Nexus Agent — an advanced AI assistant that reasons step-by-step through complex, multi-part tasks.
+Today is ` + today + `.
+
+RULES:
+- Break complex requests into clear numbered steps and execute each one.
+- If [LIVE SEARCH RESULTS] are provided, use them as your primary source of facts.
+- Show your reasoning process: "Step 1: ...", "Step 2: ...", etc.
+- For research tasks: gather facts first, then analyse, then conclude.
+- Be direct and decisive. Give recommendations, not just information.
+- Acknowledge uncertainty clearly rather than guessing.`
+
+	default: // ask-nexus and all other general tools
+		basePrompt = `You are Nexus AI — a brilliant, direct personal assistant. Today is ` + today + `.
+
+Your strengths: writing, analysis, business advice, education, general knowledge, Nigerian and African context.
+
+RULES:
+- Match response length to the question. Short questions get concise answers. Complex questions get structured detail.
+- Use **bold** for key terms. Use bullet points for lists. Use paragraphs for explanations.
+- For current events, live prices, recent news, or anything that changes day-to-day: clearly state your knowledge has a cutoff and recommend a live source. Do NOT invent specific numbers or dates.
+- For writing tasks: produce the full draft immediately — no templates, no "here's an example".
+- For factual questions you are confident about: answer directly without excessive caveats.
+- Naturally incorporate Nigerian/African context when relevant (Naira, CBN, Lagos, JAMB, etc.).`
 	}
+
 	systemPrompt := basePrompt
 
-	// Inject attached file/link context if provided
+	// Inject attached file/link context
 	if req.AttachedContext != "" {
 		name := req.AttachedName
 		if name == "" {
 			name = "attached document"
 		}
 		systemPrompt += "\n\n[ATTACHED DOCUMENT: " + name + "]\n" +
-			"The user has attached the following document for you to read and reason over. " +
-			"Use its content to answer their question accurately and specifically.\n\n" +
+			"The user has attached the following. Use its content to answer accurately.\n\n" +
 			req.AttachedContext + "\n[END ATTACHED DOCUMENT]"
 	}
 
+	// Inject session memory
 	if memoryBlock != "" {
 		systemPrompt += "\n\n" + memoryBlock + "\n\n" +
-			"[MEMORY USAGE RULES]\n" +
-			"- The [NEXUS MEMORY] block above contains SUMMARIES of past sessions — NOT the full content of previous responses.\n" +
-			"- Do NOT claim to have the full text of any previous response. You only have a summary.\n" +
-			"- Do NOT say 'I already drafted this for you' or 'I created this in our previous session' — you cannot re-share something you only have a summary of.\n" +
-			"- DO use the memory context to personalise your response (e.g., 'I see you've been working on a food delivery startup — here's a fresh detailed plan:').\n" +
-			"- ALWAYS generate a complete, fresh, full-length answer to the user's current request.\n" +
-			"[END MEMORY USAGE RULES]"
+			"[MEMORY RULES]\n" +
+			"- Use memory context to personalise responses (e.g. recall their name, business, or prior goals).\n" +
+			"- Do NOT claim to have the full text of previous responses — you only have summaries.\n" +
+			"- Always generate a complete fresh answer to the current request.\n" +
+			"[END MEMORY RULES]"
 	}
 
-	// 4. Route: Gemini 2.5 Flash (primary) → DeepSeek V3 (fallback)
-	// Groq removed: model availability and response accuracy were unreliable.
+	// Primary: Gemini 2.5 Flash → Fallback: DeepSeek V3
 	var (
 		text     string
 		provider LLMProvider
 		err      error
 	)
-
-	// Primary: Gemini 2.5 Flash
 	text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
 	if err != nil {
 		log.Printf("[LLM] Gemini failed → DeepSeek: %v", err)
 		go o.recordProviderUse(context.Background(), ProviderGeminiLite, false, err.Error())
-		// Fallback: DeepSeek V3
 		text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
 		provider = ProviderDeepSeek
 	} else {
 		provider = ProviderGeminiLite
 	}
-
 	if err != nil {
-		// Record the failure for the last-attempted provider
 		go o.recordProviderUse(context.Background(), provider, false, err.Error())
 		return nil, fmt.Errorf("all LLM providers exhausted: %w", err)
 	}
 
-	// 5. Post-success: increment usage counter & persist messages
 	_ = o.usageTracker.Increment(ctx, req.UserID)
 
-	// Resolve session UUID: if req.SessionID is already a valid UUID, use it;
-	// otherwise get-or-create a session in chat_sessions by (userID, toolSlug).
-	// This ensures messages are always persisted even when the frontend sends
-	// non-UUID session IDs like "sess_general_1234567890".
-	var resolvedSessionID string
-	if req.SessionID != "" {
-		if sid, parseErr := uuid.Parse(req.SessionID); parseErr == nil {
-			// Already a valid UUID — use it directly
-			_ = o.chatRepo.AppendMessage(ctx, sid, "user", req.Prompt)
-			_ = o.chatRepo.AppendMessage(ctx, sid, "assistant", text)
-			resolvedSessionID = sid.String()
-		} else {
-			// Not a UUID — resolve via chat_sessions table
-			toolSlug := req.ToolSlug
-			if toolSlug == "" {
-				toolSlug = "general"
-			}
-			sess, sessErr := o.chatRepo.GetActiveSession(ctx, uid, toolSlug)
-			if sessErr != nil {
-				// No active session — create one
-				sess, sessErr = o.chatRepo.CreateSession(ctx, uid, toolSlug)
-			}
-			if sessErr == nil && sess != nil {
-				_ = o.chatRepo.AppendMessage(ctx, sess.ID, "user", req.Prompt)
-				_ = o.chatRepo.AppendMessage(ctx, sess.ID, "assistant", text)
-				resolvedSessionID = sess.ID.String()
-			}
-		}
-	}
-
-	// Record successful provider use (non-blocking)
+	resolvedSessionID := o.persistMessages(ctx, uid, req.SessionID, req.ToolSlug, req.Prompt, text)
 	go o.recordProviderUse(context.Background(), provider, true, "")
 
 	return &LLMResponse{
@@ -422,10 +475,34 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 	}, nil
 }
 
-// ─── Summarize ───────────────────────────────────────────────────────────────
+// persistMessages saves user+assistant messages to the session, creating one if needed.
+// Returns the resolved session UUID string.
+func (o *LLMOrchestrator) persistMessages(ctx context.Context, uid uuid.UUID, sessionID, toolSlug, userMsg, assistantMsg string) string {
+	if sessionID == "" {
+		return ""
+	}
+	if sid, err := uuid.Parse(sessionID); err == nil {
+		_ = o.chatRepo.AppendMessage(ctx, sid, "user", userMsg)
+		_ = o.chatRepo.AppendMessage(ctx, sid, "assistant", assistantMsg)
+		return sid.String()
+	}
+	// Non-UUID session ID — resolve or create via chat_sessions table
+	slug := toolSlug
+	if slug == "" {
+		slug = "general"
+	}
+	sess, sessErr := o.chatRepo.GetActiveSession(ctx, uid, slug)
+	if sessErr != nil {
+		sess, sessErr = o.chatRepo.CreateSession(ctx, uid, slug)
+	}
+	if sessErr == nil && sess != nil {
+		_ = o.chatRepo.AppendMessage(ctx, sess.ID, "user", userMsg)
+		_ = o.chatRepo.AppendMessage(ctx, sess.ID, "assistant", assistantMsg)
+		return sess.ID.String()
+	}
+	return ""
+}
 
-// Summarize sends a full conversation transcript to Gemini Flash-Lite and returns
-// a structured memory paragraph the AI can use to continue the conversation.
 func (o *LLMOrchestrator) Summarize(ctx context.Context, transcript string) (string, error) {
 	systemPrompt := "You are a precision memory extraction system for an AI assistant. " +
 		"Your job is to extract and compress the most important context from a conversation into a structured memory block. " +
@@ -451,123 +528,113 @@ func (o *LLMOrchestrator) Summarize(ctx context.Context, transcript string) (str
 // ChatWithTool routes a chat message to a specific Pollinations-backed tool
 // (web-search-ai → gemini-search, code-helper → qwen-coder) and persists the
 // exchange to the session just like a normal Chat() call.
+
+
+// ─── ChatWithTool routes search-backed tools through Tavily → Gemini ─────────
+//
+// Routing logic:
+//   web-search-ai, research-brief, deep-research-brief, nexus-agent
+//     → searchTavily() for live grounding → Gemini synthesises results
+//   code-helper, code-pro
+//     → Pollinations Qwen-Coder (specialised code model)
+//   everything else
+//     → Chat() (standard Gemini)
 func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
-	sk := os.Getenv("POLLINATIONS_SECRET_KEY")
-	if sk == "" {
-		// No Pollinations key — graceful fallback to standard chat
-		return o.Chat(ctx, req)
-	}
-
-	var (
-		payload map[string]interface{}
-		providerName LLMProvider
-	)
-
-	// Build attached context block (shared across tool modes)
-	attachedBlock := ""
-	if req.AttachedContext != "" {
-		name := req.AttachedName
-		if name == "" {
-			name = "attached document"
-		}
-		attachedBlock = "\n\n[ATTACHED DOCUMENT: " + name + "]\n" +
-			"The user has attached the following document. Read it carefully and use its content to answer their question.\n\n" +
-			req.AttachedContext + "\n[END ATTACHED DOCUMENT]"
-	}
+	uid, _ := uuid.Parse(req.UserID)
 
 	switch req.ToolSlug {
-	case "web-search-ai":
+
+	// ── Search-grounded tools: Tavily → Gemini ─────────────────────────────
+	case "web-search-ai", "research-brief", "deep-research-brief", "nexus-agent":
+
+		// Determine how many search results to fetch based on depth
+		numResults := 5
+		if req.ToolSlug == "deep-research-brief" {
+			numResults = 8
+		}
+
+		// Step 1: Live search (returns "" gracefully if key not set)
+		searchResults := o.searchTavily(ctx, req.Prompt, numResults)
+
+		// Step 2: Build user prompt — inject search results above the user question
+		augmentedPrompt := req.Prompt
+		if searchResults != "" {
+			augmentedPrompt = searchResults + "\n\nUser question: " + req.Prompt
+		} else {
+			// No Tavily key or search failed — prepend honest context
 			today := time.Now().UTC().Format("Monday, January 2, 2006")
-			payload = map[string]interface{}{
-				"model": "openai",
-				"messages": []map[string]interface{}{
-					{"role": "system", "content": "You are Nexus AI, a world-class web search assistant with real-time access to the internet. " +
-						"Today's date is " + today + ".\n\n" +
-						"Your capabilities:\n" +
-						"- You have real-time web search access. Use it to provide current, accurate, up-to-date information on any topic worldwide.\n" +
-						"- You can answer questions about global news, technology, science, business, politics, culture, sports, finance, and any other domain.\n" +
-						"- When the user's context suggests Nigerian or African relevance, naturally incorporate local insights (e.g., Nigerian regulations, Naira exchange rates, local market data, African perspectives).\n\n" +
-						"Response format rules (MUST follow every time):\n" +
-						"1. Start with a **bold one-sentence direct answer** to the question.\n" +
-						"2. Follow with 2-4 short paragraphs or bullet points of supporting detail.\n" +
-						"3. For factual questions: include specific numbers, dates, and names — never be vague.\n" +
-						"4. For news/current events: summarise key facts + their implications.\n" +
-						"5. Cite sources naturally inline (e.g., 'According to Reuters...', 'Per the World Bank...').\n" +
-						"6. End with a **Sources** section listing 2-4 sources used (publication name + brief description).\n" +
-						"7. Keep total response under 450 words unless the user explicitly asks for more.\n" +
-						"8. If search results are unclear or outdated, say so honestly and provide your best knowledge with a caveat."},
-					{"role": "user", "content": req.Prompt + attachedBlock},
-				},
-				"search": true,
-				"stream": false,
+			augmentedPrompt = "[NOTE: Live web search is unavailable. Answer from training knowledge only. " +
+				"Today is " + today + ". If the question requires current data, say so clearly.]\n\n" + req.Prompt
+		}
+
+		// Reuse Chat() with augmented prompt — it picks the right system prompt for this slug
+		augReq := req
+		augReq.Prompt = augmentedPrompt
+		resp, err := o.Chat(ctx, augReq)
+		if err != nil {
+			return nil, err
+		}
+		// Label provider to show search was used
+		if searchResults != "" {
+			resp.Provider = "TAVILY+GEMINI"
+		}
+		return resp, nil
+
+	// ── Code tools: Pollinations Qwen-Coder ───────────────────────────────
+	case "code-helper", "code-pro":
+		sk := os.Getenv("POLLINATIONS_SECRET_KEY")
+		if sk == "" {
+			// No Pollinations key — fall back to Gemini with code prompt
+			return o.Chat(ctx, req)
+		}
+
+		attachedBlock := ""
+		if req.AttachedContext != "" {
+			name := req.AttachedName
+			if name == "" {
+				name = "attached document"
 			}
-		providerName = "POLLINATIONS_SEARCH"
-	case "code-helper":
-			payload = map[string]interface{}{
-				"model": "qwen-coder",
-				"messages": []map[string]interface{}{
-					{"role": "system", "content": "You are Nexus Code, a world-class programming assistant and senior software engineer. " +
-						"You have deep expertise in all major programming languages, frameworks, and software engineering best practices globally.\n\n" +
-						"Your capabilities:\n" +
-						"- Write production-quality, clean, well-commented, fully functional code in any language.\n" +
-						"- Debug errors with clear explanations of the root cause and fix.\n" +
-						"- Explain complex concepts in simple terms with practical examples.\n" +
-						"- Suggest better approaches, patterns, and optimisations based on industry best practices.\n" +
-						"- Handle web dev (React, Next.js, Node, Go, Python, SQL), mobile (Flutter, React Native, Swift, Kotlin), backend (Go, Python, Java, C#), data science (Python, R), and DevOps (Docker, CI/CD, Kubernetes).\n" +
-						"- For multi-file projects, clearly label each file with a comment like `# File: main.py` or `// File: server.js`.\n\n" +
-						"Response rules (MUST follow every time):\n" +
-						"- ALWAYS wrap code in fenced code blocks with the language name (e.g., ```python, ```javascript, ```go).\n" +
-						"- For every code block, add a brief comment at the top explaining what it does.\n" +
-						"- After the code, explain the key logic in 3-5 numbered bullet points.\n" +
-						"- If the user's code has a bug, quote the problematic line, explain why it's wrong, then show the corrected version.\n" +
-						"- Detect the programming language from context — never ask the user to specify it unless truly ambiguous.\n" +
-						"- Always include proper error handling, input validation, and edge case handling.\n" +
-						"- Write complete, runnable code — never use placeholder comments like '// TODO' or '// rest of code here'."},
-					{"role": "user", "content": req.Prompt + attachedBlock},
-				},
-			}
-		providerName = "POLLINATIONS_QWEN"
+			attachedBlock = "\n\n[ATTACHED DOCUMENT: " + name + "]\n" +
+				req.AttachedContext + "\n[END ATTACHED DOCUMENT]"
+		}
+
+		payload := map[string]interface{}{
+			"model": "qwen-coder",
+			"messages": []map[string]interface{}{
+				{"role": "system", "content": `You are Nexus Code — a senior software engineer and expert coding assistant.
+RULES:
+- Always wrap code in fenced blocks with the language name.
+- Write complete, runnable code. Never use placeholder comments.
+- Include proper error handling and edge cases.
+- After each code block, explain the key logic in 3-5 numbered points.
+- If debugging: quote the broken line, explain why it fails, then show the fix.`},
+				{"role": "user", "content": req.Prompt + attachedBlock},
+			},
+		}
+
+		text, err := o.callPollinationsChat(ctx, sk, payload)
+		if err != nil {
+			log.Printf("[LLM] Qwen-Coder failed → Gemini fallback: %v", err)
+			go o.recordProviderUse(context.Background(), "POLLINATIONS_QWEN", false, err.Error())
+			return o.Chat(ctx, req)
+		}
+
+		resolvedSessionID := o.persistMessages(ctx, uid, req.SessionID, req.ToolSlug, req.Prompt, text)
+		go o.recordProviderUse(context.Background(), "POLLINATIONS_QWEN", true, "")
+
+		return &LLMResponse{
+			Text:      text,
+			Provider:  "POLLINATIONS_QWEN",
+			SessionID: resolvedSessionID,
+		}, nil
+
+	// ── All other slugs ────────────────────────────────────────────────────
 	default:
 		return o.Chat(ctx, req)
 	}
-
-	text, err := o.callPollinationsChat(ctx, sk, payload)
-	if err != nil {
-		log.Printf("[LLM] ChatWithTool %s failed: %v — falling back to general chat", req.ToolSlug, err)
-		go o.recordProviderUse(context.Background(), providerName, false, err.Error())
-		return o.Chat(ctx, req)
-	}
-
-	// Persist messages to session (same logic as Chat())
-	uid, _ := uuid.Parse(req.UserID)
-	var resolvedSessionID string
-	if req.SessionID != "" {
-		if sid, parseErr := uuid.Parse(req.SessionID); parseErr == nil {
-			_ = o.chatRepo.AppendMessage(ctx, sid, "user", req.Prompt)
-			_ = o.chatRepo.AppendMessage(ctx, sid, "assistant", text)
-			resolvedSessionID = sid.String()
-		} else {
-			toolSlug := req.ToolSlug
-			if toolSlug == "" {
-				toolSlug = "general"
-			}
-			sess, sessErr := o.chatRepo.GetActiveSession(ctx, uid, toolSlug)
-			if sessErr != nil {
-				sess, sessErr = o.chatRepo.CreateSession(ctx, uid, toolSlug)
-			}
-			if sessErr == nil && sess != nil {
-				_ = o.chatRepo.AppendMessage(ctx, sess.ID, "user", req.Prompt)
-				_ = o.chatRepo.AppendMessage(ctx, sess.ID, "assistant", text)
-				resolvedSessionID = sess.ID.String()
-			}
-		}
-	}
-	go o.recordProviderUse(context.Background(), providerName, true, "")
-
-	return &LLMResponse{Text: text, Provider: providerName, SessionID: resolvedSessionID}, nil
 }
 
-// callPollinationsChat is a shared helper for Pollinations OpenAI-compatible chat.
+
 func (o *LLMOrchestrator) callPollinationsChat(ctx context.Context, sk string, payload interface{}) (string, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {

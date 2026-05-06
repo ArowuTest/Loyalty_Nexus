@@ -371,11 +371,11 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── Route by tool_slug ─────────────────────────────────────────────────
-	// web-search-ai and code-helper are dispatched through AIStudioOrchestrator
-	// (which uses Pollinations gemini-search and Qwen-Coder respectively).
-	// All other slugs (including empty) use the standard LLMOrchestrator chain.
+	// ChatWithTool handles: web-search-ai (Tavily→Gemini), code-helper/code-pro
+	// (Qwen-Coder), research-brief, deep-research-brief, nexus-agent (Tavily→Gemini).
+	// All other slugs use the standard Chat() chain (Gemini → DeepSeek).
 	switch req.ToolSlug {
-	case "web-search-ai", "code-helper":
+	case "web-search-ai", "code-helper", "code-pro", "research-brief", "deep-research-brief", "nexus-agent":
 		// Resolve tool → get the tool entity so we can deduct points if needed
 		tool, err := h.studioSvc.FindToolBySlug(r.Context(), req.ToolSlug)
 		if err != nil {
