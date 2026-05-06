@@ -330,7 +330,7 @@ func (o *LLMOrchestrator) searchTavily(ctx context.Context, query string, maxRes
 		sb.WriteString(fmt.Sprintf("Excerpt: %s\n\n", content))
 	}
 	sb.WriteString("[END SEARCH RESULTS]\n")
-	sb.WriteString("Today\'s date: " + time.Now().UTC().Format("Monday, January 2, 2006") + "\n")
+	sb.WriteString("Today's date: " + time.Now().UTC().Format("Monday, January 2, 2006") + "\n")
 	return sb.String()
 }
 
