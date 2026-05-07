@@ -106,9 +106,7 @@ func (o *AIStudioOrchestrator) callByTemplate(
 			if visionPrompt == "" {
 				visionPrompt = "Describe this image in detail."
 			}
-			visionPrompt = fmt.Sprintf("%s
-
-Image URL: %s", visionPrompt, in.ImageURL)
+			visionPrompt = fmt.Sprintf("%s\n\nImage URL: %s", visionPrompt, in.ImageURL)
 			outputText, err = o.callGeminiFlashWithModel(ctx, p.ModelID, key, in.SystemPrompt, visionPrompt)
 		} else {
 			outputText, err = o.callGeminiFlashWithModel(ctx, p.ModelID, key, in.SystemPrompt, in.UserPrompt)
