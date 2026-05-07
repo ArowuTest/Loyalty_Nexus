@@ -75,17 +75,44 @@ func (o *AIStudioOrchestrator) callByTemplate(
 	case entities.TemplatePollText:
 		// openai-compatible: covers Pollinations, Groq, DeepSeek, any OAI endpoint
 		baseURL := resolveBaseURLForProvider(p)
-		payload := map[string]interface{}{
-			"model": p.ModelID,
-			"messages": []map[string]string{
-				{"role": "system", "content": in.SystemPrompt},
-				{"role": "user", "content": in.UserPrompt},
-			},
+		var payload map[string]interface{}
+		if in.ImageURL != "" {
+			// Multimodal message: attach image for vision tasks (image-analyser, ask-my-photo, code-pro)
+			userContent := []map[string]interface{}{
+				{"type": "text", "text": in.UserPrompt},
+				{"type": "image_url", "image_url": map[string]string{"url": in.ImageURL}},
+			}
+			payload = map[string]interface{}{
+				"model": p.ModelID,
+				"messages": []map[string]interface{}{
+					{"role": "user", "content": userContent},
+				},
+			}
+		} else {
+			payload = map[string]interface{}{
+				"model": p.ModelID,
+				"messages": []map[string]string{
+					{"role": "system", "content": in.SystemPrompt},
+					{"role": "user", "content": in.UserPrompt},
+				},
+			}
 		}
 		outputText, err = o.callOpenAICompatible(ctx, baseURL+"/v1/chat/completions", "Bearer "+key, payload)
 
 	case entities.TemplateGemini:
-		outputText, err = o.callGeminiFlashWithModel(ctx, p.ModelID, key, in.SystemPrompt, in.UserPrompt)
+		if in.ImageURL != "" {
+			// Vision task: include image URL in prompt for Gemini multimodal
+			visionPrompt := in.UserPrompt
+			if visionPrompt == "" {
+				visionPrompt = "Describe this image in detail."
+			}
+			visionPrompt = fmt.Sprintf("%s
+
+Image URL: %s", visionPrompt, in.ImageURL)
+			outputText, err = o.callGeminiFlashWithModel(ctx, p.ModelID, key, in.SystemPrompt, visionPrompt)
+		} else {
+			outputText, err = o.callGeminiFlashWithModel(ctx, p.ModelID, key, in.SystemPrompt, in.UserPrompt)
+		}
 
 	case entities.TemplateDeepSeek:
 		outputText, err = o.callDeepSeekWithKey(ctx, key, in.SystemPrompt, in.UserPrompt)
