@@ -237,7 +237,7 @@ const NEW_TOOL_SLUGS = new Set([
 ]);
 
 // ─── Dual / special input sets ────────────────────────────────────────────────
-const DUAL_INPUT_TOOLS = new Set(["ask-my-photo","photo-editor","video-cinematic"]);
+const DUAL_INPUT_TOOLS = new Set(["ask-my-photo","photo-editor"]);
 const URL_INPUT_TOOLS  = new Set(["image-analyser","transcribe-african"]);
 const VOICE_TOOLS      = new Set(["narrate-pro"]);
 const LANG_TOOLS       = new Set(["transcribe-african", "localize-ui"]);

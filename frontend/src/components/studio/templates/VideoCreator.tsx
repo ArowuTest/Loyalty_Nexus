@@ -53,8 +53,8 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
   const showAudioDir    = cfg.show_audio_direction ?? (tool.slug === 'video-veo');
   const showMusicStyle  = cfg.show_music_style     ?? (tool.slug === 'video-jingle');
   const showImgUpload   = cfg.show_image_upload    ?? (tool.slug === 'video-jingle' || tool.slug === 'video-cinematic');
-  // video-cinematic requires an image (image-to-video model); video-jingle is optional
-  const imgUploadOpt    = cfg.image_upload_optional ?? (tool.slug !== 'video-cinematic');
+  // Reference image is optional for all tools — video-cinematic is text-to-video with optional style reference
+  const imgUploadOpt    = cfg.image_upload_optional ?? true;
 
   const [prompt,     setPrompt]     = useState('');
   const [aspect,     setAspect]     = useState(cfg.default_aspect ?? '16:9');
