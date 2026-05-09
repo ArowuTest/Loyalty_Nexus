@@ -28,7 +28,7 @@ const ASPECT_RATIOS = [
   { value: '1:1',  label: 'Square',    icon: '⬜' },
 ];
 
-export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
+export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, preloadImageUrl }: TemplateProps) {
   const cfg       = tool.ui_config ?? {};
   const styleTags = cfg.style_tags ?? DEFAULT_STYLE_TAGS;
   // video-premium uses Kling (5/10s only); video-cinematic uses Wan (5/8/10s)
@@ -38,9 +38,10 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints }:
   const durations = cfg.duration_options ?? (isKling ? KLING_DURATIONS : isGrok ? GROK_DURATIONS : WAN_DURATIONS);
 
   // ── Start image state ──────────────────────────────────────────────────────
-  const [imageUrl,      setImageUrl]      = useState('');
+  // Pre-populate from preloadImageUrl if provided (cross-tool context passing)
+  const [imageUrl,      setImageUrl]      = useState(preloadImageUrl ?? '');
   const [imageFile,     setImageFile]     = useState<File | null>(null);
-  const [preview,       setPreview]       = useState<string | null>(null);
+  const [preview,       setPreview]       = useState<string | null>(preloadImageUrl ?? null);
   const [uploading,     setUploading]     = useState(false);
 
   // ── End / tail image state (Kling v2.6 Pro feature) ───────────────────────

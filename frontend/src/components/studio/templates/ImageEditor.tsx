@@ -29,17 +29,18 @@ const STRENGTH_LEVELS = [
   { label: 'Max',      value: 1.0, desc: 'Full rework' },
 ];
 
-export default function ImageEditor({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
+export default function ImageEditor({ tool, onSubmit, isLoading, userPoints, preloadImageUrl }: TemplateProps) {
   const cfg             = tool.ui_config ?? {};
   const editSuggestions = (cfg.edit_suggestions ?? DEFAULT_EDIT_SUGGESTIONS) as string[];
   // bg-remover sets show_edit_prompt: false and prompt_optional: true
   const showEditPrompt  = cfg.show_edit_prompt !== false; // default true
   const promptOptional  = cfg.prompt_optional === true;   // default false
 
-  const [imageUrl,     setImageUrl]     = useState('');
+  // Pre-populate from preloadImageUrl if provided (cross-tool context passing)
+  const [imageUrl,     setImageUrl]     = useState(preloadImageUrl ?? '');
   const [imageFile,    setImageFile]    = useState<File | null>(null);
-  const [preview,      setPreview]      = useState<string | null>(null);
-  const [uploadedUrl,  setUploadedUrl]  = useState<string | null>(null);
+  const [preview,      setPreview]      = useState<string | null>(preloadImageUrl ?? null);
+  const [uploadedUrl,  setUploadedUrl]  = useState<string | null>(preloadImageUrl ?? null);
   const [isUploading,  setIsUploading]  = useState(false);
   const [uploadError,  setUploadError]  = useState<string | null>(null);
   const [editPrompt,   setEditPrompt]   = useState('');

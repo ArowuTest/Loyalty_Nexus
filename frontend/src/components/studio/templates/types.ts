@@ -20,4 +20,8 @@ export interface TemplateProps {
   onSubmit: (payload: GeneratePayload) => void;
   isLoading: boolean;
   userPoints: number;
+  /** Optional pre-loaded image URL — populated when user clicks "Animate This" or "Edit Photo" on a result */
+  preloadImageUrl?: string;
+  /** Optional pre-loaded video URL — populated when user clicks "Extend Video" on a result */
+  preloadVideoUrl?: string;
 }

@@ -1517,7 +1517,11 @@ function renderSlideDeck(text: string) {
   );
 }
 // ─── Generation card ──────────────────────────────────────────────────────────
-function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?: (gen: Generation) => void }) {
+function GenerationCard({ gen, onRegenerate, onCrossToolAction }: {
+  gen: Generation;
+  onRegenerate?: (gen: Generation) => void;
+  onCrossToolAction?: (toolSlug: string, imageUrl?: string, videoUrl?: string) => void;
+}) {
   // Expiry logic — provider CDN URLs last ~48 hrs
   const isExpired = gen.expires_at ? new Date(gen.expires_at) < new Date() : false;
   const expiresInHrs = gen.expires_at
@@ -1684,6 +1688,18 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                     <RotateCcw size={11} /> Regenerate
                   </button>
                 )}
+                {onCrossToolAction && gen.output_url && (
+                  <button onClick={() => onCrossToolAction("animate-my-photo", gen.output_url!)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 transition-all">
+                    <Video size={11} /> Animate
+                  </button>
+                )}
+                {onCrossToolAction && gen.output_url && (
+                  <button onClick={() => onCrossToolAction("photo-editor", gen.output_url!)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 transition-all">
+                    <Wand2 size={11} /> Edit
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -1725,6 +1741,12 @@ function GenerationCard({ gen, onRegenerate }: { gen: Generation; onRegenerate?:
                   <button onClick={() => onRegenerate(gen)}
                     className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-all">
                     <RotateCcw size={11} /> Regenerate
+                  </button>
+                )}
+                {onCrossToolAction && gen.output_url && (
+                  <button onClick={() => onCrossToolAction("video-extend", undefined, gen.output_url!)}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 transition-all">
+                    <Zap size={11} /> Extend
                   </button>
                 )}
               </div>
@@ -1973,6 +1995,8 @@ function renderTemplate(
   onSubmit: (p: GeneratePayload) => void,
   isLoading: boolean,
   userPoints: number,
+  preloadImageUrl?: string,
+  preloadVideoUrl?: string,
 ) {
   // Cast Tool → StudioTool-compatible shape (same fields, Tool just omits icon)
   const t = tool as unknown as import("../../types/studio").StudioTool;
@@ -1988,18 +2012,18 @@ function renderTemplate(
   switch (tpl) {
     case "music-composer":  return <MusicComposer  {...props} />;
     case "image-creator":   return <ImageCreator   {...props} />;
-    case "image-editor":    return <ImageEditor    {...props} />;
+    case "image-editor":    return <ImageEditor    {...props} preloadImageUrl={preloadImageUrl} />;
     case "image-compose":   return <ImageCompose   {...props} />;
     case "video-creator":   return <VideoCreator   {...props} />;
-    case "video-animator":      return <VideoAnimator      {...props} />;
+    case "video-animator":      return <VideoAnimator      {...props} preloadImageUrl={preloadImageUrl} />;
     case "video-editor":       return <VideoEditor       {...props} />;
-    case "video-extender":     return <VideoExtender     {...props} />;
+    case "video-extender":     return <VideoExtender     {...props} preloadVideoUrl={preloadVideoUrl} />;
     case "video-multi-scene":  return <VideoMultiScene  {...props} />;
     case "video-script":       return <VideoScript       {...props} />;
     case "voice-studio":    return <VoiceStudio    {...props} />;
     case "transcribe":      return <Transcribe     {...props} />;
     case "code-pro":        return <CodePro        {...props} />;
-    case "vision-ask":      return <VisionAsk      {...props} />;
+    case "vision-ask":      return <VisionAsk      {...props} preloadImageUrl={preloadImageUrl} />;
     case "knowledge-doc":
     default:                return <KnowledgeDoc   {...props} />;
   }
@@ -2008,9 +2032,14 @@ function renderTemplate(
 // ─── Tool drawer ──────────────────────────────────────────────────────────────
 function ToolDrawer({
   tool, onClose, userPoints, onGenerated, onContinueInChat,
+  preloadImageUrl, preloadVideoUrl, onCrossToolAction,
 }: {
   tool: Tool; onClose: () => void; userPoints: number; onGenerated?: () => void;
   onContinueInChat?: (text: string) => void;
+  preloadImageUrl?: string;
+  preloadVideoUrl?: string;
+  /** Called when user wants to use the generated result in another tool */
+  onCrossToolAction?: (toolSlug: string, imageUrl?: string, videoUrl?: string) => void;
 }) {
   // pendingPayload holds the GeneratePayload from the template until the user
   // confirms in the ConfirmModal. null = no payload ready yet.
@@ -2220,7 +2249,7 @@ function ToolDrawer({
                   handleTemplateSubmit(payload) which stages the payload and opens
                   the ConfirmModal before any API call is made.                       */}
               <div className="min-h-0">
-                {renderTemplate(tool, handleTemplateSubmit, generating, userPoints)}
+                {renderTemplate(tool, handleTemplateSubmit, generating, userPoints, preloadImageUrl, preloadVideoUrl)}
               </div>
 
               {/* ── Points summary bar (always visible below template) ── */}
@@ -2405,6 +2434,35 @@ function ToolDrawer({
                           <RefreshCw size={14} /> Generate Again
                         </button>
                       </div>
+                      {/* Cross-tool actions: only shown for image-generating tools, not already-animated/edited */}
+                      {onCrossToolAction && inlineResult.output_url && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => { onCrossToolAction("animate-my-photo", inlineResult.output_url!); onClose(); }}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl
+                                       bg-purple-500/15 border border-purple-500/25 text-purple-300
+                                       text-xs font-semibold hover:bg-purple-500/25 transition-colors"
+                          >
+                            <Video size={12} /> Animate This
+                          </button>
+                          <button
+                            onClick={() => { onCrossToolAction("photo-editor", inlineResult.output_url!); onClose(); }}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl
+                                       bg-blue-500/15 border border-blue-500/25 text-blue-300
+                                       text-xs font-semibold hover:bg-blue-500/25 transition-colors"
+                          >
+                            <Wand2 size={12} /> Edit Photo
+                          </button>
+                          <button
+                            onClick={() => { onCrossToolAction("bg-remover", inlineResult.output_url!); onClose(); }}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl
+                                       bg-amber-500/15 border border-amber-500/25 text-amber-300
+                                       text-xs font-semibold hover:bg-amber-500/25 transition-colors"
+                          >
+                            <Sparkles size={12} /> Remove BG
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2443,6 +2501,17 @@ function ToolDrawer({
                           <RefreshCw size={14} /> Generate Again
                         </button>
                       </div>
+                      {/* Extend Video cross-tool action */}
+                      {onCrossToolAction && inlineResult.output_url && (
+                        <button
+                          onClick={() => { onCrossToolAction("video-extend", undefined, inlineResult.output_url!); onClose(); }}
+                          className="w-full flex items-center justify-center gap-2 py-2 rounded-xl
+                                     bg-purple-500/15 border border-purple-500/25 text-purple-300
+                                     text-xs font-semibold hover:bg-purple-500/25 transition-colors"
+                        >
+                          <Zap size={12} /> Extend Video
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -2699,6 +2768,12 @@ function StudioPageInner() {
   const tools   = toolsData?.tools   ?? [];
   const gallery = galleryData?.items ?? [];
   const recentGens = gallery.slice(0, 8);
+  // Expose tools array on window so openToolWithPreload can look up by slug
+  useEffect(() => {
+    if (tools.length > 0) {
+      (window as unknown as { __ln_tools?: Tool[] }).__ln_tools = tools;
+    }
+  }, [tools]);
 
   // Auto-poll gallery every 4s when there are pending/processing items
   useEffect(() => {
@@ -2810,10 +2885,25 @@ function StudioPageInner() {
   const [selectedTool,   setSelectedTool]   = useState<Tool | null>(null);
   const [showWebsiteBuilder, setShowWebsiteBuilder] = useState(false);
   const [chatToolSlug, setChatToolSlug] = useState<string | null>(null);
+  // Cross-tool preload state: populated when user clicks "Animate This" / "Edit Photo" / "Extend Video"
+  const [crossToolPreload, setCrossToolPreload] = useState<{
+    imageUrl?: string;
+    videoUrl?: string;
+  }>({});
   // Helper: open a tool drawer and immediately scroll to top so the drawer is visible
   const openTool = useCallback((tool: Tool | null) => {
     setSelectedTool(tool);
+    if (!tool) setCrossToolPreload({});
     if (tool) window.scrollTo({ top: 0, behavior: "instant" });
+  }, []);
+  // Helper: open a tool by slug with an optional preloaded image/video URL
+  const openToolWithPreload = useCallback((toolSlug: string, imageUrl?: string, videoUrl?: string) => {
+    const match = (window as unknown as { __ln_tools?: Tool[] }).__ln_tools?.find((t: Tool) => t.slug === toolSlug);
+    if (!match) return;
+    setCrossToolPreload({ imageUrl, videoUrl });
+    setSelectedTool(match);
+    setActiveTab("tools");
+    window.scrollTo({ top: 0, behavior: "instant" });
   }, []);
   const [searchQuery,    setSearchQuery]    = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -3764,6 +3854,7 @@ function StudioPageInner() {
                           else { openTool(tool); setActiveTab("tools"); }
                         }
                         }}
+                        onCrossToolAction={openToolWithPreload}
                       />
                     ))}
                     {gallery.length > 8 && (
@@ -3791,6 +3882,16 @@ function StudioPageInner() {
             onClose={() => openTool(null)}
             userPoints={userPoints}
             onGenerated={() => { mutateGallery(); }}
+            preloadImageUrl={crossToolPreload.imageUrl}
+            preloadVideoUrl={crossToolPreload.videoUrl}
+            onCrossToolAction={(toolSlug, imageUrl, videoUrl) => {
+              // Close current drawer first, then open the target tool with preloaded data
+              setSelectedTool(null);
+              setCrossToolPreload({ imageUrl, videoUrl });
+              setTimeout(() => {
+                openToolWithPreload(toolSlug, imageUrl, videoUrl);
+              }, 80);
+            }}
             onContinueInChat={(prefill) => {
               setInput(prefill);
               setChatMode('general');

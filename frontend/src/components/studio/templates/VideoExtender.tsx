@@ -46,15 +46,16 @@ const CONSTRAINTS = [
   { icon: '🔗', text: 'Seamless continuation from last frame' },
 ];
 
-export default function VideoExtender({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
+export default function VideoExtender({ tool, onSubmit, isLoading, userPoints, preloadVideoUrl }: TemplateProps) {
   const cfg = tool.ui_config ?? {};
 
   // ── Video upload state ─────────────────────────────────────────────────────
+  // Pre-populate from preloadVideoUrl if provided (cross-tool context passing)
   const [videoFile,    setVideoFile]    = useState<File | null>(null);
-  const [videoUrl,     setVideoUrl]     = useState('');
-  const [videoPreview, setVideoPreview] = useState<string | null>(null);
+  const [videoUrl,     setVideoUrl]     = useState(preloadVideoUrl ?? '');
+  const [videoPreview, setVideoPreview] = useState<string | null>(preloadVideoUrl ?? null);
   const [uploading,    setUploading]    = useState(false);
-  const [uploadedUrl,  setUploadedUrl]  = useState('');
+  const [uploadedUrl,  setUploadedUrl]  = useState(preloadVideoUrl ?? '');
 
   // ── Extension controls ─────────────────────────────────────────────────────
   const [extendPrompt, setExtendPrompt] = useState('');

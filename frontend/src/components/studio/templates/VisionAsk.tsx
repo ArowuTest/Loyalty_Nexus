@@ -18,7 +18,7 @@ const DEFAULT_EXAMPLE_QUESTIONS = [
   'What is the approximate location?',
 ];
 
-export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
+export default function VisionAsk({ tool, onSubmit, isLoading, userPoints, preloadImageUrl }: TemplateProps) {
   const cfg          = tool.ui_config ?? {};
   const promptOptional = cfg.prompt_optional ?? false;
   // Example questions from ui_config (so they can be customised per tool from DB)
@@ -27,10 +27,11 @@ export default function VisionAsk({ tool, onSubmit, isLoading, userPoints }: Tem
   // When prompt_optional=true the tool auto-generates a full description
   const autoMode = promptOptional;
 
-  const [imageUrl,    setImageUrl]    = useState('');
+  // Pre-populate from preloadImageUrl if provided (cross-tool context passing)
+  const [imageUrl,    setImageUrl]    = useState(preloadImageUrl ?? '');
   const [imageFile,   setImageFile]   = useState<File | null>(null);
-  const [preview,     setPreview]     = useState<string | null>(null);
-  const [uploadedUrl, setUploadedUrl] = useState<string | null>(null);
+  const [preview,     setPreview]     = useState<string | null>(preloadImageUrl ?? null);
+  const [uploadedUrl, setUploadedUrl] = useState<string | null>(preloadImageUrl ?? null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [question,    setQuestion]    = useState('');

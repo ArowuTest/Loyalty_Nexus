@@ -1196,6 +1196,10 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 				motionPrompt = motionPrompt + ". Motion style: " + hint
 			}
 		}
+		// Inject camera movement hint into prompt (sent by VideoCreator camera presets)
+		if cm, ok := env.Extra["camera_movement"].(string); ok && cm != "" {
+			motionPrompt = motionPrompt + ". Camera: " + cm
+		}
 		if imgURL == "" {
 			return nil, fmt.Errorf("video-cinematic: image_url is required")
 		}
@@ -1257,6 +1261,10 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 			if hint, ok2 := motionHints[int(mi)]; ok2 {
 				prompt = prompt + ". Motion style: " + hint
 			}
+		}
+		// Inject camera movement hint into prompt (sent by VideoCreator camera presets)
+		if cm, ok := env.Extra["camera_movement"].(string); ok && cm != "" {
+			prompt = prompt + ". Camera: " + cm
 		}
 		// Tier 1: Grok Imagine Video (xAI) — $0.05/sec
 		if o.grokClient != nil {
