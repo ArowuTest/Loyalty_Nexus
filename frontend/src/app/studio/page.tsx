@@ -2160,13 +2160,40 @@ function ToolDrawer({
   const [genStartedAt,   setGenStartedAt]   = useState<number | null>(null);
   // Inline result — set when polling returns completed, shown directly in drawer
   const [inlineResult,   setInlineResult]   = useState<{ output_url?: string; output_url_2?: string; output_text?: string; output_type?: string } | null>(null);
+  // When a result is ready, collapse the form so the result is front-and-centre
+  const [formCollapsed,  setFormCollapsed]  = useState(false);
   // Scroll-to-top ref — resets scroll position whenever the active tool changes
   const drawerScrollRef = useRef<HTMLDivElement>(null);
+  // Scroll-to-result ref — auto-scrolls the result into view when it arrives
+  const inlineResultRef = useRef<HTMLDivElement>(null);
+  // Scroll-to-progress ref — scrolls progress bar into view when generation starts
+  const generatingRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (drawerScrollRef.current) {
       drawerScrollRef.current.scrollTop = 0;
     }
+    // Reset form collapse when switching tools
+    setFormCollapsed(false);
+    setInlineResult(null);
   }, [tool.id]);
+  // Auto-scroll and collapse form when result arrives
+  useEffect(() => {
+    if (inlineResult) {
+      setFormCollapsed(true);
+      // Small delay so the DOM updates before scrolling
+      setTimeout(() => {
+        inlineResultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    }
+  }, [inlineResult]);
+  // Scroll progress bar into view when generation starts (so user sees it immediately)
+  useEffect(() => {
+    if (generating && genStartedAt) {
+      setTimeout(() => {
+        generatingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 150);
+    }
+  }, [generating, genStartedAt]);
 
   const cfg        = catCfg(tool.category);
   const slug       = tool.slug;
@@ -2359,9 +2386,21 @@ function ToolDrawer({
               {/* Each template handles its own Generate button. When clicked it calls
                   handleTemplateSubmit(payload) which stages the payload and opens
                   the ConfirmModal before any API call is made.                       */}
-              <div className="min-h-0">
-                {renderTemplate(tool, handleTemplateSubmit, generating, userPoints, preloadImageUrl, preloadVideoUrl)}
-              </div>
+              {formCollapsed && inlineResult ? (
+                /* When result is ready — show a slim "Generate Again" bar instead of full form */
+                <button
+                  onClick={() => { setFormCollapsed(false); setInlineResult(null); setPendingPayload(null); }}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-white/10
+                             bg-white/[0.03] text-white/50 text-sm font-medium hover:bg-white/[0.06] hover:text-white/70
+                             transition-all"
+                >
+                  <RefreshCw size={13} /> Generate something new with {tool.name}
+                </button>
+              ) : (
+                <div className="min-h-0">
+                  {renderTemplate(tool, handleTemplateSubmit, generating, userPoints, preloadImageUrl, preloadVideoUrl)}
+                </div>
+              )}
 
               {/* ── Points summary bar (always visible below template) ── */}
               <div className={cn(
@@ -2410,6 +2449,7 @@ function ToolDrawer({
               {/* ── Inline generating indicator ── */}
               {generating && genStartedAt && (
                 <motion.div
+                  ref={generatingRef}
                   initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
                   className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3"
                 >
@@ -2446,6 +2486,7 @@ function ToolDrawer({
               {/* ── Inline result panel ── */}
               {inlineResult && !generating && (
                 <motion.div
+                  ref={inlineResultRef}
                   initial={{ opacity: 0, y: 8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   className="rounded-2xl border border-green-500/25 bg-green-500/5 overflow-hidden"
@@ -2457,7 +2498,7 @@ function ToolDrawer({
                       <span>{tool.name} ready!</span>
                     </div>
                     <button
-                      onClick={() => setInlineResult(null)}
+                      onClick={() => { setInlineResult(null); setFormCollapsed(false); }}
                       className="text-white/30 hover:text-white/60 transition-colors"
                     >
                       <X size={14} />
@@ -2506,7 +2547,7 @@ function ToolDrawer({
                       )}
 
                       <button
-                        onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                        onClick={() => { setInlineResult(null); setPendingPayload(null); setFormCollapsed(false); }}
                         className="flex items-center justify-center gap-2 py-2.5 rounded-xl w-full
                                    bg-white/5 border border-white/10 text-white/60
                                    text-sm font-semibold hover:bg-white/10 transition-colors"
@@ -2539,7 +2580,7 @@ function ToolDrawer({
                           <Download size={14} /> Download Image
                         </a>
                         <button
-                          onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                          onClick={() => { setInlineResult(null); setPendingPayload(null); setFormCollapsed(false); }}
                           className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
                                      bg-white/5 border border-white/10 text-white/60
                                      text-sm font-semibold hover:bg-white/10 transition-colors"
@@ -2644,7 +2685,7 @@ function ToolDrawer({
                           <Download size={14} /> Download Video
                         </a>
                         <button
-                          onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                          onClick={() => { setInlineResult(null); setPendingPayload(null); setFormCollapsed(false); }}
                           className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
                                      bg-white/5 border border-white/10 text-white/60
                                      text-sm font-semibold hover:bg-white/10 transition-colors"
@@ -2720,7 +2761,7 @@ function ToolDrawer({
                                   <Copy size={12} /> Copy JSON
                                 </button>
                                 <button
-                                  onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                                  onClick={() => { setInlineResult(null); setPendingPayload(null); setFormCollapsed(false); }}
                                   className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/8 hover:bg-white/15 border border-white/10 text-white/60 text-xs font-semibold transition-all"
                                 >
                                   <RefreshCw size={12} /> Generate Again
@@ -2759,7 +2800,7 @@ function ToolDrawer({
                                 <FileDown size={12} /> Download .md
                               </button>
                               <button
-                                onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                                onClick={() => { setInlineResult(null); setPendingPayload(null); setFormCollapsed(false); }}
                                 className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-white/8 hover:bg-white/15 border border-white/10 text-white/60 text-xs font-semibold transition-all"
                               >
                                 <RefreshCw size={12} /> Generate Again
@@ -2783,7 +2824,7 @@ function ToolDrawer({
                               <Copy size={14} /> Copy Text
                             </button>
                             <button
-                              onClick={() => { setInlineResult(null); setPendingPayload(null); }}
+                              onClick={() => { setInlineResult(null); setPendingPayload(null); setFormCollapsed(false); }}
                               className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
                                          bg-white/5 border border-white/10 text-white/60
                                          text-sm font-semibold hover:bg-white/10 transition-colors"
