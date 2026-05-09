@@ -3996,8 +3996,8 @@ function StudioPageInner() {
                           <div className="grid grid-cols-2 gap-2">
                             {mediaGens.map((gen) => {
                               const isVid = VIDEO_SLUGS.has(gen.tool_slug);
-                              let displayPrompt = gen.prompt;
-                              try { const e = JSON.parse(gen.prompt); if (e?.prompt) displayPrompt = e.prompt; } catch { /* plain */ }
+                              let displayPrompt = gen.prompt ?? '';
+                              try { const e = JSON.parse(gen.prompt ?? ''); if (e?.prompt) displayPrompt = e.prompt; } catch { /* plain */ }
                               return (
                                 <div key={gen.id} className="relative group rounded-2xl overflow-hidden border border-white/10 aspect-square bg-black">
                                   {/* Thumbnail */}
