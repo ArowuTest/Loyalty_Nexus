@@ -879,6 +879,52 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
   );
 }
 
+/** Parse "~45 sec", "~2 min", "~90 sec" → seconds number */
+function parseEstimatedSeconds(time?: string): number {
+  if (!time) return 30;
+  const minMatch = time.match(/(\d+)\s*min/);
+  if (minMatch) return parseInt(minMatch[1]) * 60;
+  const secMatch = time.match(/(\d+)\s*sec/);
+  if (secMatch) return parseInt(secMatch[1]);
+  return 30;
+}
+
+/** Time-based progress bar — fills smoothly to ~90%, then pauses until done */
+function GenerationProgressBar({ startedAt, estimatedSeconds }: { startedAt: number; estimatedSeconds: number }) {
+  const [pct, setPct] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const elapsed = (Date.now() - startedAt) / 1000;
+      // Ease-in curve: fast start, slow near the cap
+      const raw = elapsed / estimatedSeconds;
+      // Cap at 92% — never show 100% until actually done
+      const capped = Math.min(0.92, 1 - Math.exp(-2.5 * raw));
+      setPct(Math.round(capped * 100));
+    }, 400);
+    return () => clearInterval(id);
+  }, [startedAt, estimatedSeconds]);
+
+  const colorClass =
+    pct < 40 ? 'from-amber-500 to-orange-400'
+    : pct < 75 ? 'from-orange-400 to-yellow-400'
+    : 'from-yellow-400 to-green-400';
+
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between items-center">
+        <span className="text-[10px] text-white/30">Progress</span>
+        <span className="text-[10px] text-amber-400 font-mono tabular-nums">{pct}%</span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
+        <div
+          className={`h-full rounded-full bg-gradient-to-r transition-all duration-500 ease-out ${colorClass}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ─── Language colour map for code blocks ────────────────────────────────────
 const LANG_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
   python:     { bg: 'bg-blue-500/20',   text: 'text-blue-300',   dot: 'bg-blue-400' },
@@ -1139,6 +1185,35 @@ function ChatBubble({ msg }: { msg: Message }) {
   );
 }
 
+// ─── Tool sample preview images (Unsplash-sourced, freely usable) ─────────────
+// These give each media-generating tool a visual identity on its card,
+// helping users quickly understand the output quality before spending points.
+const TOOL_PREVIEW_IMAGES: Record<string, string> = {
+  "ai-photo":        "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&q=80", // landscape
+  "ai-photo-pro":    "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=400&q=80", // portrait
+  "ai-photo-max":    "https://images.unsplash.com/photo-1519125323398-675f0ddb6308?w=400&q=80", // architectural
+  "ai-photo-dream":  "https://images.unsplash.com/photo-1518780664697-55e3ad937233?w=400&q=80", // dreamy
+  "photo-editor":    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&q=80", // portrait edit
+  "bg-remover":      "https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d?w=400&q=80", // product
+  "image-compose":   "https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?w=400&q=80", // compose
+  "animate-my-photo":"https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&q=80", // portrait for animation
+  "animate-photo":   "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&q=80",
+  "video-premium":   "https://images.unsplash.com/photo-1440404653325-ab127d49abc1?w=400&q=80", // cinematic
+  "video-cinematic": "https://images.unsplash.com/photo-1502899576159-f224dc2349fa?w=400&q=80", // cinematic night
+  "video-veo":       "https://images.unsplash.com/photo-1524712245354-2c4e5e7121c0?w=400&q=80", // ultra realism
+  "video-story":     "https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=400&q=80", // storyboard
+  "my-video-story":  "https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=400&q=80",
+  "video-jingle":    "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&q=80", // music
+  "video-edit":      "https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=400&q=80", // editing
+  "video-extend":    "https://images.unsplash.com/photo-1485846234645-a62644f84728?w=400&q=80", // extend
+  "narrate":         "https://images.unsplash.com/photo-1478737270239-2f02b77fc618?w=400&q=80", // microphone
+  "narrate-pro":     "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=400&q=80", // studio mic
+  "song-creator":    "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80", // music
+  "instrumental":    "https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=400&q=80", // piano
+  "jingle":          "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&q=80", // music note
+  "bg-music":        "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&q=80", // background music
+};
+
 // ─── Tool Card ────────────────────────────────────────────────────────────────
 // CHAT_TOOL_SLUGS: clicking these tool cards opens NexusChatUI instead of ToolDrawer.
 const CHAT_TOOL_SLUGS = new Set([
@@ -1170,6 +1245,7 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
   const outType     = getOutputType(tool.slug);
   const entryLocked = !tool.is_free && tool.entry_point_cost > 0 && userPoints < tool.entry_point_cost;
   const isChatTool  = CHAT_REDIRECT_SLUGS.has(tool.slug);
+  const previewImg  = TOOL_PREVIEW_IMAGES[tool.slug];
 
   const outputColour =
     VIDEO_SLUGS.has(tool.slug) ? "bg-red-500/15 text-red-300 border-red-500/25"
@@ -1194,8 +1270,45 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
         </div>
       )}
 
-      {/* Coloured header strip with icon */}
-      <div className={cn(
+      {/* Preview image — shown for media tools with a sample output image */}
+      {previewImg && (
+        <div className="relative w-full h-28 overflow-hidden flex-shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewImg}
+            alt={`${tool.name} sample output`}
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+            loading="lazy"
+          />
+          {/* Gradient fade into card body */}
+          <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/70" />
+          {/* Output type + NEW badge overlaid on image */}
+          <div className="absolute top-2 left-2 flex gap-1.5">
+            {isNew && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/80 text-purple-100 border border-purple-400/50 leading-none backdrop-blur-sm">
+                NEW
+              </span>
+            )}
+            {isFree && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/80 text-green-100 border border-green-400/50 leading-none backdrop-blur-sm">
+                FREE
+              </span>
+            )}
+          </div>
+          <div className="absolute top-2 right-2">
+            <span className={cn("text-[9px] font-bold px-2 py-1 rounded-full border leading-none backdrop-blur-sm", outputColour)}>
+              {outType.emoji} {outType.label}
+            </span>
+          </div>
+          {/* Tool name overlaid at bottom of image */}
+          <div className="absolute bottom-0 left-0 right-0 px-3 py-2">
+            <p className="text-white font-bold text-sm leading-tight drop-shadow-lg">{tool.name}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Coloured header strip with icon — shown only when NO preview image */}
+      {!previewImg && <div className={cn(
         "w-full px-4 pt-4 pb-3 bg-gradient-to-br flex items-center justify-between",
         cfg.color
       )}>
@@ -1228,7 +1341,7 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
         <span className={cn("text-[9px] font-bold px-2 py-1 rounded-full border leading-none flex-shrink-0", outputColour)}>
           {outType.emoji} {outType.label}
         </span>
-      </div>
+      </div>}
 
       {/* Body */}
       <div className="px-4 py-3 flex flex-col gap-2.5 flex-1">
@@ -1573,15 +1686,13 @@ function GenerationCard({ gen, onRegenerate, onCrossToolAction }: {
           </span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {/* Expiry badge */}
+          {/* Expiry badge — only show when urgently close or expired */}
           {gen.status === "completed" && gen.expires_at && (
             isExpired
               ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/20 font-bold">Expired</span>
-              : expiresInHrs !== null && expiresInHrs <= 12
+              : expiresInHrs !== null && expiresInHrs <= 6
                 ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/20 font-bold">⚠ {expiresInHrs}h left</span>
-                : expiresInHrs !== null
-                  ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/5 text-white/30 border border-white/10">{expiresInHrs}h</span>
-                  : null
+                : null
           )}
           <span className="text-white/25 text-[10px]">{timeAgo(gen.created_at)}</span>
           <StatusPill status={gen.status} />
@@ -2309,6 +2420,8 @@ function ToolDrawer({
                     </div>
                     <ElapsedTimer startedAt={genStartedAt} />
                   </div>
+                  {/* Progress bar — time-based estimate */}
+                  <GenerationProgressBar startedAt={genStartedAt} estimatedSeconds={parseEstimatedSeconds(meta?.time)} />
                   {/* Animated waveform bars */}
                   <div className="flex items-end gap-[3px] h-8 px-1">
                     {Array.from({ length: 28 }).map((_, i) => (
@@ -2469,17 +2582,55 @@ function ToolDrawer({
                   {/* Video result */}
                   {inlineResult.output_url && (VIDEO_SLUGS.has(slug) || inlineResult.output_type === "video" || /\.(mp4|webm|mov)/i.test(inlineResult.output_url)) && (
                     <div className="p-4 space-y-3">
-                      <div className="rounded-xl overflow-hidden border border-white/10 bg-black">
+                      <div className="rounded-xl overflow-hidden border border-white/10 bg-black relative group">
                         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                         <video
                           src={inlineResult.output_url}
                           controls
+                          muted
                           autoPlay
                           loop
+                          playsInline
+                          preload="auto"
                           className="w-full"
-                          style={{ maxHeight: 280 }}
+                          style={{ maxHeight: 320 }}
+                          onError={(e) => {
+                            // Fallback: if inline playback fails, show download-to-play message
+                            const t = e.currentTarget;
+                            t.style.display = 'none';
+                            const fb = t.parentElement?.querySelector('.video-fallback') as HTMLElement | null;
+                            if (fb) fb.style.display = 'flex';
+                          }}
                         />
+                        {/* Fallback for CORS-restricted videos */}
+                        <div className="video-fallback hidden flex-col items-center justify-center gap-3 py-8 px-4 text-center">
+                          <div className="w-14 h-14 rounded-full bg-white/10 flex items-center justify-center">
+                            <Play size={24} className="text-white/60 ml-1" />
+                          </div>
+                          <p className="text-white/50 text-sm">Video ready — click Download to play</p>
+                          <a
+                            href={inlineResult.output_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-500/20 border border-purple-500/30 text-purple-300 text-sm font-semibold hover:bg-purple-500/30 transition-colors"
+                          >
+                            <ExternalLink size={14} /> Open Video
+                          </a>
+                        </div>
                       </div>
+                      {/* Cross-tool action buttons — video */}
+                      {onCrossToolAction && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => onCrossToolAction('video-extend', undefined, inlineResult.output_url!)}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl
+                                       bg-blue-500/15 border border-blue-500/25 text-blue-300
+                                       text-xs font-semibold hover:bg-blue-500/25 transition-colors"
+                          >
+                            <Zap size={12} /> Extend Video
+                          </button>
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <a
                           href={inlineResult.output_url}
@@ -2501,17 +2652,6 @@ function ToolDrawer({
                           <RefreshCw size={14} /> Generate Again
                         </button>
                       </div>
-                      {/* Extend Video cross-tool action */}
-                      {onCrossToolAction && inlineResult.output_url && (
-                        <button
-                          onClick={() => { onCrossToolAction("video-extend", undefined, inlineResult.output_url!); onClose(); }}
-                          className="w-full flex items-center justify-center gap-2 py-2 rounded-xl
-                                     bg-purple-500/15 border border-purple-500/25 text-purple-300
-                                     text-xs font-semibold hover:bg-purple-500/25 transition-colors"
-                        >
-                          <Zap size={12} /> Extend Video
-                        </button>
-                      )}
                     </div>
                   )}
 
@@ -3842,21 +3982,134 @@ function StudioPageInner() {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {recentGens.map((gen) => (
-                      <GenerationCard
-                        key={gen.id}
-                        gen={gen}
-                        onRegenerate={(g) => {
-                          const tool = tools.find((t) => t.slug === g.tool_slug);
-                          if (tool) {
-                          if (CHAT_TOOL_SLUGS.has(tool.slug)) { setChatToolSlug(tool.slug); }
-                          else { openTool(tool); setActiveTab("tools"); }
-                        }
-                        }}
-                        onCrossToolAction={openToolWithPreload}
-                      />
-                    ))}
+                  <div className="space-y-5">
+                    {/* ── Visual media grid (images + videos) ── */}
+                    {(() => {
+                      const mediaGens = recentGens.filter(g =>
+                        (IMAGE_SLUGS.has(g.tool_slug) || VIDEO_SLUGS.has(g.tool_slug)) &&
+                        g.status === 'completed' && g.output_url && !g.output_url.endsWith('.txt')
+                      );
+                      if (mediaGens.length === 0) return null;
+                      return (
+                        <div>
+                          <p className="text-white/30 text-[10px] uppercase tracking-wider font-semibold mb-3">Media</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {mediaGens.map((gen) => {
+                              const isVid = VIDEO_SLUGS.has(gen.tool_slug);
+                              let displayPrompt = gen.prompt;
+                              try { const e = JSON.parse(gen.prompt); if (e?.prompt) displayPrompt = e.prompt; } catch { /* plain */ }
+                              return (
+                                <div key={gen.id} className="relative group rounded-2xl overflow-hidden border border-white/10 aspect-square bg-black">
+                                  {/* Thumbnail */}
+                                  {!isVid && (
+                                    <img src={gen.output_url!} alt={displayPrompt}
+                                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                      loading="lazy" />
+                                  )}
+                                  {isVid && (
+                                    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-purple-900/40 to-black gap-2">
+                                      <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center">
+                                        <Play size={20} className="text-white/70 ml-0.5" />
+                                      </div>
+                                      <span className="text-white/40 text-[10px] font-medium">Video</span>
+                                    </div>
+                                  )}
+                                  {/* Hover overlay */}
+                                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-2.5 gap-1.5">
+                                    <p className="text-white/80 text-[10px] line-clamp-2 leading-tight">{displayPrompt}</p>
+                                    <div className="flex gap-1.5">
+                                      {/* Download */}
+                                      <a href={gen.output_url!} download target="_blank" rel="noreferrer"
+                                        className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-white/15 text-white/70 hover:text-white text-[10px] font-semibold transition-colors">
+                                        <Download size={10} /> {isVid ? 'MP4' : 'Save'}
+                                      </a>
+                                      {/* Context actions */}
+                                      {!isVid && (
+                                        <button
+                                          onClick={() => openToolWithPreload('animate-my-photo', gen.output_url!, undefined)}
+                                          className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-purple-500/30 text-purple-200 text-[10px] font-semibold transition-colors hover:bg-purple-500/50">
+                                          🎬 Animate
+                                        </button>
+                                      )}
+                                      {isVid && (
+                                        <button
+                                          onClick={() => openToolWithPreload('video-extend', undefined, gen.output_url!)}
+                                          className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-blue-500/30 text-blue-200 text-[10px] font-semibold transition-colors hover:bg-blue-500/50">
+                                          ⚡ Extend
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {/* Video badge */}
+                                  {isVid && (
+                                    <div className="absolute top-2 left-2 text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/20 font-bold">
+                                      🎬 video
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* ── Other generations (audio, text) ── */}
+                    {(() => {
+                      const otherGens = recentGens.filter(g =>
+                        !IMAGE_SLUGS.has(g.tool_slug) && !VIDEO_SLUGS.has(g.tool_slug)
+                      );
+                      if (otherGens.length === 0) return null;
+                      return (
+                        <div>
+                          <p className="text-white/30 text-[10px] uppercase tracking-wider font-semibold mb-3">All Generations</p>
+                          <div className="space-y-3">
+                            {otherGens.map((gen) => (
+                              <GenerationCard
+                                key={gen.id}
+                                gen={gen}
+                                onRegenerate={(g) => {
+                                  const tool = tools.find((t) => t.slug === g.tool_slug);
+                                  if (tool) {
+                                    if (CHAT_TOOL_SLUGS.has(tool.slug)) { setChatToolSlug(tool.slug); }
+                                    else { openTool(tool); setActiveTab("tools"); }
+                                  }
+                                }}
+                                onCrossToolAction={openToolWithPreload}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Also show image/video cards in the list for non-completed or text outputs */}
+                    {(() => {
+                      const listMediaGens = recentGens.filter(g =>
+                        (IMAGE_SLUGS.has(g.tool_slug) || VIDEO_SLUGS.has(g.tool_slug)) &&
+                        (g.status !== 'completed' || !g.output_url || g.output_url.endsWith('.txt'))
+                      );
+                      if (listMediaGens.length === 0) return null;
+                      return (
+                        <div className="space-y-3">
+                          {listMediaGens.map((gen) => (
+                            <GenerationCard
+                              key={gen.id}
+                              gen={gen}
+                              onRegenerate={(g) => {
+                                const tool = tools.find((t) => t.slug === g.tool_slug);
+                                if (tool) {
+                                  if (CHAT_TOOL_SLUGS.has(tool.slug)) { setChatToolSlug(tool.slug); }
+                                  else { openTool(tool); setActiveTab("tools"); }
+                                }
+                              }}
+                              onCrossToolAction={openToolWithPreload}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })()}
+
                     {gallery.length > 8 && (
                       <a href="/studio/gallery"
                         className="glass border border-white/[0.10] text-white/70 hover:text-white hover:border-white/20 transition-all rounded-xl w-full py-3 text-sm flex items-center justify-center gap-2">
