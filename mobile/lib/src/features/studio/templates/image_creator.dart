@@ -40,14 +40,14 @@ const _inspirations = [
 Map<String, dynamic> _providerConfig(String slug) {
   if (slug == 'ai-photo-pro') {
     return {
-      'label': 'Grok Aurora',
+      'label': 'Nexus Vision',
       'desc': 'High quality · Detailed generation',
       'color': const Color(0xFF8B5CF6),
     };
   }
   if (slug == 'ai-photo-max') {
     return {
-      'label': 'GPT-Image Large',
+      'label': 'Nexus AI Max',
       'desc': 'Max quality · 2× detail, slower',
       'color': const Color(0xFF6366F1),
     };

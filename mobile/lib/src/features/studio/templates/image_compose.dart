@@ -131,7 +131,7 @@ class _ImageComposeTemplateState extends ConsumerState<ImageComposeTemplate> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const ProviderBadge(
-          label: 'Grok Aurora',
+          label: 'Nexus Vision',
           description: 'Multi-image composition & blending',
           color: Color(0xFFDB2777),
           icon: Icons.photo_library_rounded,

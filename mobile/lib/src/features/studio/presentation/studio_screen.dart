@@ -238,6 +238,67 @@ _CatConfig _catCfg(String cat) =>
 // Tool meta (time estimates + tips — mirrors TOOL_META in webapp)
 // ══════════════════════════════════════════════════════════════════════════════
 
+// Preview images for tool cards — mirrors TOOL_PREVIEW_IMAGES in webapp
+const _toolPreviewImages = <String, String>{
+  'ai-photo':        'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&q=80',
+  'ai-photo-pro':    'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=400&q=80',
+  'ai-photo-max':    'https://images.unsplash.com/photo-1519125323398-675f0ddb6308?w=400&q=80',
+  'ai-photo-dream':  'https://images.unsplash.com/photo-1518780664697-55e3ad937233?w=400&q=80',
+  'photo-editor':    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&q=80',
+  'bg-remover':      'https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d?w=400&q=80',
+  'image-compose':   'https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?w=400&q=80',
+  'image-composer':  'https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?w=400&q=80',
+  'animate-my-photo':'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&q=80',
+  'animate-photo':   'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&q=80',
+  'video-premium':   'https://images.unsplash.com/photo-1440404653325-ab127d49abc1?w=400&q=80',
+  'video-cinematic': 'https://images.unsplash.com/photo-1502899576159-f224dc2349fa?w=400&q=80',
+  'video-veo':       'https://images.unsplash.com/photo-1524712245354-2c4e5e7121c0?w=400&q=80',
+  'video-story':     'https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=400&q=80',
+  'my-video-story':  'https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=400&q=80',
+  'video-jingle':    'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&q=80',
+  'video-edit':      'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=400&q=80',
+  'video-extend':    'https://images.unsplash.com/photo-1485846234645-a62644f84728?w=400&q=80',
+  'narrate':         'https://images.unsplash.com/photo-1478737270239-2f02b77fc618?w=400&q=80',
+  'narrate-pro':     'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=400&q=80',
+  'song-creator':    'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80',
+  'instrumental':    'https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=400&q=80',
+  'jingle':          'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&q=80',
+  'bg-music':        'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&q=80',
+  'ask-nexus':       'https://images.unsplash.com/photo-1677442135703-1787eea5ce01?w=400&q=80',
+  'nexus-chat':      'https://images.unsplash.com/photo-1676277791608-ac54525aa94d?w=400&q=80',
+  'web-search-ai':   'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=400&q=80',
+  'code-helper':     'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=400&q=80',
+  'code-pro':        'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=400&q=80',
+  'nexus-code-pro':  'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=400&q=80',
+  'website-builder': 'https://images.unsplash.com/photo-1467232004584-a241de8bcf5d?w=400&q=80',
+  'bizplan':         'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=400&q=80',
+  'business-plan':   'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=400&q=80',
+  'business-plan-summary': 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=400&q=80',
+  'voice-to-plan':   'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=400&q=80',
+  'research-brief':  'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=400&q=80',
+  'deep-research-brief': 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=400&q=80',
+  'slide-deck':      'https://images.unsplash.com/photo-1557804506-669a67965ba0?w=400&q=80',
+  'infographic':     'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400&q=80',
+  'nexus-agent':     'https://images.unsplash.com/photo-1677442135703-1787eea5ce01?w=400&q=80',
+  'doc-analyzer':    'https://images.unsplash.com/photo-1568667256549-094345857637?w=400&q=80',
+  'nexus-document-analyzer': 'https://images.unsplash.com/photo-1568667256549-094345857637?w=400&q=80',
+  'localize-ui':     'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=400&q=80',
+  'nexus-localization-engine': 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=400&q=80',
+  'study-guide':     'https://images.unsplash.com/photo-1513258496099-48168024aec0?w=400&q=80',
+  'quiz':            'https://images.unsplash.com/photo-1606326608606-aa0b62935f2b?w=400&q=80',
+  'quiz-me':         'https://images.unsplash.com/photo-1606326608606-aa0b62935f2b?w=400&q=80',
+  'quiz-generator':  'https://images.unsplash.com/photo-1606326608606-aa0b62935f2b?w=400&q=80',
+  'mindmap':         'https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=400&q=80',
+  'mind-map':        'https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=400&q=80',
+  'translate':       'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=400&q=80',
+  'local-translation': 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=400&q=80',
+  'image-analyser':  'https://images.unsplash.com/photo-1516110833967-0b5716ca1387?w=400&q=80',
+  'ask-my-photo':    'https://images.unsplash.com/photo-1516110833967-0b5716ca1387?w=400&q=80',
+  'transcribe':      'https://images.unsplash.com/photo-1590602847861-f357a9332bbc?w=400&q=80',
+  'transcribe-african': 'https://images.unsplash.com/photo-1590602847861-f357a9332bbc?w=400&q=80',
+  'african-transcribe': 'https://images.unsplash.com/photo-1590602847861-f357a9332bbc?w=400&q=80',
+};
+
 const _toolMeta = <String, (String time, String tip)>{
   'ai-chat':           ('instant',  'Ask follow-ups to go deeper'),
   'web-search-ai':     ('~5 sec',   "Include 'today' or a date for current info"),
@@ -249,7 +310,7 @@ const _toolMeta = <String, (String time, String tip)>{
   'image-analyser':    ('~4 sec',   'Works with any public image URL'),
   'animate-photo':     ('~45 sec',  'Use portraits or scenic photos for best motion'),
   'video-cinematic':   ('~90 sec',  "Describe motion: 'slow zoom in', 'camera pan left'"),
-  'video-premium':     ('~2 min',   'More detail in prompt = better camera movement'),
+  'video-premium':     ('~45 sec',  'More detail in prompt = better camera movement'),
   'video-veo':         ('~3 min',   'Describe the scene like a film director would'),
   'narrate':           ('~4 sec',   'Keep text under 500 words for best quality'),
   'narrate-pro':       ('~5 sec',   "Try 'coral' for warm tone, 'onyx' for deep voice"),
@@ -1436,6 +1497,7 @@ class _ToolCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cfg = _catCfg(tool.category);
     final meta = _toolMeta[tool.slug];
+    final previewImg = _toolPreviewImages[tool.slug];
     final entryLocked = !tool.isFree && tool.entryPointCost > 0 && userPoints < tool.entryPointCost;
 
     return GestureDetector(
@@ -1448,6 +1510,7 @@ class _ToolCard extends StatelessWidget {
         ),
         child: Stack(children: [
           Row(children: [
+            // Tool icon / preview image
             Container(
               width: 40, height: 40,
               decoration: BoxDecoration(
@@ -1455,7 +1518,15 @@ class _ToolCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(11),
                 border: Border.all(color: cfg.color.withValues(alpha: 0.25)),
               ),
-              child: Icon(cfg.icon, size: 18, color: cfg.color),
+              clipBehavior: Clip.antiAlias,
+              child: previewImg != null
+                  ? Image.network(
+                      previewImg,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          Icon(cfg.icon, size: 18, color: cfg.color),
+                    )
+                  : Icon(cfg.icon, size: 18, color: cfg.color),
             ),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2266,13 +2337,58 @@ class _ToolDrawer extends ConsumerStatefulWidget {
   @override ConsumerState<_ToolDrawer> createState() => _ToolDrawerState();
 }
 
+// Stage messages shown during generation (per output type)
+const _kStageMessages = {
+  'image': [
+    '🎨 Priming creative canvas…',
+    '✨ Assembling pixel layers…',
+    '🖌️ Applying lighting and detail…',
+    '🔍 Enhancing fine textures…',
+    '🚀 Almost there — final polish…',
+  ],
+  'video': [
+    '🎬 Initialising video engine…',
+    '🎞️ Rendering motion frames…',
+    '✨ Applying cinematic effects…',
+    '🖥️ Encoding final footage…',
+    '🚀 Wrapping up — almost done…',
+  ],
+  'audio': [
+    '🎵 Warming up the studio…',
+    '🎤 Synthesising voice layers…',
+    '🎶 Mixing frequencies…',
+    '🔊 Mastering audio output…',
+    '🚀 Almost ready — finalising…',
+  ],
+  'text': [
+    '📝 Reading your request…',
+    '🧠 Thinking it through…',
+    '✍️ Drafting the content…',
+    '🔍 Reviewing and refining…',
+    '🚀 Finishing touches…',
+  ],
+};
+
 class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
   final _promptCtrl = TextEditingController();
   final _urlCtrl    = TextEditingController();
   bool _generating  = false;
   bool _showConfirm = false;
 
-  @override void dispose() { _promptCtrl.dispose(); _urlCtrl.dispose(); super.dispose(); }
+  // Progress bar + stage messages during generation
+  Timer? _stageTimer;
+  Timer? _progressTimer;
+  int _stageIndex = 0;
+  double _genProgress = 0.0;
+  String _currentStage = '';
+
+  @override void dispose() {
+    _stageTimer?.cancel();
+    _progressTimer?.cancel();
+    _promptCtrl.dispose();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
 
   bool get _isFree     => widget.tool.isFree || widget.tool.pointCost == 0;
   bool get _canAfford  => _isFree || widget.userPoints >= widget.tool.pointCost;
@@ -2452,6 +2568,41 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
 
     const SizedBox(height: 20),
 
+    // ── Generation progress bar + stage messages ──
+    if (_generating) ...[
+      const SizedBox(height: 4),
+      Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0x0A8B5CF6),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0x1A8B5CF6))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const SizedBox(
+              width: 14, height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                valueColor: AlwaysStoppedAnimation(Color(0xFF8B5CF6)))),
+            const SizedBox(width: 10),
+            Expanded(child: Text(
+              _currentStage.isEmpty ? 'Generating…' : _currentStage,
+              style: const TextStyle(
+                color: Color(0xFFc4b5fd), fontSize: 12, fontWeight: FontWeight.w500))),
+          ]),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: _genProgress,
+              minHeight: 4,
+              backgroundColor: const Color(0x1A8B5CF6),
+              valueColor: const AlwaysStoppedAnimation(Color(0xFF8B5CF6)))),
+        ]),
+      ),
+      const SizedBox(height: 16),
+    ],
+
     // ── Purpose-built template (has its own Generate button) ──
     TemplateRegistry.build(
       tool: widget.tool.toJson(),
@@ -2531,13 +2682,65 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
     ),
   );
 
+  String _outputType() {
+    final slug = widget.tool.slug;
+    if (_videoSlugs.contains(slug)) return 'video';
+    if (_audioSlugs.contains(slug)) return 'audio';
+    final cat = widget.tool.category.toLowerCase();
+    if (cat.contains('image') || cat.contains('vision')) return 'image';
+    return 'text';
+  }
+
+  void _startGenerationProgress() {
+    final type = _outputType();
+    final messages = _kStageMessages[type] ?? _kStageMessages['text']!;
+    final metaDuration = _toolMeta[widget.tool.slug]?.$1 ?? '~30 sec';
+    // Parse estimated duration in seconds (e.g. "~45 sec" → 45, "~2 min" → 120)
+    int estSeconds = 30;
+    final secMatch = RegExp(r'(\d+)\s*sec').firstMatch(metaDuration);
+    final minMatch = RegExp(r'(\d+)\s*min').firstMatch(metaDuration);
+    if (secMatch != null) estSeconds = int.parse(secMatch.group(1)!);
+    else if (minMatch != null) estSeconds = int.parse(minMatch.group(1)!) * 60;
+
+    setState(() {
+      _stageIndex = 0;
+      _genProgress = 0.0;
+      _currentStage = messages[0];
+    });
+
+    // Rotate stage messages every (estSeconds / messages.length) seconds, max at 90%
+    final intervalMs = ((estSeconds * 1000) / messages.length).round();
+    _stageTimer = Timer.periodic(Duration(milliseconds: intervalMs), (t) {
+      if (!mounted) { t.cancel(); return; }
+      final next = (_stageIndex + 1).clamp(0, messages.length - 1);
+      setState(() { _stageIndex = next; _currentStage = messages[next]; });
+    });
+
+    // Smooth progress from 0 → 90% over estSeconds, then hold
+    const tickMs = 200;
+    _progressTimer = Timer.periodic(const Duration(milliseconds: tickMs), (t) {
+      if (!mounted) { t.cancel(); return; }
+      final increment = (1.0 / (estSeconds * (1000 / tickMs))) * 0.9;
+      setState(() { _genProgress = (_genProgress + increment).clamp(0.0, 0.9); });
+    });
+  }
+
+  void _stopGenerationProgress() {
+    _stageTimer?.cancel();
+    _progressTimer?.cancel();
+    setState(() { _genProgress = 1.0; });
+  }
+
   Future<void> _doGenerateRaw(Map<String, dynamic> payload) async {
+    _startGenerationProgress();
     setState(() { _generating = true; _showConfirm = false; });
     try {
       await ref.read(studioApiProvider)
           .startGeneration(widget.tool.slug, payload);
+      _stopGenerationProgress();
       widget.onGenerated();
     } catch (e) {
+      _stopGenerationProgress();
       setState(() => _generating = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(

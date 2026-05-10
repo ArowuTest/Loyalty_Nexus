@@ -105,7 +105,7 @@ class _VideoAnimatorTemplateState extends ConsumerState<VideoAnimatorTemplate> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const ProviderBadge(
-          label: 'Kling / Wan',
+          label: 'Nexus Video Engine',
           description: 'Image-to-video animation',
           color: Color(0xFFF97316),
           icon: Icons.animation_rounded,

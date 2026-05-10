@@ -889,6 +889,28 @@ function parseEstimatedSeconds(time?: string): number {
   return 30;
 }
 
+/** Contextual rotating stage messages shown during generation */
+const STAGE_MESSAGES: Record<string, string[]> = {
+  image:  ['Composing your vision…', 'Applying style and lighting…', 'Rendering fine details…', 'Almost ready…'],
+  video:  ['Building your scene…', 'Animating motion…', 'Encoding frames…', 'Finalising video…'],
+  audio:  ['Composing melody…', 'Adding vocal layers…', 'Mixing and mastering…', 'Almost done…'],
+  text:   ['Thinking…', 'Structuring content…', 'Polishing the result…', 'Almost ready…'],
+};
+function useStageMessage(outputType: string, estimatedSeconds: number) {
+  const messages = STAGE_MESSAGES[outputType] ?? STAGE_MESSAGES.text;
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    const interval = Math.max(3000, (estimatedSeconds * 1000) / messages.length);
+    const id = setInterval(() => setIdx(i => Math.min(i + 1, messages.length - 1)), interval);
+    return () => clearInterval(id);
+  }, [estimatedSeconds, messages.length]);
+  return messages[idx];
+}
+function StageMessageText({ outputType, estimatedSeconds }: { outputType: string; estimatedSeconds: number }) {
+  const msg = useStageMessage(outputType, estimatedSeconds);
+  return <span key={msg} className="transition-all duration-700">{msg}</span>;
+}
+
 /** Time-based progress bar — fills smoothly to ~90%, then pauses until done */
 function GenerationProgressBar({ startedAt, estimatedSeconds }: { startedAt: number; estimatedSeconds: number }) {
   const [pct, setPct] = useState(0);
@@ -1212,6 +1234,44 @@ const TOOL_PREVIEW_IMAGES: Record<string, string> = {
   "instrumental":    "https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?w=400&q=80", // piano
   "jingle":          "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&q=80", // music note
   "bg-music":        "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&q=80", // background music
+  // Chat / text tools
+  "ask-nexus":         "https://images.unsplash.com/photo-1677442135703-1787eea5ce01?w=400&q=80", // AI abstract
+  "nexus-chat":        "https://images.unsplash.com/photo-1676277791608-ac54525aa94d?w=400&q=80", // chat interface
+  "web-search-ai":     "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=400&q=80", // globe/internet
+  "code-helper":       "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=400&q=80", // code screen
+  "code-pro":          "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=400&q=80", // code screen
+  "nexus-code-pro":    "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=400&q=80",
+  // Business / build tools
+  "website-builder":   "https://images.unsplash.com/photo-1467232004584-a241de8bcf5d?w=400&q=80", // website design
+  "bizplan":           "https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=400&q=80", // business plan
+  "business-plan":     "https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=400&q=80",
+  "business-plan-summary": "https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=400&q=80",
+  "voice-to-plan":     "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=400&q=80", // mic planning
+  "research-brief":    "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=400&q=80", // research
+  "deep-research-brief":"https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=400&q=80",
+  "slide-deck":        "https://images.unsplash.com/photo-1557804506-669a67965ba0?w=400&q=80", // presentation
+  "infographic":       "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400&q=80", // data viz
+  "nexus-agent":       "https://images.unsplash.com/photo-1677442135703-1787eea5ce01?w=400&q=80", // AI
+  "doc-analyzer":      "https://images.unsplash.com/photo-1568667256549-094345857637?w=400&q=80", // documents
+  "nexus-document-analyzer": "https://images.unsplash.com/photo-1568667256549-094345857637?w=400&q=80",
+  "localize-ui":       "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=400&q=80", // translation/global
+  "nexus-localization-engine": "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=400&q=80",
+  // Learning tools
+  "study-guide":       "https://images.unsplash.com/photo-1513258496099-48168024aec0?w=400&q=80", // books
+  "quiz":              "https://images.unsplash.com/photo-1606326608606-aa0b62935f2b?w=400&q=80", // quiz/exam
+  "quiz-me":           "https://images.unsplash.com/photo-1606326608606-aa0b62935f2b?w=400&q=80",
+  "quiz-generator":    "https://images.unsplash.com/photo-1606326608606-aa0b62935f2b?w=400&q=80",
+  "mindmap":           "https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=400&q=80", // mind map
+  "mind-map":          "https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=400&q=80",
+  "translate":         "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=400&q=80", // languages
+  // Vision / image analysis
+  "image-analyser":    "https://images.unsplash.com/photo-1516110833967-0b5716ca1387?w=400&q=80", // eye/vision
+  "ask-my-photo":      "https://images.unsplash.com/photo-1516110833967-0b5716ca1387?w=400&q=80",
+  "image-composer":    "https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?w=400&q=80",
+  // Transcription
+  "transcribe":        "https://images.unsplash.com/photo-1590602847861-f357a9332bbc?w=400&q=80", // waveform
+  "transcribe-african":"https://images.unsplash.com/photo-1590602847861-f357a9332bbc?w=400&q=80",
+  "african-transcribe":"https://images.unsplash.com/photo-1590602847861-f357a9332bbc?w=400&q=80",
 };
 
 // ─── Tool Card ────────────────────────────────────────────────────────────────
@@ -2458,7 +2518,7 @@ function ToolDrawer({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-amber-400 text-sm font-medium">
                       <Loader2 size={14} className="animate-spin" />
-                      <span>Generating your {outType.noun}…</span>
+                      <StageMessageText outputType={outType.noun} estimatedSeconds={parseEstimatedSeconds(meta?.time)} />
                     </div>
                     <ElapsedTimer startedAt={genStartedAt} />
                   </div>

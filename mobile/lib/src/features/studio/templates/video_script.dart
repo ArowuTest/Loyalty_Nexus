@@ -366,7 +366,7 @@ class _VideoScriptTemplateState extends ConsumerState<VideoScriptTemplate> {
       children: [
         // ── Provider badge ──
         const ProviderBadge(
-          label: 'Kling v2.6 Pro',
+          label: 'Nexus Video Engine',
           description: 'Script-driven story animation',
           color: Color(0xFF7C3AED),
           icon: Icons.movie_creation_rounded,

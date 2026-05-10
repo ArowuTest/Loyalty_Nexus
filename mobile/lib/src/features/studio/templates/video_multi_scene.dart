@@ -125,7 +125,7 @@ class _VideoMultiSceneTemplateState extends State<VideoMultiSceneTemplate> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const ProviderBadge(
-          label: 'Grok / Kling',
+          label: 'Nexus Video Engine',
           description: 'Multi-scene AI video storytelling',
           color: Color(0xFFF59E0B),
           icon: Icons.movie_creation_rounded,

@@ -90,7 +90,7 @@ class _VideoEditorTemplateState extends ConsumerState<VideoEditorTemplate> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const ProviderBadge(
-          label: 'Kling / Wan',
+          label: 'Nexus Video Engine',
           description: 'AI video editing and enhancement',
           color: Color(0xFF7C3AED),
           icon: Icons.video_settings_rounded,

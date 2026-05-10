@@ -285,7 +285,7 @@ class _VideoCreatorTemplateState extends ConsumerState<VideoCreatorTemplate> {
 
         // ── Provider badge ──
         const ProviderBadge(
-          label: 'Grok / Kling',
+          label: 'Nexus Video Engine',
           description: 'High-quality AI video generation',
           color: Color(0xFFEF4444),
           icon: Icons.videocam_rounded,

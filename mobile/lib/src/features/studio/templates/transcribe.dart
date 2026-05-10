@@ -139,7 +139,7 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ProviderBadge(
-          label: _isAfricanMode ? 'Pollinations Whisper' : 'OpenAI Whisper',
+          label: _isAfricanMode ? 'Nexus AI — African' : 'Nexus AI Transcription',
           description: _isAfricanMode
               ? 'Optimised for African languages & Pidgin'
               : 'High-accuracy speech recognition',

@@ -90,7 +90,7 @@ class _VideoExtenderTemplateState extends ConsumerState<VideoExtenderTemplate> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const ProviderBadge(
-          label: 'Kling / Wan',
+          label: 'Nexus Video Engine',
           description: 'Seamless video extension',
           color: Color(0xFF0EA5E9),
           icon: Icons.expand_rounded,

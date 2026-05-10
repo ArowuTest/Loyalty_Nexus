@@ -305,7 +305,7 @@ class _MusicComposerTemplateState extends State<MusicComposerTemplate> {
       children: [
         // ── Provider badge ──
         const ProviderBadge(
-          label: 'Suno AI',
+          label: 'Nexus Music',
           description: 'Professional music generation with full song structure',
           color: Color(0xFF10B981),
           icon: Icons.music_note_rounded,

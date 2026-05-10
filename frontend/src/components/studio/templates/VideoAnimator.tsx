@@ -189,6 +189,52 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
         </div>
       )}
 
+      {/* ── Aspect Ratio + Duration — FIRST (Runway/Kling style) ── */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Aspect Ratio</label>
+          <div className="flex gap-2 flex-wrap">
+            {ASPECT_RATIOS.map((ar) => (
+              <button
+                key={ar.value}
+                onClick={() => setAspectRatio(ar.value)}
+                className={cn(
+                  'flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-lg border font-semibold transition-all',
+                  aspectRatio === ar.value
+                    ? 'bg-cyan-600 text-white border-cyan-500'
+                    : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
+                )}
+              >
+                <span>{ar.icon}</span>
+                <span>{ar.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Duration</label>
+            <span className="text-white/35 text-[11px] font-mono">{duration}s</span>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {durations.map((d: number) => (
+              <button
+                key={d}
+                onClick={() => setDuration(d)}
+                className={cn(
+                  'text-[11px] px-3 py-1.5 rounded-lg border font-semibold transition-all',
+                  duration === d
+                    ? 'bg-cyan-600 text-white border-cyan-500'
+                    : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
+                )}
+              >
+                {d}s
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* ── STEP 1: Describe the animation (ALWAYS VISIBLE FIRST) ── */}
       <div>
         <div className="flex items-center gap-2 mb-2">
@@ -349,60 +395,13 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
           <Sparkles size={13} />
           Advanced settings
           <span className="ml-auto text-white/20 text-[10px]">
-            {[`${duration}s`, aspectRatio, resolution, INTENSITY_LABELS[intensity]].join(' · ')}
+            {[resolution, INTENSITY_LABELS[intensity]].filter(Boolean).join(' · ')}
           </span>
           {showAdvanced ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
         </button>
 
         {showAdvanced && (
           <div className="mt-3 space-y-4 pl-1 border-l-2 border-white/[0.06]">
-
-            {/* Aspect Ratio */}
-            <div>
-              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Aspect Ratio</label>
-              <div className="flex gap-2 flex-wrap">
-                {ASPECT_RATIOS.map((ar) => (
-                  <button
-                    key={ar.value}
-                    onClick={() => setAspectRatio(ar.value)}
-                    className={cn(
-                      'flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
-                      aspectRatio === ar.value
-                        ? 'bg-cyan-600 text-white border-cyan-500'
-                        : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
-                    )}
-                  >
-                    <span>{ar.icon}</span>
-                    <span>{ar.label}</span>
-                    <span className="text-[9px] font-mono opacity-60">{ar.value}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Duration */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Duration</label>
-                <span className="text-white/35 text-[11px] font-mono">{duration}s</span>
-              </div>
-              <div className="flex gap-2 flex-wrap">
-                {durations.map((d: number) => (
-                  <button
-                    key={d}
-                    onClick={() => setDuration(d)}
-                    className={cn(
-                      'text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
-                      duration === d
-                        ? 'bg-cyan-600 text-white border-cyan-500'
-                        : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
-                    )}
-                  >
-                    {d}s
-                  </button>
-                ))}
-              </div>
-            </div>
 
             {/* Resolution (Grok supports 480p / 720p) */}
             {isGrok && (
