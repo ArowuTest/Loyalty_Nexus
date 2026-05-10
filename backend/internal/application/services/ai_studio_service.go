@@ -151,15 +151,16 @@ type studioProviderResult struct {
 // ─── AIStudioOrchestrator ─────────────────────────────────────────────────────
 
 type AIStudioOrchestrator struct {
-	cfg        *config.ConfigManager
-	studioRepo repositories.StudioRepository
-	studioSvc  *StudioService
-	userRepo   repositories.UserRepository
-	storage    external.AssetStorage
-	httpClient *http.Client
-	llmOrch    *external.LLMOrchestrator // for provider health tracking
-	providerDB ProviderConfigStore       // optional DB-backed provider registry
-	grokClient *external.GrokAdapter     // xAI Grok for premium image/video generation
+	cfg            *config.ConfigManager
+	studioRepo     repositories.StudioRepository
+	studioSvc      *StudioService
+	userRepo       repositories.UserRepository
+	storage        external.AssetStorage
+	httpClient     *http.Client
+	llmOrch        *external.LLMOrchestrator // for provider health tracking
+	providerDB     ProviderConfigStore       // optional DB-backed provider registry
+	grokClient     *external.GrokAdapter     // xAI Grok for premium image/video generation
+	agentSemaphore chan struct{}              // caps concurrent true-agent runs (ReAct loop)
 }
 
 // ProviderConfigStore is the minimal interface the orchestrator needs
@@ -187,14 +188,23 @@ func NewAIStudioOrchestrator(
 	} else {
 		log.Printf("[AIStudio] XAI_API_KEY not set — Grok premium image/video disabled")
 	}
+	// agentSemaphore: caps concurrent Nexus Agent ReAct runs at 10.
+	// Each run makes 4-8 Gemini calls + Tavily searches; this prevents API rate-limit
+	// exhaustion regardless of how many users are on the platform.
+	agentSem := make(chan struct{}, 10)
+	for i := 0; i < 10; i++ {
+		agentSem <- struct{}{}
+	}
+
 	return &AIStudioOrchestrator{
-		cfg:        cfg,
-		studioRepo: studioRepo,
-		studioSvc:  studioSvc,
-		userRepo:   userRepo,
-		storage:    storage,
-		httpClient: &http.Client{Timeout: 120 * time.Second},
-		grokClient: grokClient,
+		cfg:            cfg,
+		studioRepo:     studioRepo,
+		studioSvc:      studioSvc,
+		userRepo:       userRepo,
+		storage:        storage,
+		httpClient:     &http.Client{Timeout: 120 * time.Second},
+		grokClient:     grokClient,
+		agentSemaphore: agentSem,
 	}
 }
 
@@ -3817,56 +3827,461 @@ func (o *AIStudioOrchestrator) dispatchLocalizeUI(ctx context.Context, env promp
 	return nil, fmt.Errorf("localize-ui: text translation failed: %w", err)
 }
 
-// ─── Nexus Agentic Workflow Builder ──────────────────────────────────────────
-// dispatchNexusAgent handles the nexus-agent slug.
-// Runs a multi-step agentic reasoning loop: the model plans, executes sub-tasks,
-// and synthesises a final result — all in a single streaming response.
-func (o *AIStudioOrchestrator) dispatchNexusAgent(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
-	agentSys := "You are Nexus Agent, an autonomous AI workflow engine. " +
-		"When given a complex multi-step task, you MUST follow this exact process: " +
-		"\n\n## Step 1: Task Decomposition " +
-		"\nBreak the user's request into 3-7 discrete, ordered sub-tasks. List them as a numbered plan. " +
-		"\n\n## Step 2: Sequential Execution " +
-		"\nExecute each sub-task in order. For each one, write: " +
-		"\n**Sub-task [N]: [Name]** " +
-		"\n[Your work for this sub-task] " +
-		"\n\n## Step 3: Synthesis " +
-		"\nCombine all sub-task outputs into a single, coherent final deliverable. " +
-		"\n\nRules: " +
-		"\n- Think step by step. Show your reasoning. " +
-		"\n- For data analysis tasks: show the analysis, then the insight, then the recommendation. " +
-		"\n- For writing tasks: plan the structure, write each section, then present the final document. " +
-		"\n- For research tasks: identify sources, extract key facts, then synthesise findings. " +
-		"\n- Always end with a clear, actionable \"Final Output\" section. " +
-		"\n- Be thorough. Quality over speed. The user is paying premium points for this."
+// ─── Nexus Agent — True ReAct Agent (Option B) ───────────────────────────────
+//
+// Architecture: Gemini 2.5 Flash with native function-calling (tool use).
+// Loop:  Reason → Act (call tool) → Observe (inject result) → repeat
+// Tools: web_search (Tavily), read_url (HTTP fetch + strip)
+// Cap:   agentSemaphore limits concurrent runs to 10 — protects API rate limits
+//        at scale (10 k users). Queue wait timeout: 8 s.
+// Max iterations: 8 — prevents infinite loops on adversarial inputs.
+// Total timeout: 90 s context deadline (set by caller via ctx).
 
-	userTask := env.Prompt
-	if userTask == "" {
+// agentMessage mirrors the Gemini content shape used in the conversation array.
+type agentMessage struct {
+	Role  string       `json:"role"`
+	Parts []agentPart  `json:"parts"`
+}
+
+type agentPart struct {
+	// Exactly one of the following fields is set per part.
+	Text             string                 `json:"text,omitempty"`
+	FunctionCall     *agentFunctionCall     `json:"functionCall,omitempty"`
+	FunctionResponse *agentFunctionResponse `json:"functionResponse,omitempty"`
+}
+
+type agentFunctionCall struct {
+	Name string                 `json:"name"`
+	Args map[string]interface{} `json:"args"`
+}
+
+type agentFunctionResponse struct {
+	Name     string                 `json:"name"`
+	Response map[string]interface{} `json:"response"`
+}
+
+// dispatchNexusAgent is the entry point called by the async job dispatcher.
+func (o *AIStudioOrchestrator) dispatchNexusAgent(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
+	if env.Prompt == "" {
 		return nil, fmt.Errorf("nexus-agent: task description is required")
 	}
 
-	// Enrich with any uploaded document context
-	if env.DocumentURL != "" {
-		text, err := o.callGeminiWithDocument(ctx, agentSys, userTask, env.DocumentURL)
-		if err == nil {
-			return &studioProviderResult{OutputText: text, Provider: "gemini-flash/nexus-agent-doc", CostMicros: 0}, nil
+	// ── Concurrency gate ────────────────────────────────────────────────────
+	// Acquire a slot from the semaphore (capacity 10). If all slots are busy,
+	// wait up to 8 seconds before rejecting — keeps the API healthy at scale.
+	acquireCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	select {
+	case <-o.agentSemaphore:
+		defer func() { o.agentSemaphore <- struct{}{} }() // always release
+	case <-acquireCtx.Done():
+		return nil, fmt.Errorf("nexus-agent is at capacity — please try again in a moment")
+	}
+
+	// ── Run the ReAct loop ──────────────────────────────────────────────────
+	output, iterations, err := o.runReActLoop(ctx, env)
+	if err != nil {
+		// Fallback: plain Gemini call with a strong system prompt
+		log.Printf("[NexusAgent] ReAct loop failed after %d iterations: %v — falling back to plain Gemini", iterations, err)
+		fallbackSys := "You are Nexus Agent — an expert AI assistant. " +
+			"Break the task into clear steps, reason through each one, and deliver a thorough final answer."
+		text, fErr := o.callGeminiFlash(ctx, fallbackSys, env.Prompt)
+		if fErr != nil {
+			return nil, fmt.Errorf("nexus-agent: all paths failed: react=%v fallback=%v", err, fErr)
 		}
-		log.Printf("[AIStudio] Nexus Agent Gemini document failed: %v — falling back to text-only", err)
+		return &studioProviderResult{OutputText: text, Provider: "gemini-flash/nexus-agent-fallback", CostMicros: 0}, nil
 	}
 
-	// Primary: Gemini Flash (best for long multi-step reasoning)
-	text, err := o.callGeminiFlash(ctx, agentSys, userTask)
-	if err == nil {
-		return &studioProviderResult{OutputText: text, Provider: "gemini-flash/nexus-agent", CostMicros: 0}, nil
-	}
-	log.Printf("[AIStudio] Nexus Agent Gemini failed: %v — falling back to Groq", err)
+	log.Printf("[NexusAgent] completed in %d iterations", iterations)
+	return &studioProviderResult{OutputText: output, Provider: "gemini-2.5-flash/nexus-agent", CostMicros: 0}, nil
+}
 
-	// Fallback: Groq Llama-4
-	text, err = o.callGroqLlama4(ctx, agentSys, userTask)
-	if err == nil {
-		return &studioProviderResult{OutputText: text, Provider: "groq/nexus-agent", CostMicros: 0}, nil
+// runReActLoop executes the Reason → Act → Observe cycle using Gemini function calling.
+// Returns the final text answer and the number of iterations used.
+func (o *AIStudioOrchestrator) runReActLoop(ctx context.Context, env promptEnvelope) (string, int, error) {
+	const maxIterations = 8
+
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		return "", 0, fmt.Errorf("GEMINI_API_KEY not configured")
 	}
-	return nil, fmt.Errorf("nexus-agent: all providers failed: %w", err)
+
+	today := time.Now().UTC().Format("Monday, 2 January 2006")
+
+	systemPrompt := `You are Nexus Agent — an autonomous AI assistant with access to real-time tools.
+
+Today is ` + today + `.
+
+Your goal: complete the user's task accurately by reasoning step-by-step and using your tools when needed.
+
+RULES:
+- Always call web_search before answering factual questions about current events, companies, people, prices, or anything that may have changed recently.
+- If a search result contains a useful URL, call read_url to get the full content before drawing conclusions.
+- Reason before acting: briefly state what you are about to do and why.
+- After gathering enough information, synthesise a complete, well-structured final answer.
+- Cite your sources inline as markdown links: [Source Title](URL).
+- Be direct and decisive. Never say "I cannot" if a tool can help.
+- Structure your final answer with clear headings where appropriate.`
+
+	// Attach document context if provided
+	userTask := env.Prompt
+	if env.AttachedContext != "" {
+		name := env.AttachedName
+		if name == "" {
+			name = "attached document"
+		}
+		userTask = fmt.Sprintf("%s\n\n[ATTACHED: %s]\n%s\n[END ATTACHED]", userTask, name, env.AttachedContext)
+	}
+
+	// Tool declarations — passed to Gemini on every turn
+	toolDeclarations := map[string]interface{}{
+		"function_declarations": []map[string]interface{}{
+			{
+				"name":        "web_search",
+				"description": "Search the web for current, real-time information. Use this for facts, news, company details, prices, events, or anything that may have changed recently.",
+				"parameters": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"query": map[string]interface{}{
+							"type":        "string",
+							"description": "The search query. Be specific and targeted.",
+						},
+					},
+					"required": []string{"query"},
+				},
+			},
+			{
+				"name":        "read_url",
+				"description": "Fetch and read the full text content of a URL. Use this to read articles, reports, or pages found via web_search.",
+				"parameters": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"url": map[string]interface{}{
+							"type":        "string",
+							"description": "The full URL (https://...) to fetch and read.",
+						},
+					},
+					"required": []string{"url"},
+				},
+			},
+		},
+	}
+
+	// Build initial conversation
+	conversation := []agentMessage{
+		{Role: "user", Parts: []agentPart{{Text: userTask}}},
+	}
+
+	geminiURL := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s",
+		apiKey,
+	)
+
+	for iteration := 1; iteration <= maxIterations; iteration++ {
+		// ── Call Gemini with tools ──────────────────────────────────────────
+		payload := map[string]interface{}{
+			"system_instruction": map[string]interface{}{
+				"parts": []map[string]string{{"text": systemPrompt}},
+			},
+			"contents": conversation,
+			"tools":    []interface{}{toolDeclarations},
+			"tool_config": map[string]interface{}{
+				"function_calling_config": map[string]string{"mode": "AUTO"},
+			},
+			"generationConfig": map[string]interface{}{
+				"temperature":     0.4, // lower = more consistent reasoning
+				"maxOutputTokens": 8192,
+			},
+		}
+
+		body, _ := json.Marshal(payload)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiURL, bytes.NewReader(body))
+		if err != nil {
+			return "", iteration, fmt.Errorf("iteration %d: build request: %w", iteration, err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := o.httpClient.Do(req)
+		if err != nil {
+			return "", iteration, fmt.Errorf("iteration %d: gemini request: %w", iteration, err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return "", iteration, fmt.Errorf("iteration %d: gemini %d: %s", iteration, resp.StatusCode, truncateStr(string(raw), 300))
+		}
+
+		// ── Parse Gemini response ───────────────────────────────────────────
+		var geminiResp struct {
+			Candidates []struct {
+				Content struct {
+					Role  string `json:"role"`
+					Parts []struct {
+						Text         string `json:"text"`
+						FunctionCall *struct {
+							Name string                 `json:"name"`
+							Args map[string]interface{} `json:"args"`
+						} `json:"functionCall"`
+					} `json:"parts"`
+				} `json:"content"`
+				FinishReason string `json:"finishReason"`
+			} `json:"candidates"`
+			Error *struct{ Message string `json:"message"` } `json:"error"`
+		}
+		if err := json.Unmarshal(raw, &geminiResp); err != nil {
+			return "", iteration, fmt.Errorf("iteration %d: parse response: %w", iteration, err)
+		}
+		if geminiResp.Error != nil {
+			return "", iteration, fmt.Errorf("iteration %d: gemini API: %s", iteration, geminiResp.Error.Message)
+		}
+		if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+			return "", iteration, fmt.Errorf("iteration %d: gemini returned no content", iteration)
+		}
+
+		candidate := geminiResp.Candidates[0]
+
+		// ── Check for function calls ────────────────────────────────────────
+		// Gemini may return multiple parts: some text + one or more function calls.
+		// Collect them all, add the model turn to conversation, then execute.
+		var modelParts []agentPart
+		var functionCalls []agentPart // function calls found in this turn
+
+		for _, p := range candidate.Content.Parts {
+			if p.FunctionCall != nil {
+				fc := agentPart{
+					FunctionCall: &agentFunctionCall{
+						Name: p.FunctionCall.Name,
+						Args: p.FunctionCall.Args,
+					},
+				}
+				modelParts = append(modelParts, fc)
+				functionCalls = append(functionCalls, fc)
+			} else if p.Text != "" {
+				modelParts = append(modelParts, agentPart{Text: p.Text})
+			}
+		}
+
+		// Add model turn to conversation history
+		conversation = append(conversation, agentMessage{
+			Role:  "model",
+			Parts: modelParts,
+		})
+
+		// ── No function calls → model is done ──────────────────────────────
+		if len(functionCalls) == 0 {
+			// Extract all text parts as the final answer
+			var textParts []string
+			for _, p := range candidate.Content.Parts {
+				if p.Text != "" {
+					textParts = append(textParts, p.Text)
+				}
+			}
+			if len(textParts) == 0 {
+				return "", iteration, fmt.Errorf("iteration %d: model stopped but returned no text", iteration)
+			}
+			return strings.Join(textParts, "\n"), iteration, nil
+		}
+
+		// ── Execute each tool call, collect responses ───────────────────────
+		var toolResponseParts []agentPart
+		for _, fc := range functionCalls {
+			toolName := fc.FunctionCall.Name
+			args := fc.FunctionCall.Args
+			var toolResult string
+
+			log.Printf("[NexusAgent] iteration=%d tool=%s args=%v", iteration, toolName, args)
+
+			switch toolName {
+			case "web_search":
+				query, _ := args["query"].(string)
+				if query == "" {
+					toolResult = "Error: query parameter is required"
+				} else {
+					toolResult = o.agentSearchTavily(ctx, query)
+				}
+			case "read_url":
+				url, _ := args["url"].(string)
+				if url == "" {
+					toolResult = "Error: url parameter is required"
+				} else {
+					toolResult = o.agentReadURL(ctx, url)
+				}
+			default:
+				toolResult = fmt.Sprintf("Error: unknown tool %q", toolName)
+			}
+
+			toolResponseParts = append(toolResponseParts, agentPart{
+				FunctionResponse: &agentFunctionResponse{
+					Name:     toolName,
+					Response: map[string]interface{}{"result": toolResult},
+				},
+			})
+		}
+
+		// Add tool results as a user turn (Gemini function response convention)
+		conversation = append(conversation, agentMessage{
+			Role:  "user",
+			Parts: toolResponseParts,
+		})
+
+		// Guard: if we've hit the last iteration and still have function calls,
+		// the next loop will force a text answer (tools are exhausted).
+		if iteration == maxIterations-1 {
+			// Inject a final instruction so the model wraps up on the last turn
+			conversation = append(conversation, agentMessage{
+				Role:  "user",
+				Parts: []agentPart{{Text: "You have now gathered enough information. Please provide your complete final answer."}},
+			})
+		}
+	}
+
+	return "", maxIterations, fmt.Errorf("nexus-agent: exceeded maximum iterations (%d)", maxIterations)
+}
+
+// agentSearchTavily performs a Tavily web search and returns formatted results.
+// Returns an empty string (not an error) if Tavily is unavailable — the agent
+// will note the absence in its reasoning and proceed from training knowledge.
+func (o *AIStudioOrchestrator) agentSearchTavily(ctx context.Context, query string) string {
+	tavilyKey := os.Getenv("TAVILY_API_KEY")
+	if tavilyKey == "" {
+		return "[web_search unavailable: TAVILY_API_KEY not configured]"
+	}
+
+	payload := map[string]interface{}{
+		"api_key":              tavilyKey,
+		"query":                query,
+		"search_depth":         "advanced",
+		"include_answer":       true,
+		"include_raw_content":  false,
+		"max_results":          5,
+		"include_domains":      []string{},
+		"exclude_domains":      []string{},
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.tavily.com/search", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Sprintf("[web_search error: %v]", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return fmt.Sprintf("[web_search error: %v]", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf("[web_search error: HTTP %d]", resp.StatusCode)
+	}
+
+	var result struct {
+		Answer  string `json:"answer"`
+		Results []struct {
+			Title   string  `json:"title"`
+			URL     string  `json:"url"`
+			Content string  `json:"content"`
+			Score   float64 `json:"score"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Sprintf("[web_search parse error: %v]", err)
+	}
+
+	var sb strings.Builder
+	if result.Answer != "" {
+		sb.WriteString("**Direct Answer:** ")
+		sb.WriteString(result.Answer)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(fmt.Sprintf("**Search Results for:** %q\n\n", query))
+	for i, r := range result.Results {
+		sb.WriteString(fmt.Sprintf("%d. **[%s](%s)**\n%s\n\n",
+			i+1, r.Title, r.URL, truncateStr(r.Content, 400)))
+	}
+	if sb.Len() == 0 {
+		return "[web_search: no results found]"
+	}
+	return sb.String()
+}
+
+// agentReadURL fetches a URL and returns its readable text content (stripped of HTML).
+// Capped at 6 000 characters to avoid filling the context window.
+func (o *AIStudioOrchestrator) agentReadURL(ctx context.Context, rawURL string) string {
+	if rawURL == "" {
+		return "[read_url error: empty URL]"
+	}
+	// Basic sanity check — must be http/https
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		return "[read_url error: URL must start with http:// or https://]"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return fmt.Sprintf("[read_url error: %v]", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; NexusAgent/1.0)")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Sprintf("[read_url error: %v]", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf("[read_url error: HTTP %d for %s]", resp.StatusCode, rawURL)
+	}
+
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024)) // cap at 512 KB
+	text := agentStripHTML(string(raw))
+	text = strings.TrimSpace(text)
+	if len(text) > 6000 {
+		text = text[:6000] + "\n...[content truncated]"
+	}
+	if text == "" {
+		return "[read_url: page returned no readable text]"
+	}
+	return text
+}
+
+// agentStripHTML removes HTML tags and normalises whitespace for LLM consumption.
+func agentStripHTML(html string) string {
+	// Remove script and style blocks entirely
+	for _, tag := range []string{"script", "style", "head", "nav", "footer"} {
+		for {
+			open := strings.Index(strings.ToLower(html), "<"+tag)
+			if open == -1 {
+				break
+			}
+			close := strings.Index(strings.ToLower(html[open:]), "</"+tag+">")
+			if close == -1 {
+				break
+			}
+			html = html[:open] + " " + html[open+close+len("</"+tag+">"):]
+		}
+	}
+	// Strip remaining tags
+	inTag := false
+	var out strings.Builder
+	for _, ch := range html {
+		switch {
+		case ch == '<':
+			inTag = true
+		case ch == '>':
+			inTag = false
+			out.WriteRune(' ')
+		case !inTag:
+			out.WriteRune(ch)
+		}
+	}
+	// Collapse whitespace
+	text := out.String()
+	parts := strings.Fields(text)
+	return strings.Join(parts, " ")
 }
 
 // ─── NEW: dispatchTranscribeAfrican ──────────────────────────────────────────
