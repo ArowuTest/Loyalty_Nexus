@@ -127,7 +127,7 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   // Alias slugs — map to same meta as their canonical counterparts
   "my-ai-photo":         { time: "~8 sec",   output: "1024×1024 image",               tip: "Add style words: 'photorealistic', 'vibrant', 'cinematic'" },
   "background-remover":  { time: "~5 sec",   output: "Transparent PNG",               tip: "Works best with clear subject vs background" },
-  "animate-my-photo":    { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
+  "animate-my-photo":    { time: "~45 sec",  output: "5-second MP4 video",            tip: "Describe the animation — e.g. 'Camera zooms in slowly, hair flows in wind'" },
   "my-video-story":      { time: "~2 min",   output: "Script-driven story video",       tip: "Add 2+ scenes with images and dialogue for best results" },
   "video-story":         { time: "~3 min",   output: "Multi-scene story video",         tip: "Use 2–4 images; describe each scene for best transitions" },
   "video-jingle":        { time: "~3 min",   output: "Video + AI vocal jingle",         tip: "Combine a photo with a brand jingle for a full ad" },

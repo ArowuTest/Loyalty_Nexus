@@ -4,6 +4,7 @@ import { useState, useRef } from 'react';
 import {
   Loader2, Upload, X, ImageIcon, Sparkles, AlertTriangle,
   Mic, MicOff, Volume2, VolumeX, PlusCircle, Zap, Film,
+  ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
@@ -13,6 +14,15 @@ import api from '@/lib/api';
 const DEFAULT_STYLE_TAGS = [
   'Smooth motion', 'Dramatic', 'Slow motion', 'Zoom in', 'Zoom out',
   'Pan left', 'Pan right', 'Parallax', 'Vibrant', 'Cinematic',
+];
+
+const ANIMATION_PROMPTS = [
+  'Camera slowly zooms in, trees sway in wind, water ripples',
+  'Gentle parallax motion, clouds drift across sky, cinematic',
+  'Subject turns head slowly, hair flows in wind, soft bokeh',
+  'Dramatic dolly zoom, crowd moves in background, epic music',
+  'Portrait comes to life — eyes blink, slight smile, warm glow',
+  'Landscape pan right, golden hour light shifts, birds fly past',
 ];
 
 // Grok supports 2–15 seconds; Kling v2.6 Pro supports 5 or 10
@@ -31,20 +41,18 @@ const ASPECT_RATIOS = [
 export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, preloadImageUrl }: TemplateProps) {
   const cfg       = tool.ui_config ?? {};
   const styleTags = cfg.style_tags ?? DEFAULT_STYLE_TAGS;
-  // video-premium uses Kling (5/10s only); video-cinematic uses Wan (5/8/10s)
-  // animate-my-photo uses Grok image-to-video as Tier 1 (2–15s)
+  // video-premium uses Kling (5/10s only); animate-my-photo uses Grok (2–15s)
   const isKling   = tool.slug === 'video-premium';
   const isGrok    = tool.slug === 'animate-my-photo' || tool.slug === 'animate-photo' || tool.slug === 'video-premium';
   const durations = cfg.duration_options ?? (isKling ? KLING_DURATIONS : isGrok ? GROK_DURATIONS : WAN_DURATIONS);
 
-  // ── Start image state ──────────────────────────────────────────────────────
-  // Pre-populate from preloadImageUrl if provided (cross-tool context passing)
+  // ── Image state ────────────────────────────────────────────────────────────
   const [imageUrl,      setImageUrl]      = useState(preloadImageUrl ?? '');
   const [imageFile,     setImageFile]     = useState<File | null>(null);
   const [preview,       setPreview]       = useState<string | null>(preloadImageUrl ?? null);
   const [uploading,     setUploading]     = useState(false);
 
-  // ── End / tail image state (Kling v2.6 Pro feature) ───────────────────────
+  // ── End / tail image (Kling feature) ──────────────────────────────────────
   const [endImageUrl,   setEndImageUrl]   = useState('');
   const [endImageFile,  setEndImageFile]  = useState<File | null>(null);
   const [endPreview,    setEndPreview]    = useState<string | null>(null);
@@ -54,10 +62,12 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
   const [motionPrompt,  setMotionPrompt]  = useState('');
   const [selStyles,     setSelStyles]     = useState<string[]>([]);
   const [duration,      setDuration]      = useState<number>(cfg.default_duration ?? 6);
-  const [intensity,     setIntensity]     = useState<number>(1); // 0=Subtle,1=Moderate,2=Strong
+  const [intensity,     setIntensity]     = useState<number>(1); // 0=Subtle, 1=Moderate, 2=Strong
   const [aspectRatio,   setAspectRatio]   = useState<string>(cfg.default_aspect ?? '16:9');
   const [resolution,    setResolution]    = useState<'720p' | '480p'>('720p');
   const [generateAudio, setGenerateAudio] = useState<boolean>(true);
+  const [showInspo,     setShowInspo]     = useState(false);
+  const [showAdvanced,  setShowAdvanced]  = useState(false);
 
   // ── Voice input ────────────────────────────────────────────────────────────
   const { speechState, speechError, interimText, handleMicClick } =
@@ -166,7 +176,7 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
           <Zap size={13} className="text-violet-400 flex-shrink-0" />
           <p className="text-violet-300/80 text-xs leading-relaxed">
             <span className="font-semibold text-violet-300">Powered by Grok Imagine</span>
-            {' '}— xAI&apos;s state-of-the-art image-to-video model. Upload your image and it becomes the first frame of a cinematic video.
+            {' '}— Upload your image and describe the animation. The AI turns it into a cinematic video.
           </p>
         </div>
       )}
@@ -179,10 +189,73 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
         </div>
       )}
 
-      {/* ── Step 1: Start image upload ── */}
+      {/* ── STEP 1: Describe the animation (ALWAYS VISIBLE FIRST) ── */}
       <div>
         <div className="flex items-center gap-2 mb-2">
-          <span className="w-5 h-5 rounded-full bg-cyan-600/30 text-cyan-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">1</span>
+          <span className="w-5 h-5 rounded-full bg-violet-600/30 text-violet-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">1</span>
+          <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold flex-1">
+            Describe the animation
+          </label>
+          <button
+            onClick={handleMicClick}
+            disabled={speechState === 'processing'}
+            title={speechState === 'listening' ? 'Stop listening' : 'Speak your animation description'}
+            className={cn(
+              'w-7 h-7 rounded-lg flex items-center justify-center transition-all border',
+              speechState === 'listening'
+                ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+                : 'bg-white/5 text-white/30 hover:text-white/60 hover:bg-white/10 border-transparent',
+            )}
+          >
+            {speechState === 'listening' ? <MicOff size={12} /> : <Mic size={12} />}
+          </button>
+        </div>
+        <textarea
+          value={motionPrompt}
+          onChange={(e) => setMotionPrompt(e.target.value)}
+          placeholder={cfg.prompt_placeholder ?? 'Describe how to animate it — e.g. Camera slowly zooms in, trees sway in wind, water ripples…'}
+          rows={3}
+          autoFocus
+          className="nexus-input resize-none w-full text-sm leading-relaxed"
+        />
+        {speechState === 'listening' && (
+          <p className="text-[11px] text-red-300 mt-1 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
+            Listening… {interimText || 'describe the animation'}
+          </p>
+        )}
+        {speechState === 'error' && speechError && (
+          <p className="text-[11px] text-red-300 mt-1">{speechError}</p>
+        )}
+
+        {/* Prompt inspiration examples */}
+        <button
+          onClick={() => setShowInspo((v) => !v)}
+          className="flex items-center gap-1 text-white/25 hover:text-white/50 transition-colors text-[11px] mt-1.5"
+        >
+          <Film size={11} />
+          {showInspo ? 'Hide' : 'Show'} animation ideas
+          {showInspo ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+        </button>
+        {showInspo && (
+          <div className="mt-2 grid grid-cols-1 gap-1.5">
+            {ANIMATION_PROMPTS.map((inspo) => (
+              <button
+                key={inspo}
+                onClick={() => { setMotionPrompt(inspo); setShowInspo(false); }}
+                className="text-left text-xs text-white/40 hover:text-white/70 hover:bg-white/[0.04] px-3 py-2 rounded-lg border border-white/[0.06] hover:border-white/15 transition-all"
+              >
+                {inspo}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── STEP 2: Upload image (becomes first frame) ── */}
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="w-5 h-5 rounded-full bg-cyan-600/30 text-cyan-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">2</span>
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
             {cfg.upload_label ?? 'Image to animate (becomes the first frame)'}
           </label>
@@ -242,271 +315,249 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
         )}
       </div>
 
-      {/* ── Step 2: Motion options (revealed once image is loaded) ── */}
-      {hasImage && (
-        <>
-          {/* ── End / tail image (Kling v2.6 Pro feature) ── */}
-          {isKling && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="w-5 h-5 rounded-full bg-purple-600/30 text-purple-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">2</span>
-                  <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
-                    End Frame <span className="text-white/25 normal-case font-normal">(optional)</span>
-                  </label>
-                </div>
-                {!showEndImage && (
-                  <button
-                    onClick={() => setShowEndImage(true)}
-                    className="flex items-center gap-1 text-purple-400 text-xs hover:text-purple-300 transition-colors"
-                  >
-                    <PlusCircle size={12} /> Add end frame
-                  </button>
-                )}
-              </div>
-
-              {showEndImage && (
-                <>
-                  {!endPreview && !endImageUrl ? (
-                    <>
-                      <div
-                        onClick={() => endFileRef.current?.click()}
-                        className="border-2 border-dashed border-purple-500/20 rounded-xl p-5 flex flex-col items-center gap-2 cursor-pointer
-                                   hover:border-purple-500/40 hover:bg-purple-500/5 transition-all text-center"
-                      >
-                        <Upload size={18} className="text-purple-400/60" />
-                        <p className="text-white/50 text-xs">Upload the final frame of the video</p>
-                      </div>
-                      <input
-                        ref={endFileRef}
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        className="hidden"
-                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleEndFile(f); }}
-                      />
-                      <p className="text-white/25 text-[11px] text-center mt-1.5">— or paste a URL —</p>
-                      <input
-                        type="url"
-                        value={endImageUrl}
-                        onChange={(e) => setEndImageUrl(e.target.value)}
-                        placeholder="https://example.com/end-frame.jpg"
-                        className="nexus-input w-full text-sm mt-1"
-                      />
-                    </>
-                  ) : (
-                    <div className="relative rounded-xl overflow-hidden border border-purple-500/20 bg-black/50">
-                      <img
-                        src={endPreview ?? endImageUrl}
-                        alt="End frame"
-                        className="w-full max-h-48 object-contain"
-                      />
-                      <button
-                        onClick={clearEndImage}
-                        className="absolute top-2 right-2 p-1.5 bg-black/70 rounded-full text-white/60 hover:text-white transition-colors"
-                      >
-                        <X size={14} />
-                      </button>
-                      <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-black/70 rounded-full px-2.5 py-1">
-                        <ImageIcon size={11} className="text-purple-400" />
-                        <span className="text-white/60 text-[11px]">{endImageFile?.name ?? 'End frame'}</span>
-                      </div>
-                    </div>
-                  )}
-                </>
+      {/* ── STEP 3: Motion style tags ── */}
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="w-5 h-5 rounded-full bg-cyan-600/30 text-cyan-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">3</span>
+          <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Motion Style</label>
+          <span className="text-white/25 text-[11px] normal-case font-normal">(optional)</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {styleTags.map((s: string) => (
+            <button
+              key={s}
+              onClick={() => toggleStyle(s)}
+              className={cn(
+                'text-xs px-3 py-1.5 rounded-full border font-medium transition-all',
+                selStyles.includes(s)
+                  ? 'bg-cyan-600 text-white border-cyan-500'
+                  : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
               )}
-            </div>
-          )}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      </div>
 
-          {/* Aspect Ratio */}
-          <div>
-            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Aspect Ratio</label>
-            <div className="flex gap-2 flex-wrap">
-              {ASPECT_RATIOS.map((ar) => (
-                <button
-                  key={ar.value}
-                  onClick={() => setAspectRatio(ar.value)}
-                  className={cn(
-                    'flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
-                    aspectRatio === ar.value
-                      ? 'bg-cyan-600 text-white border-cyan-500'
-                      : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
-                  )}
-                >
-                  <span>{ar.icon}</span>
-                  <span>{ar.label}</span>
-                  <span className="text-[9px] font-mono opacity-60">{ar.value}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+      {/* ── Advanced controls (always available, collapsed by default) ── */}
+      <div>
+        <button
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="flex items-center gap-2 text-white/40 text-xs font-medium hover:text-white/70 transition-colors w-full"
+        >
+          <Sparkles size={13} />
+          Advanced settings
+          <span className="ml-auto text-white/20 text-[10px]">
+            {[`${duration}s`, aspectRatio, resolution, INTENSITY_LABELS[intensity]].join(' · ')}
+          </span>
+          {showAdvanced ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        </button>
 
-          {/* Duration */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Duration</label>
-              <span className="text-white/35 text-[11px] font-mono">{duration}s</span>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              {durations.map((d: number) => (
-                <button
-                  key={d}
-                  onClick={() => setDuration(d)}
-                  className={cn(
-                    'text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
-                    duration === d
-                      ? 'bg-cyan-600 text-white border-cyan-500'
-                      : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
-                  )}
-                >
-                  {d}s
-                </button>
-              ))}
-            </div>
-          </div>
+        {showAdvanced && (
+          <div className="mt-3 space-y-4 pl-1 border-l-2 border-white/[0.06]">
 
-          {/* Resolution (Grok supports 480p / 720p) */}
-          {isGrok && (
+            {/* Aspect Ratio */}
             <div>
-              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Resolution</label>
-              <div className="flex gap-2">
-                {(['720p', '480p'] as const).map((r) => (
+              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Aspect Ratio</label>
+              <div className="flex gap-2 flex-wrap">
+                {ASPECT_RATIOS.map((ar) => (
                   <button
-                    key={r}
-                    onClick={() => setResolution(r)}
+                    key={ar.value}
+                    onClick={() => setAspectRatio(ar.value)}
                     className={cn(
                       'flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
-                      resolution === r
-                        ? 'bg-violet-600 text-white border-violet-500'
+                      aspectRatio === ar.value
+                        ? 'bg-cyan-600 text-white border-cyan-500'
                         : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
                     )}
                   >
-                    <Film size={11} />
-                    {r}
-                    {r === '720p' && <span className="text-[9px] bg-violet-500/20 text-violet-300 px-1.5 py-0.5 rounded-full">HD</span>}
+                    <span>{ar.icon}</span>
+                    <span>{ar.label}</span>
+                    <span className="text-[9px] font-mono opacity-60">{ar.value}</span>
                   </button>
                 ))}
               </div>
             </div>
-          )}
 
-          {/* Audio toggle */}
-          <div>
-            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Audio</label>
-            <button
-              onClick={() => setGenerateAudio(!generateAudio)}
-              className={cn(
-                'flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm font-semibold transition-all w-full',
-                generateAudio
-                  ? 'bg-green-500/15 border-green-500/30 text-green-300'
-                  : 'bg-white/5 border-white/15 text-white/40',
-              )}
-            >
-              {generateAudio ? <Volume2 size={14} /> : <VolumeX size={14} />}
-              <span>{generateAudio ? 'AI audio generation ON' : 'Silent video (no audio)'}</span>
-              <span className={cn(
-                'ml-auto text-[10px] px-2 py-0.5 rounded-full font-bold',
-                generateAudio ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-white/30',
-              )}>
-                {generateAudio ? 'ON' : 'OFF'}
-              </span>
-            </button>
-          </div>
-
-          {/* Motion intensity slider */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Motion Intensity</label>
-              <span className={cn(
-                'text-xs font-bold px-2 py-0.5 rounded-full',
-                intensity === 0 ? 'bg-blue-500/20 text-blue-300'
-                : intensity === 1 ? 'bg-cyan-500/20 text-cyan-300'
-                : 'bg-orange-500/20 text-orange-300',
-              )}>
-                {INTENSITY_LABELS[intensity]}
-              </span>
+            {/* Duration */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Duration</label>
+                <span className="text-white/35 text-[11px] font-mono">{duration}s</span>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {durations.map((d: number) => (
+                  <button
+                    key={d}
+                    onClick={() => setDuration(d)}
+                    className={cn(
+                      'text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
+                      duration === d
+                        ? 'bg-cyan-600 text-white border-cyan-500'
+                        : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
+                    )}
+                  >
+                    {d}s
+                  </button>
+                ))}
+              </div>
             </div>
-            <input
-              type="range"
-              min={0}
-              max={2}
-              step={1}
-              value={intensity}
-              onChange={(e) => setIntensity(Number(e.target.value))}
-              className="w-full h-1.5 rounded-full appearance-none cursor-pointer
-                         bg-gradient-to-r from-blue-600 via-cyan-500 to-orange-500
-                         [&::-webkit-slider-thumb]:appearance-none
-                         [&::-webkit-slider-thumb]:w-4
-                         [&::-webkit-slider-thumb]:h-4
-                         [&::-webkit-slider-thumb]:rounded-full
-                         [&::-webkit-slider-thumb]:bg-white
-                         [&::-webkit-slider-thumb]:shadow-md"
-            />
-            <div className="flex justify-between mt-1">
-              <span className="text-white/20 text-[9px]">Subtle</span>
-              <span className="text-white/20 text-[9px]">Strong</span>
-            </div>
-          </div>
 
-          {/* Motion style tags */}
-          <div>
-            <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Motion Style</label>
-            <div className="flex flex-wrap gap-1.5">
-              {styleTags.map((s: string) => (
-                <button
-                  key={s}
-                  onClick={() => toggleStyle(s)}
-                  className={cn(
-                    'text-xs px-3 py-1.5 rounded-full border font-medium transition-all',
-                    selStyles.includes(s)
-                      ? 'bg-cyan-600 text-white border-cyan-500'
-                      : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
+            {/* Resolution (Grok supports 480p / 720p) */}
+            {isGrok && (
+              <div>
+                <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Resolution</label>
+                <div className="flex gap-2">
+                  {(['720p', '480p'] as const).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setResolution(r)}
+                      className={cn(
+                        'flex items-center gap-1.5 text-xs px-4 py-2 rounded-lg border font-semibold transition-all',
+                        resolution === r
+                          ? 'bg-violet-600 text-white border-violet-500'
+                          : 'text-white/55 border-white/15 hover:border-white/30 hover:text-white/80',
+                      )}
+                    >
+                      <Film size={11} />
+                      {r}
+                      {r === '720p' && <span className="text-[9px] bg-violet-500/20 text-violet-300 px-1.5 py-0.5 rounded-full">HD</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* End frame (Kling) */}
+            {isKling && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
+                    End Frame <span className="text-white/25 normal-case font-normal">(optional)</span>
+                  </label>
+                  {!showEndImage && (
+                    <button
+                      onClick={() => setShowEndImage(true)}
+                      className="flex items-center gap-1 text-purple-400 text-xs hover:text-purple-300 transition-colors"
+                    >
+                      <PlusCircle size={12} /> Add end frame
+                    </button>
                   )}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
+                </div>
 
-          {/* Motion description with voice input */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">
-                Motion Description <span className="text-white/25 normal-case font-normal">(optional)</span>
-              </label>
+                {showEndImage && (
+                  <>
+                    {!endPreview && !endImageUrl ? (
+                      <>
+                        <div
+                          onClick={() => endFileRef.current?.click()}
+                          className="border-2 border-dashed border-purple-500/20 rounded-xl p-5 flex flex-col items-center gap-2 cursor-pointer
+                                     hover:border-purple-500/40 hover:bg-purple-500/5 transition-all text-center"
+                        >
+                          <Upload size={18} className="text-purple-400/60" />
+                          <p className="text-white/50 text-xs">Upload the final frame of the video</p>
+                        </div>
+                        <input
+                          ref={endFileRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleEndFile(f); }}
+                        />
+                        <p className="text-white/25 text-[11px] text-center mt-1.5">— or paste a URL —</p>
+                        <input
+                          type="url"
+                          value={endImageUrl}
+                          onChange={(e) => setEndImageUrl(e.target.value)}
+                          placeholder="https://example.com/end-frame.jpg"
+                          className="nexus-input w-full text-sm mt-1"
+                        />
+                      </>
+                    ) : (
+                      <div className="relative rounded-xl overflow-hidden border border-purple-500/20 bg-black/50">
+                        <img
+                          src={endPreview ?? endImageUrl}
+                          alt="End frame"
+                          className="w-full max-h-48 object-contain"
+                        />
+                        <button
+                          onClick={clearEndImage}
+                          className="absolute top-2 right-2 p-1.5 bg-black/70 rounded-full text-white/60 hover:text-white transition-colors"
+                        >
+                          <X size={14} />
+                        </button>
+                        <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-black/70 rounded-full px-2.5 py-1">
+                          <ImageIcon size={11} className="text-purple-400" />
+                          <span className="text-white/60 text-[11px]">{endImageFile?.name ?? 'End frame'}</span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Audio toggle */}
+            <div>
+              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Audio</label>
               <button
-                onClick={handleMicClick}
-                disabled={speechState === 'processing'}
-                title={speechState === 'listening' ? 'Stop listening' : 'Speak the motion'}
+                onClick={() => setGenerateAudio(!generateAudio)}
                 className={cn(
-                  'w-7 h-7 rounded-lg flex items-center justify-center transition-all border',
-                  speechState === 'listening'
-                    ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
-                    : 'bg-white/5 text-white/30 hover:text-white/60 hover:bg-white/10 border-transparent',
+                  'flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-sm font-semibold transition-all w-full',
+                  generateAudio
+                    ? 'bg-green-500/15 border-green-500/30 text-green-300'
+                    : 'bg-white/5 border-white/15 text-white/40',
                 )}
               >
-                {speechState === 'listening' ? <MicOff size={12} /> : <Mic size={12} />}
+                {generateAudio ? <Volume2 size={14} /> : <VolumeX size={14} />}
+                <span>{generateAudio ? 'AI audio generation ON' : 'Silent video (no audio)'}</span>
+                <span className={cn(
+                  'ml-auto text-[10px] px-2 py-0.5 rounded-full font-bold',
+                  generateAudio ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-white/30',
+                )}>
+                  {generateAudio ? 'ON' : 'OFF'}
+                </span>
               </button>
             </div>
-            <textarea
-              value={motionPrompt}
-              onChange={(e) => setMotionPrompt(e.target.value)}
-              placeholder={cfg.prompt_placeholder ?? 'Describe how to animate it — e.g. Camera slowly zooms in, trees sway in wind, water ripples…'}
-              rows={3}
-              className="nexus-input resize-none w-full text-sm leading-relaxed"
-            />
-            {speechState === 'listening' && (
-              <p className="text-[11px] text-red-300 mt-1 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block" />
-                Listening… {interimText || 'describe the motion'}
-              </p>
-            )}
-            {speechState === 'error' && speechError && (
-              <p className="text-[11px] text-red-300 mt-1">{speechError}</p>
-            )}
+
+            {/* Motion intensity slider */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold">Motion Intensity</label>
+                <span className={cn(
+                  'text-xs font-bold px-2 py-0.5 rounded-full',
+                  intensity === 0 ? 'bg-blue-500/20 text-blue-300'
+                  : intensity === 1 ? 'bg-cyan-500/20 text-cyan-300'
+                  : 'bg-orange-500/20 text-orange-300',
+                )}>
+                  {INTENSITY_LABELS[intensity]}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={2}
+                step={1}
+                value={intensity}
+                onChange={(e) => setIntensity(Number(e.target.value))}
+                className="w-full h-1.5 rounded-full appearance-none cursor-pointer
+                           bg-gradient-to-r from-blue-600 via-cyan-500 to-orange-500
+                           [&::-webkit-slider-thumb]:appearance-none
+                           [&::-webkit-slider-thumb]:w-4
+                           [&::-webkit-slider-thumb]:h-4
+                           [&::-webkit-slider-thumb]:rounded-full
+                           [&::-webkit-slider-thumb]:bg-white
+                           [&::-webkit-slider-thumb]:shadow-md"
+              />
+              <div className="flex justify-between mt-1">
+                <span className="text-white/20 text-[9px]">Subtle</span>
+                <span className="text-white/20 text-[9px]">Strong</span>
+              </div>
+            </div>
           </div>
-        </>
-      )}
+        )}
+      </div>
 
       {/* ── Generate button ── */}
       <button
@@ -524,10 +575,16 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
           : isLoading
             ? <><Loader2 size={15} className="animate-spin" /> Generating video…</>
             : !hasImage
-              ? <><ImageIcon size={15} className="opacity-50" /> Upload an image first</>
-              : <><Sparkles size={15} /> Animate with Grok →</>
+              ? <><ImageIcon size={15} className="opacity-50" /> Upload an image to animate →</>
+              : <><Sparkles size={15} /> Animate with AI →</>
         }
       </button>
+
+      {!tool.is_free && (
+        <p className="text-white/20 text-[11px] text-center -mt-2">
+          {tool.point_cost} PulsePoints per generation · {userPoints} available
+        </p>
+      )}
     </div>
   );
 }

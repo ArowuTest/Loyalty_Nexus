@@ -170,6 +170,63 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
         </div>
       )}
 
+      {/* ── Video Jingle: music style + brand FIRST (most relevant inputs for this tool) ── */}
+      {showMusicStyle && (
+        <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Music size={13} className="text-green-400 flex-shrink-0" />
+            <label className="text-green-300 text-[11px] uppercase tracking-wider font-semibold">Jingle Details</label>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
+                Brand / Product Name <span className="text-white/25 normal-case font-normal">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={audioDir}
+                onChange={(e) => setAudioDir(e.target.value.slice(0, 100))}
+                placeholder="e.g. Nexus, Konga, MTN, Paystack…"
+                className="nexus-input w-full text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-1.5 block">
+                Music Style <span className="text-white/25 normal-case font-normal">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={musicStyle}
+                onChange={(e) => setMusicStyle(e.target.value.slice(0, 100))}
+                placeholder="upbeat pop, Afrobeats, corporate, cinematic…"
+                className="nexus-input w-full text-sm"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Video Veo: audio direction FIRST ── */}
+      {showAudioDir && !showMusicStyle && (
+        <div>
+          <label className="flex items-center gap-1.5 text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2">
+            <Volume2 size={11} />
+            Audio / Sound direction
+            <span className="text-white/25 normal-case font-normal">(optional)</span>
+          </label>
+          <textarea
+            value={audioDir}
+            onChange={(e) => setAudioDir(e.target.value.slice(0, 200))}
+            placeholder="Describe the audio: ambient city sounds, dramatic orchestral score, birds chirping, silence..."
+            rows={2}
+            className="nexus-input resize-none w-full text-sm leading-relaxed"
+          />
+          <p className="text-white/20 text-[10px] mt-1">
+            Veo 3 supports native audio generation — describe sounds, music, or ambient audio.
+          </p>
+        </div>
+      )}
+
       {/* ── Aspect ratio with live canvas preview ── */}
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -416,43 +473,6 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
         </div>
       )}
 
-      {/* ── Audio direction (video-veo only) ── */}
-      {showAudioDir && (
-        <div>
-          <label className="flex items-center gap-1.5 text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2">
-            <Volume2 size={11} />
-            Audio / Sound direction
-            <span className="text-white/25 normal-case font-normal">(optional)</span>
-          </label>
-          <textarea
-            value={audioDir}
-            onChange={(e) => setAudioDir(e.target.value.slice(0, 200))}
-            placeholder="Describe the audio: ambient city sounds, dramatic orchestral score, birds chirping, crowd noise, silence..."
-            rows={2}
-            className="nexus-input resize-none w-full text-sm leading-relaxed"
-          />
-          <p className="text-white/20 text-[10px] mt-1">
-            Veo 3 supports native audio generation — describe sounds, music, or ambient audio.
-          </p>
-        </div>
-      )}
-      {/* ── Music style (video-jingle only) ── */}
-      {showMusicStyle && (
-        <div>
-          <label className="flex items-center gap-1.5 text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2">
-            <Music size={11} />
-            Music style
-            <span className="text-white/25 normal-case font-normal">(optional)</span>
-          </label>
-          <input
-            type="text"
-            value={musicStyle}
-            onChange={(e) => setMusicStyle(e.target.value.slice(0, 100))}
-            placeholder="upbeat pop, corporate, Afrobeats, cinematic orchestral, lo-fi..."
-            className="nexus-input w-full text-sm"
-          />
-        </div>
-      )}
       {/* ── Optional image upload (video-jingle) ── */}
       {showImgUpload && (
         <div>
