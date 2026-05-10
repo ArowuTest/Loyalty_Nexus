@@ -671,7 +671,7 @@ func (h *StudioHandler) StreamGenerationStatus(w http.ResponseWriter, r *http.Re
 	}
 
 	sendEvent := func(data string) {
-		fmt.Fprintf(w, "data: %s\n\n", data)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()
 	}
 
@@ -749,7 +749,7 @@ func (h *StudioHandler) GetPromptHistory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"prompts": items,
 		"count":   len(items),
 	})
