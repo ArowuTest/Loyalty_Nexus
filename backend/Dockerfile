@@ -15,6 +15,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# Regenerate go.sum in case new dependencies were added without updating it locally
+RUN go mod tidy
 
 ARG VERSION=dev
 
