@@ -1512,12 +1512,20 @@ class _ToolCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: NexusColors.surface, borderRadius: BorderRadius.circular(14),
           border: Border.all(color: NexusColors.border),
         ),
-        child: Stack(children: [
+        clipBehavior: Clip.antiAlias,
+        child: Column(children: [
+          // Category colour accent stripe (top — mirrors web left-border accent)
+          Container(height: 2,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                Colors.transparent, cfg.color.withValues(alpha: 0.7), Colors.transparent]))),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Stack(children: [
           Row(children: [
             // Tool icon / preview image
             Container(
@@ -1605,6 +1613,8 @@ class _ToolCard extends StatelessWidget {
               ),
             )),
         ]),
+          ),   // Padding
+        ]),    // Column
       ),
     );
   }
