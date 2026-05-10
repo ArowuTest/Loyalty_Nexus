@@ -337,3 +337,41 @@ func (r *postgresStudioRepository) DisputeGeneration(ctx context.Context, genID 
 			"refund_pts":     refundPts,
 		}).Error
 }
+
+// ─── Prompt history ───────────────────────────────────────────────────────────
+
+func (r *postgresStudioRepository) GetPromptHistory(ctx context.Context, userID uuid.UUID, toolSlug string, limit int) ([]repositories.PromptHistoryItem, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	type row struct {
+		ToolSlug string    `gorm:"column:tool_slug"`
+		Prompt   string    `gorm:"column:prompt"`
+		UsedAt   time.Time `gorm:"column:used_at"`
+	}
+	var rows []row
+
+	q := r.db.WithContext(ctx).
+		Table("ai_generations").
+		Select("tool_slug, prompt, MAX(created_at) AS used_at").
+		Where("user_id = ? AND prompt != '' AND status = 'completed'", userID)
+	if toolSlug != "" {
+		q = q.Where("tool_slug = ?", toolSlug)
+	}
+	q = q.Group("tool_slug, prompt").
+		Order("used_at DESC").
+		Limit(limit)
+	if err := q.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	out := make([]repositories.PromptHistoryItem, len(rows))
+	for i, r := range rows {
+		out[i] = repositories.PromptHistoryItem{
+			ToolSlug: r.ToolSlug,
+			Prompt:   r.Prompt,
+			UsedAt:   r.UsedAt,
+		}
+	}
+	return out, nil
+}

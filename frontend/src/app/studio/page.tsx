@@ -2248,6 +2248,9 @@ function ToolDrawer({
   const [genStartedAt,   setGenStartedAt]   = useState<number | null>(null);
   // Inline result — set when polling returns completed, shown directly in drawer
   const [inlineResult,   setInlineResult]   = useState<{ output_url?: string; output_url_2?: string; output_text?: string; output_type?: string } | null>(null);
+  // A/B compare: second generation for side-by-side comparison
+  const [compareResult,  setCompareResult]  = useState<{ output_url?: string; output_url_2?: string; output_text?: string; output_type?: string } | null>(null);
+  const [compareMode,    setCompareMode]    = useState(false); // show side-by-side view
   // When a result is ready, collapse the form so the result is front-and-centre
   const [formCollapsed,  setFormCollapsed]  = useState(false);
   // Scroll-to-top ref — resets scroll position whenever the active tool changes
@@ -2256,6 +2259,22 @@ function ToolDrawer({
   const inlineResultRef = useRef<HTMLDivElement>(null);
   // Scroll-to-progress ref — scrolls progress bar into view when generation starts
   const generatingRef = useRef<HTMLDivElement>(null);
+  // ── Prompt history: recent prompts for this tool ──────────────────────────
+  const [recentPrompts, setRecentPrompts] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    api.getPromptHistory(tool.slug, 8).then(res => {
+      if (!cancelled && res?.prompts) {
+        setRecentPrompts(res.prompts.map((p: { prompt: string }) => p.prompt));
+      }
+    }).catch(() => {/* non-critical */});
+    return () => { cancelled = true; };
+  }, [tool.slug]);
+  // Called after a successful generation so we can append the prompt to history
+  function appendPromptHistory(prompt: string) {
+    if (!prompt) return;
+    setRecentPrompts(prev => [prompt, ...prev.filter(p => p !== prompt)].slice(0, 8));
+  }
   useEffect(() => {
     if (drawerScrollRef.current) {
       drawerScrollRef.current.scrollTop = 0;
@@ -2263,6 +2282,8 @@ function ToolDrawer({
     // Reset form collapse when switching tools
     setFormCollapsed(false);
     setInlineResult(null);
+    setCompareResult(null);
+    setCompareMode(false);
   }, [tool.id]);
   // Auto-scroll and collapse form when result arrives
   useEffect(() => {
@@ -2305,46 +2326,96 @@ function ToolDrawer({
   // Called when the user confirms in the ConfirmModal.
   const handleConfirmedGenerate = async () => {
     if (!pendingPayload) return;
+    // ── A/B compare routing ───────────────────────────────────────────────────
+    // If a first result already exists and the user hasn't started a compare yet,
+    // the second generation goes into compareResult (side-by-side view).
+    const isCompareRun = !!inlineResult && !compareMode;
     setGenerating(true);
     setGenStartedAt(Date.now());
-    setInlineResult(null);
+    if (isCompareRun) {
+      setCompareResult(null); // clear previous compare slot
+    } else {
+      setInlineResult(null);
+      setCompareResult(null);
+      setCompareMode(false);
+    }
     setShowConfirm(false);
     try {
       const res = await api.generateTool(tool.id, pendingPayload) as { generation_id: string; status: string };
       if (res?.generation_id) {
         const genId = res.generation_id;
-        let attempts = 0;
-        const poll = setInterval(async () => {
-          attempts++;
-          if (attempts > 90) { clearInterval(poll); setGenerating(false); return; }
-          try {
-            const status = await api.getGenerationStatus(genId) as {
-              status: string;
-              output_url?: string;
-              output_url_2?: string;
-              output_text?: string;
-              output_type?: string;
-            };
-            if (status?.status === "completed") {
-              clearInterval(poll);
+        // ── SSE real-time stream (replaces 2-second polling) ────────────────
+        // Falls back to a single poll on SSE error so the UX never gets stuck.
+        let sseFailed = false;
+        const unsub = api.streamGenerationStatus(
+          genId,
+          (status) => {
+            if (status.status === "completed") {
+              unsub();
               setGenerating(false);
               setGenStartedAt(null);
-              setInlineResult({
+              appendPromptHistory(pendingPayload?.prompt ?? "");
+              const resultPayload = {
                 output_url:   status.output_url,
                 output_url_2: status.output_url_2,
                 output_text:  status.output_text,
                 output_type:  status.output_type,
-              });
-              onGenerated?.(); // refresh Gallery in background
-            } else if (status?.status === "failed") {
-              clearInterval(poll);
+              };
+              if (isCompareRun) {
+                setCompareResult(resultPayload);
+                setCompareMode(true);
+              } else {
+                setInlineResult(resultPayload);
+              }
+              onGenerated?.();
+            } else if (status.status === "failed") {
+              unsub();
               setGenerating(false);
               setGenStartedAt(null);
               toast.error(`${tool.name} failed. Points refunded automatically.`);
               onGenerated?.();
             }
-          } catch { clearInterval(poll); setGenerating(false); }
-        }, 2000);
+          },
+          () => {
+            // SSE error — fall back to a single poll after 3s
+            if (!sseFailed) {
+              sseFailed = true;
+              setTimeout(async () => {
+                try {
+                  const s = await api.getGenerationStatus(genId) as { status: string; output_url?: string; output_url_2?: string; output_text?: string; output_type?: string };
+                  if (s?.status === "completed") {
+                    setGenerating(false); setGenStartedAt(null);
+                    if (isCompareRun) { setCompareResult({ output_url: s.output_url, output_url_2: s.output_url_2, output_text: s.output_text, output_type: s.output_type }); setCompareMode(true); } else { setInlineResult({ output_url: s.output_url, output_url_2: s.output_url_2, output_text: s.output_text, output_type: s.output_type }); }
+                    onGenerated?.();
+                  } else if (s?.status === "failed") {
+                    setGenerating(false); setGenStartedAt(null);
+                    toast.error(`${tool.name} failed. Points refunded automatically.`);
+                    onGenerated?.();
+                  } else {
+                    // Still processing — keep polling every 3s as last resort
+                    let attempts = 0;
+                    const poll = setInterval(async () => {
+                      attempts++;
+                      if (attempts > 60) { clearInterval(poll); setGenerating(false); return; }
+                      try {
+                        const ps = await api.getGenerationStatus(genId) as { status: string; output_url?: string; output_url_2?: string; output_text?: string; output_type?: string };
+                        if (ps?.status === "completed") {
+                          clearInterval(poll); setGenerating(false); setGenStartedAt(null);
+                          if (isCompareRun) { setCompareResult({ output_url: ps.output_url, output_url_2: ps.output_url_2, output_text: ps.output_text, output_type: ps.output_type }); setCompareMode(true); } else { setInlineResult({ output_url: ps.output_url, output_url_2: ps.output_url_2, output_text: ps.output_text, output_type: ps.output_type }); }
+                          onGenerated?.();
+                        } else if (ps?.status === "failed") {
+                          clearInterval(poll); setGenerating(false); setGenStartedAt(null);
+                          toast.error(`${tool.name} failed. Points refunded automatically.`);
+                          onGenerated?.();
+                        }
+                      } catch { clearInterval(poll); setGenerating(false); }
+                    }, 3000);
+                  }
+                } catch { setGenerating(false); }
+              }, 3000);
+            }
+          },
+        );
       } else {
         // Synchronous / free tool — refresh gallery after short delay
         setTimeout(() => { onGenerated?.(); setGenerating(false); }, 3000);
@@ -2475,18 +2546,60 @@ function ToolDrawer({
                   handleTemplateSubmit(payload) which stages the payload and opens
                   the ConfirmModal before any API call is made.                       */}
               {formCollapsed && inlineResult ? (
-                /* When result is ready — show a slim "Generate Again" bar instead of full form */
-                <button
-                  onClick={() => { setFormCollapsed(false); setInlineResult(null); setPendingPayload(null); }}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-white/10
-                             bg-white/[0.03] text-white/50 text-sm font-medium hover:bg-white/[0.06] hover:text-white/70
-                             transition-all"
-                >
-                  <RefreshCw size={13} /> Generate something new with {tool.name}
-                </button>
+                /* When result is ready — show action bar: "Compare" and "Generate New" */
+                <div className="flex gap-2">
+                  {/* Compare button: re-generates with same payload for A/B view */}
+                  {!compareMode && pendingPayload && (
+                    <button
+                      onClick={() => { setShowConfirm(true); }}
+                      className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border border-gold-500/25
+                                 bg-gold-500/8 text-gold-400 text-sm font-medium hover:bg-gold-500/15 hover:border-gold-500/40
+                                 transition-all"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="8" height="18" rx="1"/><rect x="13" y="3" width="8" height="18" rx="1"/></svg>
+                      Compare A/B
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setFormCollapsed(false); setInlineResult(null); setCompareResult(null); setCompareMode(false); setPendingPayload(null); }}
+                    className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border border-white/10
+                               bg-white/[0.03] text-white/50 text-sm font-medium hover:bg-white/[0.06] hover:text-white/70
+                               transition-all"
+                  >
+                    <RefreshCw size={13} /> Generate something new
+                  </button>
+                </div>
               ) : (
                 <div className="min-h-0">
                   {renderTemplate(tool, handleTemplateSubmit, generating, userPoints, preloadImageUrl, preloadVideoUrl)}
+                </div>
+              )}
+
+              {/* ── Recent prompts strip (history chips) ──────────────────── */}
+              {!formCollapsed && !generating && recentPrompts.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-[10px] text-white/30 font-medium uppercase tracking-wider px-0.5">Recent</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {recentPrompts.map((p, i) => (
+                      <button
+                        key={i}
+                        title={p}
+                        onClick={() => {
+                          // Pre-fill the pending payload prompt field so the next submit uses it.
+                          // We also copy the text to clipboard as a convenience hint for templates
+                          // that render their own textarea (they don't read pendingPayload directly).
+                          navigator.clipboard?.writeText(p).catch(() => {});
+                          toast(`Prompt copied — paste into the input field`, { duration: 2000, icon: "📋" });
+                        }}
+                        className="max-w-[220px] truncate text-left text-[11px] px-2.5 py-1
+                                   rounded-full border border-white/8 bg-white/[0.035]
+                                   text-white/45 hover:text-white/75 hover:border-white/20
+                                   hover:bg-white/[0.07] transition-all cursor-pointer"
+                      >
+                        {p.length > 50 ? p.slice(0, 50) + "…" : p}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -3046,7 +3159,92 @@ function ToolDrawer({
                 </motion.div>
               )}
 
-              {/* Time estimate row — only shown when idle and no result yet */}
+              {/* ── A/B Compare panel — shown when compareMode is active ── */}
+              {compareMode && inlineResult && compareResult && !generating && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-2xl border border-gold-500/30 bg-gold-500/5 overflow-hidden"
+                >
+                  {/* Compare header */}
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-gold-500/15">
+                    <div className="flex items-center gap-2 text-gold-400 text-sm font-semibold">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="8" height="18" rx="1"/><rect x="13" y="3" width="8" height="18" rx="1"/></svg>
+                      A/B Comparison
+                    </div>
+                    <button
+                      onClick={() => { setCompareResult(null); setCompareMode(false); }}
+                      className="text-white/30 hover:text-white/60 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  {/* Side-by-side panels */}
+                  <div className="grid grid-cols-2 divide-x divide-gold-500/10">
+                    {/* Version A */}
+                    <div className="p-3 space-y-2">
+                      <p className="text-[10px] text-gold-400/70 font-semibold uppercase tracking-wider text-center">Version A</p>
+                      {inlineResult.output_url && IMAGE_SLUGS.has(slug) && (
+                        <img src={inlineResult.output_url} alt="Version A" className="w-full rounded-xl aspect-square object-cover border border-white/10" />
+                      )}
+                      {inlineResult.output_url && VIDEO_SLUGS.has(slug) && (
+                        <video src={inlineResult.output_url} controls className="w-full rounded-xl border border-white/10" />
+                      )}
+                      {inlineResult.output_url && AUDIO_SLUGS.has(slug) && (
+                        <audio src={inlineResult.output_url} controls className="w-full" />
+                      )}
+                      {inlineResult.output_text && !inlineResult.output_url && (
+                        <div className="text-white/70 text-xs leading-relaxed max-h-48 overflow-y-auto pr-1 whitespace-pre-wrap">
+                          {inlineResult.output_text.slice(0, 600)}{inlineResult.output_text.length > 600 ? "…" : ""}
+                        </div>
+                      )}
+                      <a
+                        href={inlineResult.output_url ?? "#"}
+                        target={inlineResult.output_url ? "_blank" : undefined}
+                        rel="noreferrer"
+                        onClick={!inlineResult.output_url ? (e) => { e.preventDefault(); navigator.clipboard.writeText(inlineResult.output_text ?? ""); toast.success("Copied A!"); } : undefined}
+                        className="flex items-center justify-center gap-1.5 w-full py-2 rounded-xl bg-white/8 hover:bg-white/15 border border-white/10 text-white/50 text-xs font-semibold transition-all"
+                      >
+                        {inlineResult.output_url ? <><Download size={11} /> Save A</> : <><Copy size={11} /> Copy A</>}
+                      </a>
+                    </div>
+
+                    {/* Version B */}
+                    <div className="p-3 space-y-2">
+                      <p className="text-[10px] text-gold-400/70 font-semibold uppercase tracking-wider text-center">Version B</p>
+                      {compareResult.output_url && IMAGE_SLUGS.has(slug) && (
+                        <img src={compareResult.output_url} alt="Version B" className="w-full rounded-xl aspect-square object-cover border border-white/10" />
+                      )}
+                      {compareResult.output_url && VIDEO_SLUGS.has(slug) && (
+                        <video src={compareResult.output_url} controls className="w-full rounded-xl border border-white/10" />
+                      )}
+                      {compareResult.output_url && AUDIO_SLUGS.has(slug) && (
+                        <audio src={compareResult.output_url} controls className="w-full" />
+                      )}
+                      {compareResult.output_text && !compareResult.output_url && (
+                        <div className="text-white/70 text-xs leading-relaxed max-h-48 overflow-y-auto pr-1 whitespace-pre-wrap">
+                          {compareResult.output_text.slice(0, 600)}{compareResult.output_text.length > 600 ? "…" : ""}
+                        </div>
+                      )}
+                      <a
+                        href={compareResult.output_url ?? "#"}
+                        target={compareResult.output_url ? "_blank" : undefined}
+                        rel="noreferrer"
+                        onClick={!compareResult.output_url ? (e) => { e.preventDefault(); navigator.clipboard.writeText(compareResult.output_text ?? ""); toast.success("Copied B!"); } : undefined}
+                        className="flex items-center justify-center gap-1.5 w-full py-2 rounded-xl bg-white/8 hover:bg-white/15 border border-white/10 text-white/50 text-xs font-semibold transition-all"
+                      >
+                        {compareResult.output_url ? <><Download size={11} /> Save B</> : <><Copy size={11} /> Copy B</>}
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Footer hint */}
+                  <div className="px-4 py-2.5 border-t border-gold-500/10">
+                    <p className="text-[10px] text-white/25 text-center">Both versions saved to your Gallery</p>
+                  </div>
+                </motion.div>
+              )}
               {meta && !generating && !inlineResult && (
                 <div className="flex items-center justify-between px-1">
                   <span className="text-white/25 text-[11px] flex items-center gap-1">

@@ -15,10 +15,16 @@ package services
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
+	"github.com/sideshow/apns2"
+	apnstoken "github.com/sideshow/apns2/token"
 	"loyalty-nexus/internal/infrastructure/config"
 
 	"github.com/google/uuid"
@@ -285,9 +291,16 @@ func (w *GhostNudgeWorker) runWalletPassSync(ctx context.Context) {
 }
 
 // sendApplePushNotification sends an Apple PassKit push notification to registered devices.
-// Apple Wallet push: POST to https://api.push.apple.com/3/device/{pushToken}
+// Apple Wallet push: POST https://api.push.apple.com/3/device/{pushToken}
 // with an empty JSON body — Apple then calls GET /v1/passes/{passTypeID}/{serialNumber}
 // on our server to fetch the updated pass.
+//
+// Required env vars:
+//   APNS_KEY_ID        — 10-char key ID from developer.apple.com
+//   APNS_TEAM_ID       — 10-char Team ID from Apple Developer account
+//   APNS_TOPIC         — pass type identifier (e.g. pass.com.loyaltynexus.wallet)
+//   APNS_AUTH_KEY_PATH — path to the .p8 private key file (default: /run/secrets/apns.p8)
+//   APNS_PRODUCTION    — "true" for production endpoint (default: sandbox)
 func (w *GhostNudgeWorker) sendApplePushNotification(ctx context.Context, userID uuid.UUID, serialNumber, trigger string) {
 	type deviceRow struct {
 		PushToken string `gorm:"column:push_token"`
@@ -304,13 +317,89 @@ func (w *GhostNudgeWorker) sendApplePushNotification(ctx context.Context, userID
 		return
 	}
 
-	// Full APNs implementation requires golang.org/x/net/http2 + Apple cert.
-	// For now, log the intent and mark the push as pending.
-	for _, d := range devices {
-		log.Printf("[ApplePush] Would push to device %s (token: %s...) for user %s trigger=%s",
-			d.DeviceID, safePrefix(d.PushToken, 12), userID, trigger)
-		w.logPassportPush(ctx, userID, "apple", trigger, "pending", "apns_not_yet_implemented")
+	// ── Load APNS credentials from env ──────────────────────────────────────
+	keyID     := os.Getenv("APNS_KEY_ID")
+	teamID    := os.Getenv("APNS_TEAM_ID")
+	topic     := os.Getenv("APNS_TOPIC")
+	keyPath   := os.Getenv("APNS_AUTH_KEY_PATH")
+	isProd    := os.Getenv("APNS_PRODUCTION") == "true"
+
+	if keyID == "" || teamID == "" || topic == "" {
+		log.Printf("[ApplePush] APNS credentials not configured (APNS_KEY_ID/APNS_TEAM_ID/APNS_TOPIC missing) — skipping push for user %s", userID)
+		for _, d := range devices {
+			w.logPassportPush(ctx, userID, "apple", trigger, "skipped", "apns_credentials_missing")
+			_ = d
+		}
+		return
 	}
+	if keyPath == "" {
+		keyPath = "/run/secrets/apns.p8"
+	}
+
+	authKey, err := loadAPNSAuthKey(keyPath)
+	if err != nil {
+		log.Printf("[ApplePush] failed to load .p8 key from %s: %v", keyPath, err)
+		for range devices {
+			w.logPassportPush(ctx, userID, "apple", trigger, "failed", "key_load_error: "+err.Error())
+		}
+		return
+	}
+
+	tok := &apnstoken.Token{
+		AuthKey: authKey,
+		KeyID:   keyID,
+		TeamID:  teamID,
+	}
+
+	var client *apns2.Client
+	if isProd {
+		client = apns2.NewTokenClient(tok).Production()
+	} else {
+		client = apns2.NewTokenClient(tok).Development()
+	}
+
+	// Apple Wallet pushes send an empty payload; Apple calls back our PKPass endpoint.
+	for _, d := range devices {
+		notification := &apns2.Notification{
+			DeviceToken: d.PushToken,
+			Topic:       topic,
+			Payload:     []byte(`{}`),
+		}
+		resp, pushErr := client.PushWithContext(ctx, notification)
+		if pushErr != nil {
+			log.Printf("[ApplePush] push error device=%s user=%s: %v", d.DeviceID, userID, pushErr)
+			w.logPassportPush(ctx, userID, "apple", trigger, "failed", pushErr.Error())
+			continue
+		}
+		if !resp.Sent() {
+			log.Printf("[ApplePush] rejected device=%s user=%s reason=%s", d.DeviceID, userID, resp.Reason)
+			w.logPassportPush(ctx, userID, "apple", trigger, "failed", resp.Reason)
+			continue
+		}
+		log.Printf("[ApplePush] sent OK device=%s user=%s trigger=%s apnsID=%s", d.DeviceID, userID, trigger, resp.ApnsID)
+		w.logPassportPush(ctx, userID, "apple", trigger, "sent", "")
+	}
+}
+
+// loadAPNSAuthKey parses a .p8 ECDSA private key file and returns the ecdsa.PrivateKey.
+func loadAPNSAuthKey(path string) (*ecdsa.PrivateKey, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read .p8 file: %w", err)
+	}
+	block, _ := pem.Decode(b)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block from %s", path)
+	}
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse PKCS8 private key: %w", err)
+	}
+	ecKey, ok := key.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("key is not ECDSA (got %T)", key)
+	}
+	return ecKey, nil
 }
 
 // ─── Audit log helper ─────────────────────────────────────────────────────────

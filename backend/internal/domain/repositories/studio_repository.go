@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -106,6 +107,10 @@ type StudioRepository interface {
 
 	// DisputeGeneration marks a generation as disputed and records the refund.
 	DisputeGeneration(ctx context.Context, genID uuid.UUID, refundPts int64) error
+
+	// GetPromptHistory returns the N most-recent distinct prompts a user submitted
+	// for a given tool slug. If toolSlug is empty, returns across all tools.
+	GetPromptHistory(ctx context.Context, userID uuid.UUID, toolSlug string, limit int) ([]PromptHistoryItem, error)
 }
 
 // ToolStats holds 30-day aggregated usage figures for a single studio tool.
@@ -125,4 +130,11 @@ type GenerationFilter struct {
 	Disputed bool // if true, only return rows where disputed_at IS NOT NULL
 	Limit    int
 	Offset   int
+}
+
+// PromptHistoryItem is one entry returned by GetPromptHistory.
+type PromptHistoryItem struct {
+	ToolSlug  string    `json:"tool_slug"`
+	Prompt    string    `json:"prompt"`
+	UsedAt    time.Time `json:"used_at"` // most-recent usage timestamp
 }

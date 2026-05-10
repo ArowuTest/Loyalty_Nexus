@@ -301,6 +301,19 @@ class StudioApi {
     return (r as Map)['generations'] as List? ?? [];
   }
 
+  /// Returns the user's recent distinct prompts for a tool (or all tools).
+  Future<List<String>> getPromptHistory({String? toolSlug, int limit = 8}) async {
+    final Map<String, dynamic> query = {'limit': limit};
+    if (toolSlug != null) query['tool_slug'] = toolSlug;
+    final r = await _dio.apiGet<Map>('/studio/prompts', query: query);
+    final List<dynamic> raw = (r as Map?)?['prompts'] as List? ?? [];
+    return raw
+        .whereType<Map>()
+        .map((e) => e['prompt']?.toString() ?? '')
+        .where((p) => p.isNotEmpty)
+        .toList();
+  }
+
   /// Chat with AI (session-aware, supports tool-scoped context)
   Future<Map<String, dynamic>> sendChat(
       String message, {String? toolSlug, String? sessionId,

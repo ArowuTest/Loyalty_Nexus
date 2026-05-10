@@ -452,3 +452,8 @@ func (s *StudioService) DisputeGeneration(ctx context.Context, genID uuid.UUID, 
 func (s *StudioService) GetSessionUsage(ctx context.Context, userID uuid.UUID) (*entities.StudioSession, error) {
 	return s.studioRepo.GetSessionUsage(ctx, userID)
 }
+
+// GetPromptHistory returns the N most-recent distinct prompts for a tool.
+func (s *StudioService) GetPromptHistory(ctx context.Context, userID uuid.UUID, toolSlug string, limit int) ([]repositories.PromptHistoryItem, error) {
+	return s.studioRepo.GetPromptHistory(ctx, userID, toolSlug, limit)
+}

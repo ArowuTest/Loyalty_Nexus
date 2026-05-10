@@ -54,6 +54,8 @@ dependencies:
   record: ^5.1.2
   path_provider: ^2.1.4
   just_audio: ^0.9.42
+  video_player: ^2.9.2
+  chewie: ^1.8.5
 
   # Speech-to-text (mic dictation in templates)
   speech_to_text: ^7.0.0

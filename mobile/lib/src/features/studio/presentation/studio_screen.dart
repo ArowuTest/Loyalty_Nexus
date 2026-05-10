@@ -7,6 +7,8 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:video_player/video_player.dart';
+import 'package:chewie/chewie.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
@@ -49,7 +51,7 @@ class _GalleryNotifier extends StateNotifier<_GalleryState> {
       // Auto-poll if any pending
       if (items.any((g) => g.status == 'pending' || g.status == 'processing')) {
         _poll?.cancel();
-        _poll = Timer.periodic(const Duration(seconds: 4), (_) => _fetch());
+        _poll = Timer.periodic(const Duration(milliseconds: 1500), (_) => _fetch());
       } else {
         _poll?.cancel();
       }
@@ -2285,75 +2287,83 @@ class _AudioOutputState extends State<_AudioOutput> {
   }
 }
 
-class _VideoOutput extends StatelessWidget {
+class _VideoOutput extends StatefulWidget {
   final Generation gen;
   final ValueChanged<Generation> onRegenerate;
   final void Function(String toolSlug, {String? imageUrl, String? videoUrl}) onCrossToolAction;
   const _VideoOutput({required this.gen, required this.onRegenerate, required this.onCrossToolAction});
+  @override
+  State<_VideoOutput> createState() => _VideoOutputState();
+}
+
+class _VideoOutputState extends State<_VideoOutput> {
+  VideoPlayerController? _vpc;
+  ChewieController?      _cc;
+  bool _initError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initPlayer();
+  }
+
+  Future<void> _initPlayer() async {
+    try {
+      final vpc = VideoPlayerController.networkUrl(Uri.parse(widget.gen.outputUrl!));
+      await vpc.initialize();
+      if (!mounted) { vpc.dispose(); return; }
+      final cc = ChewieController(
+        videoPlayerController: vpc,
+        autoPlay:              false,
+        looping:               false,
+        aspectRatio:           vpc.value.aspectRatio,
+        allowFullScreen:       true,
+        allowMuting:           true,
+        showControlsOnInitialize: false,
+        materialProgressColors: ChewieProgressColors(
+          playedColor:     NexusColors.primary,
+          bufferedColor:   NexusColors.primary.withValues(alpha: 0.3),
+          backgroundColor: Colors.white.withValues(alpha: 0.1),
+          handleColor:     NexusColors.primary,
+        ),
+        placeholder: _VideoPlaceholder(),
+      );
+      setState(() { _vpc = vpc; _cc = cc; });
+    } catch (_) {
+      if (mounted) setState(() => _initError = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _cc?.dispose();
+    _vpc?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    // Derive a thumbnail URL from common CDN patterns (Cloudinary, Mux, etc.).
-    // Falls back to a styled placeholder when no thumbnail is available.
-    final url = gen.outputUrl!;
-    String? thumbUrl;
-    if (url.contains('cloudinary.com')) {
-      // Convert .mp4 → .jpg thumbnail via Cloudinary transformation
-      thumbUrl = url.replaceAll('/upload/', '/upload/w_640,h_360,c_fill,so_2/').replaceAll('.mp4', '.jpg');
-    } else if (url.contains('mux.com') && url.contains('stream.mux.com')) {
-      // Mux thumbnail: https://image.mux.com/{playback_id}/thumbnail.jpg
-      final match = RegExp(r'stream\.mux\.com/([^/]+)').firstMatch(url);
-      if (match != null) thumbUrl = 'https://image.mux.com/${match.group(1)}/thumbnail.jpg';
-    }
-
+    final url = widget.gen.outputUrl!;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        GestureDetector(
-          onTap: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: thumbUrl != null
-                    ? Image.network(
-                        thumbUrl,
-                        width: double.infinity,
-                        height: 180,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _VideoPlaceholder(),
-                      )
-                    : _VideoPlaceholder(),
-              ),
-              // Play overlay
-              Container(
-                width: 56, height: 56,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
-                ),
-                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 32),
-              ),
-              // "Tap to play" label
-              Positioned(
-                bottom: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text('Tap to play in browser',
-                    style: TextStyle(color: Colors.white70, fontSize: 11)),
-                ),
-              ),
-            ],
-          ),
+        // ── In-app Chewie player ──────────────────────────────────────────────
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: _cc != null
+              ? AspectRatio(
+                  aspectRatio: _vpc!.value.aspectRatio > 0 ? _vpc!.value.aspectRatio : 16/9,
+                  child: Chewie(controller: _cc!),
+                )
+              : _initError
+                  ? GestureDetector(
+                      onTap: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+                      child: _VideoPlaceholder(label: 'Tap to open video'),
+                    )
+                  : _VideoPlaceholder(loading: true),
         ),
         const SizedBox(height: 8),
-        // Output metadata chip
+        // ── Output metadata chip ──────────────────────────────────────────────
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           margin: const EdgeInsets.only(bottom: 6),
@@ -2362,13 +2372,11 @@ class _VideoOutput extends StatelessWidget {
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white.withValues(alpha: 0.07))),
           child: Text('🎬 AI Video · Generated by Nexus AI',
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 9, fontWeight: FontWeight.w500)),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.35),
+              fontSize: 9, fontWeight: FontWeight.w500)),
         ),
+        // ── Action row ────────────────────────────────────────────────────────
         Row(children: [
-          _ActionBtn('Play', Icons.play_circle_outline_rounded,
-            () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
-            color: const Color(0xFFef4444)),
-          const SizedBox(width: 8),
           _ActionBtn('Download', Icons.download_rounded,
             () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication)),
           const SizedBox(width: 8),
@@ -2378,12 +2386,12 @@ class _VideoOutput extends StatelessWidget {
                    content: Text('Video link copied!'), behavior: SnackBarBehavior.floating,
                    duration: Duration(seconds: 2))); }),
           const SizedBox(width: 8),
-          _ActionBtn('Again', Icons.refresh_rounded, () => onRegenerate(gen)),
+          _ActionBtn('Again', Icons.refresh_rounded, () => widget.onRegenerate(widget.gen)),
         ]),
         const SizedBox(height: 6),
         Row(children: [
           _ActionBtn('Extend', Icons.open_in_full_rounded,
-            () => onCrossToolAction('video-extend', videoUrl: url),
+            () => widget.onCrossToolAction('video-extend', videoUrl: url),
             color: const Color(0xFF8B5CF6), small: true),
         ]),
       ]),
@@ -2392,15 +2400,26 @@ class _VideoOutput extends StatelessWidget {
 }
 
 class _VideoPlaceholder extends StatelessWidget {
+  final bool loading;
+  final String? label;
+  const _VideoPlaceholder({this.loading = false, this.label});
   @override
   Widget build(BuildContext context) => Container(
-    width: double.infinity, height: 180,
+    width: double.infinity, height: 200,
     decoration: BoxDecoration(
       color: const Color(0x1Aef4444),
       borderRadius: BorderRadius.circular(12),
       border: Border.all(color: const Color(0x33ef4444)),
     ),
-    child: const Center(child: Icon(Icons.movie_rounded, size: 48, color: Color(0x80ef4444))),
+    child: Center(child: loading
+        ? const CircularProgressIndicator(color: NexusColors.primary, strokeWidth: 2)
+        : Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.movie_rounded, size: 48, color: Color(0x80ef4444)),
+            if (label != null) ...[
+              const SizedBox(height: 8),
+              Text(label!, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+            ],
+          ])),
   );
 }
 
@@ -2652,12 +2671,28 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
   bool _showConfirm = false;
   bool _resultReady = false; // true after generation completes — shows 'generate again' bar
 
+  // Prompt history — recent prompts for this tool
+  List<String> _recentPrompts = [];
+
   // Progress bar + stage messages during generation
   Timer? _stageTimer;
   Timer? _progressTimer;
   int _stageIndex = 0;
   double _genProgress = 0.0;
   String _currentStage = '';
+
+  @override void initState() {
+    super.initState();
+    _loadPromptHistory();
+  }
+
+  Future<void> _loadPromptHistory() async {
+    try {
+      final api = ref.read(studioApiProvider);
+      final prompts = await api.getPromptHistory(toolSlug: widget.tool.slug, limit: 8);
+      if (mounted) setState(() => _recentPrompts = prompts);
+    } catch (_) {/* non-critical */}
+  }
 
   @override void dispose() {
     _stageTimer?.cancel();
@@ -2915,6 +2950,55 @@ class _ToolDrawerState extends ConsumerState<_ToolDrawer> {
       isLoading: _generating,
       userPoints: widget.userPoints,
     ),
+
+    // ── Recent prompts strip ──────────────────────────────────────
+    if (!_resultReady && !_generating && _recentPrompts.isNotEmpty) ...[
+      const SizedBox(height: 12),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Recent', style: TextStyle(
+            fontSize: 10, fontWeight: FontWeight.w600,
+            letterSpacing: 0.8, color: Colors.white.withValues(alpha: 0.3))),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: _recentPrompts.asMap().entries.map((e) {
+              final prompt = e.value;
+              final display = prompt.length > 48 ? '${prompt.substring(0, 48)}…' : prompt;
+              return Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: GestureDetector(
+                  onTap: () {
+                    // Copy to clipboard and show a snackbar hint
+                    Clipboard.setData(ClipboardData(text: prompt));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Prompt copied — paste into the input field',
+                          style: const TextStyle(fontSize: 12)),
+                        duration: const Duration(seconds: 2),
+                        behavior: SnackBarBehavior.floating,
+                        backgroundColor: NexusColors.surface,
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.035),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.08))),
+                    child: Text(display, style: TextStyle(
+                      fontSize: 11, color: Colors.white.withValues(alpha: 0.45))),
+                  ),
+                ),
+              );
+            }).toList()),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 8),
+    ],
   ]);
 
   /// Called by TemplateRegistry templates when the user taps Generate.

@@ -260,6 +260,39 @@ class APIClient {
   getGenerationStatus(id: string) {
     return this.request("GET", `/studio/generate/${id}`);
   }
+  /**
+   * streamGenerationStatus — subscribes to the SSE endpoint for real-time
+   * status updates. Falls back to polling if EventSource is unavailable.
+   * Returns an unsubscribe function.
+   */
+  streamGenerationStatus(
+    id: string,
+    onUpdate: (data: { status: string; output_url?: string; output_url_2?: string; output_text?: string; output_type?: string }) => void,
+    onError?: () => void,
+  ): () => void {
+    const token = typeof window !== "undefined"
+      ? (localStorage.getItem("nexus_token") ?? "")
+      : "";
+    // EventSource doesn't support custom headers — append token as query param
+    const url = `${BASE_URL}/studio/generate/${id}/stream?token=${encodeURIComponent(token)}`;
+    const es = new EventSource(url);
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "status" && data.status) {
+          onUpdate(data);
+          if (data.status === "completed" || data.status === "failed") {
+            es.close();
+          }
+        }
+      } catch { /* ignore malformed */ }
+    };
+    es.onerror = () => {
+      es.close();
+      onError?.();
+    };
+    return () => es.close();
+  }
   buildWebsite(payload: {
     site_type: string;
     vanity_slug?: string;
@@ -272,6 +305,13 @@ class APIClient {
     return this.request("GET", `/studio/website/check-slug?slug=${encodeURIComponent(slug)}`);
   }
   getGallery() { return this.request("GET", "/studio/gallery"); }
+
+  /** getPromptHistory — recent distinct prompts for a tool (or all tools if toolSlug omitted) */
+  getPromptHistory(toolSlug?: string, limit = 10): Promise<{ prompts: Array<{ tool_slug: string; prompt: string; used_at: string }>; count: number }> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (toolSlug) params.set("tool_slug", toolSlug);
+    return this.request("GET", `/studio/prompts?${params.toString()}`);
+  }
 
   /** Upload an audio or image file to cloud storage.
    *  Returns { url: string } — pass the url to generateTool() as prompt (transcribe)

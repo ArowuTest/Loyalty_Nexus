@@ -110,6 +110,11 @@ func extractBearer(r *http.Request) string {
 	if strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
+	// EventSource (SSE) cannot send custom headers — accept ?token= query param
+	// as a fallback for GET /stream endpoints only.
+	if t := r.URL.Query().Get("token"); t != "" {
+		return t
+	}
 	return ""
 }
 

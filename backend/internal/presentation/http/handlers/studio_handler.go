@@ -18,6 +18,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -635,4 +636,121 @@ func buildEnrichedPrompt(req generateRequest) string {
 		return req.Prompt // safe fallback
 	}
 	return string(b)
+}
+
+// ─── GET /api/v1/studio/generate/{id}/stream ──────────────────────────────────
+// Server-Sent Events stream: sends generation status updates in real-time.
+// The client receives events until status is "completed" or "failed".
+// Event format:  data: {"status":"...","output_url":"...","output_text":"..."}\n\n
+//
+// The handler polls DB every 1.5s for up to 5 minutes (200 iterations).
+// When the job finishes, it sends a final event then closes the stream.
+// Replaces client-side polling entirely — latency drops from ~3s to ~1.5s.
+func (h *StudioHandler) StreamGenerationStatus(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uid)
+
+	genID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, `{"error":"invalid generation id"}`, http.StatusBadRequest)
+		return
+	}
+
+	// SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable nginx buffering
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.WriteHeader(http.StatusOK)
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	sendEvent := func(data string) {
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	// Send a heartbeat immediately so the client knows the stream is live
+	sendEvent(`{"type":"connected"}`)
+
+	ticker := time.NewTicker(1500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for i := 0; i < 200; i++ {
+		select {
+		case <-r.Context().Done():
+			return // client disconnected
+		case <-ticker.C:
+			gen, fetchErr := h.studioSvc.FindGenerationByID(r.Context(), genID)
+			if fetchErr != nil {
+				sendEvent(`{"type":"error","error":"generation not found"}`)
+				return
+			}
+			if gen.UserID != userID {
+				sendEvent(`{"type":"error","error":"access denied"}`)
+				return
+			}
+
+			payload := map[string]interface{}{
+				"type":        "status",
+				"status":      gen.Status,
+				"output_url":  gen.OutputURL,
+				"output_url_2": gen.OutputURL2,
+				"output_text": gen.OutputText,
+				"updated_at":  gen.UpdatedAt,
+			}
+			b, _ := json.Marshal(payload)
+			sendEvent(string(b))
+
+			if gen.Status == "completed" || gen.Status == "failed" {
+				return // stream complete
+			}
+		}
+	}
+	// Timeout after ~5 minutes
+	sendEvent(`{"type":"timeout","status":"processing"}`)
+}
+
+// ─── Prompt history ───────────────────────────────────────────────────────────
+
+// GetPromptHistory godoc
+// @Summary      Recent prompts for a tool
+// @Description  Returns the N most-recent distinct prompts submitted by the authenticated user for a tool.
+// @Tags         studio
+// @Produce      json
+// @Param        tool_slug  query  string  false  "Tool slug filter (omit for all tools)"
+// @Param        limit      query  int     false  "Max results (1-50, default 10)"
+// @Success      200  {object}  map[string]interface{}
+// @Security     BearerAuth
+// @Router       /studio/prompts [get]
+func (h *StudioHandler) GetPromptHistory(w http.ResponseWriter, r *http.Request) {
+	uid, _ := r.Context().Value(middleware.ContextUserID).(string)
+	userID, err := uuid.Parse(uid)
+	if err != nil || userID == uuid.Nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	toolSlug := r.URL.Query().Get("tool_slug")
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 50 {
+			limit = n
+		}
+	}
+	items, err := h.studioSvc.GetPromptHistory(r.Context(), userID, toolSlug, limit)
+	if err != nil {
+		log.Printf("[GetPromptHistory] error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"prompts": items,
+		"count":   len(items),
+	})
 }
