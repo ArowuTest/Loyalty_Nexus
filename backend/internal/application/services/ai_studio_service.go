@@ -3925,12 +3925,8 @@ RULES:
 
 	// Attach document context if provided
 	userTask := env.Prompt
-	if env.AttachedContext != "" {
-		name := env.AttachedName
-		if name == "" {
-			name = "attached document"
-		}
-		userTask = fmt.Sprintf("%s\n\n[ATTACHED: %s]\n%s\n[END ATTACHED]", userTask, name, env.AttachedContext)
+	if env.DocumentURL != "" {
+		userTask = fmt.Sprintf("%s\n\n[ATTACHED DOCUMENT URL: %s]\nPlease read this document using the read_url tool as part of your research.", userTask, env.DocumentURL)
 	}
 
 	// Tool declarations — passed to Gemini on every turn
