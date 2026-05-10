@@ -222,7 +222,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
             className="nexus-input resize-none w-full text-sm leading-relaxed"
           />
           <p className="text-white/20 text-[10px] mt-1">
-            Veo 3 supports native audio generation — describe sounds, music, or ambient audio.
+            Nexus AI supports native audio generation — describe sounds, music, or ambient audio.
           </p>
         </div>
       )}

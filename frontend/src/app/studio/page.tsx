@@ -99,7 +99,7 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "bg-remover":         { time: "~5 sec",   output: "Transparent PNG",               tip: "Works best with clear subject vs background" },
   "animate-photo":      { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
   "video-cinematic":    { time: "~90 sec",  output: "Cinematic 5s video",            tip: "Describe motion: 'slow zoom in', 'camera pan left'" },
-  "video-premium":      { time: "~45 sec",  output: "HD video clip",                 tip: "Upload your photo, then describe the animation — Kling brings it to life" },
+  "video-premium":      { time: "~45 sec",  output: "HD video clip",                 tip: "Upload your photo, then describe the animation — Nexus AI brings it to life" },
   "video-veo":          { time: "~3 min",   output: "Cinematic AI video",             tip: "Describe the scene like a film director would" },
   "narrate":            { time: "~4 sec",   output: "MP3 audio file",                tip: "Keep text under 500 words for best quality" },
   "narrate-pro":        { time: "~5 sec",   output: "MP3 with premium voice",        tip: "Try 'coral' for warm tone, 'onyx' for deep voice" },
@@ -2361,7 +2361,7 @@ function ToolDrawer({
                       {isFree    && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">FREE</span>}
                       {isPremium && !isFree && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">PREMIUM</span>}
                       {slug === "web-search-ai" && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">🌐 Live</span>}
-                      {slug === "video-veo"     && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">Veo</span>}
+                      {slug === "video-veo"     && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">Ultra HD</span>}
                     </div>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-white/40 text-xs">{outType.emoji} Outputs 1 {outType.noun}</span>

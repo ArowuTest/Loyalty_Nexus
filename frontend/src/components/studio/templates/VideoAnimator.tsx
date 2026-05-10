@@ -170,12 +170,12 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
   return (
     <div className="space-y-5">
 
-      {/* ── Grok Imagine badge ── */}
+      {/* ── Nexus Video Engine badge ── */}
       {isGrok && (
         <div className="flex items-center gap-2 bg-gradient-to-r from-violet-500/10 to-cyan-500/10 border border-violet-500/20 rounded-xl px-3 py-2">
           <Zap size={12} className="text-violet-400 flex-shrink-0" />
           <p className="text-violet-300/70 text-[11px]">
-            <span className="font-semibold text-violet-300">Powered by Grok Imagine</span>
+            <span className="font-semibold text-violet-300">Nexus Video Engine</span>
             {' '}— describe the motion, upload your photo, get a cinematic video.
           </p>
         </div>
