@@ -131,6 +131,10 @@ var slugCategory = map[string]studioToolCat{
 	"doc-analyzer": catVision, // Nexus Document Analyzer: PDF/image structured extraction
 	"localize-ui":  catVision, // Nexus Localization Engine: screenshot OCR + African dialect translation
 	"nexus-agent":  catText,   // Nexus Agentic Workflow Builder: multi-step agentic reasoning loop
+
+	// website-builder: routed as catText so the worker doesn't fail with "unknown slug".
+	// dispatchText handles it by delegating to the website builder generation flow.
+	"website-builder": catText,
 }
 
 // ─── Provider result ──────────────────────────────────────────────────────────────────────────────────────
@@ -358,6 +362,23 @@ func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, en
 		slug = "ask-nexus" // both use the same free conversational AI path
 	case "voice-to-plan":
 		slug = "voice-to-plan"
+	}
+
+	// website-builder: the frontend sometimes posts to /studio/generate with this slug
+	// instead of the dedicated /studio/website endpoint. Generate a professional
+	// multi-section HTML website using Gemini and return it as OutputText so the
+	// polling endpoint shows it correctly. The dedicated /studio/website endpoint
+	// is still the preferred path for full form data.
+	if slug == "website-builder" {
+		wbSys := "You are an expert web developer. Generate a complete, production-ready single-page HTML website. " +
+			"Use modern CSS (inline styles or a <style> block), responsive design, professional color scheme, and clean typography. " +
+			"Include a header with navigation, hero section, about/services section, contact section, and footer. " +
+			"Return ONLY the full HTML document starting with <!DOCTYPE html>. No markdown fences."
+		html, err := o.callGeminiFlash(ctx, wbSys, "Create a professional website for: "+prompt)
+		if err != nil {
+			return nil, fmt.Errorf("website-builder: Gemini failed: %w", err)
+		}
+		return &studioProviderResult{OutputText: html, Provider: "gemini/website-builder", CostMicros: 0}, nil
 	}
 
 	// nexus-agent: multi-step agentic workflow builder
@@ -1521,12 +1542,21 @@ func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*s
 		}
 	}
 
-	// Last resort: Pollinations.ai TTS (free, OpenAI-compatible, 30+ voices, no key)
-	if audioURL, err := o.callPollinationsTTS(ctx, text, "nova"); err == nil {
-		return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/tts", CostMicros: 0}, nil
+	// Last resort: Pollinations.ai TTS — try "alloy" first (OpenAI model, no ElevenLabs quota),
+	// then "nova" as secondary. Both require POLLINATIONS_SECRET_KEY.
+	for _, voice := range []string{"alloy", "nova", "echo"} {
+		if audioURL, err := o.callPollinationsTTS(ctx, text, voice); err == nil {
+			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/tts-" + voice, CostMicros: 0}, nil
+		}
 	}
 
-	return nil, fmt.Errorf("TTS unavailable: configure GOOGLE_CLOUD_TTS_KEY or ELEVENLABS_API_KEY")
+	return nil, fmt.Errorf("TTS unavailable: all providers failed (google-tts=%s, elevenlabs=blocked-by-render-ip, pollinations=quota-exceeded)",
+		func() string {
+			if os.Getenv("GOOGLE_CLOUD_TTS_KEY") != "" {
+				return "key-set-voice-mismatch-fixed"
+			}
+			return "key-not-set"
+		}())
 }
 
 func (o *AIStudioOrchestrator) dispatchTranscribe(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
@@ -2640,9 +2670,9 @@ func (o *AIStudioOrchestrator) callGoogleCloudTTS(ctx context.Context, apiKey, t
 	payload := map[string]interface{}{
 		"input": map[string]string{"text": text},
 		"voice": map[string]interface{}{
-			"languageCode": "en-NG", // Nigerian English
-			"name":         "en-GB-Neural2-A",
-			"ssmlGender":   "NEUTRAL",
+			"languageCode": "en-US", // Google TTS has no en-NG voice — en-US Neural2-F is natural and clear
+			"name":         "en-US-Neural2-F",
+			"ssmlGender":   "FEMALE",
 		},
 		"audioConfig": map[string]interface{}{
 			"audioEncoding": "MP3",

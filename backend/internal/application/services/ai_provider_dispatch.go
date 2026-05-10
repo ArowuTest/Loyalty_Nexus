@@ -163,7 +163,7 @@ func (o *AIStudioOrchestrator) callByTemplate(
 			if v, ok := p.ExtraConfig["voice"].(string); ok && v != "" {
 				voice = v
 			} else {
-				voice = "nova"
+				voice = "alloy" // alloy uses OpenAI model (not ElevenLabs), avoids quota issues
 			}
 		}
 		outputURL, err = o.callPollinationsTTS(ctx, in.Text, voice)
