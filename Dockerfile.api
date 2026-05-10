@@ -12,6 +12,9 @@ RUN go mod download
 
 COPY backend/ .
 
+# Regenerate go.sum for any deps committed without running go mod tidy locally
+RUN go mod tidy
+
 ARG VERSION=dev
 
 # Build API and migrate binaries
