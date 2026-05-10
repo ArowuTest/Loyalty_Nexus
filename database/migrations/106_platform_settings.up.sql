@@ -30,9 +30,9 @@ ON CONFLICT (key) DO NOTHING;
 -- ── Asset expiry notification tracking ───────────────────────────────────────
 CREATE TABLE IF NOT EXISTS asset_expiry_notifications (
     generation_id UUID        NOT NULL REFERENCES ai_generations(id) ON DELETE CASCADE,
-    window        VARCHAR(20) NOT NULL,  -- 'first' | 'second'
+    notif_window  VARCHAR(20) NOT NULL,  -- 'first' | 'second'  ('window' is a reserved keyword in PG)
     sent_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (generation_id, window)
+    PRIMARY KEY (generation_id, notif_window)
 );
 
 -- ── Expiry cleanup tracking ───────────────────────────────────────────────────

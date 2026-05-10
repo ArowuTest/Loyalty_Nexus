@@ -108,7 +108,7 @@ func (w *AssetExpiryWorker) notifyWindow(ctx context.Context, before time.Durati
 		  AND g.expires_at BETWEEN ? AND ?
 		  AND NOT EXISTS (
 		    SELECT 1 FROM asset_expiry_notifications n
-		    WHERE n.generation_id = g.id AND n.window = ?
+		    WHERE n.generation_id = g.id AND n.notif_window = ?
 		  )
 		LIMIT 500
 	`, from, to, windowName).Scan(&gens)
@@ -139,9 +139,9 @@ func (w *AssetExpiryWorker) notifyWindow(ctx context.Context, before time.Durati
 
 func (w *AssetExpiryWorker) recordNotification(ctx context.Context, genID uuid.UUID, window string) {
 	w.db.WithContext(ctx).Exec(
-		`INSERT INTO asset_expiry_notifications (generation_id, window, sent_at)
+		`INSERT INTO asset_expiry_notifications (generation_id, notif_window, sent_at)
 		 VALUES (?, ?, NOW())
-		 ON CONFLICT (generation_id, window) DO NOTHING`,
+		 ON CONFLICT (generation_id, notif_window) DO NOTHING`,
 		genID, window,
 	)
 }
