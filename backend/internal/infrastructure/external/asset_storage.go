@@ -144,6 +144,9 @@ func (s *s3Storage) PublicURL(key string) string {
 	if s.cdnBase != "" {
 		return strings.TrimRight(s.cdnBase, "/") + "/" + key
 	}
+	// For custom endpoints (R2), the public URL doesn't include the bucket
+	// because the CDN base URL already scopes to the bucket.
+	// If no CDN base, return the endpoint path for debugging.
 	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", s.bucket, s.region, key)
 }
 
@@ -165,20 +168,43 @@ func (s *s3Storage) put(ctx context.Context, key string, body io.Reader, size in
 	}
 	data, _ := io.ReadAll(body) // need bytes for signature
 	now := time.Now().UTC()
-	objectURL := strings.TrimRight(s.endpoint, "/") + "/" + key
-	host := strings.TrimPrefix(strings.TrimPrefix(s.endpoint, "https://"), "http://")
-	host = strings.TrimRight(host, "/")
+
+	// Determine if we are using a custom endpoint (Cloudflare R2, MinIO, etc.)
+	// or standard AWS virtual-hosted style.
+	//
+	// Custom endpoint (R2): path-style → endpoint/bucket/key
+	//   PUT https://accountid.r2.cloudflarestorage.com/loyalty-nexus-assets/narrations/file.mp3
+	//   Host:        accountid.r2.cloudflarestorage.com
+	//   Signing path: /loyalty-nexus-assets/narrations/file.mp3
+	//
+	// Standard AWS: virtual-hosted → bucket.s3.region.amazonaws.com/key
+	//   PUT https://bucket.s3.region.amazonaws.com/key
+	//   Host:        bucket.s3.region.amazonaws.com
+	//   Signing path: /key
+	isCustomEndpoint := os.Getenv("AWS_S3_ENDPOINT") != ""
+	var objectURL, host, signingPath string
+	if isCustomEndpoint {
+		base := strings.TrimRight(s.endpoint, "/")
+		objectURL = fmt.Sprintf("%s/%s/%s", base, s.bucket, key)
+		host = strings.TrimPrefix(strings.TrimPrefix(base, "https://"), "http://")
+		signingPath = fmt.Sprintf("/%s/%s", s.bucket, key)
+	} else {
+		objectURL = strings.TrimRight(s.endpoint, "/") + "/" + key
+		host = strings.TrimPrefix(strings.TrimPrefix(s.endpoint, "https://"), "http://")
+		host = strings.TrimRight(host, "/")
+		signingPath = "/" + key
+	}
 
 	bodyHash := hexSHA256(data)
 	headers := map[string]string{
-		"content-type":        contentType,
-		"host":                host,
+		"content-type":         contentType,
+		"host":                 host,
 		"x-amz-content-sha256": bodyHash,
-		"x-amz-date":          amzDate(now),
+		"x-amz-date":           amzDate(now),
 	}
 
 	_, authHeader := signV4(
-		http.MethodPut, "/"+key, "",
+		http.MethodPut, signingPath, "",
 		headers, bodyHash,
 		s.accessKey, s.secretKey, s.region, "s3", now,
 	)
