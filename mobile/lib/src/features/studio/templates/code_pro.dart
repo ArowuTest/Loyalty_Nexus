@@ -48,6 +48,8 @@ class _CodeProTemplateState extends ConsumerState<CodeProTemplate> {
   void initState() {
     super.initState();
     _initSpeech();
+    // Rebuild when question changes (drives isValid / button state)
+    _questionCtrl.addListener(() => setState(() {}));
   }
 
   Future<void> _initSpeech() async {
@@ -189,7 +191,6 @@ class _CodeProTemplateState extends ConsumerState<CodeProTemplate> {
           controller: _questionCtrl,
           placeholder: placeholder,
           maxLines: 5,
-          onChanged: (_) => setState(() {}),
         ),
         if (_micListening) ...[
           const SizedBox(height: 6),
@@ -211,6 +212,7 @@ class _CodeProTemplateState extends ConsumerState<CodeProTemplate> {
         if (exampleQs.length > 4) ...[
           TextField(
             controller: _filterCtrl,
+            onChanged: (_) => setState(() {}),
             style: const TextStyle(color: Colors.white, fontSize: 12),
             decoration: InputDecoration(
               hintText: 'Filter examples…',
