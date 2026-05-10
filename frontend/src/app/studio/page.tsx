@@ -17,7 +17,7 @@ import {
   Brain, Video, X, Info, Play, LayoutGrid, MessageSquare, History,
   Code2, Copy, Check, Download, RotateCcw, Zap, CreditCard,
   TrendingUp, Timer, ChevronDown, Lock, Activity,
-  Paperclip, AlertCircle, Search, Plus, FileDown,
+  Paperclip, AlertCircle, Search, Plus, FileDown, Share2,
 } from "lucide-react";
 import {
   MusicComposer, ImageCreator, ImageEditor, ImageCompose,
@@ -99,7 +99,7 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "bg-remover":         { time: "~5 sec",   output: "Transparent PNG",               tip: "Works best with clear subject vs background" },
   "animate-photo":      { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
   "video-cinematic":    { time: "~90 sec",  output: "Cinematic 5s video",            tip: "Describe motion: 'slow zoom in', 'camera pan left'" },
-  "video-premium":      { time: "~2 min",   output: "HD video clip",                 tip: "Upload your photo, then describe the animation — Kling brings it to life" },
+  "video-premium":      { time: "~45 sec",  output: "HD video clip",                 tip: "Upload your photo, then describe the animation — Kling brings it to life" },
   "video-veo":          { time: "~3 min",   output: "Cinematic AI video",             tip: "Describe the scene like a film director would" },
   "narrate":            { time: "~4 sec",   output: "MP3 audio file",                tip: "Keep text under 500 words for best quality" },
   "narrate-pro":        { time: "~5 sec",   output: "MP3 with premium voice",        tip: "Try 'coral' for warm tone, 'onyx' for deep voice" },
@@ -2143,7 +2143,7 @@ function renderTemplate(
 // ─── Tool drawer ──────────────────────────────────────────────────────────────
 function ToolDrawer({
   tool, onClose, userPoints, onGenerated, onContinueInChat,
-  preloadImageUrl, preloadVideoUrl, onCrossToolAction,
+  preloadImageUrl, preloadVideoUrl, onCrossToolAction, onViewGallery,
 }: {
   tool: Tool; onClose: () => void; userPoints: number; onGenerated?: () => void;
   onContinueInChat?: (text: string) => void;
@@ -2151,6 +2151,8 @@ function ToolDrawer({
   preloadVideoUrl?: string;
   /** Called when user wants to use the generated result in another tool */
   onCrossToolAction?: (toolSlug: string, imageUrl?: string, videoUrl?: string) => void;
+  /** Called when user clicks View in Gallery */
+  onViewGallery?: () => void;
 }) {
   // pendingPayload holds the GeneratePayload from the template until the user
   // confirms in the ConfirmModal. null = no payload ready yet.
@@ -2560,10 +2562,24 @@ function ToolDrawer({
                   {/* Image result */}
                   {inlineResult.output_url && !AUDIO_SLUGS.has(slug) && !VIDEO_SLUGS.has(slug) && (IMAGE_SLUGS.has(slug) || inlineResult.output_type === "image" || /\.(png|jpg|jpeg|webp|gif)/i.test(inlineResult.output_url)) && (
                     <div className="p-4 space-y-3">
+                      {/* Prompt used — shown above the image so user knows what generated it */}
+                      {confirmPrompt && (
+                        <div className="flex items-start gap-1.5 px-1">
+                          <span className="text-white/20 text-[10px] mt-0.5 flex-shrink-0">Prompt:</span>
+                          <p className="text-white/45 text-[11px] italic leading-relaxed line-clamp-2 flex-1">"{confirmPrompt}"</p>
+                          <button
+                            onClick={() => { navigator.clipboard.writeText(confirmPrompt); toast.success('Prompt copied!'); }}
+                            className="flex-shrink-0 text-white/20 hover:text-white/55 transition-colors mt-0.5"
+                            title="Copy prompt"
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
+                      )}
                       <div className="rounded-xl overflow-hidden border border-white/10">
                         <img
                           src={inlineResult.output_url}
-                          alt={tool.name}
+                          alt={confirmPrompt || tool.name}
                           className="w-full object-cover"
                         />
                       </div>
@@ -2577,15 +2593,24 @@ function ToolDrawer({
                                      bg-green-500/15 border border-green-500/25 text-green-300
                                      text-sm font-semibold hover:bg-green-500/25 transition-colors"
                         >
-                          <Download size={14} /> Download Image
+                          <Download size={14} /> Download
                         </a>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(inlineResult.output_url!); toast.success('Image link copied!'); }}
+                          className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl
+                                     bg-white/5 border border-white/10 text-white/50
+                                     hover:bg-white/10 hover:text-white/70 transition-colors"
+                          title="Copy image link"
+                        >
+                          <Share2 size={14} />
+                        </button>
                         <button
                           onClick={() => { setInlineResult(null); setPendingPayload(null); setFormCollapsed(false); }}
                           className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
                                      bg-white/5 border border-white/10 text-white/60
                                      text-sm font-semibold hover:bg-white/10 transition-colors"
                         >
-                          <RefreshCw size={14} /> Generate Again
+                          <RefreshCw size={14} /> Again
                         </button>
                       </div>
                       {/* Cross-tool actions: only shown for image-generating tools, not already-animated/edited */}
@@ -2597,7 +2622,7 @@ function ToolDrawer({
                                        bg-purple-500/15 border border-purple-500/25 text-purple-300
                                        text-xs font-semibold hover:bg-purple-500/25 transition-colors"
                           >
-                            <Video size={12} /> Animate This
+                            <Video size={12} /> Animate
                           </button>
                           <button
                             onClick={() => { onCrossToolAction("photo-editor", inlineResult.output_url!); onClose(); }}
@@ -2605,7 +2630,7 @@ function ToolDrawer({
                                        bg-blue-500/15 border border-blue-500/25 text-blue-300
                                        text-xs font-semibold hover:bg-blue-500/25 transition-colors"
                           >
-                            <Wand2 size={12} /> Edit Photo
+                            <Wand2 size={12} /> Edit
                           </button>
                           <button
                             onClick={() => { onCrossToolAction("bg-remover", inlineResult.output_url!); onClose(); }}
@@ -2684,6 +2709,15 @@ function ToolDrawer({
                         >
                           <Download size={14} /> Download Video
                         </a>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(inlineResult.output_url!); toast.success('Video link copied!'); }}
+                          className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl
+                                     bg-white/5 border border-white/10 text-white/50
+                                     hover:bg-white/10 hover:text-white/70 transition-colors"
+                          title="Copy video link"
+                        >
+                          <Share2 size={14} />
+                        </button>
                         <button
                           onClick={() => { setInlineResult(null); setPendingPayload(null); setFormCollapsed(false); }}
                           className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl
@@ -2874,9 +2908,19 @@ function ToolDrawer({
 
                   {/* Gallery note */}
                   <div className="px-4 pb-3">
-                    <p className="text-white/25 text-[10px] text-center">
-                      A copy has been saved to your Gallery
-                    </p>
+                    <div className="flex items-center justify-center gap-2">
+                      <p className="text-white/25 text-[10px]">
+                        A copy has been saved to your Gallery
+                      </p>
+                      {onViewGallery && (
+                        <button
+                          onClick={() => { onClose(); onViewGallery(); }}
+                          className="text-white/35 hover:text-amber-400/70 text-[10px] underline underline-offset-2 transition-colors"
+                        >
+                          View →
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </motion.div>
               )}
@@ -4194,6 +4238,7 @@ function StudioPageInner() {
               // Focus chat input after tab switch
               setTimeout(() => inputRef.current?.focus(), 150);
             }}
+            onViewGallery={() => { setActiveTab('gallery'); }}
           />
         )}
       </AnimatePresence>
