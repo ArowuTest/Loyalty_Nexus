@@ -548,7 +548,7 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 	switch req.ToolSlug {
 
 	// ── Search-grounded tools: Tavily → Gemini ─────────────────────────────
-	case "web-search-ai", "research-brief", "deep-research-brief", "nexus-agent":
+	case "web-search-ai", "ask-nexus", "nexus-chat", "research-brief", "deep-research-brief", "nexus-agent":
 
 		// Determine how many search results to fetch based on depth
 		numResults := 5

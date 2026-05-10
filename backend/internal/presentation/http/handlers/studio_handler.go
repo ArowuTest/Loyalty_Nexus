@@ -376,7 +376,7 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	// (Qwen-Coder), research-brief, deep-research-brief, nexus-agent (Tavily→Gemini).
 	// All other slugs use the standard Chat() chain (Gemini → DeepSeek).
 	switch req.ToolSlug {
-	case "web-search-ai", "code-helper", "code-pro", "research-brief", "deep-research-brief", "nexus-agent":
+	case "web-search-ai", "ask-nexus", "nexus-chat", "code-helper", "code-pro", "research-brief", "deep-research-brief", "nexus-agent":
 		// These are all CHAT tools — always handle inline (never dispatch to async queue).
 		// For paid chat tools (research-brief, nexus-agent, etc.) deduct points here if
 		// the tool has a cost, but keep the response synchronous so the user gets an

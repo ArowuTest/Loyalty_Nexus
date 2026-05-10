@@ -328,23 +328,24 @@ func parseEnvelope(raw string) promptEnvelope {
 
 func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	prompt := env.Prompt
-	// web-search-ai AND ask-nexus/nexus-chat: both use live web search for accuracy.
-	// ask-nexus is the conversational AI — routing it through web search ensures factual
-	// answers rather than relying on potentially stale training data.
-	if slug == "web-search-ai" || slug == "ask-nexus" || slug == "nexus-chat" {
+	// web-search-ai: primary via Pollinations gemini-search, fallback to Gemini Flash.
+	// NOTE: ask-nexus/nexus-chat go through /studio/chat → llm_orchestrator (Tavily→Gemini),
+	// not through this async dispatcher. This block only handles web-search-ai on /studio/generate.
+	if slug == "web-search-ai" {
 		text, err := o.callPollinationsWebSearch(ctx, prompt)
 		if err == nil {
 			return &studioProviderResult{OutputText: text, Provider: "pollinations/gemini-search", CostMicros: 0}, nil
 		}
-		log.Printf("[AIStudio] Pollinations web-search failed (%s): %v — falling back to Gemini Flash", slug, err)
+		log.Printf("[AIStudio] Pollinations web-search failed: %v — falling back", err)
 		webSys := "You are Nexus AI, a world-class intelligent assistant with comprehensive global knowledge. " +
-			"Answer with depth and accuracy. Structure your answer clearly: direct answer first, then supporting details. " +
+			"Web search is temporarily unavailable, but answer from your knowledge with depth and accuracy. " +
+			"Structure your answer clearly: direct answer first, then supporting details. " +
 			"Be specific with facts, numbers, and examples. Include local context naturally when the query suggests it."
-		fallbackText, fErr := o.callGeminiFlash(ctx, webSys, prompt)
+		fallbackText, fErr := o.callGeminiFlash(ctx, webSys, fmt.Sprintf("(Web search unavailable — answer from knowledge) %s", prompt))
 		if fErr == nil {
-			return &studioProviderResult{OutputText: fallbackText, Provider: "gemini-flash", CostMicros: 0}, nil
+			return &studioProviderResult{OutputText: fallbackText, Provider: "gemini-flash/nosearch", CostMicros: 0}, nil
 		}
-		return nil, fmt.Errorf("%s: all providers failed: %v / %v", slug, err, fErr)
+		return nil, fmt.Errorf("web-search-ai: all providers failed: %v / %v", err, fErr)
 	}
 
 	// Handle alias slugs by remapping to canonical slugs
