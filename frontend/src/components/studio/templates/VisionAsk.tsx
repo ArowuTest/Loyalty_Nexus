@@ -20,7 +20,9 @@ const DEFAULT_EXAMPLE_QUESTIONS = [
 
 export default function VisionAsk({ tool, onSubmit, isLoading, userPoints, preloadImageUrl }: TemplateProps) {
   const cfg          = tool.ui_config ?? {};
-  const promptOptional = cfg.prompt_optional ?? false;
+  // image-analyser is auto-mode (full description, no question required)
+  const isAutoAnalyser = tool.slug === 'image-analyser' || tool.slug === 'localize-ui';
+  const promptOptional = isAutoAnalyser ? true : (cfg.prompt_optional ?? false);
   // Example questions from ui_config (so they can be customised per tool from DB)
   const exampleQuestions = cfg.example_questions ?? DEFAULT_EXAMPLE_QUESTIONS;
 

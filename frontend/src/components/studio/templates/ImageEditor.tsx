@@ -32,9 +32,10 @@ const STRENGTH_LEVELS = [
 export default function ImageEditor({ tool, onSubmit, isLoading, userPoints, preloadImageUrl }: TemplateProps) {
   const cfg             = tool.ui_config ?? {};
   const editSuggestions = (cfg.edit_suggestions ?? DEFAULT_EDIT_SUGGESTIONS) as string[];
-  // bg-remover sets show_edit_prompt: false and prompt_optional: true
-  const showEditPrompt  = cfg.show_edit_prompt !== false; // default true
-  const promptOptional  = cfg.prompt_optional === true;   // default false
+  // bg-remover and background-remover should hide the edit prompt — the action is always "remove background"
+  const isBgRemover    = tool.slug === 'bg-remover' || tool.slug === 'background-remover';
+  const showEditPrompt  = isBgRemover ? false : (cfg.show_edit_prompt !== false); // default true
+  const promptOptional  = isBgRemover ? true  : (cfg.prompt_optional === true);   // default false
 
   // Pre-populate from preloadImageUrl if provided (cross-tool context passing)
   const [imageUrl,     setImageUrl]     = useState(preloadImageUrl ?? '');

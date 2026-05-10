@@ -99,7 +99,7 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "bg-remover":         { time: "~5 sec",   output: "Transparent PNG",               tip: "Works best with clear subject vs background" },
   "animate-photo":      { time: "~45 sec",  output: "5-second MP4 video",            tip: "Use portraits or scenic photos for best motion" },
   "video-cinematic":    { time: "~90 sec",  output: "Cinematic 5s video",            tip: "Describe motion: 'slow zoom in', 'camera pan left'" },
-  "video-premium":      { time: "~2 min",   output: "HD video clip",                 tip: "More detail in prompt = better camera movement" },
+  "video-premium":      { time: "~2 min",   output: "HD video clip",                 tip: "Upload your photo, then describe the animation — Kling brings it to life" },
   "video-veo":          { time: "~3 min",   output: "Cinematic AI video",             tip: "Describe the scene like a film director would" },
   "narrate":            { time: "~4 sec",   output: "MP3 audio file",                tip: "Keep text under 500 words for best quality" },
   "narrate-pro":        { time: "~5 sec",   output: "MP3 with premium voice",        tip: "Try 'coral' for warm tone, 'onyx' for deep voice" },
