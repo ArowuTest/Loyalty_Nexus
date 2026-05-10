@@ -328,22 +328,23 @@ func parseEnvelope(raw string) promptEnvelope {
 
 func (o *AIStudioOrchestrator) dispatchText(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	prompt := env.Prompt
-	// web-search-ai: primary via Pollinations gemini-search, fallback to Gemini Flash
-	if slug == "web-search-ai" {
+	// web-search-ai AND ask-nexus/nexus-chat: both use live web search for accuracy.
+	// ask-nexus is the conversational AI — routing it through web search ensures factual
+	// answers rather than relying on potentially stale training data.
+	if slug == "web-search-ai" || slug == "ask-nexus" || slug == "nexus-chat" {
 		text, err := o.callPollinationsWebSearch(ctx, prompt)
 		if err == nil {
 			return &studioProviderResult{OutputText: text, Provider: "pollinations/gemini-search", CostMicros: 0}, nil
 		}
-		log.Printf("[AIStudio] Pollinations web-search failed: %v — falling back", err)
+		log.Printf("[AIStudio] Pollinations web-search failed (%s): %v — falling back to Gemini Flash", slug, err)
 		webSys := "You are Nexus AI, a world-class intelligent assistant with comprehensive global knowledge. " +
-			"Web search is temporarily unavailable, but answer from your knowledge with depth and accuracy. " +
-			"Structure your answer clearly: direct answer first, then supporting details. " +
+			"Answer with depth and accuracy. Structure your answer clearly: direct answer first, then supporting details. " +
 			"Be specific with facts, numbers, and examples. Include local context naturally when the query suggests it."
-		fallbackText, fErr := o.callGeminiFlash(ctx, webSys, fmt.Sprintf("(Web search unavailable — answer from knowledge) %s", prompt))
+		fallbackText, fErr := o.callGeminiFlash(ctx, webSys, prompt)
 		if fErr == nil {
-			return &studioProviderResult{OutputText: fallbackText, Provider: "gemini-flash/nosearch", CostMicros: 0}, nil
+			return &studioProviderResult{OutputText: fallbackText, Provider: "gemini-flash", CostMicros: 0}, nil
 		}
-		return nil, fmt.Errorf("web-search-ai: all providers failed: %v / %v", err, fErr)
+		return nil, fmt.Errorf("%s: all providers failed: %v / %v", slug, err, fErr)
 	}
 
 	// Handle alias slugs by remapping to canonical slugs
@@ -462,11 +463,7 @@ func buildTextPrompts(slug, input string) (system, user string) {
 	nexusSys := "You are Nexus AI, a world-class AI assistant with comprehensive global knowledge. " +
 		"You are deeply knowledgeable across all domains: business, education, science, technology, culture, finance, law, health, and the arts. " +
 		"Always produce thorough, accurate, well-structured responses that provide genuine value. " +
-		"When the user's context or query suggests Nigerian or African relevance, naturally incorporate local insights, examples, and context. " +
-		"CRITICAL ACCURACY RULES: (1) If you are not certain about a specific fact — such as who owns a company, who founded it, who invested in it, or specific financial figures — say so explicitly rather than guessing. " +
-		"(2) Do NOT fabricate ownership details, funding rounds, investor names, biographical information, or revenue figures about real companies or people. " +
-		"(3) If your knowledge may be outdated or you cannot verify a claim, say: 'Based on my knowledge, ...' or 'I am not certain, but...' " +
-		"(4) It is always better to acknowledge uncertainty than to state incorrect facts with confidence."
+		"When the user's context or query suggests Nigerian or African relevance, naturally incorporate local insights, examples, and context."
 
 	switch slug {
 	case "web-search-ai":
@@ -645,8 +642,7 @@ Why now, why this team, and what's the ask.
 	Use the appropriate currency for the market described (default to Nigerian Naira ₦ if the context is Nigerian). Be specific, realistic, and actionable.`, input)
 
 	case "ask-nexus":
-		return nexusSys + " You are a helpful, knowledgeable conversational AI. Respond naturally and thoroughly. " +
-			"Remember: never fabricate specific facts — always express appropriate uncertainty when you are not sure.",
+		return nexusSys + " You are a helpful, knowledgeable conversational AI. Respond naturally and thoroughly.",
 			input
 	case "voice-to-plan":
 		return nexusSys + " You are an expert business consultant who transforms spoken ideas into structured business plans.",
