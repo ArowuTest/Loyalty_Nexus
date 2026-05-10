@@ -29,6 +29,7 @@ const NAV = [
     { href: "/ai-providers",   label: "🔌 AI Providers" },
     { href: "/ai-health",      label: "⚡ AI Provider Health" },
     { href: "/generations",    label: "🎨 AI Generations" },
+    { href: "/disputes",       label: "🛑 Disputes & Refunds" },
     { href: "/notifications",  label: "📢 Notifications" },
   ]},
   { group: "Platform", items: [

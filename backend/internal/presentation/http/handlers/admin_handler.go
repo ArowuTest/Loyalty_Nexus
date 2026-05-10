@@ -985,6 +985,7 @@ func (h *AdminHandler) GetStudioGenerations(w http.ResponseWriter, r *http.Reque
 	filter := repositories.GenerationFilter{
 		Status:   q.Get("status"),
 		ToolSlug: q.Get("tool_slug"),
+		Disputed: q.Get("disputed") == "true",
 		Limit:    limit,
 		Offset:   offset,
 	}
@@ -997,14 +998,17 @@ func (h *AdminHandler) GetStudioGenerations(w http.ResponseWriter, r *http.Reque
 
 	// Project and truncate prompt to 80 chars
 	type genRow struct {
-		ID             uuid.UUID `json:"id"`
-		UserID         uuid.UUID `json:"user_id"`
-		ToolSlug       string    `json:"tool_slug"`
-		Status         string    `json:"status"`
-		Provider       string    `json:"provider"`
-		Prompt         string    `json:"prompt"`
-		PointsDeducted int64     `json:"points_deducted"`
-		CreatedAt      time.Time `json:"created_at"`
+		ID             uuid.UUID  `json:"id"`
+		UserID         uuid.UUID  `json:"user_id"`
+		ToolSlug       string     `json:"tool_slug"`
+		Status         string     `json:"status"`
+		Provider       string     `json:"provider"`
+		Prompt         string     `json:"prompt"`
+		PointsDeducted int64      `json:"points_deducted"`
+		DisputedAt     *time.Time `json:"disputed_at"`
+		RefundGranted  bool       `json:"refund_granted"`
+		RefundPts      int64      `json:"refund_pts"`
+		CreatedAt      time.Time  `json:"created_at"`
 	}
 	rows := make([]genRow, 0, len(gens))
 	for _, g := range gens {
@@ -1020,6 +1024,9 @@ func (h *AdminHandler) GetStudioGenerations(w http.ResponseWriter, r *http.Reque
 			Provider:       g.Provider,
 			Prompt:         prompt,
 			PointsDeducted: g.PointsDeducted,
+			DisputedAt:     g.DisputedAt,
+			RefundGranted:  g.RefundGranted,
+			RefundPts:      g.RefundPts,
 			CreatedAt:      g.CreatedAt,
 		})
 	}

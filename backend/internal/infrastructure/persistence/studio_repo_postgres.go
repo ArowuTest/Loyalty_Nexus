@@ -250,7 +250,9 @@ func (r *postgresStudioRepository) GetToolStats(ctx context.Context) ([]reposito
 // ListGenerations returns paginated generations with optional status/slug filters.
 func (r *postgresStudioRepository) ListGenerations(ctx context.Context, filter repositories.GenerationFilter) ([]entities.AIGeneration, int, error) {
 	q := r.db.WithContext(ctx).Model(&entities.AIGeneration{})
-	if filter.Status != "" {
+	if filter.Disputed {
+		q = q.Where("disputed_at IS NOT NULL")
+	} else if filter.Status != "" {
 		q = q.Where("status = ?", filter.Status)
 	}
 	if filter.ToolSlug != "" {

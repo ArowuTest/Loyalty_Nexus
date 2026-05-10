@@ -122,6 +122,7 @@ type ToolStats struct {
 type GenerationFilter struct {
 	Status   string
 	ToolSlug string
+	Disputed bool // if true, only return rows where disputed_at IS NOT NULL
 	Limit    int
 	Offset   int
 }

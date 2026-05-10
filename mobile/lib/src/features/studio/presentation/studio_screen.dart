@@ -198,6 +198,46 @@ class Generation {
     } catch (_) { return prompt!; }
   }
 
+  /// Returns the voice name from the stored prompt envelope (narrate / narrate-pro).
+  String? get voiceName {
+    if (prompt == null) return null;
+    try {
+      final decoded = jsonDecode(prompt!) as Map;
+      return decoded['voice_id']?.toString();
+    } catch (_) { return null; }
+  }
+
+  /// Returns the playback speed from extra params in the stored prompt envelope.
+  String? get voiceSpeed {
+    if (prompt == null) return null;
+    try {
+      final decoded = jsonDecode(prompt!) as Map;
+      final extra = decoded['extra'] as Map?;
+      final speed = extra?['speed'];
+      if (speed == null) return null;
+      final s = double.tryParse(speed.toString());
+      if (s == null) return null;
+      return s == s.truncateToDouble() ? '${s.toInt()}×' : '${s}×';
+    } catch (_) { return null; }
+  }
+
+  /// Returns BPM and key from music-composer extra params.
+  String? get musicMeta {
+    if (prompt == null) return null;
+    try {
+      final decoded = jsonDecode(prompt!) as Map;
+      final extra = decoded['extra'] as Map?;
+      if (extra == null) return null;
+      final bpm   = extra['bpm']?.toString();
+      final key   = extra['key']?.toString();
+      if (bpm == null && key == null) return null;
+      final parts = <String>[];
+      if (bpm != null && bpm.isNotEmpty) parts.add('$bpm BPM');
+      if (key != null && key.isNotEmpty) parts.add(key);
+      return parts.join(' · ');
+    } catch (_) { return null; }
+  }
+
   String get timeAgo {
     final diff = DateTime.now().difference(createdAt);
     if (diff.inMinutes < 1)  return 'just now';
@@ -206,6 +246,13 @@ class Generation {
     return '${diff.inDays}d ago';
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Utility helpers
+// ══════════════════════════════════════════════════════════════════════════════
+
+String _capitalize(String s) =>
+    s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Category config (mirrors webapp CAT map)
@@ -1707,6 +1754,8 @@ class _GalleryTab extends StatelessWidget {
         child: RefreshIndicator(
           onRefresh: onRefresh,
           color: NexusColors.primary,
+          backgroundColor: NexusColors.surface,
+          displacement: 40,
           child: ListView.builder(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
@@ -1920,18 +1969,89 @@ class _ImageOutput extends StatelessWidget {
   final ValueChanged<Generation> onRegenerate;
   final void Function(String toolSlug, {String? imageUrl, String? videoUrl}) onCrossToolAction;
   const _ImageOutput({required this.gen, required this.onRegenerate, required this.onCrossToolAction});
+
+  void _showQuickActions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: NexusColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 36, height: 4, margin: const EdgeInsets.only(top: 8, bottom: 12),
+            decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+          const Text('Quick Actions', style: TextStyle(color: Colors.white,
+            fontSize: 13, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          _QuickActionTile(
+            icon: Icons.movie_outlined, color: const Color(0xFF8B5CF6),
+            label: 'Animate Image', subtitle: 'Turn into video',
+            onTap: () { Navigator.pop(ctx); onCrossToolAction('animate-my-photo', imageUrl: gen.outputUrl); },
+          ),
+          _QuickActionTile(
+            icon: Icons.edit_outlined, color: const Color(0xFF3B82F6),
+            label: 'Edit Photo', subtitle: 'Modify with AI',
+            onTap: () { Navigator.pop(ctx); onCrossToolAction('photo-editor', imageUrl: gen.outputUrl); },
+          ),
+          _QuickActionTile(
+            icon: Icons.layers_clear_outlined, color: const Color(0xFF10B981),
+            label: 'Remove Background', subtitle: 'Instant BG removal',
+            onTap: () { Navigator.pop(ctx); onCrossToolAction('bg-remover', imageUrl: gen.outputUrl); },
+          ),
+          _QuickActionTile(
+            icon: Icons.share_outlined, color: NexusColors.textSecondary,
+            label: 'Copy Image Link', subtitle: 'Copy URL to clipboard',
+            onTap: () {
+              Navigator.pop(ctx);
+              Clipboard.setData(ClipboardData(text: gen.outputUrl!));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Image link copied!'), behavior: SnackBarBehavior.floating,
+                duration: Duration(seconds: 2)));
+            },
+          ),
+          _QuickActionTile(
+            icon: Icons.download_rounded, color: NexusColors.textSecondary,
+            label: 'Download', subtitle: 'Save to device',
+            onTap: () { Navigator.pop(ctx); launchUrl(Uri.parse(gen.outputUrl!)); },
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Image.network(gen.outputUrl!,
-        width: double.infinity, fit: BoxFit.cover,
-        loadingBuilder: (_, child, progress) => progress == null ? child
-            : Container(height: 200, color: NexusColors.background,
-                child: const Center(child: CircularProgressIndicator(color: NexusColors.primary))),
-        errorBuilder: (_, __, ___) => Container(height: 120, color: NexusColors.background,
-          child: const Center(child: Icon(Icons.broken_image_rounded,
-            color: NexusColors.textSecondary, size: 48))),
+    // Long-press for quick actions (mirrors web hover overlay UX)
+    GestureDetector(
+      onLongPress: () => _showQuickActions(context),
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.network(gen.outputUrl!,
+              width: double.infinity, fit: BoxFit.cover,
+              loadingBuilder: (_, child, progress) => progress == null ? child
+                  : Container(height: 200, color: NexusColors.background,
+                      child: const Center(child: CircularProgressIndicator(color: NexusColors.primary))),
+              errorBuilder: (_, __, ___) => Container(height: 120, color: NexusColors.background,
+                child: const Center(child: Icon(Icons.broken_image_rounded,
+                  color: NexusColors.textSecondary, size: 48))),
+            ),
+          ),
+          // Long-press hint badge
+          Positioned(
+            bottom: 8, right: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(10)),
+              child: const Text('Hold for actions',
+                style: TextStyle(color: Colors.white60, fontSize: 9)),
+            ),
+          ),
+        ],
       ),
     ),
     const SizedBox(height: 8),
@@ -2116,12 +2236,50 @@ class _AudioOutputState extends State<_AudioOutput> {
           ]),
         ),
         const SizedBox(height: 8),
-        Row(children: [
+        // Audio metadata chip — voice name, speed, or music meta
+        Builder(builder: (_) {
+          final voice = widget.gen.voiceName;
+          final speed = widget.gen.voiceSpeed;
+          final music = widget.gen.musicMeta;
+          final isMusic = widget.gen.toolSlug.contains('music') ||
+                          widget.gen.toolSlug.contains('song') ||
+                          widget.gen.toolSlug.contains('jingle') ||
+                          widget.gen.toolSlug.contains('instrumental');
+          String label;
+          if (isMusic && music != null) {
+            label = '🎵 AI Music · $music';
+          } else if (isMusic) {
+            label = '🎵 AI Music · Generated by Nexus AI';
+          } else if (voice != null && speed != null) {
+            label = '🎙 ${_capitalize(voice)} · ${speed} · Generated by Nexus AI';
+          } else if (voice != null) {
+            label = '🎙 ${_capitalize(voice)} · Generated by Nexus AI';
+          } else {
+            label = '🎵 AI Audio · Generated by Nexus AI';
+          }
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.07))),
+              child: Text(label,
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.35),
+                  fontSize: 9, fontWeight: FontWeight.w500)),
+            ),
+          );
+        }),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(children: [
           _ActionBtn('Download', Icons.download_rounded,
             () => launchUrl(Uri.parse(widget.gen.outputUrl!))),
           const SizedBox(width: 8),
           _ActionBtn('Regenerate', Icons.refresh_rounded, () => widget.onRegenerate(widget.gen)),
-        ]),
+        ])),
       ]),
     );
   }
@@ -2362,6 +2520,37 @@ class _ActionBtn extends StatelessWidget {
           fontSize: small ? 10 : 11, fontWeight: FontWeight.w500)),
       ]),
     ),
+  );
+}
+
+/// Tile used in the long-press bottom sheet quick-actions menu.
+class _QuickActionTile extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label;
+  final String subtitle;
+  final VoidCallback onTap;
+  const _QuickActionTile({
+    required this.icon, required this.color,
+    required this.label, required this.subtitle, required this.onTap,
+  });
+  @override
+  Widget build(BuildContext context) => ListTile(
+    onTap: onTap,
+    leading: Container(
+      width: 36, height: 36,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        shape: BoxShape.circle,
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Icon(icon, size: 16, color: color),
+    ),
+    title: Text(label, style: const TextStyle(color: Colors.white,
+      fontSize: 13, fontWeight: FontWeight.w600)),
+    subtitle: Text(subtitle, style: TextStyle(
+      color: Colors.white.withValues(alpha: 0.4), fontSize: 11)),
+    minLeadingWidth: 36,
   );
 }
 

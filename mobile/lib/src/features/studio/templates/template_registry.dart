@@ -1,6 +1,6 @@
 // ─── Template Registry ────────────────────────────────────────────────────────
 // Mirrors webapp's renderTemplate() switch exactly.
-// All 13 templates registered — 9 updated + 4 new.
+// All 15 templates registered — 9 updated + 5 new + CodePro.
 // Usage: TemplateRegistry.build(tool, onSubmit, isLoading, userPoints)
 
 export 'template_types.dart';
@@ -18,6 +18,7 @@ export 'voice_studio.dart';
 export 'transcribe.dart';
 export 'vision_ask.dart';
 export 'knowledge_doc.dart';
+export 'code_pro.dart';
 
 import 'package:flutter/material.dart';
 import 'template_types.dart';
@@ -35,6 +36,7 @@ import 'voice_studio.dart';
 import 'transcribe.dart';
 import 'vision_ask.dart';
 import 'knowledge_doc.dart';
+import 'code_pro.dart';
 
 class TemplateRegistry {
   /// Picks the purpose-built input widget based on [tool.ui_template].
@@ -102,6 +104,12 @@ class TemplateRegistry {
 
       case 'chat':
         return KnowledgeDocTemplate(props: props);
+
+      // ── Website Builder (safety net — routed directly in studio_screen) ─────────
+      // ── Code ──────────────────────────────────────────────────────────────────────
+      case 'code-pro':
+      case 'nexus-code-pro':
+        return CodeProTemplate(props: props);
 
       // ── Website Builder (safety net — routed directly in studio_screen) ─────────
       case 'website-builder':

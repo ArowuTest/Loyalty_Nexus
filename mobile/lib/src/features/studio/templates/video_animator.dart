@@ -27,7 +27,10 @@ const _motionIntensities = [
   {'label': 'Extreme',  'value': 'extreme'},
 ];
 
-const _defaultDurations = [3, 5, 8, 10];
+// Duration sets per mode — mirrors VideoAnimator.tsx
+const _klingDurations = [5, 10];
+const _grokDurations  = [5, 6, 8, 10, 15];
+const _wanDurations   = [5, 8, 10];     // default WAN / Wan2.1
 
 const _inspirations = [
   'Bring this portrait to life with gentle head movement and blinking eyes',
@@ -100,6 +103,12 @@ class _VideoAnimatorTemplateState extends ConsumerState<VideoAnimatorTemplate> {
   Widget build(BuildContext context) {
     final p = widget.props;
     final isValid = _imageUrl != null && _promptCtrl.text.trim().isNotEmpty;
+
+    // Slug-based mode detection — mirrors webapp logic
+    final slug = p.slug;
+    final isKling = slug == 'video-premium';
+    final isGrok  = slug == 'animate-my-photo' || slug == 'animate-photo';
+    final durations = isKling ? _klingDurations : isGrok ? _grokDurations : _wanDurations;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,14 +209,17 @@ class _VideoAnimatorTemplateState extends ConsumerState<VideoAnimatorTemplate> {
         const SizedBox(height: 16),
 
         // ── Duration ──
-        buildSectionLabel('Duration'),
+        buildSectionLabel(
+          isKling ? 'Duration (Kling Pro)' : isGrok ? 'Duration (Grok Vision)' : 'Duration'),
         Row(
-          children: _defaultDurations.map((d) => Padding(
+          children: durations.map((d) => Padding(
             padding: const EdgeInsets.only(right: 8),
             child: buildChip(
               label: '${d}s',
               selected: _duration == d,
-              onTap: () => setState(() => _duration = d),
+              onTap: () {
+                setState(() => _duration = d);
+              },
             ),
           )).toList(),
         ),

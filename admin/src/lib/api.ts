@@ -176,10 +176,11 @@ class AdminAPI {
   disableStudioTool(id: string): Promise<void> { return this.req<void>("DELETE", `/admin/studio-tools/${id}`); }
   getStudioToolErrors(id: string): Promise<{ errors: GenerationError[]; count: number }> { return this.req<{ errors: GenerationError[]; count: number }>("GET", `/admin/studio-tools/${id}/errors`); }
   getStudioToolStats(): Promise<{ stats: ToolStat[] }> { return this.req<{ stats: ToolStat[] }>("GET", "/admin/studio-tools/stats"); }
-  getStudioGenerations(params?: { status?: string; tool_slug?: string; limit?: number; offset?: number }): Promise<{ generations: Generation[]; total: number }> {
+  getStudioGenerations(params?: { status?: string; tool_slug?: string; disputed?: boolean; limit?: number; offset?: number }): Promise<{ generations: Generation[]; total: number }> {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
     if (params?.tool_slug) qs.set("tool_slug", params.tool_slug);
+    if (params?.disputed) qs.set("disputed", "true");
     if (params?.limit !== undefined) qs.set("limit", String(params.limit));
     if (params?.offset !== undefined) qs.set("offset", String(params.offset));
     const q = qs.toString();
@@ -670,6 +671,9 @@ export interface Generation {
   provider: string;
   prompt: string;
   points_deducted: number;
+  disputed_at: string | null;
+  refund_granted: boolean;
+  refund_pts: number;
   created_at: string;
 }
 
