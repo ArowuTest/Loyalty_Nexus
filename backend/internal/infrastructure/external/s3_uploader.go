@@ -20,11 +20,16 @@ import (
 
 // AwsS3Uploader implements S3Uploader using pure-Go AWS Signature V4 signing.
 // It requires no third-party SDK — only the standard library.
+// Supports both AWS S3 and S3-compatible endpoints (e.g. Cloudflare R2) via Endpoint field.
 type AwsS3Uploader struct {
 	BucketName      string
 	Region          string
 	AccessKeyID     string
 	SecretAccessKey string
+	// Endpoint, when set, overrides the default AWS S3 endpoint.
+	// Use for S3-compatible providers like Cloudflare R2.
+	// Example: "https://accountid.r2.cloudflarestorage.com"
+	Endpoint string
 	// CDNBaseURL, when non-empty, is prepended to the object key to form the
 	// returned URL (e.g. "https://cdn.example.com").
 	CDNBaseURL string
@@ -45,14 +50,23 @@ func NewAwsS3Uploader(bucket, region, accessKey, secretKey, cdnBase string) *Aws
 
 // NewS3UploaderFromEnv reads AWS credentials from well-known environment
 // variables and returns a configured uploader.
+// AWS_S3_ENDPOINT overrides the default AWS endpoint (required for Cloudflare R2).
+// STORAGE_CDN_BASE_URL or AWS_CDN_BASE_URL sets the public CDN prefix.
 func NewS3UploaderFromEnv() *AwsS3Uploader {
-	return NewAwsS3Uploader(
-		os.Getenv("AWS_S3_BUCKET"),
-		os.Getenv("AWS_REGION"),
-		os.Getenv("AWS_ACCESS_KEY_ID"),
-		os.Getenv("AWS_SECRET_ACCESS_KEY"),
-		os.Getenv("AWS_CDN_BASE_URL"),
-	)
+	cdnBase := os.Getenv("STORAGE_CDN_BASE_URL")
+	if cdnBase == "" {
+		cdnBase = os.Getenv("AWS_CDN_BASE_URL")
+	}
+	u := &AwsS3Uploader{
+		BucketName:      os.Getenv("AWS_S3_BUCKET"),
+		Region:          os.Getenv("AWS_REGION"),
+		AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
+		SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+		Endpoint:        os.Getenv("AWS_S3_ENDPOINT"),
+		CDNBaseURL:      cdnBase,
+		client:          &http.Client{Timeout: 60 * time.Second},
+	}
+	return u
 }
 
 // Upload puts data at key in the configured S3 bucket and returns the public URL.
@@ -62,25 +76,45 @@ func (u *AwsS3Uploader) Upload(ctx context.Context, key string, data []byte, con
 	}
 
 	now := time.Now().UTC()
-	endpoint := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", u.BucketName, u.Region, key)
+
+	// Build endpoint URL and signing host.
+	// Cloudflare R2 (and other S3-compatible providers) require path-style requests:
+	//   https://<account>.r2.cloudflarestorage.com/<bucket>/<key>
+	// Standard AWS uses virtual-hosted style:
+	//   https://<bucket>.s3.<region>.amazonaws.com/<key>
+	var putURL, signingHost, signingPath string
+	if u.Endpoint != "" {
+		// Path-style: endpoint/bucket/key
+		base := strings.TrimRight(u.Endpoint, "/")
+		putURL = fmt.Sprintf("%s/%s/%s", base, u.BucketName, key)
+		// Host for signing is just the endpoint host (no bucket prefix)
+		parsed, _ := url.Parse(base)
+		signingHost = parsed.Host
+		signingPath = fmt.Sprintf("/%s/%s", u.BucketName, key)
+	} else {
+		// Virtual-hosted style (standard AWS)
+		putURL = fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", u.BucketName, u.Region, key)
+		signingHost = fmt.Sprintf("%s.s3.%s.amazonaws.com", u.BucketName, u.Region)
+		signingPath = "/" + key
+	}
 
 	bodyHash := hexSHA256(data)
 
 	headers := map[string]string{
-		"content-type":        contentType,
-		"host":                fmt.Sprintf("%s.s3.%s.amazonaws.com", u.BucketName, u.Region),
+		"content-type":         contentType,
+		"host":                 signingHost,
 		"x-amz-content-sha256": bodyHash,
-		"x-amz-date":          amzDate(now),
+		"x-amz-date":           amzDate(now),
 	}
 
 	signature, authHeader := signV4(
-		http.MethodPut, "/"+key, "",
+		http.MethodPut, signingPath, "",
 		headers, bodyHash,
 		u.AccessKeyID, u.SecretAccessKey, u.Region, "s3", now,
 	)
 	_ = signature
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, putURL, bytes.NewReader(data))
 	if err != nil {
 		return "", err
 	}
@@ -195,10 +229,13 @@ func (u *AwsS3Uploader) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-// publicURL returns the CDN URL if configured, otherwise the S3 object URL.
+// publicURL returns the CDN URL if configured, otherwise the endpoint/bucket/key URL.
 func (u *AwsS3Uploader) publicURL(key string) string {
 	if u.CDNBaseURL != "" {
 		return strings.TrimRight(u.CDNBaseURL, "/") + "/" + key
+	}
+	if u.Endpoint != "" {
+		return fmt.Sprintf("%s/%s/%s", strings.TrimRight(u.Endpoint, "/"), u.BucketName, key)
 	}
 	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", u.BucketName, u.Region, key)
 }

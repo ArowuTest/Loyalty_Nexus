@@ -162,10 +162,10 @@ func (o *AIStudioOrchestrator) callByTemplate(
 		if voice == "" {
 			if v, ok := p.ExtraConfig["voice"].(string); ok && v != "" {
 				voice = v
-			} else {
-				voice = "alloy" // alloy uses OpenAI model (not ElevenLabs), avoids quota issues
 			}
 		}
+		// mapToQwenVoice converts any OpenAI/ElevenLabs voice name to a working Qwen-TTS voice
+		// (ElevenLabs model is OFF on Pollinations as of May 2026)
 		outputURL, err = o.callPollinationsTTS(ctx, in.Text, voice)
 
 	// ── Transcription ────────────────────────────────────────────────────────

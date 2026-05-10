@@ -1542,15 +1542,15 @@ func (o *AIStudioOrchestrator) dispatchTTS(ctx context.Context, text string) (*s
 		}
 	}
 
-	// Last resort: Pollinations.ai TTS — try "alloy" first (OpenAI model, no ElevenLabs quota),
-	// then "nova" as secondary. Both require POLLINATIONS_SECRET_KEY.
-	for _, voice := range []string{"alloy", "nova", "echo"} {
+	// Last resort: Pollinations Qwen-TTS (UP as of May 2026 — ElevenLabs is OFF).
+	// mapToQwenVoice inside callPollinationsTTS handles the name translation.
+	for _, voice := range []string{"Cherry", "Serena", "Ethan"} {
 		if audioURL, err := o.callPollinationsTTS(ctx, text, voice); err == nil {
-			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/tts-" + voice, CostMicros: 0}, nil
+			return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/qwen-tts-" + voice, CostMicros: 0}, nil
 		}
 	}
 
-	return nil, fmt.Errorf("TTS unavailable: all providers failed (google-tts=%s, elevenlabs=blocked-by-render-ip, pollinations=quota-exceeded)",
+	return nil, fmt.Errorf("TTS unavailable: all providers failed (google-tts=%s, elevenlabs=blocked-by-render-ip, pollinations-qwen-tts=check-key)",
 		func() string {
 			if os.Getenv("GOOGLE_CLOUD_TTS_KEY") != "" {
 				return "key-set-voice-mismatch-fixed"
@@ -3128,17 +3128,17 @@ func (o *AIStudioOrchestrator) callPollinationsImageWithSeed(ctx context.Context
 	return publicURL, nil
 }
 
-// callPollinationsTTS generates speech using Pollinations TTS (OpenAI-compatible).
-// sk_ key is now REQUIRED (anonymous access removed 2026-03-26).
-// Endpoint: POST https://gen.pollinations.ai/v1/audio/speech
+// callPollinationsTTS generates speech using Pollinations Qwen-TTS (UP as of May 2026).
+// ElevenLabs-backed models (tts-1 with nova/alloy/echo) are OFF — use qwen-tts instead.
+// Qwen-TTS voice options: Cherry (female), Ethan (male), Serena (female), Default.
+// sk_ key is REQUIRED.
 func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, voice string) (string, error) {
-	if voice == "" {
-		voice = "nova" // natural, clear English voice
-	}
+	// Map OpenAI voice names → Qwen-TTS equivalents (ElevenLabs is OFF on Pollinations)
+	qwenVoice := mapToQwenVoice(voice)
 	payload := map[string]interface{}{
-		"model": "tts-1",
+		"model": "qwen-tts",
 		"input": text,
-		"voice": voice,
+		"voice": qwenVoice,
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -3187,16 +3187,14 @@ func (o *AIStudioOrchestrator) callPollinationsTTSFull(ctx context.Context, text
 	if sk == "" {
 		return "", fmt.Errorf("POLLINATIONS_SECRET_KEY not configured")
 	}
-	if voice == "" {
-		voice = "nova"
-	}
 	if format == "" {
 		format = "mp3"
 	}
+	qwenVoice := mapToQwenVoice(voice)
 	payload := map[string]interface{}{
-		"model":           "tts-1",
+		"model":           "qwen-tts",
 		"input":           text,
-		"voice":           voice,
+		"voice":           qwenVoice,
 		"response_format": format,
 	}
 	if speed > 0 && speed != 1.0 {
@@ -3247,6 +3245,23 @@ func (o *AIStudioOrchestrator) callPollinationsTTSFull(ctx context.Context, text
 		return "data:" + mimeType + ";base64," + encoded64, nil
 	}
 	return publicURL, nil
+}
+
+// mapToQwenVoice maps OpenAI TTS voice names to Pollinations Qwen-TTS voice names.
+// ElevenLabs-backed voices (nova, alloy, echo, shimmer, onyx, fable) are OFF on Pollinations.
+// Qwen-TTS available voices: Cherry (female, warm), Ethan (male, clear),
+// Serena (female, professional), Default.
+func mapToQwenVoice(voice string) string {
+	switch strings.ToLower(voice) {
+	case "nova", "shimmer", "cherry":
+		return "Cherry" // warm female
+	case "alloy", "echo", "serena":
+		return "Serena" // professional female
+	case "onyx", "fable", "ethan":
+		return "Ethan" // clear male
+	default:
+		return "Cherry" // safe default: warm, clear female voice
+	}
 }
 
 // callPollinationsVideo generates a short video using wan-fast (FREE).
