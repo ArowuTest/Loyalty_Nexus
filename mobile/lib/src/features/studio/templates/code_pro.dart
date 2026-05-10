@@ -234,7 +234,6 @@ class _CodeProTemplateState extends ConsumerState<CodeProTemplate> {
               ),
               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
             ),
-            onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 8),
         ],
