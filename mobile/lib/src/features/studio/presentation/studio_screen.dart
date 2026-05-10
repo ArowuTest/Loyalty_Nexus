@@ -646,6 +646,15 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
               setState(() { _chatMode = ChatMode.general; });
               _tabs.animateTo(0);
             },
+            onCrossToolAction: (toolSlug, {imageUrl, videoUrl}) {
+              // Open the target tool drawer, then switch to Studio tab
+              ref.read(_toolsProvider).whenData((tools) {
+                final target = tools.firstWhere(
+                  (t) => t.slug == toolSlug, orElse: () => tools.first);
+                setState(() => _selectedTool = target);
+                _tabs.animateTo(1); // Studio tab
+              });
+            },
           ),
         ])),
       ]),
@@ -1627,10 +1636,13 @@ class _GalleryTab extends StatelessWidget {
   final ValueChanged<Generation> onRegenerate;
   final ValueChanged<String> onDelete;
   final ValueChanged<String> onContinueInChat;
+  /// Cross-tool action: open toolSlug with preloaded image/video URL
+  final void Function(String toolSlug, {String? imageUrl, String? videoUrl}) onCrossToolAction;
   const _GalleryTab({
     required this.galleryState, required this.onRefresh,
     required this.onRegenerate, required this.onDelete,
     required this.onContinueInChat,
+    required this.onCrossToolAction,
   });
 
   @override
@@ -1696,6 +1708,7 @@ class _GalleryTab extends StatelessWidget {
                 onRegenerate: onRegenerate,
                 onDelete: () => _confirmDelete(context, gallery[i].id),
                 onContinueInChat: onContinueInChat,
+                onCrossToolAction: onCrossToolAction,
               ),
             ),
           ),
@@ -1731,7 +1744,8 @@ class _GenerationCard extends StatelessWidget {
   final ValueChanged<Generation> onRegenerate;
   final VoidCallback onDelete;
   final ValueChanged<String> onContinueInChat;
-  const _GenerationCard({required this.gen, required this.onRegenerate, required this.onDelete, required this.onContinueInChat});
+  final void Function(String toolSlug, {String? imageUrl, String? videoUrl}) onCrossToolAction;
+  const _GenerationCard({required this.gen, required this.onRegenerate, required this.onDelete, required this.onContinueInChat, required this.onCrossToolAction});
 
   @override
   Widget build(BuildContext context) {
@@ -1780,7 +1794,7 @@ class _GenerationCard extends StatelessWidget {
         if (gen.status == 'processing' || gen.status == 'pending')
           _ProcessingView(gen: gen)
         else if (gen.status == 'completed')
-          _CompletedView(gen: gen, onRegenerate: onRegenerate, onContinueInChat: onContinueInChat)
+          _CompletedView(gen: gen, onRegenerate: onRegenerate, onContinueInChat: onContinueInChat, onCrossToolAction: onCrossToolAction)
         else if (gen.status == 'failed')
           _FailedView(gen: gen),
 
@@ -1875,13 +1889,14 @@ class _CompletedView extends StatelessWidget {
   final Generation gen;
   final ValueChanged<Generation> onRegenerate;
   final ValueChanged<String> onContinueInChat;
-  const _CompletedView({required this.gen, required this.onRegenerate, required this.onContinueInChat});
+  final void Function(String toolSlug, {String? imageUrl, String? videoUrl}) onCrossToolAction;
+  const _CompletedView({required this.gen, required this.onRegenerate, required this.onContinueInChat, required this.onCrossToolAction});
 
   @override
   Widget build(BuildContext context) {
     if (gen.outputUrl != null) {
-      if (gen.isImage && !gen.isVideo) return _ImageOutput(gen: gen, onRegenerate: onRegenerate);
-      if (gen.isVideo) return _VideoOutput(gen: gen, onRegenerate: onRegenerate);
+      if (gen.isImage && !gen.isVideo) return _ImageOutput(gen: gen, onRegenerate: onRegenerate, onCrossToolAction: onCrossToolAction);
+      if (gen.isVideo) return _VideoOutput(gen: gen, onRegenerate: onRegenerate, onCrossToolAction: onCrossToolAction);
       if (gen.isAudio && !gen.isVideo) return _AudioOutput(gen: gen, onRegenerate: onRegenerate);
       return _UrlOutput(gen: gen);
     }
@@ -1893,7 +1908,8 @@ class _CompletedView extends StatelessWidget {
 class _ImageOutput extends StatelessWidget {
   final Generation gen;
   final ValueChanged<Generation> onRegenerate;
-  const _ImageOutput({required this.gen, required this.onRegenerate});
+  final void Function(String toolSlug, {String? imageUrl, String? videoUrl}) onCrossToolAction;
+  const _ImageOutput({required this.gen, required this.onRegenerate, required this.onCrossToolAction});
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     ClipRRect(
@@ -1911,11 +1927,35 @@ class _ImageOutput extends StatelessWidget {
     const SizedBox(height: 8),
     Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Row(children: [
-        _ActionBtn('Download', Icons.download_rounded,
-          () => launchUrl(Uri.parse(gen.outputUrl!))),
-        const SizedBox(width: 8),
-        _ActionBtn('Regenerate', Icons.refresh_rounded, () => onRegenerate(gen)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Primary actions row
+        Row(children: [
+          _ActionBtn('Download', Icons.download_rounded,
+            () => launchUrl(Uri.parse(gen.outputUrl!))),
+          const SizedBox(width: 8),
+          _ActionBtn('Share', Icons.share_outlined,
+            () { Clipboard.setData(ClipboardData(text: gen.outputUrl!));
+                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                   content: Text('Image link copied!'), behavior: SnackBarBehavior.floating,
+                   duration: Duration(seconds: 2))); }),
+          const SizedBox(width: 8),
+          _ActionBtn('Again', Icons.refresh_rounded, () => onRegenerate(gen)),
+        ]),
+        const SizedBox(height: 8),
+        // Cross-tool action buttons
+        Row(children: [
+          _ActionBtn('Animate', Icons.movie_outlined,
+            () => onCrossToolAction('animate-my-photo', imageUrl: gen.outputUrl),
+            color: const Color(0xFF8B5CF6), small: true),
+          const SizedBox(width: 6),
+          _ActionBtn('Edit', Icons.edit_outlined,
+            () => onCrossToolAction('photo-editor', imageUrl: gen.outputUrl),
+            color: const Color(0xFF3B82F6), small: true),
+          const SizedBox(width: 6),
+          _ActionBtn('Remove BG', Icons.layers_clear_outlined,
+            () => onCrossToolAction('bg-remover', imageUrl: gen.outputUrl),
+            color: const Color(0xFF10B981), small: true),
+        ]),
       ]),
     ),
   ]);
@@ -2069,7 +2109,8 @@ class _AudioOutputState extends State<_AudioOutput> {
 class _VideoOutput extends StatelessWidget {
   final Generation gen;
   final ValueChanged<Generation> onRegenerate;
-  const _VideoOutput({required this.gen, required this.onRegenerate});
+  final void Function(String toolSlug, {String? imageUrl, String? videoUrl}) onCrossToolAction;
+  const _VideoOutput({required this.gen, required this.onRegenerate, required this.onCrossToolAction});
 
   @override
   Widget build(BuildContext context) {
@@ -2141,7 +2182,19 @@ class _VideoOutput extends StatelessWidget {
           _ActionBtn('Download', Icons.download_rounded,
             () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication)),
           const SizedBox(width: 8),
-          _ActionBtn('Regenerate', Icons.refresh_rounded, () => onRegenerate(gen)),
+          _ActionBtn('Share', Icons.share_outlined,
+            () { Clipboard.setData(ClipboardData(text: url));
+                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                   content: Text('Video link copied!'), behavior: SnackBarBehavior.floating,
+                   duration: Duration(seconds: 2))); }),
+          const SizedBox(width: 8),
+          _ActionBtn('Again', Icons.refresh_rounded, () => onRegenerate(gen)),
+        ]),
+        const SizedBox(height: 6),
+        Row(children: [
+          _ActionBtn('Extend', Icons.open_in_full_rounded,
+            () => onCrossToolAction('video-extend', videoUrl: url),
+            color: const Color(0xFF8B5CF6), small: true),
         ]),
       ]),
     );
@@ -2259,20 +2312,22 @@ class _ActionBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final Color? color;
-  const _ActionBtn(this.label, this.icon, this.onTap, {this.color});
+  final bool small;
+  const _ActionBtn(this.label, this.icon, this.onTap, {this.color, this.small = false});
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: EdgeInsets.symmetric(horizontal: small ? 8 : 10, vertical: small ? 5 : 6),
       decoration: BoxDecoration(
-        color: NexusColors.background, borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: NexusColors.border)),
+        color: color != null && small ? color!.withValues(alpha: 0.1) : NexusColors.background,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color != null && small ? color!.withValues(alpha: 0.3) : NexusColors.border)),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 12, color: color ?? NexusColors.textSecondary),
-        const SizedBox(width: 5),
+        Icon(icon, size: small ? 11 : 12, color: color ?? NexusColors.textSecondary),
+        const SizedBox(width: 4),
         Text(label, style: TextStyle(color: color ?? NexusColors.textSecondary,
-          fontSize: 11, fontWeight: FontWeight.w500)),
+          fontSize: small ? 10 : 11, fontWeight: FontWeight.w500)),
       ]),
     ),
   );

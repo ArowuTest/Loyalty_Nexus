@@ -4034,7 +4034,7 @@ function StudioPageInner() {
                         </span>
                         <span className="text-white/20 text-[10px]">Quick access to the most-used tools</span>
                       </div>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                         {spotlightTools.map((tool) => (
                           <ToolCard
                             key={tool.id}

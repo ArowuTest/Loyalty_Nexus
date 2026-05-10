@@ -124,6 +124,8 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
     final p = widget.props;
     final finalUrl = _imageUrl ?? _urlCtrl.text.trim();
     final isValid = finalUrl.isNotEmpty;
+    // image-analyser and localize-ui are auto-mode: no question required, full description generated
+    final isAutoAnalyser = p.slug == 'image-analyser' || p.slug == 'localize-ui';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -236,39 +238,57 @@ class _VisionAskTemplateState extends ConsumerState<VisionAskTemplate> {
         })),
         const SizedBox(height: 16),
 
-        // ── Question ──
-        buildSectionLabel('Your Question (optional)'),
-        buildTextArea(
-          controller: _questionCtrl,
-          placeholder: 'Ask anything about the image…',
-          maxLines: 3,
-          onMicTap: _micAvailable ? _toggleMic : null,
-          micActive: _micListening,
-        ),
-        const SizedBox(height: 8),
-
-        // ── Quick questions ──
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: _quickQuestions.map((q) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: GestureDetector(
-                onTap: () => setState(() => _questionCtrl.text = q),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.04),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                  ),
-                  child: Text(q, style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11)),
-                ),
-              ),
-            )).toList(),
+        // ── Question (hidden for auto-analyser tools) ──
+        if (!isAutoAnalyser) ...[
+          buildSectionLabel('Your Question (optional)'),
+          buildTextArea(
+            controller: _questionCtrl,
+            placeholder: 'Ask anything about the image…',
+            maxLines: 3,
+            onMicTap: _micAvailable ? _toggleMic : null,
+            micActive: _micListening,
           ),
-        ),
-        const SizedBox(height: 24),
+          const SizedBox(height: 8),
+          // ── Quick questions ──
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _quickQuestions.map((q) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () => setState(() => _questionCtrl.text = q),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                    ),
+                    child: Text(q, style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11)),
+                  ),
+                ),
+              )).toList(),
+            ),
+          ),
+          const SizedBox(height: 24),
+        ] else ...[
+          // Auto-mode hint: no question needed
+          Container(
+            padding: const EdgeInsets.all(10),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: const Color(0x0A6366F1),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0x1A6366F1))),
+            child: Row(children: [
+              const Icon(Icons.auto_awesome_rounded, size: 13, color: Color(0xFF818cf8)),
+              const SizedBox(width: 8),
+              const Expanded(child: Text(
+                'Nexus AI will automatically analyse and describe everything in your image.',
+                style: TextStyle(color: Color(0xFF818cf8), fontSize: 11))),
+            ]),
+          ),
+        ],
 
         buildGenerateButton(
           label: p.isLoading

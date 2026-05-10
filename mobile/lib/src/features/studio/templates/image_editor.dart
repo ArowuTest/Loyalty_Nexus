@@ -27,7 +27,7 @@ class _ImageEditorTemplateState extends ConsumerState<ImageEditorTemplate> {
   String? _uploadError;
   double  _strength     = 0.85;
 
-  bool get _isBackgroundRemover => widget.props.slug == 'background-remover';
+  bool get _isBackgroundRemover => widget.props.slug == 'background-remover' || widget.props.slug == 'bg-remover';
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
