@@ -38,6 +38,7 @@ type AdminHandler struct {
 	csvSvc        *services.MTNPushCSVService  // nil-safe; set via WithCSVService
 	bonusPulseSvc *services.BonusPulseService  // nil-safe; set via WithBonusPulseService
 	notifySvc     *services.NotificationService // for winner SMS notifications
+	settingsSvc   *services.SettingsService     // nil-safe; set via WithSettingsService
 	rdb           *redis.Client
 }
 
@@ -86,7 +87,63 @@ func (h *AdminHandler) WithBonusPulseService(svc *services.BonusPulseService) *A
 	return h
 }
 
-// ─── Dashboard ────────────────────────────────────────────────────────────
+func (h *AdminHandler) WithSettingsService(svc *services.SettingsService) *AdminHandler {
+	h.settingsSvc = svc
+	return h
+}
+
+// ─── Platform Settings ────────────────────────────────────────────────────────
+
+// GetPlatformSettings returns all settings, optionally filtered by category.
+func (h *AdminHandler) GetPlatformSettings(w http.ResponseWriter, r *http.Request) {
+	if h.settingsSvc == nil {
+		http.Error(w, "settings service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	category := r.URL.Query().Get("category")
+	var (
+		rows []services.PlatformSetting
+		err  error
+	)
+	if category != "" {
+		rows, err = h.settingsSvc.ListByCategory(r.Context(), category)
+	} else {
+		rows, err = h.settingsSvc.ListAll(r.Context())
+	}
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"settings": rows, "count": len(rows)})
+}
+
+// UpdatePlatformSetting updates a single setting key.
+func (h *AdminHandler) UpdatePlatformSetting(w http.ResponseWriter, r *http.Request) {
+	if h.settingsSvc == nil {
+		http.Error(w, "settings service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Key == "" {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	// Get admin identity from context (set by adminAuth middleware)
+	updatedBy := "admin"
+	if role, ok := r.Context().Value(middleware.ContextAdminRole).(string); ok && role != "" {
+		updatedBy = role
+	}
+	if err := h.settingsSvc.Set(r.Context(), body.Key, body.Value, updatedBy); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "key": body.Key, "value": body.Value})
+}
 
 func (h *AdminHandler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

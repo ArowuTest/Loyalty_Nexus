@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -107,6 +108,22 @@ func main() {
 			Logger: logger.Default.LogMode(logger.Error),
 		})
 		if err == nil {
+			// ── Connection pool tuning (env-configurable, no code changes needed) ──
+			// DB_MAX_OPEN_CONNS  — max simultaneous connections (default 25)
+			// DB_MAX_IDLE_CONNS  — idle connection pool size   (default 10)
+			// DB_CONN_MAX_LIFE   — max connection lifetime in seconds (default 300)
+			if sqlDB, sqlErr := db.DB(); sqlErr == nil {
+				maxOpen  := 25
+				maxIdle  := 10
+				maxLife  := 300
+				if v, e := strconv.Atoi(os.Getenv("DB_MAX_OPEN_CONNS")); e == nil && v > 0 { maxOpen = v }
+				if v, e := strconv.Atoi(os.Getenv("DB_MAX_IDLE_CONNS")); e == nil && v > 0 { maxIdle = v }
+				if v, e := strconv.Atoi(os.Getenv("DB_CONN_MAX_LIFE"));  e == nil && v > 0 { maxLife = v }
+				sqlDB.SetMaxOpenConns(maxOpen)
+				sqlDB.SetMaxIdleConns(maxIdle)
+				sqlDB.SetConnMaxLifetime(time.Duration(maxLife) * time.Second)
+				log.Printf("[DB] pool configured: maxOpen=%d maxIdle=%d maxLifetime=%ds", maxOpen, maxIdle, maxLife)
+			}
 			break
 		}
 		log.Printf("[DB] connect attempt %d/30 failed: %v — retrying in 3s...", attempt, err)
@@ -227,8 +244,12 @@ func main() {
 
 		// ─── Services ─────────────────────────────────────────────
 		notifySvc     := services.NewNotificationService(os.Getenv("TERMII_API_KEY"))
+		notifySvc.SetDB(db)
 		authSvc       := services.NewAuthService(authRepo, userRepo, notifySvc, cfg)
 		adminAuthSvc  := services.NewAdminAuthService(db)           // RBAC email+password auth for admins; seeds admin from ADMIN_SEED_EMAIL/PASSWORD env vars on first run
+
+		settingsSvc   := services.NewSettingsService(db, rdb)
+
 		fulfillSvc    := services.NewPrizeFulfillmentService(prizeRepo, userRepo, vtpass, momoSvc, notifySvc, cfg)
 		drawSvc       := services.NewDrawService(db)
 		drawWindowSvc := services.NewDrawWindowService(db)
@@ -236,6 +257,7 @@ func main() {
 		mtnPushSvc    := services.NewMTNPushService(db, userRepo, txRepo, drawSvc, drawWindowSvc, notifySvc, cfg)
 		spinSvc       := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
 		studioSvc     := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
+		studioSvc.SetSettingsService(settingsSvc)
 		hlrSvc        := services.NewHLRService(hlrRepo)
 		warssSvc      := services.NewRegionalWarsService(warsRepo, userRepo, txRepo, cfg, db)
 		passportSvc   := services.NewPassportService(db, cfg)
@@ -279,6 +301,16 @@ func main() {
 			go summariserWorker.Run(ctx)
 		}
 
+		// ─── Asset expiry worker (pre-expiry notifications + R2 cleanup) ──────
+		if db != nil {
+			expiryWorker := services.NewAssetExpiryWorker(db, settingsSvc, notifySvc, assetStorage)
+			expiryWorker.Start()
+			go func() {
+				<-ctx.Done()
+				expiryWorker.Stop()
+			}()
+		}
+
 		// ─── HTTP Handlers ────────────────────────────────────────
 		authH    := handlers.NewAuthHandler(authSvc)
 		adminAuthH := handlers.NewAdminAuthHandler(adminAuthSvc)    // Admin RBAC
@@ -295,7 +327,8 @@ func main() {
 		adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, drawWindowSvc, fraudSvc, warssSvc, studioSvc, adminClaimSvc, rdb).
 				WithNotificationService(notifySvc).
 					WithCSVService(services.NewMTNPushCSVService(db, mtnPushSvc)).
-					WithBonusPulseService(bonusPulseSvc)
+					WithBonusPulseService(bonusPulseSvc).
+					WithSettingsService(settingsSvc)
 		claimH   := handlers.NewClaimHandler(claimSvc)
 		notifyH  := handlers.NewNotificationHandler(db)
 
@@ -548,6 +581,10 @@ func main() {
 		// System health (REQ-5.8.3)
 		mux.Handle("GET    /api/v1/admin/health",                 adminAuth(http.HandlerFunc(adminH.GetHealth)))
 		mux.Handle("GET    /api/v1/admin/ai-health",              adminAuth(http.HandlerFunc(adminH.GetAIHealth)))
+
+		// Platform settings (admin-configurable TTL, notification windows, etc.)
+		mux.Handle("GET    /api/v1/admin/settings",               adminAuth(http.HandlerFunc(adminH.GetPlatformSettings)))
+		mux.Handle("PATCH  /api/v1/admin/settings",               adminAuth(http.HandlerFunc(adminH.UpdatePlatformSetting)))
 
 		log.Printf("[API] All routes registered. Mode: %s", cfg.GetString("operation_mode", "independent"))
 

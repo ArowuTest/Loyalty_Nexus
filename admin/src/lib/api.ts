@@ -814,3 +814,14 @@ export interface RechargeConfigPayload {
   spin_max_per_day?: number;
   min_amount_naira?: number;
 }
+
+// ─── Platform Settings ────────────────────────────────────────────────────────
+export interface PlatformSetting {
+  key: string;
+  value: string;
+  label: string;
+  description: string;
+  category: string;
+  updated_at: string;
+  updated_by: string;
+}

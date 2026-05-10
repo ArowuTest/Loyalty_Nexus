@@ -27,11 +27,12 @@ import (
 
 // StudioService is injected into HTTP handlers and the async worker.
 type StudioService struct {
-	studioRepo repositories.StudioRepository
-	userRepo   repositories.UserRepository
-	txRepo     repositories.TransactionRepository
-	notifySvc  *NotificationService
-	db         *gorm.DB
+	studioRepo  repositories.StudioRepository
+	userRepo    repositories.UserRepository
+	txRepo      repositories.TransactionRepository
+	notifySvc   *NotificationService
+	settingsSvc *SettingsService
+	db          *gorm.DB
 }
 
 func NewStudioService(
@@ -49,6 +50,18 @@ func NewStudioService(
 		notifySvc:  ns,
 		db:         db,
 	}
+}
+
+// SetSettingsService injects the SettingsService for admin-configurable TTL.
+func (s *StudioService) SetSettingsService(ss *SettingsService) { s.settingsSvc = ss }
+
+// storageTTL returns the admin-configured asset TTL for the given tier.
+// Falls back to 48h if SettingsService is not wired or DB is unavailable.
+func (s *StudioService) storageTTL(ctx context.Context, tier string) time.Duration {
+	if s.settingsSvc != nil {
+		return s.settingsSvc.StorageTTL(ctx, tier)
+	}
+	return 48 * time.Hour // safe default
 }
 
 // ─── Read-only queries ────────────────────────────────────────────────────────
@@ -133,7 +146,7 @@ func (s *StudioService) RequestGeneration(
 			PointsDeducted: 0,
 			CreatedAt:      now,
 			UpdatedAt:      now,
-			ExpiresAt:      now.Add(48 * time.Hour), // 48-hour asset window — provider CDN URLs expire
+			ExpiresAt:      now.Add(s.storageTTL(ctx, user.Tier)), // admin-configurable per tier
 		}
 		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if err := s.studioRepo.CreateGenerationTx(ctx, tx, gen); err != nil {
@@ -180,7 +193,7 @@ func (s *StudioService) RequestGeneration(
 		PointsDeducted: tool.PointCost,
 		CreatedAt:      now,
 		UpdatedAt:      now,
-		ExpiresAt:      now.Add(48 * time.Hour), // 48-hour asset window — provider CDN URLs expire
+		ExpiresAt:      now.Add(s.storageTTL(ctx, user.Tier)), // admin-configurable per tier
 	}
 
 	// 7. Atomic: deduct wallet + ledger entry + create job

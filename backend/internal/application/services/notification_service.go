@@ -9,12 +9,16 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // NotificationService sends SMS via Termii with stdout fallback for staging.
 type NotificationService struct {
 	termiiKey  string
 	httpClient *http.Client
+	db         *gorm.DB // optional — for SendToUser lookup
 }
 
 func NewNotificationService(termiiKey string) *NotificationService {
@@ -23,6 +27,9 @@ func NewNotificationService(termiiKey string) *NotificationService {
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
+
+// SetDB injects a DB reference for user-lookup operations.
+func (n *NotificationService) SetDB(db *gorm.DB) { n.db = db }
 
 // SendOTP delivers a 6-digit OTP via Termii.
 func (n *NotificationService) SendOTP(ctx context.Context, phone, code string) error {
@@ -261,4 +268,27 @@ func (n *NotificationService) NotifyStudioGenReady(ctx context.Context, phone, f
 	_ = n.SendPush(ctx, fcmToken, "Studio Ready ✨", msg, map[string]string{
 		"type": "studio_ready", "gen_id": genID, "tool": toolName,
 	})
+}
+
+// SendToUser looks up the user's phone + FCM token then sends push + SMS.
+// data is passed as push notification payload.
+func (n *NotificationService) SendToUser(ctx context.Context, userID uuid.UUID, title, body string, data map[string]string) error {
+	if n.db == nil {
+		return nil // db not wired — non-fatal
+	}
+	type userRow struct {
+		Phone    string `gorm:"column:phone"`
+		FCMToken string `gorm:"column:fcm_token"`
+	}
+	var u userRow
+	if err := n.db.WithContext(ctx).Raw(
+		`SELECT phone, COALESCE(fcm_token,'') AS fcm_token FROM users WHERE id = ?`, userID,
+	).Scan(&u).Error; err != nil || u.Phone == "" {
+		return nil // user not found — non-fatal
+	}
+	_ = n.SendSMS(ctx, u.Phone, fmt.Sprintf("%s — %s", title, body))
+	if u.FCMToken != "" {
+		_ = n.SendPush(ctx, u.FCMToken, title, body, data)
+	}
+	return nil
 }

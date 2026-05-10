@@ -2693,17 +2693,45 @@ function ToolDrawer({
                   className="rounded-2xl border border-green-500/25 bg-green-500/5 overflow-hidden"
                 >
                   {/* Result header */}
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-green-500/15">
-                    <div className="flex items-center gap-2 text-green-400 text-sm font-semibold">
-                      <CheckCircle2 size={14} />
-                      <span>{tool.name} ready!</span>
+                  <div className="flex flex-col border-b border-green-500/15">
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div className="flex items-center gap-2 text-green-400 text-sm font-semibold">
+                        <CheckCircle2 size={14} />
+                        <span>{tool.name} ready!</span>
+                      </div>
+                      <button
+                        onClick={() => { setInlineResult(null); setFormCollapsed(false); }}
+                        className="text-white/30 hover:text-white/60 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => { setInlineResult(null); setFormCollapsed(false); }}
-                      className="text-white/30 hover:text-white/60 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
+                    {/* ⬇ Download nudge — appears immediately after generation */}
+                    {inlineResult.output_url && (
+                      <div className="mx-4 mb-3 flex items-center justify-between
+                                      rounded-xl border border-amber-500/25 bg-amber-500/8
+                                      px-3 py-2 gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-amber-400 text-sm">⏳</span>
+                          <p className="text-amber-200/80 text-[11px] leading-snug">
+                            <span className="font-semibold">Save your work</span> — this asset expires based on your tier.
+                            Download it now so you don&apos;t lose it.
+                          </p>
+                        </div>
+                        <a
+                          href={inlineResult.output_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          download
+                          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5
+                                     rounded-lg bg-amber-500/20 border border-amber-500/30
+                                     text-amber-300 text-[11px] font-semibold
+                                     hover:bg-amber-500/35 transition-all whitespace-nowrap"
+                        >
+                          <Download size={11} /> Download
+                        </a>
+                      </div>
+                    )}
                   </div>
 
                   {/* Audio result — use slug-based detection as primary, URL extension as fallback */}
