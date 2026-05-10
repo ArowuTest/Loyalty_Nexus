@@ -326,9 +326,8 @@ func (w *GhostNudgeWorker) sendApplePushNotification(ctx context.Context, userID
 
 	if keyID == "" || teamID == "" || topic == "" {
 		log.Printf("[ApplePush] APNS credentials not configured (APNS_KEY_ID/APNS_TEAM_ID/APNS_TOPIC missing) — skipping push for user %s", userID)
-		for _, d := range devices {
+		for range devices {
 			w.logPassportPush(ctx, userID, "apple", trigger, "skipped", "apns_credentials_missing")
-			_ = d
 		}
 		return
 	}
