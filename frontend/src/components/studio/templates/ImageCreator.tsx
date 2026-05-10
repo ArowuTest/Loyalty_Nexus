@@ -434,18 +434,33 @@ export default function ImageCreator({ tool, onSubmit, isLoading, userPoints }: 
         {speechState === 'error' && speechError && (
           <p className="text-[11px] text-red-300 mt-1">{speechError}</p>
         )}
-        {/* Prompt inspirations */}
+        {/* Prompt inspirations — always show 3 quick chips (Runway-style) */}
+        {!prompt && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {PROMPT_INSPIRATIONS.slice(0, 3).map((inspo) => (
+              <button
+                key={inspo}
+                onClick={() => setPrompt(inspo)}
+                className="text-left text-[10px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] px-2.5 py-1.5 rounded-lg border border-white/[0.07] hover:border-white/20 transition-all truncate max-w-[180px]"
+                title={inspo}
+              >
+                ✦ {inspo.slice(0, 32)}{inspo.length > 32 ? '…' : ''}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* More ideas toggle (collapsed) */}
         <button
           onClick={() => setShowInspo((v) => !v)}
-          className="flex items-center gap-1 text-white/30 hover:text-white/55 transition-colors text-[11px] mt-1.5"
+          className="flex items-center gap-1 text-white/25 hover:text-white/50 transition-colors text-[10px] mt-1"
         >
-          <Wand2 size={11} />
-          {showInspo ? 'Hide' : 'Show'} prompt ideas
-          {showInspo ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+          <Wand2 size={10} />
+          {showInspo ? 'Hide' : 'More'} ideas
+          {showInspo ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
         </button>
         {showInspo && (
-          <div className="mt-2 grid grid-cols-1 gap-1.5">
-            {PROMPT_INSPIRATIONS.map((inspo) => (
+          <div className="mt-1.5 grid grid-cols-1 gap-1">
+            {PROMPT_INSPIRATIONS.slice(3).map((inspo) => (
               <button
                 key={inspo}
                 onClick={() => { setPrompt(inspo); setShowInspo(false); }}
