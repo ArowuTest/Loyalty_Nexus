@@ -34,6 +34,9 @@ RUN go mod download
 # Copy backend source
 COPY backend/ .
 
+# Regenerate go.sum for any deps added after last commit (e.g. apns2)
+RUN go mod tidy
+
 ARG VERSION=dev
 
 # Build API binary
