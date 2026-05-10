@@ -361,11 +361,15 @@ class StudioApi {
   }
 
   /// Chat history for a given mode (general / web-search-ai / code-helper)
-  Future<List<dynamic>> getChatHistory(String mode) async {
+  Future<Map<String, dynamic>> getChatHistory(String mode) async {
     try {
       final r = await _dio.apiGet<Map>('/studio/chat/history', query: {'mode': mode});
-      return (r as Map)['messages'] as List? ?? [];
-    } catch (_) { return []; }
+      final m = r as Map;
+      return {
+        'session_id': m['session_id']?.toString(),
+        'messages': m['messages'] as List? ?? <dynamic>[],
+      };
+    } catch (_) { return {'session_id': null, 'messages': <dynamic>[]}; }
   }
 
   /// Chat usage / quota (messages remaining, resets, plan)

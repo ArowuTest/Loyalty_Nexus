@@ -272,11 +272,43 @@ export default function NexusChat() {
 
   useEffect(() => {
     sessionId.current = getOrCreateSessionId();
+
+    // Load chat usage quota
     api.getChatUsage().then((res: unknown) => {
       const r = res as { used: number; limit: number };
       setMsgCount(r.used ?? 0);
       setMsgLimit(r.limit ?? 20);
     }).catch(() => {});
+
+    // BUG-05 fix: restore chat history from server on mount
+    api.getChatHistory('general').then((res) => {
+      const history = res as {
+        session_id?: string;
+        messages?: { role: string; content: string; created_at: string }[];
+      };
+      if (!history?.messages?.length) return;
+
+      // Update sessionId from server response
+      if (history.session_id) {
+        sessionId.current = history.session_id;
+        try { localStorage.setItem('nexus_chat_session', history.session_id); } catch { /* ignore */ }
+      }
+
+      // Convert server messages → local Message shape
+      const restored: Message[] = history.messages.map((m, i) => ({
+        id: `history-${i}`,
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        timestamp: new Date(m.created_at),
+      }));
+
+      // Replace welcome message with history, appending a fresh greeting only if
+      // the last message was from the user (i.e. we're mid-conversation)
+      setMessages(restored);
+      // Scroll to bottom handled by the messages useEffect
+    }).catch(() => {
+      // Silently ignore — user may be unauthenticated or network unavailable
+    });
   }, []);
 
   useEffect(() => {
@@ -535,8 +567,8 @@ export default function NexusChat() {
                 <span className="text-white/20 text-[9px] tabular-nums">
                   {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
-                {msg.role === 'assistant' && msg.provider && (
-                  <span className="text-[9px] font-bold text-white/20 border border-white/10 px-1.5 py-0.5 rounded uppercase">{msg.provider}</span>
+                {msg.role === 'assistant' && (
+                  <span className="text-[9px] font-medium text-white/20 px-1 py-0.5 rounded">Nexus AI</span>
                 )}
                 {/* Copy button — appears on hover */}
                 <button

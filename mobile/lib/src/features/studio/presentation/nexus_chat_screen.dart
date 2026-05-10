@@ -284,7 +284,46 @@ class _NexusChatScreenState extends ConsumerState<NexusChatScreen>
   Future<void> _loadSession() async {
     final prefs = await SharedPreferences.getInstance();
     final key = 'nexus_chat_session_${widget.tool.slug}';
-    setState(() => _sessionId = prefs.getString(key));
+    final savedId = prefs.getString(key);
+    if (savedId != null) {
+      setState(() => _sessionId = savedId);
+    }
+
+    // BUG-05 fix: restore chat history from server on mount
+    try {
+      final api = ref.read(studioApiProvider);
+      final hist = await api.getChatHistory('general');
+      final msgs = hist['messages'] as List<dynamic>;
+      final sid  = hist['session_id'] as String?;
+      if (msgs.isEmpty) return;
+
+      // Update session id from server
+      if (sid != null && sid.isNotEmpty) {
+        await _saveSession(sid);
+      }
+
+      // Convert server messages → local _Msg objects
+      final restored = msgs
+          .whereType<Map>()
+          .map((m) => _Msg(
+                role: m['role'] == 'user' ? _MsgRole.user : _MsgRole.ai,
+                content: m['content']?.toString() ?? '',
+                time: DateTime.tryParse(m['created_at']?.toString() ?? '') ??
+                    DateTime.now(),
+              ))
+          .toList();
+
+      if (restored.isNotEmpty) {
+        setState(() {
+          _messages
+            ..clear()
+            ..addAll(restored);
+        });
+        _scrollToBottom();
+      }
+    } catch (_) {
+      // Silently ignore — history is a UX enhancement, not critical
+    }
   }
 
   Future<void> _saveSession(String id) async {
