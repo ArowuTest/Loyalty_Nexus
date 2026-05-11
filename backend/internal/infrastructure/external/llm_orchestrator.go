@@ -495,7 +495,7 @@ func (o *LLMOrchestrator) persistMessages(ctx context.Context, uid uuid.UUID, se
 		slug = "general"
 	}
 	sess, sessErr := o.chatRepo.GetActiveSession(ctx, uid, slug)
-	if sessErr != nil {
+	if sessErr != nil || sess == nil {
 		sess, sessErr = o.chatRepo.CreateSession(ctx, uid, slug)
 	}
 	if sessErr == nil && sess != nil {
@@ -745,7 +745,7 @@ func (o *LLMOrchestrator) GetChatHistory(ctx context.Context, userID, toolSlug s
 		toolSlug = "general"
 	}
 	sess, sessErr := o.chatRepo.GetActiveSession(ctx, uid, toolSlug)
-	if sessErr != nil {
+	if sessErr != nil || sess == nil {
 		// No active session — return empty history (not an error)
 		return "", nil, nil
 	}

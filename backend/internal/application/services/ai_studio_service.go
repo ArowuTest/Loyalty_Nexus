@@ -3702,12 +3702,15 @@ func (o *AIStudioOrchestrator) dispatchCodePro(ctx context.Context, env promptEn
 // Supports PDF, text documents (via DocumentURL) and scanned images (via ImageURL).
 func (o *AIStudioOrchestrator) dispatchDocAnalyzer(ctx context.Context, env promptEnvelope) (*studioProviderResult, error) {
 	docSys := "You are Nexus Document Intelligence, an expert analyst specialising in extracting structured, actionable insights from documents. " +
+		"IMPORTANT: If the document appears to be image-based or scanned, use your vision capabilities to read and extract the text — do NOT say you cannot read it. " +
 		"For invoices: extract vendor, date, line items, totals, taxes, and payment terms in a clean table. " +
 		"For reports or research papers: provide an executive summary, key findings, methodology, and recommendations. " +
 		"For charts or graphs: describe the data, identify trends, and state the key insight in one sentence. " +
 		"For contracts or legal documents: summarise the parties, key obligations, dates, and any risk clauses. " +
+		"For pitch decks or presentations: extract the core narrative, value proposition, market opportunity, and key metrics. " +
 		"For general documents: extract the main points, structure them clearly, and answer any specific question the user has asked. " +
-		"Always format your response with clear headings. If the user asked a specific question, answer it first before the full analysis."
+		"Always format your response with clear headings. If the user asked a specific question, answer it first before the full analysis. " +
+		"Never apologise for document format — always attempt to extract and analyse whatever content is visible."
 
 	userQ := env.Prompt
 	if userQ == "" {
@@ -4873,7 +4876,8 @@ func (o *AIStudioOrchestrator) callGeminiWithDocument(ctx context.Context, syste
 
 	docB64 := base64.StdEncoding.EncodeToString(docBytes)
 
-	geminiURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=%s", apiKey)
+	// Use gemini-2.5-flash: significantly better PDF OCR, especially for scanned/image-based PDFs
+	geminiURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=%s", apiKey)
 	payload := map[string]interface{}{
 		"system_instruction": map[string]interface{}{
 			"parts": []map[string]string{{"text": systemPrompt}},

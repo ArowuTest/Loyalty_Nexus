@@ -2,6 +2,7 @@ package persistence
 
 import (
 "context"
+"errors"
 "fmt"
 "loyalty-nexus/internal/domain/repositories"
 "github.com/google/uuid"
@@ -43,7 +44,14 @@ var s repositories.ChatSession
 err := r.db.WithContext(ctx).Table("chat_sessions").
 Where("user_id = ? AND tool_slug = ? AND status = 'active'", userID, toolSlug).
 Order("created_at DESC").First(&s).Error
-return &s, err
+if err != nil {
+// record not found is expected for new users / new sessions — not an error
+if errors.Is(err, gorm.ErrRecordNotFound) {
+return nil, nil
+}
+return nil, err
+}
+return &s, nil
 }
 
 func (r *postgresChatRepository) ExpireSession(ctx context.Context, sessionID uuid.UUID) error {
