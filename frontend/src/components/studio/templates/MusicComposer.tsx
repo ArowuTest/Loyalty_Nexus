@@ -335,11 +335,11 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
 
       {/* ── Suno-style Simple / Custom mode toggle (song-creator only) ── */}
       {mode === 'song-creator' && (
-        <div className="flex rounded-xl overflow-hidden border border-white/10 w-full">
+        <div className="flex overflow-x-auto rounded-xl overflow-hidden border border-white/10 w-full">
           <button
             onClick={() => setInputMode('simple')}
             className={cn(
-              'flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-semibold transition-all',
+              'flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-semibold transition-all whitespace-nowrap',
               inputMode === 'simple'
                 ? 'bg-amber-500 text-black'
                 : 'text-white/55 hover:text-white/80',
@@ -350,7 +350,7 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
           <button
             onClick={() => { setInputMode('custom'); setShowLyricsBox(true); }}
             className={cn(
-              'flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-semibold transition-all',
+              'flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-semibold transition-all whitespace-nowrap',
               inputMode === 'custom'
                 ? 'bg-amber-500 text-black'
                 : 'text-white/55 hover:text-white/80',
@@ -640,7 +640,7 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
           placeholder={cfg.prompt_placeholder ?? ctx.promptHint}
           rows={3}
           autoFocus
-          className="nexus-input resize-none w-full text-sm leading-relaxed"
+          className="nexus-input resize-none w-full min-w-0 text-sm leading-relaxed"
         />
 
         {promptSpeech === 'listening' && (
@@ -662,12 +662,12 @@ export default function MusicComposer({ tool, onSubmit, isLoading, userPoints }:
           {showInspo ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
         </button>
         {showInspo && (
-          <div className="mt-2 grid grid-cols-1 gap-1.5">
+          <div className="mt-2 flex flex-wrap gap-1.5">
             {inspirations.map((inspo) => (
               <button
                 key={inspo}
                 onClick={() => { setPrompt(inspo); setShowInspo(false); }}
-                className="text-left text-xs text-white/40 hover:text-white/70 hover:bg-white/[0.04] px-3 py-2 rounded-lg border border-white/[0.06] hover:border-white/15 transition-all truncate"
+                className="text-left text-xs text-white/40 hover:text-white/70 hover:bg-white/[0.04] px-3 py-2 rounded-lg border border-white/[0.06] hover:border-white/15 transition-all"
               >
                 {inspo}
               </button>

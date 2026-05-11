@@ -167,14 +167,14 @@ export default function SpinPage() {
         style: { background: "#1c2038", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" },
       }} />
 
-      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 pb-28 space-y-6">
+      <div className="max-w-5xl mx-auto px-3 md:px-6 py-4 md:py-6 pb-28 space-y-4 md:space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold font-display text-white flex items-center gap-2">
-              <Sparkles className="text-yellow-400" size={22} /> Spin & Win
+            <h1 className="text-xl md:text-2xl font-bold font-display text-white flex items-center gap-2">
+              <Sparkles className="text-yellow-400" size={20} /> Spin & Win
             </h1>
-            <p className="text-white/40 text-sm mt-0.5">Earn spins by recharging. Every ₦1,000 = 1 spin.</p>
+            <p className="text-white/40 text-xs md:text-sm mt-0.5">Earn spins by recharging. Every ₦1,000 = 1 spin.</p>
           </div>
           <Link href="/prizes" className="flex items-center gap-1.5 text-xs text-nexus-300 hover:text-nexus-200 transition-colors">
             <History size={14} /> My Prizes
@@ -208,7 +208,7 @@ export default function SpinPage() {
 
         {/* Wheel */}
         <div className="nexus-card p-6">
-          <div className="relative mx-auto" style={{ width: 280, height: 280 }}>
+          <div className="relative mx-auto" style={{ width: 'min(280px, calc(100vw - 64px))', height: 'min(280px, calc(100vw - 64px))' }}>
             {loadingSegments ? (
               <div className="w-full h-full rounded-full flex items-center justify-center border-2 border-nexus-500/20">
                 <Loader2 className="text-nexus-400 animate-spin" size={32} />
@@ -348,7 +348,7 @@ export default function SpinPage() {
           <p className="text-white/40 text-xs font-semibold uppercase tracking-widest mb-3 flex items-center gap-1.5">
             <Info size={12} /> Possible Prizes
           </p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {segments.map((seg, i) => (
               <div key={i} className="flex items-center gap-2 text-xs text-white/60">
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: seg.color }} />

@@ -294,7 +294,7 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
         )}
 
         <div className="max-h-56 overflow-y-auto pr-0.5 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
             {filteredVoices.map((v) => {
               const isSelected  = voiceId === v.id;
               const isPreviewing = previewingId === v.id;
@@ -396,7 +396,7 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
       )}
 
       {/* ── Speed + Format ── */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {showSpeed && (
           <div>
             <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Speed</label>
@@ -421,7 +421,7 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
         {showFormat && (
           <div>
             <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Format</label>
-            <div className="flex gap-1.5">
+            <div className="flex gap-1.5 flex-wrap">
               {FORMAT_OPTIONS.map((f) => (
                 <button
                   key={f.value}

@@ -34,7 +34,7 @@ export default function MyAIPhoto() {
   return (
     <div className="min-h-screen bg-black text-white max-w-screen-md mx-auto border-x border-white/5 flex flex-col">
       {/* Header */}
-      <header className="glass border-b border-brand-gold/20 px-6 py-4 flex items-center gap-4 sticky top-0 z-50">
+      <header className="glass border-b border-brand-gold/20 px-3 md:px-6 py-4 flex items-center gap-4 sticky top-0 z-50">
         <Link href="/studio" className="p-2 -ml-2 text-slate-400 hover:text-brand-gold transition-colors">
           <ArrowLeft size={20} />
         </Link>
@@ -49,7 +49,7 @@ export default function MyAIPhoto() {
         </div>
       </header>
 
-      <main className="flex-grow p-6 space-y-8 overflow-y-auto no-scrollbar">
+      <main className="flex-grow p-3 md:p-6 space-y-6 md:space-y-8 overflow-y-auto no-scrollbar">
         {/* Instruction Card */}
         <div className="glass rounded-3xl p-6 border border-white/5 space-y-2">
           <h2 className="text-sm font-black text-brand-gold uppercase tracking-wider flex items-center gap-2">
@@ -120,7 +120,7 @@ export default function MyAIPhoto() {
         </div>
       </main>
 
-      <footer className="p-6 pt-0">
+      <footer className="p-3 md:p-6 pt-0">
         <Link href="/studio/gallery" className="block text-center text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] hover:text-brand-gold transition-colors">
           View My AI Gallery →
         </Link>

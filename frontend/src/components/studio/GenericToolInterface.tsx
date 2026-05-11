@@ -42,7 +42,7 @@ export default function GenericToolInterface({ params }: { params: { id: string 
   return (
     <div className="min-h-screen bg-black text-white max-w-screen-md mx-auto border-x border-white/5 flex flex-col">
       {/* Header */}
-      <header className="glass border-b border-brand-gold/20 px-6 py-4 flex items-center gap-4 sticky top-0 z-50">
+      <header className="glass border-b border-brand-gold/20 px-3 md:px-6 py-4 flex items-center gap-4 sticky top-0 z-50">
         <Link href="/studio" className="p-2 -ml-2 text-slate-400 hover:text-brand-gold transition-colors">
           <ArrowLeft size={20} />
         </Link>
@@ -54,9 +54,9 @@ export default function GenericToolInterface({ params }: { params: { id: string 
         </div>
       </header>
 
-      <main className="flex-grow p-6 space-y-8 overflow-y-auto no-scrollbar">
+      <main className="flex-grow p-3 md:p-6 space-y-6 md:space-y-8 overflow-y-auto no-scrollbar">
         {result ? (
-          <div className="glass rounded-[2.5rem] p-10 border border-brand-gold/30 flex flex-col items-center text-center space-y-6 animate-in zoom-in-95">
+          <div className="glass rounded-[2rem] md:rounded-[2.5rem] p-6 md:p-10 border border-brand-gold/30 flex flex-col items-center text-center space-y-6 animate-in zoom-in-95">
             <div className="w-full aspect-video rounded-3xl bg-white/5 overflow-hidden flex items-center justify-center">
               {params.id.includes('podcast') ? (
                 <RefreshCw className="text-brand-gold w-12 h-12 animate-pulse" />
@@ -68,7 +68,7 @@ export default function GenericToolInterface({ params }: { params: { id: string 
               <h3 className="text-xl font-black text-white italic">Generation Complete</h3>
               <p className="text-sm text-slate-500 font-bold uppercase tracking-widest mt-1">Asset added to your gallery</p>
             </div>
-            <button className="gold-gradient text-black px-10 py-4 rounded-2xl font-black text-sm uppercase tracking-[0.2em] flex items-center gap-3 shadow-xl">
+            <button className="gold-gradient text-black w-full md:w-auto px-6 md:px-10 py-4 rounded-2xl font-black text-sm uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-xl">
               <Download size={20} /> Download Result
             </button>
           </div>

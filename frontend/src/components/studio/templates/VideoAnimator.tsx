@@ -190,7 +190,7 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
       )}
 
       {/* ── Aspect Ratio + Duration — FIRST (Runway/Kling style) ── */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         <div>
           <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Aspect Ratio</label>
           <div className="flex gap-2 flex-wrap">
@@ -407,7 +407,7 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
             {isGrok && (
               <div>
                 <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">Resolution</label>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   {(['720p', '480p'] as const).map((r) => (
                     <button
                       key={r}

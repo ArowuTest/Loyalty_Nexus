@@ -37,7 +37,7 @@ export default function BuildTool({ toolId, toolName, pointCost }: BuildToolProp
 
   return (
     <div className="min-h-screen bg-black text-white max-w-screen-md mx-auto border-x border-white/5 flex flex-col">
-      <header className="glass border-b border-brand-gold/20 px-6 py-4 flex items-center gap-4 sticky top-0 z-50">
+      <header className="glass border-b border-brand-gold/20 px-3 md:px-6 py-4 flex items-center gap-4 sticky top-0 z-50">
         <Link href="/studio" className="p-2 -ml-2 text-slate-400 hover:text-brand-gold transition-colors">
           <ArrowLeft size={20} />
         </Link>
@@ -52,7 +52,7 @@ export default function BuildTool({ toolId, toolName, pointCost }: BuildToolProp
         </div>
       </header>
 
-      <main className="flex-grow p-6 space-y-8 overflow-y-auto no-scrollbar">
+      <main className="flex-grow p-3 md:p-6 space-y-6 md:space-y-8 overflow-y-auto no-scrollbar">
         <div className="glass rounded-3xl p-6 border border-white/5 space-y-2 text-center">
           <h2 className="text-sm font-black text-brand-gold uppercase tracking-wider flex items-center justify-center gap-2">
             <Sparkles size={14} /> Professional Automation
@@ -63,7 +63,7 @@ export default function BuildTool({ toolId, toolName, pointCost }: BuildToolProp
         </div>
 
         {result ? (
-          <div className="glass rounded-3xl p-10 border border-brand-gold/30 flex flex-col items-center text-center space-y-6 animate-in zoom-in-95 duration-500">
+          <div className="glass rounded-3xl p-6 md:p-10 border border-brand-gold/30 flex flex-col items-center text-center space-y-6 animate-in zoom-in-95 duration-500">
             <div className="w-20 h-20 rounded-3xl gold-gradient flex items-center justify-center text-black shadow-2xl">
               {toolName.includes('Slide') ? <Presentation size={40} /> : <FileText size={40} />}
             </div>
@@ -71,7 +71,7 @@ export default function BuildTool({ toolId, toolName, pointCost }: BuildToolProp
               <h3 className="text-xl font-black text-white tracking-tight italic">Generation Complete</h3>
               <p className="text-sm text-slate-500 font-bold uppercase tracking-widest mt-1">Your document is ready for download</p>
             </div>
-            <button className="gold-gradient text-black px-10 py-4 rounded-2xl font-black text-sm uppercase tracking-[0.2em] flex items-center gap-3 shadow-xl hover:scale-105 transition-transform active:scale-95">
+            <button className="gold-gradient text-black w-full md:w-auto px-6 md:px-10 py-4 rounded-2xl font-black text-sm uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-xl hover:scale-105 transition-transform active:scale-95">
               <Download size={20} /> Download File
             </button>
           </div>

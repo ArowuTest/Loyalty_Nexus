@@ -237,14 +237,14 @@ export default function DrawsPage() {
         style: { background: "#1c2038", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" },
       }} />
 
-      <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 pb-28 space-y-6">
+      <div className="max-w-5xl mx-auto px-3 md:px-6 py-4 md:py-6 pb-28 space-y-4 md:space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold font-display text-white flex items-center gap-2">
-              <Ticket className="text-nexus-400" size={22} /> Daily Draws
+            <h1 className="text-xl md:text-2xl font-bold font-display text-white flex items-center gap-2">
+              <Ticket className="text-nexus-400" size={20} /> Daily Draws
             </h1>
-            <p className="text-white/40 text-sm mt-0.5">Win big with every recharge</p>
+            <p className="text-white/40 text-xs md:text-sm mt-0.5">Win big with every recharge</p>
           </div>
           <button
             onClick={fetchDraws}
@@ -282,7 +282,7 @@ export default function DrawsPage() {
           <p className="text-white/50 text-xs font-semibold uppercase tracking-widest flex items-center gap-1.5">
             <Gift size={12} /> How to Enter
           </p>
-          <div className="grid grid-cols-3 gap-3 text-center">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
             {[
               { step: "1", text: "Recharge ₦200+", sub: "= 1 draw entry" },
               { step: "2", text: "Subscribe ₦20/day", sub: "guaranteed entry" },

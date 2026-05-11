@@ -239,7 +239,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
             <span className="text-white/35 text-[11px] font-mono">{aspect}</span>
           </div>
         </div>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {(aspectRatios as { value: string; label: string; icon?: string }[]).map((ar) => (
             <button
               key={ar.value}
@@ -316,7 +316,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
         <label className="text-white/50 text-[11px] uppercase tracking-wider font-semibold mb-2 block">
           Camera Movement <span className="text-white/25 normal-case font-normal">(optional)</span>
         </label>
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
           {(cameraPresets as { label: string; icon?: string; value: string }[]).map((cm) => (
             <button
               key={cm.value}

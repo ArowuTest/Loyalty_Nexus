@@ -58,7 +58,7 @@ export default function Gallery() {
   return (
     <div className="min-h-screen bg-black text-white max-w-screen-md mx-auto border-x border-white/5 flex flex-col">
       {/* Header */}
-      <header className="glass border-b border-white/10 px-6 py-4 flex items-center gap-4 sticky top-0 z-50">
+      <header className="glass border-b border-white/10 px-3 md:px-6 py-4 flex items-center gap-4 sticky top-0 z-50">
         <Link href="/studio" className="p-2 -ml-2 text-slate-400 hover:text-brand-gold transition-colors">
           <ArrowLeft size={20} />
         </Link>
@@ -83,7 +83,7 @@ export default function Gallery() {
         </button>
       </header>
 
-      <main className="flex-grow p-6 overflow-y-auto no-scrollbar">
+      <main className="flex-grow p-3 md:p-6 overflow-y-auto no-scrollbar">
         {/* Loading */}
         {loading && (
           <div className="flex flex-col items-center justify-center h-64 gap-3 text-slate-500">
@@ -105,7 +105,7 @@ export default function Gallery() {
 
         {/* Grid */}
         {!loading && !error && items.length > 0 && (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {items.map(item => {
               const mt  = mediaType(item.tool_slug);
               const url = item.output_url || '';

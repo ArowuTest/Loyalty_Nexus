@@ -822,7 +822,7 @@ export default function NexusChatUI({
     <div className="flex flex-col h-full bg-[#0c0c10] text-white overflow-hidden">
 
       {/* ── Header ───────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4 pt-4 pb-3 border-b border-white/[0.06] flex-shrink-0">
+      <div className="flex items-center gap-3 px-3 md:px-4 pt-3 md:pt-4 pb-3 border-b border-white/[0.06] flex-shrink-0">
         {handleBack && (
           <button
             onClick={handleBack}
@@ -862,7 +862,7 @@ export default function NexusChatUI({
       </div>
 
       {/* ── Messages ─────────────────────────────────────────────────────── */}
-      <div ref={scrollAreaRef} className="flex-1 overflow-y-auto overscroll-contain px-4 py-3 space-y-5 scroll-smooth"
+      <div ref={scrollAreaRef} className="flex-1 overflow-y-auto overscroll-contain px-3 md:px-4 py-3 space-y-5 scroll-smooth"
         style={{ scrollbarWidth: "none" }}>
 
         {/* Suggestion cards */}
@@ -900,7 +900,7 @@ export default function NexusChatUI({
             )}
 
             {/* Bubble */}
-            <div className={cn("max-w-[85%]", msg.role === "user" && "items-end flex flex-col")}>
+            <div className={cn("max-w-[90vw] md:max-w-[75%]", msg.role === "user" && "items-end flex flex-col")}>
 
               {/* Attached pill */}
               {msg.role === "user" && msg.attachedName && (
@@ -1000,7 +1000,7 @@ export default function NexusChatUI({
       </AnimatePresence>
 
       {/* ── Input area ───────────────────────────────────────────────────── */}
-      <div className="flex-shrink-0 px-4 pb-5 pt-2 border-t border-white/[0.06]">
+      <div className="flex-shrink-0 px-3 md:px-4 pb-safe pb-5 pt-2 border-t border-white/[0.06]">
 
         {/* Attachment chip */}
         <AnimatePresence>

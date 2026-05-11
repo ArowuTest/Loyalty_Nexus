@@ -312,11 +312,11 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center"
+    <div className="fixed inset-0 z-50 flex items-end justify-center"
       style={{ background: "rgba(0,0,0,0.85)", backdropFilter: "blur(8px)" }}>
       <motion.div
         initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
-        className="relative w-full max-w-lg mx-auto flex flex-col"
+        className="relative w-full md:max-w-lg mx-auto flex flex-col"
         style={{
           background: "linear-gradient(135deg, #13141f 0%, #0d0f1a 100%)",
           border: "1px solid rgba(255,255,255,0.08)",
@@ -326,9 +326,9 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
         }}
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-5 pt-5 pb-3 flex-shrink-0"
+        <div className="flex items-center justify-between px-3 md:px-5 pt-4 md:pt-5 pb-3 flex-shrink-0"
           style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 min-w-0">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg"
               style={{ background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.25)" }}>
               🌐
@@ -338,7 +338,7 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
               <p className="text-white/40 text-[10px]">Step {step} of {step < 5 ? "4" : "5"}</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 min-w-0">
             {step < 5 && (
               <span className="text-[11px] px-2.5 py-1 rounded-full font-bold"
                 style={{ background: canAfford ? "rgba(245,166,35,0.12)" : "rgba(239,68,68,0.12)", color: canAfford ? "#F5A623" : "#ef4444", border: `1px solid ${canAfford ? "rgba(245,166,35,0.2)" : "rgba(239,68,68,0.2)"}` }}>
@@ -353,7 +353,7 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
 
         {/* ── Step indicator ─────────────────────────────────────────────── */}
         {step < 5 && (
-          <div className="px-5 pt-3 pb-2 flex gap-1.5 flex-shrink-0">
+          <div className="px-3 md:px-5 pt-3 pb-2 flex gap-1.5 flex-shrink-0 overflow-x-auto">
             {[1, 2, 3, 4].map(s => (
               <div key={s} className="h-1 flex-1 rounded-full transition-all duration-500"
                 style={{ background: s <= step ? "#6366f1" : "rgba(255,255,255,0.08)" }} />
@@ -368,12 +368,12 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
             {/* ─── Step 1: Choose type ──────────────────────────────────── */}
             {step === 1 && (
               <motion.div key="s1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                className="p-5 space-y-4">
+                className="p-3 md:p-5 space-y-4">
                 <div>
-                  <h2 className="text-white font-black text-xl">What type of website?</h2>
+                  <h2 className="text-white font-black text-lg md:text-xl">What type of website?</h2>
                   <p className="text-white/40 text-sm mt-1">Choose the one that best matches your business</p>
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {SITE_TYPES.map(type => (
                     <button key={type.id} onClick={() => { setSelectedType(type); setFields({}); setStep(2); }}
                       className="relative flex flex-col items-start gap-2 p-3.5 rounded-2xl text-left transition-all active:scale-95"
@@ -398,11 +398,11 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
             {/* ─── Step 2: Details form ─────────────────────────────────── */}
             {step === 2 && selectedType && (
               <motion.div key="s2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                className="p-5 space-y-4">
+                className="p-3 md:p-5 space-y-4">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xl">{selectedType.id === "shop" ? "🛍️" : selectedType.id === "corporate" ? "🏢" : "✏️"}</span>
-                    <h2 className="text-white font-black text-xl">Your details</h2>
+                    <h2 className="text-white font-black text-lg md:text-xl">Your details</h2>
                   </div>
                   <p className="text-white/40 text-sm">Fill in as much as you can — the more detail, the better your website</p>
                 </div>
@@ -472,9 +472,9 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
             {/* ─── Step 3: Photos ───────────────────────────────────────── */}
             {step === 3 && (
               <motion.div key="s3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                className="p-5 space-y-4">
+                className="p-3 md:p-5 space-y-4">
                 <div>
-                  <h2 className="text-white font-black text-xl">Add photos <span className="text-white/30 font-normal">(optional)</span></h2>
+                  <h2 className="text-white font-black text-lg md:text-xl">Add photos <span className="text-white/30 font-normal">(optional)</span></h2>
                   <p className="text-white/40 text-sm mt-1">Up to 6 photos. Add a short description for each one.</p>
                 </div>
                 <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoAdd} />
@@ -517,16 +517,16 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
             {/* ─── Step 4: Review ───────────────────────────────────────── */}
             {step === 4 && selectedType && (
               <motion.div key="s4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                className="p-5 space-y-4">
+                className="p-3 md:p-5 space-y-4">
                 <div>
-                  <h2 className="text-white font-black text-xl">Ready to build!</h2>
+                  <h2 className="text-white font-black text-lg md:text-xl">Ready to build!</h2>
                   <p className="text-white/40 text-sm mt-1">Here's what we'll create for you</p>
                 </div>
 
                 {/* Summary card */}
                 <div className="rounded-2xl p-4 space-y-3"
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center"
                       style={{ background: `${selectedType.color}20`, color: selectedType.color }}>
                       {selectedType.icon}
@@ -536,7 +536,7 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
                       <p className="text-white/40 text-xs">{fields[Object.keys(fields)[0]] || "Your business"}</p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
                       { label: "Fields", value: Object.values(fields).filter(Boolean).length },
                       { label: "Photos", value: photos.length },
@@ -583,7 +583,7 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
             {/* ─── Step 5: Result ───────────────────────────────────────── */}
             {step === 5 && (
               <motion.div key="s5" initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
-                className="p-5 space-y-4">
+                className="p-3 md:p-5 space-y-4">
                 {siteStatus !== "completed" ? (
                   <div className="flex flex-col items-center text-center py-8 space-y-4">
                     <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
@@ -603,7 +603,7 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
                   </div>
                 ) : (
                   <>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center"
                         style={{ background: "rgba(16,185,129,0.15)" }}>
                         <CheckCircle size={22} className="text-emerald-400" />
@@ -638,7 +638,7 @@ export default function WebsiteBuilderWizard({ pointBalance, onClose, onSuccess 
                     </div>
 
                     {/* Action buttons */}
-                    <div className="grid grid-cols-2 gap-2.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <button onClick={copyLink}
                         className="flex items-center justify-center gap-2 py-3 rounded-2xl font-bold text-sm transition-all active:scale-95"
                         style={{ background: copied ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.08)", color: copied ? "#10b981" : "#fff", border: `1px solid ${copied ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.1)"}` }}>

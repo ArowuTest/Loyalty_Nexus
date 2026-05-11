@@ -147,7 +147,7 @@ export default function VoiceToBusinessPlan() {
 
   return (
     <div className="min-h-screen bg-black text-white max-w-screen-md mx-auto border-x border-white/5 flex flex-col">
-      <header className="glass border-b border-brand-gold/20 px-6 py-4 flex items-center gap-4 sticky top-0 z-50">
+      <header className="glass border-b border-brand-gold/20 px-3 md:px-6 py-4 flex items-center gap-4 sticky top-0 z-50">
         <Link href="/studio" className="p-2 -ml-2 text-slate-400 hover:text-brand-gold transition-colors">
           <ArrowLeft size={20} />
         </Link>
@@ -164,11 +164,11 @@ export default function VoiceToBusinessPlan() {
         </div>
       </header>
 
-      <main className="flex-grow p-6 space-y-8 overflow-y-auto no-scrollbar">
+      <main className="flex-grow p-3 md:p-6 space-y-6 md:space-y-8 overflow-y-auto no-scrollbar">
 
         {/* ── Result ── */}
         {step === 'done' && (
-          <div className="glass rounded-3xl p-8 border border-brand-gold/30 space-y-6 animate-in zoom-in-95">
+          <div className="glass rounded-3xl p-4 md:p-8 border border-brand-gold/30 space-y-6 animate-in zoom-in-95">
             <div className="flex flex-col items-center text-center space-y-3">
               <div className="w-16 h-16 rounded-3xl gold-gradient flex items-center justify-center text-black shadow-2xl">
                 <Sparkles size={32} />
@@ -185,15 +185,15 @@ export default function VoiceToBusinessPlan() {
               </div>
             )}
 
-            <div className="flex gap-3 justify-center flex-wrap">
+            <div className="flex flex-col sm:flex-row gap-3 justify-center flex-wrap">
               {planURL && (
                 <a href={planURL} download target="_blank" rel="noreferrer"
-                  className="gold-gradient text-black px-8 py-3.5 rounded-2xl font-black text-sm uppercase tracking-[0.2em] flex items-center gap-2 shadow-xl hover:scale-105 transition-transform">
+                  className="gold-gradient text-black w-full sm:w-auto px-8 py-3.5 rounded-2xl font-black text-sm uppercase tracking-[0.2em] flex items-center justify-center gap-2 shadow-xl hover:scale-105 transition-transform">
                   <Download size={16} /> Download PDF
                 </a>
               )}
               <button onClick={reset}
-                className="border border-white/10 text-slate-400 px-6 py-3.5 rounded-2xl font-black text-sm uppercase tracking-widest hover:text-white transition-colors flex items-center gap-2">
+                className="border border-white/10 text-slate-400 w-full sm:w-auto px-6 py-3.5 rounded-2xl font-black text-sm uppercase tracking-widest hover:text-white transition-colors flex items-center justify-center gap-2">
                 <RefreshCw size={14} /> Start Over
               </button>
             </div>
