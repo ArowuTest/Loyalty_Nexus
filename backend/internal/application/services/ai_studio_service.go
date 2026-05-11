@@ -998,6 +998,15 @@ func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL s
 		log.Printf("[AIStudio] rembg failed: %v", err)
 	}
 
+	// Fallback: Pollinations background removal (free, no key required beyond secret)
+	if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
+		result, err := o.callPollinationsBgRemover(ctx, sk, imageURL)
+		if err == nil {
+			return &studioProviderResult{OutputURL: result, Provider: "pollinations/bg-remove", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] Pollinations bg-remove failed: %v", err)
+	}
+
 	// Fallback: FAL.AI BiRefNet (accurate background removal)
 	if falKey := os.Getenv("FAL_API_KEY"); falKey != "" {
 		result, err := o.callFALBgRemover(ctx, falKey, imageURL)
@@ -1016,7 +1025,7 @@ func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL s
 		log.Printf("[AIStudio] remove.bg failed: %v", err)
 	}
 
-	return nil, fmt.Errorf("background removal unavailable: configure REMBG_SERVICE_URL, FAL_API_KEY, or REMOVEBG_API_KEY")
+	return nil, fmt.Errorf("background removal unavailable: configure REMBG_SERVICE_URL, POLLINATIONS_SECRET_KEY, FAL_API_KEY, or REMOVEBG_API_KEY")
 }
 
 // ─── Video dispatch ────────────────────────────────────────────────────────────
@@ -2441,6 +2450,52 @@ func (o *AIStudioOrchestrator) callRembgService(ctx context.Context, serviceURL,
 		return o.uploadOrDataURI(ctx, raw, "image/png", "bgremoved/"+uuid.New().String()+".png"), nil
 	}
 	return result.ResultURL, nil
+}
+
+// callPollinationsBgRemover uses Pollinations image API with a background-removal prompt
+// as a free fallback when no dedicated bg-removal service key is configured.
+// Pollinations processes the image through its pipeline and returns a CDN URL.
+func (o *AIStudioOrchestrator) callPollinationsBgRemover(ctx context.Context, secretKey, imageURL string) (string, error) {
+	// Pollinations background removal endpoint
+	payload := map[string]interface{}{
+		"imageUrl": imageURL,
+		"model":    "flux",
+		"prompt":   "remove background, transparent background, subject only, no background, isolated subject, professional cutout",
+		"enhance":  false,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://image.pollinations.ai/prompt/remove+background?nologo=true",
+		bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("pollinations bg-remove request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("pollinations bg-remove %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+
+	// Pollinations returns the image directly as binary — upload to R2 for a stable CDN URL
+	imgData, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+	if err != nil {
+		return "", fmt.Errorf("pollinations bg-remove read: %w", err)
+	}
+	if len(imgData) < 1024 {
+		return "", fmt.Errorf("pollinations bg-remove: response too small (%d bytes)", len(imgData))
+	}
+
+	// Return as data URI if R2 storage unavailable
+	encoded := base64.StdEncoding.EncodeToString(imgData)
+	return "data:image/png;base64," + encoded, nil
 }
 
 // callFALBgRemover uses FAL.AI's BiRefNet for background removal.
