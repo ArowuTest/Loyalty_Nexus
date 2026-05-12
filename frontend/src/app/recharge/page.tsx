@@ -89,9 +89,10 @@ export default function RechargePage() {
     }
   }, [_hasHydrated, isAuthenticated, user?.email]);
 
-  // ── Fetch active networks ──────────────────────────────────────────────────
-  useEffect(() => {
+  // ── Fetch active networks (with retry support) ────────────────────────────
+  const fetchNetworks = useCallback(() => {
     setLoadNets(true);
+    setError("");
     fetch(`${API}/api/v1/recharge/networks`)
       .then(r => r.json())
       .then(d => {
@@ -102,6 +103,8 @@ export default function RechargePage() {
       .catch(() => setError("Unable to load networks. Please try again."))
       .finally(() => setLoadNets(false));
   }, []);
+
+  useEffect(() => { fetchNetworks(); }, [fetchNetworks]);
 
   // ── Fetch bundles when network + data tab selected ─────────────────────────
   const fetchBundles = useCallback(async (code: string) => {
@@ -469,9 +472,19 @@ export default function RechargePage() {
 
           {/* ── Error ── */}
           {error && (
-            <div className="flex items-center gap-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
-              <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
-              <p className="text-[13px] text-red-300">{error}</p>
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+              <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] text-red-300">{error}</p>
+                {networks.length === 0 && (
+                  <button
+                    onClick={fetchNetworks}
+                    className="mt-1.5 text-[12px] font-bold text-red-400 hover:text-red-300 underline underline-offset-2"
+                  >
+                    Tap to retry
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
