@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/cache/cache_service.dart';
 import '../../../core/theme/nexus_theme.dart';
+import '../../../core/widgets/nexus_gamification.dart';
 import '../../passport/presentation/wallet_onboarding_sheet.dart';
 
 // ── Providers ──────────────────────────────────────────────────────────────────
@@ -250,8 +251,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 const SizedBox(height: 16),
 
                 // ── Wallet hero card ─────────────────────────────────────────
-                _WalletHeroCard(
-                  walletAsync: walletAsync,
+                walletAsync.isLoading
+                    ? const WalletCardSkeleton()
+                    : _WalletHeroCard(
+                        walletAsync:  walletAsync,
+                        profileAsync: profileAsync,
+                      ),
+                const SizedBox(height: 16),
+
+                // Streak + Tier Progress
+                _StreakAndProgressRow(
+                  walletAsync:  walletAsync,
                   profileAsync: profileAsync,
                 ),
                 const SizedBox(height: 16),
@@ -402,10 +412,13 @@ class _WalletHeroCard extends ConsumerWidget {
             const Text('Pulse Points', style: TextStyle(color: Colors.white60, fontSize: 12, letterSpacing: 0.8)),
             const SizedBox(height: 6),
             walletAsync.isLoading
-                ? const SizedBox(width: 120, height: 36, child: _LoadingPlaceholder())
-                : Text(_formatPts(pts),
+                ? const NexusSkeleton(width: 130, height: 40)
+                : PointsCounter(
+                    key: ValueKey(pts),
+                    value: pts,
                     style: const TextStyle(color: Colors.white, fontSize: 36,
-                      fontWeight: FontWeight.w800, letterSpacing: -1)),
+                      fontWeight: FontWeight.w800, letterSpacing: -1),
+                  ),
           ]),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -1064,4 +1077,45 @@ class _LoadingRow extends StatelessWidget {
     const SizedBox(height: 10),
     NexusShimmer(width: 200, height: 14, radius: NexusRadius.sm),
   ]);
+}
+
+// ── Streak + Tier progress section ───────────────────────────────────────────
+
+class _StreakAndProgressRow extends StatelessWidget {
+  final AsyncValue<Map<String, dynamic>> walletAsync;
+  final AsyncValue<Map<String, dynamic>> profileAsync;
+
+  const _StreakAndProgressRow({
+    required this.walletAsync,
+    required this.profileAsync,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (walletAsync.isLoading || profileAsync.isLoading) {
+      return const NexusSkeleton(width: double.infinity, height: 80);
+    }
+    final wallet  = walletAsync.valueOrNull;
+    final profile = profileAsync.valueOrNull;
+    if (wallet == null || profile == null) return const SizedBox.shrink();
+
+    final tier   = profile['tier']?.toString()   ?? 'BRONZE';
+    final life   = wallet['lifetime_points']  as int? ?? 0;
+    final streak = profile['streak_count']    as int? ?? 0;
+
+    return Column(children: [
+      if (streak > 0) ...[
+        Row(children: [
+          StreakBadge(streak: streak),
+          const SizedBox(width: 10),
+          const Expanded(child: Text(
+            'Keep it up — recharge daily to extend your streak!',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          )),
+        ]),
+        const SizedBox(height: 12),
+      ],
+      TierProgressSection(lifetimePoints: life, tier: tier),
+    ]);
+  }
 }

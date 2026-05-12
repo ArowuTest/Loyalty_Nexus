@@ -91,7 +91,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(routes: [
             GoRoute(path: '/dashboard', builder: (_, __) => const DashboardScreen()),
           ]),
-          // 1 — Spin
+          // 1 — Earn (Wars + Arcade)
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/wars', builder: (_, __) => const WarsScreen()),
+            GoRoute(path: '/arcade', builder: (_, __) => const ArcadeScreen()),
+          ]),
+          // 2 — AI Studio
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/studio', builder: (_, __) => const StudioScreen()),
+          ]),
+          // 3 — Rewards (Spin + Prizes)
           StatefulShellBranch(routes: [
             GoRoute(
               path: '/spin',
@@ -101,19 +110,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               ],
             ),
           ]),
-          // 2 — AI Studio
-          StatefulShellBranch(routes: [
-            GoRoute(path: '/studio', builder: (_, __) => const StudioScreen()),
-          ]),
-          // 3 — Wars
-          StatefulShellBranch(routes: [
-            GoRoute(path: '/wars', builder: (_, __) => const WarsScreen()),
-          ]),
-          // 4 — Nexus Games Arcade
-          StatefulShellBranch(routes: [
-            GoRoute(path: '/arcade', builder: (_, __) => const ArcadeScreen()),
-          ]),
-          // 5 — Profile
+          // 4 — Profile
           StatefulShellBranch(routes: [
             GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
           ]),

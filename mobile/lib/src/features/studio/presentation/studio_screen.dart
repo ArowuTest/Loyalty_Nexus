@@ -11,6 +11,7 @@ import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
+import '../../../core/widgets/nexus_gamification.dart';
 import '../../../core/theme/nexus_theme.dart';
 import '../templates/template_registry.dart';
 import 'nexus_chat_screen.dart';
@@ -452,6 +453,8 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
   static const _sessionKey = 'nexus_chat_session';
 
   // ── Chat state ──
+  String? _streamingContent;      // character-by-character streaming buffer
+  bool _isStreaming = false;
   final List<_Message> _messages = [
     _Message(role: 'assistant', ts: DateTime.now(),
       content: "Hey! 👋 I'm Nexus AI — your personal AI assistant. "
@@ -500,7 +503,7 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
   @override
   void dispose() { _tabs.dispose(); _chatCtrl.dispose(); _scrollCtrl.dispose(); super.dispose(); }
 
-  // ── Chat send ──
+  // ── Chat send (with character-by-character streaming simulation) ──
   Future<void> _sendChat() async {
     final text = _chatCtrl.text.trim();
     if (text.isEmpty || _sending) return;
@@ -522,6 +525,17 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
         _sessionId = newSid;
         await _storage.write(key: _sessionKey, value: newSid);
       }
+      // Stream the reply character by character
+      setState(() { _isStreaming = true; _streamingContent = ''; });
+      _scrollToBottom();
+      for (var i = 0; i < reply.length; i++) {
+        await Future.delayed(Duration(
+          milliseconds: reply.length > 300 ? 8 : 16));
+        if (!mounted) break;
+        setState(() => _streamingContent = reply.substring(0, i + 1));
+        if (i % 12 == 0) _scrollToBottom();
+      }
+      setState(() { _isStreaming = false; _streamingContent = null; });
       setState(() {
         _messages.add(_Message(
           role: 'assistant', content: reply, mode: _chatMode,
@@ -662,6 +676,8 @@ class _StudioScreenState extends ConsumerState<StudioScreen>
         Expanded(child: TabBarView(controller: _tabs, children: [
           _ChatTab(
             messages: _messages, mode: _chatMode, sending: _sending,
+            isStreaming: _isStreaming,
+            streamingContent: _streamingContent,
             controller: _chatCtrl, scrollController: _scrollCtrl,
             onSend: _sendChat, onClear: _clearChat,
             onSummarise: _summariseChat,
@@ -831,6 +847,8 @@ class _ChatTab extends StatelessWidget {
   final List<_Message> messages;
   final ChatMode mode;
   final bool sending;
+  final bool isStreaming;
+  final String? streamingContent;
   final TextEditingController controller;
   final ScrollController scrollController;
   final VoidCallback onSend, onClear, onSummarise;
@@ -838,7 +856,7 @@ class _ChatTab extends StatelessWidget {
   final Map<String, int>? chatUsage;
 
   const _ChatTab({
-    required this.messages, required this.mode, required this.sending,
+    required this.messages, required this.mode, required this.sending, required this.isStreaming, this.streamingContent,
     required this.controller, required this.scrollController,
     required this.onSend, required this.onClear, required this.onSummarise,
     required this.onModeChange, required this.chatUsage,
@@ -899,14 +917,25 @@ class _ChatTab extends StatelessWidget {
 
       const SizedBox(height: 8),
 
+      // ── Prompt starters (shown when only the welcome message exists) ───
+      if (messages.length == 1 && !sending && !isStreaming)
+        _PromptStarters(onSelect: (p) {
+          controller.text = p;
+          onSend();
+        }),
+
       // ── Messages list ──────────────────────────────────────────────────────
       Expanded(
         child: ListView.builder(
           controller: scrollController,
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          itemCount: messages.length + (sending ? 1 : 0),
+          itemCount: messages.length + ((sending || (isStreaming && streamingContent != null)) ? 1 : 0),
           itemBuilder: (ctx, i) {
-            if (sending && i == messages.length) return _ThinkingBubble(mode: mode);
+            if (i == messages.length) {
+              if (isStreaming && streamingContent != null)
+                return _StreamingBubble(content: streamingContent!, mode: mode);
+              if (sending) return _ThinkingBubble(mode: mode);
+            }
             return _ChatBubble(msg: messages[i])
                 .animate(key: ValueKey(messages[i].ts))
                 .fadeIn(duration: 250.ms)
@@ -3182,3 +3211,168 @@ class _PointRow extends StatelessWidget {
 }
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STREAMING BUBBLE — character-by-character text reveal
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _StreamingBubble extends StatelessWidget {
+  final String content;
+  final ChatMode mode;
+  const _StreamingBubble({required this.content, required this.mode});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+        CircleAvatar(
+          radius: 15,
+          backgroundColor: mode.color.withValues(alpha: 0.12),
+          child: Text(mode.emoji, style: const TextStyle(fontSize: 13)),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            decoration: BoxDecoration(
+              color: NexusColors.surface,
+              borderRadius: const BorderRadius.only(
+                topLeft:     Radius.circular(18),
+                topRight:    Radius.circular(18),
+                bottomRight: Radius.circular(18),
+                bottomLeft:  Radius.circular(4),
+              ),
+              border: Border.all(color: NexusColors.border),
+            ),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Flexible(
+                child: Text(
+                  content,
+                  style: const TextStyle(
+                    color: NexusColors.textPrimary,
+                    fontSize: 14,
+                    height: 1.5,
+                  ),
+                ),
+              ),
+              // Blinking cursor
+              const SizedBox(width: 2),
+              _BlinkingCursor(color: mode.color),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _BlinkingCursor extends StatefulWidget {
+  final Color color;
+  const _BlinkingCursor({required this.color});
+  @override State<_BlinkingCursor> createState() => _BlinkingCursorState();
+}
+
+class _BlinkingCursorState extends State<_BlinkingCursor>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 530))
+      ..repeat(reverse: true);
+  }
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) => Opacity(
+        opacity: _ctrl.value,
+        child: Container(
+          width: 2, height: 14,
+          decoration: BoxDecoration(
+            color:        widget.color,
+            borderRadius: BorderRadius.circular(1),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROMPT STARTERS — shown when chat is empty
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PromptStarters extends StatelessWidget {
+  final ValueChanged<String> onSelect;
+  const _PromptStarters({required this.onSelect});
+
+  static const _starters = [
+    ('✍️', 'Write a recharge promo SMS for MTN Nigeria customers'),
+    ('💡', 'Give me 5 loyalty marketing ideas for a telecom app'),
+    ('📊', 'Explain how Pulse Points work in simple terms'),
+    ('🛒', 'Draft a WhatsApp message to get users to recharge today'),
+    ('🎯', 'What are the best ways to increase daily active users?'),
+    ('📱', 'Write a push notification to remind users about their streak'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Padding(
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: Text(
+          'Try asking…',
+          style: TextStyle(
+            color:      NexusColors.textSecondary,
+            fontSize:   13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.4,
+          ),
+        ),
+      ),
+      SizedBox(
+        height: 38,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          itemCount: _starters.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (_, i) {
+            final (emoji, prompt) = _starters[i];
+            return Material(
+              color:        NexusColors.surface,
+              borderRadius: BorderRadius.circular(20),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => onSelect(prompt),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text(emoji, style: const TextStyle(fontSize: 14)),
+                    const SizedBox(width: 6),
+                    Text(
+                      prompt.length > 32 ? '${prompt.substring(0, 30)}…' : prompt,
+                      style: const TextStyle(
+                        color:      NexusColors.textPrimary,
+                        fontSize:   12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ]),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+      const SizedBox(height: 12),
+    ]);
+  }
+}

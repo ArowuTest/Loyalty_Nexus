@@ -9,6 +9,7 @@ import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
+import '../../../core/widgets/nexus_gamification.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
 
@@ -124,24 +125,29 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
   late final ConfettiController _confettiCtrl;
 
   double _currentAngle = 0;
-  bool _spinning = false;
-  bool _spun = false;
+  bool _spinning      = false;
+  bool _anticipating  = false;   // drum-roll phase before wheel starts
+  bool _spun          = false;
   Map<String, dynamic>? _outcome;
-  bool _showResult = false;
+  bool _showResult    = false;
+  int  _pointerTicks  = 0;        // increments each segment crossing
+  int  _lastSegmentIndex = -1;    // tracks which segment the pointer is on
 
   @override
   void initState() {
     super.initState();
-    _confettiCtrl = ConfettiController(duration: const Duration(seconds: 3));
+    _confettiCtrl = ConfettiController(duration: const Duration(seconds: 4));
     _wheelCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 4600),
+      vsync:    this,
+      // Longer duration = more dramatic deceleration theater
+      duration: const Duration(milliseconds: 5400),
     );
+    // easeOutCubic gives more natural slow-down than easeOutExpo
     _wheelAnim = CurvedAnimation(
       parent: _wheelCtrl,
-      curve: Curves.easeOutExpo,
+      curve: Curves.easeOutCubic,
     );
-    _wheelCtrl.addListener(() => setState(() {}));
+    _wheelCtrl.addListener(_onWheelTick);
     _wheelCtrl.addStatusListener((s) {
       if (s == AnimationStatus.completed) _onSpinComplete();
     });
@@ -162,42 +168,92 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
     return extra + (2 * math.pi - target);
   }
 
+  // ── Segment tick tracking (for WheelPointerTick haptics) ──────────────────
+  void _onWheelTick() {
+    setState(() {});
+    if (!_spinning) return;
+    // Estimate which segment pointer is on and tick if crossed
+    final segsAsync = ref.read(_wheelConfigProvider);
+    final segs = segsAsync.valueOrNull;
+    if (segs == null || segs.isEmpty) return;
+    final segAngle = 2 * math.pi / segs.length;
+    final currentDisplay = _currentAngle * _wheelAnim.value;
+    final idx = (currentDisplay / segAngle).floor() % segs.length;
+    if (idx != _lastSegmentIndex) {
+      _lastSegmentIndex = idx;
+      _pointerTicks++;
+    }
+  }
+
   Future<void> _handleSpin(List<WheelSegment> segs, int spinCredits) async {
-    if (_spinning || _spun) return;
+    if (_spinning || _anticipating || _spun) return;
     if (spinCredits < 1) {
       _showSnack('No spin credits! Recharge to earn spins 💫', isError: true);
       return;
     }
-    HapticFeedback.mediumImpact();
-    setState(() { _spinning = true; _showResult = false; });
 
+    // ── Phase 1: Drum-roll anticipation (800ms) ──
+    HapticFeedback.mediumImpact();
+    setState(() { _anticipating = true; _showResult = false; });
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+    HapticFeedback.heavyImpact(); // "here we go" bump
+
+    setState(() { _anticipating = false; _spinning = true; });
+
+    // ── Phase 2: API call + wheel animation ──
     try {
       final res = await ref.read(spinApiProvider).play();
       _outcome = Map<String, dynamic>.from(res);
       final slotIdx = (res['slot_index'] ?? 0) as int;
       final delta = _targetRotation(segs, slotIdx);
       _currentAngle += delta;
+      _pointerTicks     = 0;
+      _lastSegmentIndex = -1;
       _wheelCtrl.reset();
       _wheelCtrl.forward();
     } catch (e) {
-      setState(() => _spinning = false);
+      setState(() { _spinning = false; _anticipating = false; });
       _showSnack(e.toString(), isError: true);
     }
   }
 
   void _onSpinComplete() {
+    // Triple haptic punch for dramatic landing
     HapticFeedback.heavyImpact();
-    setState(() {
-      _spinning = false;
-      _spun = true;
-      _showResult = true;
-    });
+    Future.delayed(const Duration(milliseconds: 120),
+        () => HapticFeedback.heavyImpact());
+    Future.delayed(const Duration(milliseconds: 240),
+        () => HapticFeedback.heavyImpact());
+
     final prizeType = _outcome?['spin_result']?['prize_type'] ?? 'try_again';
+    final prizeLabel = _outcome?['prize_label']?.toString() ?? '';
+
+    setState(() {
+      _spinning    = false;
+      _anticipating = false;
+      _spun        = true;
+      _showResult  = true;
+    });
+
     if (prizeType != 'try_again') {
-      _confettiCtrl.play(); // 🎉 fire confetti on any real win
-      _showSnack('🎉 ${_outcome?['prize_label'] ?? 'You won!'}');
+      // More confetti particles for bigger wins
+      _confettiCtrl.play();
+
+      // Show points overlay for pulse_points prizes
+      final baseVal = _outcome?['spin_result']?['base_value'] as int? ?? 0;
+      if (prizeType == 'pulse_points' && baseVal > 0 && mounted) {
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted) {
+            showPointsEarned(context, points: baseVal, label: 'Pulse Points Won!');
+          }
+        });
+      }
+      _showSnack('🎉 $prizeLabel');
+    } else {
+      _showSnack('Try again next time! Recharge to earn more spins 🎡');
     }
-    // Refresh wallet + history
+
     ref.invalidate(_walletProvider);
     ref.invalidate(_spinHistoryProvider);
   }
@@ -268,6 +324,13 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
                         : [],
                   ),
                   child: Column(children: [
+                    // Anticipation overlay
+                    SpinAnticipationOverlay(visible: _anticipating),
+
+                    // Pointer with tick animation
+                    WheelPointerTick(tickCount: _pointerTicks),
+                    const SizedBox(height: 2),
+
                     // Wheel
                     _WheelWidget(
                       segments: segs,
@@ -287,12 +350,12 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
                     ),
 
                     // Spin button
-                    if (!_spun) ...[
+                    if (!_spun && !_anticipating) ...[
                       const SizedBox(height: 4),
                       _SpinButton(
-                        onTap: () => _handleSpin(segs, credits),
-                        spinning: _spinning,
-                        credits: credits,
+                        onTap:        () => _handleSpin(segs, credits),
+                        spinning:     _spinning || _anticipating,
+                        credits:      credits,
                       ),
                     ],
                   ]),

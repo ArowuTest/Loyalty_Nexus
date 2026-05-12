@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import '../theme/nexus_theme.dart';
+import '../widgets/nexus_gamification.dart';
 import '../api/api_client.dart';
 
 // ── Connectivity provider ───────────────────────────────────────────────────────────
@@ -30,13 +31,14 @@ class MainShell extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
   const MainShell({super.key, required this.navigationShell});
 
+  // 5 tabs: Home | Earn | Studio | Rewards | Profile
+  // Recharge is a gold ⚡ button between Studio and Rewards (not a shell branch)
   static const _tabs = [
-    _Tab(icon: Icons.home_outlined,       activeIcon: Icons.home_rounded,         label: 'Home'),
-    _Tab(icon: Icons.casino_outlined,      activeIcon: Icons.casino_rounded,       label: 'Spin'),
-    _Tab(icon: Icons.auto_awesome_outlined,activeIcon: Icons.auto_awesome,         label: 'Studio'),
-    _Tab(icon: Icons.public_outlined,      activeIcon: Icons.public_rounded,       label: 'Wars'),
-    _Tab(icon: Icons.sports_esports_outlined, activeIcon: Icons.sports_esports_rounded, label: 'Arcade'),
-    _Tab(icon: Icons.person_outline,       activeIcon: Icons.person_rounded,       label: 'Profile'),
+    _Tab(icon: Icons.home_outlined,          activeIcon: Icons.home_rounded,          label: 'Home'),
+    _Tab(icon: Icons.trending_up_outlined,   activeIcon: Icons.trending_up_rounded,   label: 'Earn'),
+    _Tab(icon: Icons.auto_awesome_outlined,  activeIcon: Icons.auto_awesome,          label: 'Studio'),
+    _Tab(icon: Icons.card_giftcard_outlined, activeIcon: Icons.card_giftcard_rounded, label: 'Rewards'),
+    _Tab(icon: Icons.person_outline,         activeIcon: Icons.person_rounded,        label: 'Profile'),
   ];
 
   void _onTap(int i) {
@@ -103,8 +105,8 @@ class _BottomBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Split tabs into left (0–2) and right (3–5) groups with a Recharge button in the middle
-    final leftTabs  = tabs.sublist(0, 3);  // Home, Spin, Studio
-    final rightTabs = tabs.sublist(3, 6);  // Wars, Arcade, Profile
+    final leftTabs  = tabs.sublist(0, 3);  // Home, Earn, Studio
+    final rightTabs = tabs.sublist(3, 5);  // Rewards, Profile
 
     return Container(
       decoration: BoxDecoration(
@@ -140,7 +142,7 @@ class _BottomBar extends StatelessWidget {
               ...List.generate(rightTabs.length, (i) => _TabItem(
                 tab:    rightTabs[i],
                 active: (i + 3) == current,
-                badge:  (i + 3) == 5 ? unread : 0,
+                badge:  (i + 3) == 4 ? unread : 0,
                 isNew:  (i + 3) == 4,
                 onTap:  () => onTap(i + 3),
               )),
