@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, useScroll, useTransform, useInView } from "framer-motion";
 import {
   Zap, Sparkles, ArrowRight, RotateCcw, Lock, ChevronRight,
