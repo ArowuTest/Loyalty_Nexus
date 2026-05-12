@@ -24,7 +24,7 @@ services:
     # Health check hits /health (plain path, not /api/v1/health).
     healthCheckPath: /health
     plan: starter
-    autoDeploy: true
+    autoDeploy: false
 
     envVars:
       # ── Server ───────────────────────────────────────────────────────────
@@ -204,7 +204,7 @@ services:
     dockerContext: .
     dockerBuildTarget: worker
     plan: starter
-    autoDeploy: true
+    autoDeploy: false
     envVars:
       - key: DATABASE_URL
         fromDatabase:
