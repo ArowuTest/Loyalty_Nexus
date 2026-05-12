@@ -7,11 +7,12 @@ import { useStore } from "@/store/useStore";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, Zap, Wand2, Gift, Trophy, Bell,
-  User, Settings, LogOut, ChevronDown,
+  User, Settings, LogOut, ChevronDown, Smartphone,
 } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Home"       },
+  { href: "/recharge",  icon: Smartphone,      label: "Recharge",  highlight: true },
   { href: "/spin",      icon: Zap,             label: "Spin"       },
   { href: "/studio",    icon: Wand2,           label: "AI Studio"  },
   { href: "/wars",      icon: Trophy,          label: "Wars"       },
@@ -111,7 +112,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 href={item.href}
                 className={cn(
                   "flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-black transition-all",
-                  active ? "" : "text-white/40 hover:text-white hover:bg-white/[0.05]"
+                  active ? "" : (item as any).highlight && !active ? "text-yellow-400 border border-yellow-500/30 hover:border-yellow-500/60 hover:bg-yellow-500/10" : "text-white/40 hover:text-white hover:bg-white/[0.05]"
                 )}
                 style={active ? {
                   background: "rgba(245,166,35,0.10)",
