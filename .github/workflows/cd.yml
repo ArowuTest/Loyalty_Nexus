@@ -147,15 +147,15 @@ jobs:
         run: npm install -g vercel@latest
 
       - name: Deploy Frontend to Vercel (Production)
-        working-directory: frontend
         env:
-          VERCEL_TOKEN:   ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID:  ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_TOKEN:      ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_FRONTEND }}
         run: |
-          vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          # Run from repo root — pass --cwd so vercel doesn't double the rootDirectory
+          vercel pull --yes --environment=production --cwd frontend --token=${{ secrets.VERCEL_TOKEN }}
+          vercel build --prod --cwd frontend --token=${{ secrets.VERCEL_TOKEN }}
+          DEPLOY_URL=$(vercel deploy --prebuilt --prod --cwd frontend --token=${{ secrets.VERCEL_TOKEN }})
           echo "✅ Frontend deployed: $DEPLOY_URL"
           echo "FRONTEND_URL=$DEPLOY_URL" >> $GITHUB_ENV
 
@@ -184,15 +184,15 @@ jobs:
         run: npm install -g vercel@latest
 
       - name: Deploy Admin to Vercel (Production)
-        working-directory: admin
         env:
-          VERCEL_TOKEN:   ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID:  ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_TOKEN:      ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID:     ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_ADMIN }}
         run: |
-          vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          # Run from repo root — pass --cwd so vercel doesn't double the rootDirectory
+          vercel pull --yes --environment=production --cwd admin --token=${{ secrets.VERCEL_TOKEN }}
+          vercel build --prod --cwd admin --token=${{ secrets.VERCEL_TOKEN }}
+          DEPLOY_URL=$(vercel deploy --prebuilt --prod --cwd admin --token=${{ secrets.VERCEL_TOKEN }})
           echo "✅ Admin deployed: $DEPLOY_URL"
           echo "ADMIN_URL=$DEPLOY_URL" >> $GITHUB_ENV
 
