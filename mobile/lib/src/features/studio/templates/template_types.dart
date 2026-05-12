@@ -1,6 +1,7 @@
 // ─── Studio Template Shared Types ─────────────────────────────────────────────
 // Mirrors the webapp's templates/types.ts exactly.
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 /// Payload sent to the API after the user fills in a template.
@@ -308,12 +309,16 @@ class UploadZone extends StatelessWidget {
             if (hasFile && previewUrl!.startsWith('http'))
               ClipRRect(
                 borderRadius: BorderRadius.circular(13),
-                child: Image.network(
-                  previewUrl!,
+                child: CachedNetworkImage(
+                  imageUrl: previewUrl!,
                   width: double.infinity,
                   height: double.infinity,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => _placeholder(),
+                  placeholder: (_, __) => const Center(
+                    child: SizedBox(width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54)),
+                  ),
+                  errorWidget: (_, __, ___) => _placeholder(),
                 ),
               )
             else
