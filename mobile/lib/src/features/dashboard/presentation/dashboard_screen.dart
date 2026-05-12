@@ -929,19 +929,23 @@ class _RechargeCTAContent extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0x14F5A623), Color(0x08F5A623)],
+          colors: [Color(0x22F5A623), Color(0x10F5A623)],
           begin: Alignment.topLeft, end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x2EF5A623)),
+        border: Border.all(color: const Color(0x55F5A623), width: 1.5),
+        boxShadow: [BoxShadow(color: const Color(0x18F5A623), blurRadius: 12)],
       ),
       child: Row(children: [
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Recharge to earn more ⚡',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+          const Row(children: [
+            Text('⚡ ', style: TextStyle(fontSize: 14)),
+            Text('Recharge & Earn Double Points',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13)),
+          ]),
           const SizedBox(height: 3),
-          const Text('₦250 = 1 Pulse Point · ₦1,000+ = free spin',
-            style: TextStyle(color: Color(0xFF9ca3af), fontSize: 11)),
+          const Text('Tap to recharge your MTN — 2× points on every top-up',
+            style: TextStyle(color: Color(0xFFF5A623), fontSize: 11, fontWeight: FontWeight.w600)),
         ])),
         const SizedBox(width: 12),
         Container(
@@ -950,12 +954,13 @@ class _RechargeCTAContent extends StatelessWidget {
             gradient: const LinearGradient(
               colors: [NexusColors.gold, Color(0xFFd97706)]),
             borderRadius: BorderRadius.circular(14),
+            boxShadow: [BoxShadow(color: const Color(0x40F5A623), blurRadius: 8, offset: Offset(0, 2))],
           ),
           child: const Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.bolt_rounded, size: 14, color: Colors.white),
+            Icon(Icons.bolt_rounded, size: 14, color: Colors.black),
             SizedBox(width: 4),
-            Text('Recharge', style: TextStyle(color: Colors.white,
-              fontWeight: FontWeight.w800, fontSize: 12)),
+            Text('Recharge', style: TextStyle(color: Colors.black,
+              fontWeight: FontWeight.w900, fontSize: 12)),
           ]),
         ),
       ]),
