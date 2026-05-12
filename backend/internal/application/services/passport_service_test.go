@@ -45,7 +45,8 @@ func setupPassportDB(t *testing.T) *gorm.DB {
 		user_id TEXT NOT NULL UNIQUE,
 		pulse_points INTEGER NOT NULL DEFAULT 0,
 		spin_credits INTEGER NOT NULL DEFAULT 0,
-		recharge_counter INTEGER NOT NULL DEFAULT 0
+		recharge_counter INTEGER NOT NULL DEFAULT 0,
+		lifetime_points INTEGER NOT NULL DEFAULT 0
 	)`)
 
 	db.Exec(`CREATE TABLE IF NOT EXISTS user_badges (
@@ -90,7 +91,7 @@ func TestPassportService_GetPassport(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
 	db.Exec(`INSERT INTO users (id, phone_number, tier, streak_count, lifetime_points) VALUES (?, '2348012345678', 'SILVER', 5, 2500)`, userID)
-	db.Exec(`INSERT INTO wallets (id, user_id, pulse_points, spin_credits, recharge_counter) VALUES (?, ?, 150, 2, 1650)`, uuid.New(), userID)
+	db.Exec(`INSERT INTO wallets (id, user_id, pulse_points, spin_credits, recharge_counter, lifetime_points) VALUES (?, ?, 150, 2, 1650, 2500)`, uuid.New(), userID)
 	db.Exec(`INSERT INTO user_badges (id, user_id, badge_key) VALUES (?, ?, 'first_recharge')`, uuid.New(), userID)
 
 	passport, err := svc.GetPassport(ctx, userID)
