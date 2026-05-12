@@ -259,7 +259,7 @@ func main() {
 		// GAP-5: VTPass client validates credentials at construction; logs warning in
 		// sandbox mode so a missing key never causes a silent startup failure.
 		var vtuH *handlers.VTURechargeHandler
-		if vtpassClient, vtpassErr := external.NewVTPassClient(); vtpassErr != nil {
+		if vtpassClient, vtpassErr := external.NewVTPassHTTPClient(); vtpassErr != nil {
 			log.Printf("[VTU] ⚠ VTPass client init failed (%v) — recharge endpoints will return 503", vtpassErr)
 		} else {
 			bundleSvc  := external.NewNetworkBundleService(vtpassClient)

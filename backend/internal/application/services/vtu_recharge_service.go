@@ -31,7 +31,7 @@ import (
 
 type VTURechargeService struct {
 	db          *gorm.DB
-	vtpass      *external.VTPassClient
+	vtpass      *external.VTPassHTTPClient
 	bundleSvc   *external.NetworkBundleService
 	rechargeSvc *RechargeService // for processAwardTransaction (double points)
 	notifySvc   *NotificationService
@@ -97,7 +97,7 @@ func (WebhookEventDedup) TableName() string { return "webhook_events" }
 
 func NewVTURechargeService(
 	db *gorm.DB,
-	vtpass *external.VTPassClient,
+	vtpass *external.VTPassHTTPClient,
 	bundleSvc *external.NetworkBundleService,
 	rechargeSvc *RechargeService,
 	notifySvc *NotificationService,

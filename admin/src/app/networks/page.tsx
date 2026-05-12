@@ -73,7 +73,11 @@ export default function NetworksPage() {
   };
 
   return (
-    <AdminShell title="Network Operators" subtitle="Enable/disable telecom networks and their services. Changes take effect instantly — no deployment needed.">
+    <AdminShell>
+      <div className="mb-6">
+        <h1 className="text-2xl font-black text-white">Network Operators</h1>
+        <p className="text-white/40 text-sm mt-1">Enable/disable telecom networks and their services. Changes take effect instantly — no deployment needed.</p>
+      </div>
       {error   && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{error}</div>}
       {success && <div className="mb-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm">✓ {success}</div>}
 

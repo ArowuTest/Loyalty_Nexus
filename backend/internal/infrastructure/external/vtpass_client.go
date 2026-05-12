@@ -21,9 +21,9 @@ import (
 // Sandbox vs. live is controlled by a single VTPASS_SANDBOX env var.
 // GAP-7 fix: one flag controls both the base URL and the service mode — no
 // divergence between DB provider_mode and isSandbox env var.
-// GAP-5 fix: credentials are validated at construction time in NewVTPassClient().
+// GAP-5 fix: credentials are validated at construction time in NewVTPassHTTPClient().
 
-type VTPassClient struct {
+type VTPassHTTPClient struct {
 	apiKey    string
 	publicKey string
 	secretKey string
@@ -66,7 +66,7 @@ var vtpassDataIDs = map[string]string{
 
 // ── Constructor ──────────────────────────────────────────────────────────────
 
-func NewVTPassClient() (*VTPassClient, error) {
+func NewVTPassHTTPClient() (*VTPassHTTPClient, error) {
 	sandbox := os.Getenv("VTPASS_SANDBOX") == "true"
 
 	apiKey    := os.Getenv("VTPASS_API_KEY")
@@ -87,7 +87,7 @@ func NewVTPassClient() (*VTPassClient, error) {
 		baseURL = override
 	}
 
-	return &VTPassClient{
+	return &VTPassHTTPClient{
 		apiKey:    apiKey,
 		publicKey: publicKey,
 		secretKey: secretKey,
@@ -99,7 +99,7 @@ func NewVTPassClient() (*VTPassClient, error) {
 
 // ── Airtime purchase ─────────────────────────────────────────────────────────
 
-func (c *VTPassClient) PurchaseAirtime(ctx context.Context, network, phone string, amountNaira int) (*VTPassPurchaseResult, error) {
+func (c *VTPassHTTPClient) PurchaseAirtime(ctx context.Context, network, phone string, amountNaira int) (*VTPassPurchaseResult, error) {
 	svcID, ok := vtpassAirtimeIDs[network]
 	if !ok {
 		return nil, fmt.Errorf("vtpass: unsupported network %q", network)
@@ -116,7 +116,7 @@ func (c *VTPassClient) PurchaseAirtime(ctx context.Context, network, phone strin
 
 // ── Data purchase ─────────────────────────────────────────────────────────────
 
-func (c *VTPassClient) PurchaseData(ctx context.Context, network, phone, variationCode string, amountNaira int) (*VTPassPurchaseResult, error) {
+func (c *VTPassHTTPClient) PurchaseData(ctx context.Context, network, phone, variationCode string, amountNaira int) (*VTPassPurchaseResult, error) {
 	svcID, ok := vtpassDataIDs[network]
 	if !ok {
 		return nil, fmt.Errorf("vtpass: unsupported network %q", network)
@@ -136,7 +136,7 @@ func (c *VTPassClient) PurchaseData(ctx context.Context, network, phone, variati
 
 // ── Requery (for PENDING transactions) ───────────────────────────────────────
 
-func (c *VTPassClient) RequeryTransaction(ctx context.Context, requestID string) (*VTPassPurchaseResult, error) {
+func (c *VTPassHTTPClient) RequeryTransaction(ctx context.Context, requestID string) (*VTPassPurchaseResult, error) {
 	url := c.baseURL + "/requery"
 	payload, _ := json.Marshal(map[string]string{"request_id": requestID})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(payload))
@@ -159,7 +159,7 @@ func (c *VTPassClient) RequeryTransaction(ctx context.Context, requestID string)
 // ── GetVariations: live bundle catalog from VTPass ────────────────────────────
 // Called by NetworkBundleService (backed by 1-hour cache). GAP data-bundle fix.
 
-func (c *VTPassClient) GetVariations(ctx context.Context, network string) ([]VTPassVariation, error) {
+func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([]VTPassVariation, error) {
 	svcID, ok := vtpassDataIDs[network]
 	if !ok {
 		return nil, fmt.Errorf("vtpass: unsupported network %q", network)
@@ -211,7 +211,7 @@ func (c *VTPassClient) GetVariations(ctx context.Context, network string) ([]VTP
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
-func (c *VTPassClient) doPurchase(ctx context.Context, reqID string, body map[string]interface{}) (*VTPassPurchaseResult, error) {
+func (c *VTPassHTTPClient) doPurchase(ctx context.Context, reqID string, body map[string]interface{}) (*VTPassPurchaseResult, error) {
 	url := c.baseURL + "/pay"
 	payload, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(payload))
@@ -231,7 +231,7 @@ func (c *VTPassClient) doPurchase(ctx context.Context, reqID string, body map[st
 	return c.parseResponse(reqID, raw), nil
 }
 
-func (c *VTPassClient) parseResponse(reqID string, raw []byte) *VTPassPurchaseResult {
+func (c *VTPassHTTPClient) parseResponse(reqID string, raw []byte) *VTPassPurchaseResult {
 	var r struct {
 		Code                string `json:"code"`
 		ResponseDescription string `json:"response_description"`
@@ -273,7 +273,7 @@ func (c *VTPassClient) parseResponse(reqID string, raw []byte) *VTPassPurchaseRe
 	return res
 }
 
-func (c *VTPassClient) newRequestID() string {
+func (c *VTPassHTTPClient) newRequestID() string {
 	return time.Now().Format("20060102150405") + uuid.New().String()[:8]
 }
 
@@ -296,7 +296,7 @@ func formatPhoneLocal(phone string) string {
 // Implements the GAP data-bundle fix: DataBundleResponse.ID = variation_code.
 
 type NetworkBundleService struct {
-	vtpass *VTPassClient
+	vtpass *VTPassHTTPClient
 	mu     sync.RWMutex
 	cache  map[string]bundleCacheEntry
 }
@@ -327,7 +327,7 @@ type NetworkResponse struct {
 	SortOrder      int    `json:"sort_order"`
 }
 
-func NewNetworkBundleService(vtpass *VTPassClient) *NetworkBundleService {
+func NewNetworkBundleService(vtpass *VTPassHTTPClient) *NetworkBundleService {
 	return &NetworkBundleService{
 		vtpass: vtpass,
 		cache:  make(map[string]bundleCacheEntry),
