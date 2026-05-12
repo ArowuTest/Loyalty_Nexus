@@ -891,6 +891,27 @@ class _RechargeCTA extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Recharge to earn Pulse Points',
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => context.push('/recharge'),
+          child: _RechargeCTAContent(),
+        ),
+      ),
+    );
+  }
+}
+
+class _RechargeCTAContent extends StatelessWidget {
+  const _RechargeCTAContent();
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
