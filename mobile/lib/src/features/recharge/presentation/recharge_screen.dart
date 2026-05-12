@@ -174,10 +174,10 @@ class RechargeFormNotifier extends StateNotifier<RechargeFormState> {
 
     try {
       final body = <String, dynamic>{
-        'phone':        state.phone.trim(),
-        'network_code': state.selectedNetwork,
-        'amount':       state.effectiveAmount,
-        'type':         state.type.name,
+        'msisdn':        state.phone.trim(),
+        'network':       state.selectedNetwork,
+        'amount_kobo':   (state.effectiveAmount ?? 0) * 100,
+        'recharge_type': state.type.name,
         if (state.type == RechargeType.data)
           'variation_code': state.selectedBundle!.id,
         if (userId != null) 'user_id': userId,
