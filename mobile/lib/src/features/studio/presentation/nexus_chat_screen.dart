@@ -583,9 +583,9 @@ class _NexusChatScreenState extends ConsumerState<NexusChatScreen>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.09),
+                color: Colors.white.withValues(alpha: 0.09),
                 borderRadius: const BorderRadius.all(Radius.circular(18)),
-                border: Border.all(color: Colors.white.withOpacity(0.08)),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
               ),
               child: _RichText(text: text, baseColor: NexusColors.textPrimary),
             ),
@@ -645,7 +645,7 @@ class _NexusChatScreenState extends ConsumerState<NexusChatScreen>
               margin: const EdgeInsets.symmetric(horizontal: 2),
               width: 7 * scale, height: 7 * scale,
               decoration: BoxDecoration(
-                color: _cfg.color.withOpacity(0.8),
+                color: _cfg.color.withValues(alpha: 0.8),
                 shape: BoxShape.circle,
               ),
             );
@@ -668,12 +668,12 @@ class _NexusChatScreenState extends ConsumerState<NexusChatScreen>
       child: Row(children: [
         IconButton(
           icon: Icon(Icons.attach_file_rounded,
-            color: NexusColors.textSecondary.withOpacity(0.7), size: 20),
+            color: NexusColors.textSecondary.withValues(alpha: 0.7), size: 20),
           onPressed: _pickFile,
         ),
         IconButton(
           icon: Icon(Icons.image_outlined,
-            color: NexusColors.textSecondary.withOpacity(0.7), size: 20),
+            color: NexusColors.textSecondary.withValues(alpha: 0.7), size: 20),
           onPressed: _pickImage,
         ),
         Expanded(
@@ -705,7 +705,7 @@ class _NexusChatScreenState extends ConsumerState<NexusChatScreen>
           child: Container(
             width: 40, height: 40,
             decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [_cfg.color, _cfg.color.withOpacity(0.7)]),
+              gradient: LinearGradient(colors: [_cfg.color, _cfg.color.withValues(alpha: 0.7)]),
               shape: BoxShape.circle,
             ),
             child: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
@@ -729,9 +729,9 @@ class _ToolAvatar extends StatelessWidget {
     return Container(
       width: size, height: size,
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(size * 0.28),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Center(
         child: Text(icon,
@@ -756,9 +756,9 @@ class _SuggestionCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.2)),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
         ),
         child: Text(text,
           maxLines: 2,

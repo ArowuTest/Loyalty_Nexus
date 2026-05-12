@@ -3,7 +3,6 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -158,13 +157,13 @@ class _WebsiteBuilderScreenState extends ConsumerState<WebsiteBuilderScreen> {
     _slugCtrl.dispose();
     _slugTimer?.cancel();
     _pollTimer?.cancel();
-    for (final c in _fieldCtrls.values) c.dispose();
+    for (final c in _fieldCtrls.values) { c.dispose(); }
     super.dispose();
   }
 
   void _initFields() {
     if (_siteType == null) return;
-    for (final c in _fieldCtrls.values) c.dispose();
+    for (final c in _fieldCtrls.values) { c.dispose(); }
     _fieldCtrls.clear();
     for (final f in _siteType!.fields) {
       final ctrl = TextEditingController();
@@ -525,7 +524,7 @@ class _WebsiteBuilderScreenState extends ConsumerState<WebsiteBuilderScreen> {
             decoration: BoxDecoration(
               color: NexusColors.redDim,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: NexusColors.red.withOpacity(0.3)),
+              border: Border.all(color: NexusColors.red.withValues(alpha: 0.3)),
             ),
             child: Text(_genError!,
               style: const TextStyle(color: NexusColors.red, fontSize: 13)),
@@ -651,7 +650,7 @@ class _SiteTypeCard extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: selected ? type.color.withOpacity(0.12) : NexusColors.surface,
+          color: selected ? type.color.withValues(alpha: 0.12) : NexusColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: selected ? type.color : NexusColors.border,

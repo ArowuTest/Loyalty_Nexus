@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gap/gap.dart';
 import 'package:go_router/go_router.dart';
 import '../theme/nexus_theme.dart';
-import '../widgets/nexus_gamification.dart';
 import '../api/api_client.dart';
 
 // ── Connectivity provider ───────────────────────────────────────────────────────────

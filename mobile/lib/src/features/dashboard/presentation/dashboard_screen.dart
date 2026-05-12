@@ -1057,17 +1057,6 @@ class _TxRow extends StatelessWidget {
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
-class _LoadingPlaceholder extends StatelessWidget {
-  const _LoadingPlaceholder();
-  @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: 0.15),
-      borderRadius: BorderRadius.circular(8),
-    ),
-  );
-}
-
 class _LoadingRow extends StatelessWidget {
   final String label;
   const _LoadingRow({required this.label});

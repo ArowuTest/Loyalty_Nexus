@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -702,7 +703,7 @@ class _NetworkGrid extends ConsumerWidget {
               border: Border.all(
                 color: isSelected
                     ? netColor
-                    : (enabled ? Colors.white12 : Colors.white06),
+                    : (enabled ? Colors.white12 : Colors.white.withValues(alpha: 0.06)),
                 width: isSelected ? 2 : 1,
               ),
             ),

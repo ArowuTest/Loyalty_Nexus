@@ -65,7 +65,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (!loggedIn) {
         if (loc == '/' ||
             loc == '/recharge' ||
-            loc == '/recharge/success') return null;
+            loc == '/recharge/success') {
+          return null;
+        }
         return '/';
       }
 

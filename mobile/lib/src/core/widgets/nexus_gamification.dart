@@ -10,15 +10,13 @@
 ///  • NexusSkeleton        — shimmer skeleton placeholder
 ///  • showPointsEarned()   — convenience function to show the overlay
 /// ─────────────────────────────────────────────────────────────────────────────
-library nexus_gamification;
-
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:shimmer/shimmer.dart';
 
-import 'theme/nexus_theme.dart';
+import '../theme/nexus_theme.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // POINTS EARNED OVERLAY
@@ -34,7 +32,7 @@ Future<void> showPointsEarned(
 }) async {
   if (!context.mounted) return;
   HapticFeedback.heavyImpact();
-  return showGeneralDialog(
+  showGeneralDialog<void>(
     context:      context,
     barrierDismissible: true,
     barrierLabel: '',
@@ -121,7 +119,7 @@ class _PointsOverlayContentState extends State<_PointsOverlayContent>
                       color: NexusColors.surfaceHigh,
                       borderRadius: BorderRadius.circular(24),
                       border: Border.all(color: NexusColors.goldDim, width: 1.5),
-                      boxShadow: NexusColors.goldGlow,
+                      boxShadow: [BoxShadow(color: NexusColors.gold.withValues(alpha: 0.35), blurRadius: 20, spreadRadius: 0)],
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -210,9 +208,9 @@ class _ParticleRowState extends State<_ParticleRow>
   @override
   void dispose() { _ctrl.dispose(); super.dispose(); }
 
-  static const _colors = [
-    NexusColors.gold, NexusColors.primary, Color(0xFF10b981),
-    Color(0xFFf43f5e), Color(0xFFa78bfa),
+  static final _colors = [
+    NexusColors.gold, NexusColors.primary, const Color(0xFF10b981),
+    const Color(0xFFf43f5e), const Color(0xFFa78bfa),
   ];
 
   @override

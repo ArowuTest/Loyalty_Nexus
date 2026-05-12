@@ -11,7 +11,6 @@ import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
-import '../../../core/widgets/nexus_gamification.dart';
 import '../../../core/theme/nexus_theme.dart';
 import '../templates/template_registry.dart';
 import 'nexus_chat_screen.dart';
@@ -932,9 +931,10 @@ class _ChatTab extends StatelessWidget {
           itemCount: messages.length + ((sending || (isStreaming && streamingContent != null)) ? 1 : 0),
           itemBuilder: (ctx, i) {
             if (i == messages.length) {
-              if (isStreaming && streamingContent != null)
+              if (isStreaming && streamingContent != null) {
                 return _StreamingBubble(content: streamingContent!, mode: mode);
-              if (sending) return _ThinkingBubble(mode: mode);
+              }
+              if (sending) { return _ThinkingBubble(mode: mode); }
             }
             return _ChatBubble(msg: messages[i])
                 .animate(key: ValueKey(messages[i].ts))
