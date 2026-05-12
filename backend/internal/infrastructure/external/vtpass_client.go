@@ -170,7 +170,7 @@ func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([
 		return nil, err
 	}
 	req.Header.Set("api-key", c.apiKey)
-	req.Header.Set("public-key", c.publicKey)
+	req.Header.Set("secret-key", c.secretKey)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
