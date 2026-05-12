@@ -418,7 +418,7 @@ func (s *VTURechargeService) issueRefund(ctx context.Context, recharge *VTURecha
 			recharge.ID, "Manual refund required: "+recharge.PaymentReference)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	s.db.WithContext(ctx).Model(&VTURecharge{}).Where("id = ?", recharge.ID).
 		Update("status", "CANCELLED")
 	log.Printf("[VTU] refund issued for %s", recharge.PaymentReference)
@@ -457,7 +457,7 @@ func (s *VTURechargeService) initPaystack(ctx context.Context, ref, email string
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	var result struct {
 		Status bool   `json:"status"`
