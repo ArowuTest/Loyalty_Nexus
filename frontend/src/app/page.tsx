@@ -409,7 +409,7 @@ export default function HomePage() {
               <Zap className="w-5 h-5" />
               Start Earning — It&apos;s Free
             </button>
-            <button onClick={openAuth}
+            <button
               className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center justify-center gap-2 min-w-[200px] w-full"
               onClick={() => isAuthenticated ? router.push("/studio") : openAuth()}>
                 <Play className="w-4 h-4 fill-current" />
