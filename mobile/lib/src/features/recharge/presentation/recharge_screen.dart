@@ -218,8 +218,10 @@ final rechargeFormProvider =
 
 final rechargeNetworksProvider =
     FutureProvider.autoDispose<List<NetworkOperator>>((ref) async {
-  final raw = await ref.read(dioProvider).apiGet<List<dynamic>>('/recharge/networks');
-  return raw
+  // The API returns {"networks": [...]} — unwrap the key.
+  final raw = await ref.read(dioProvider).apiGet<Map<String, dynamic>>('/recharge/networks');
+  final list = (raw['networks'] as List<dynamic>? ?? []);
+  return list
       .map((e) => NetworkOperator.fromJson(e as Map<String, dynamic>))
       .toList();
 });
