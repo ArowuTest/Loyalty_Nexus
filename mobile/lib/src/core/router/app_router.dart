@@ -17,6 +17,8 @@ import '../../features/prizes/presentation/draws_screen.dart';
 import '../../features/prizes/presentation/pulse_awards_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/how_it_works/presentation/how_it_works_screen.dart';
+import '../../features/recharge/presentation/recharge_screen.dart';
+import '../../features/recharge/presentation/recharge_success_screen.dart';
 import '../auth/auth_provider.dart';
 import '../shell/main_shell.dart';
 
@@ -38,6 +40,8 @@ class AppRoutes {
   static const notifications = '/notifications';
   static const settings      = '/settings';
   static const howItWorks    = '/how-it-works';
+  static const recharge       = '/recharge';
+  static const rechargeSuccess = '/recharge/success';
 }
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -57,9 +61,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // Wait for auth init
       if (loading) return null;
 
-      // Not logged in — only allow /
+      // Not logged in — allow / and public recharge routes
       if (!loggedIn) {
-        return loc == '/' ? null : '/';
+        if (loc == '/' ||
+            loc == '/recharge' ||
+            loc == '/recharge/success') return null;
+        return '/';
       }
 
       // New user — only allow /register
@@ -121,6 +128,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
       GoRoute(path: '/settings',      builder: (_, __) => const SettingsScreen()),
       GoRoute(path: '/how-it-works',  builder: (_, __) => const HowItWorksScreen()),
+      // ── Public recharge ───────────────────────────────────────────────────
+      GoRoute(path: '/recharge',         builder: (_, __) => const RechargeScreen()),
+      GoRoute(
+        path: '/recharge/success',
+        builder: (_, state) {
+          final ref = state.extra as String?;
+          return RechargeSuccessScreen(reference: ref);
+        },
+      ),
     ],
   );
 });

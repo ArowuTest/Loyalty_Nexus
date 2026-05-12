@@ -102,6 +102,10 @@ class _BottomBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Split tabs into left (0–2) and right (3–5) groups with a Recharge button in the middle
+    final leftTabs  = tabs.sublist(0, 3);  // Home, Spin, Studio
+    final rightTabs = tabs.sublist(3, 6);  // Wars, Arcade, Profile
+
     return Container(
       decoration: BoxDecoration(
         color: NexusColors.surface,
@@ -119,17 +123,85 @@ class _BottomBar extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: List.generate(tabs.length, (i) => _TabItem(
-              tab:     tabs[i],
-              active:  i == current,
-              // Show badge on Profile tab (index 5) — notifications
-              badge:   i == 5 ? unread : 0,
-              // Arcade tab (index 4) gets a special "NEW" badge
-              isNew:   i == 4,
-              onTap:   () => onTap(i),
-            )),
+            children: [
+              // Left tabs: Home (0), Spin (1), Studio (2)
+              ...List.generate(leftTabs.length, (i) => _TabItem(
+                tab:    leftTabs[i],
+                active: i == current,
+                badge:  0,
+                isNew:  false,
+                onTap:  () => onTap(i),
+              )),
+
+              // ── Centre Recharge button ──
+              _RechargeNavButton(),
+
+              // Right tabs: Wars (3), Arcade (4), Profile (5)
+              ...List.generate(rightTabs.length, (i) => _TabItem(
+                tab:    rightTabs[i],
+                active: (i + 3) == current,
+                badge:  (i + 3) == 5 ? unread : 0,
+                isNew:  (i + 3) == 4,
+                onTap:  () => onTap(i + 3),
+              )),
+            ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─── Recharge centre-nav button ───────────────────────────────────────────────
+
+class _RechargeNavButton extends StatelessWidget {
+  const _RechargeNavButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        context.push('/recharge');
+      },
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width:  44,
+            height: 34,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFF9C74F), Color(0xFFFFB703)],
+                begin: Alignment.topLeft,
+                end:   Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color:       NexusColors.gold.withValues(alpha: 0.45),
+                  blurRadius:  10,
+                  spreadRadius: 0,
+                  offset:      const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.bolt_rounded,
+              color: Color(0xFF1A1200),
+              size:  22,
+            ),
+          ),
+          const SizedBox(height: 3),
+          const Text(
+            'Recharge',
+            style: TextStyle(
+              color:      NexusColors.gold,
+              fontSize:   10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }
