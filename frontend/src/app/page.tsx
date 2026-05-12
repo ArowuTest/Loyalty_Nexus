@@ -293,6 +293,7 @@ function DemoSpinWheel({ onLoginClick }: { onLoginClick: () => void }) {
 export default function HomePage() {
   const [authOpen, setAuthOpen]           = useState(false);
   const [bannerVisible, setBannerVisible] = useState(true);
+  const router = useRouter();
   const { isAuthenticated, _hasHydrated } = useStore();
   const heroRef                           = useRef<HTMLElement>(null);
   const { scrollY }                       = useScroll();
@@ -361,15 +362,15 @@ export default function HomePage() {
           {/* Live badge */}
           <motion.div initial={{ opacity: 0, y: 16, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ type: "spring", stiffness: 280, damping: 24, delay: 0.05 }}
-            className="inline-flex items-center gap-2 rounded-full px-5 py-2 mb-8 cursor-default select-none border"
-            style={{ background: "rgba(245,166,35,0.08)", borderColor: "rgba(245,166,35,0.25)" }}>
+            className="inline-flex items-center gap-2.5 rounded-full px-5 py-2.5 mb-8 border cursor-pointer hover:scale-105 transition-all duration-200 group"
+            style={{ background: "rgba(245,166,35,0.12)", borderColor: "rgba(245,166,35,0.50)" }}
+            onClick={() => router.push("/recharge")}>
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-nexus-500 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-nexus-500" />
             </span>
-            <span className="text-[13px] font-bold text-nexus-400">Thousands of Nigerians earning right now</span>
-            <span className="hidden sm:inline text-white/20 mx-1">·</span>
-            <span className="hidden sm:inline text-[12px] font-semibold text-white/40">🇳🇬 Made for Africa</span>
+            <Zap className="w-3.5 h-3.5 text-gold-400" /><span className="text-[13px] font-black text-gold-400">⚡ Tap to recharge your MTN &amp; earn double points</span><ArrowRight className="w-3.5 h-3.5 text-gold-400" />
+
           </motion.div>
 
           {/* Headline */}
@@ -408,9 +409,10 @@ export default function HomePage() {
               Start Earning — It&apos;s Free
             </button>
             <button onClick={openAuth}
-              className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center justify-center gap-2 min-w-[200px] w-full">
+              className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center justify-center gap-2 min-w-[200px] w-full"
+              onClick={() => isAuthenticated ? router.push("/studio") : openAuth()}>
                 <Play className="w-4 h-4 fill-current" />
-                Try AI Studio Free
+                {isAuthenticated ? "Open AI Studio" : "Try AI Studio Free"}
               </button>
           </motion.div>
 
@@ -598,7 +600,7 @@ export default function HomePage() {
               <motion.div key={cat.key} variants={fadeUp}>
                 <div className="glass rounded-2xl p-4 hover:border-white/[0.18] transition-all duration-250 cursor-pointer group h-full border"
                     style={{ borderColor: cat.border }}
-                    onClick={openAuth}>
+                    onClick={() => isAuthenticated ? router.push("/studio") : openAuth()}>
                     <div className="flex items-center justify-between mb-3">
                       <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl"
                         style={{ background: cat.bg, border: `1px solid ${cat.border}` }}>
@@ -624,7 +626,7 @@ export default function HomePage() {
             {TOOL_CARDS.map((tool) => (
               <motion.div key={tool.slug} variants={fadeUp}>
                 <div className="glass rounded-2xl border border-white/[0.07] p-4 hover:border-white/[0.18] transition-all duration-250 cursor-pointer group hover:scale-[1.02]"
-                  onClick={openAuth}>
+                  onClick={() => isAuthenticated ? router.push(`/studio/tool/${tool.slug}`) : openAuth()}>
                   <div className="flex items-start justify-between mb-3">
                     <span className="text-2xl">{tool.emoji}</span>
                     <div className="flex items-center gap-1 text-[10px] text-white/30">
@@ -634,18 +636,17 @@ export default function HomePage() {
                   </div>
                   <h4 className="text-[13px] font-bold text-white leading-snug mb-1">{tool.name}</h4>
                   <p className="text-[11px] text-white/40 line-clamp-2 leading-relaxed">{tool.description}</p>
-                  <div className="mt-3 flex items-center gap-1 text-[11px] text-white/30">
-                    <Lock className="w-3 h-3" />
-                    <span>Sign in to unlock</span>
+                  <div className="mt-3 flex items-center gap-1 text-[11px]">
+                    {isAuthenticated ? (<><Sparkles className="w-3 h-3 text-nexus-400" /><span className="text-nexus-400 ml-1">Open in Studio</span></>) : (<><Lock className="w-3 h-3 text-white/30" /><span className="text-white/30 ml-1">Sign in to unlock</span></>)}
                   </div>
                 </div>
               </motion.div>
             ))}
           </StaggerGrid>
           <div className="text-center mt-10">
-            <button onClick={openAuth}
+            <button onClick={() => isAuthenticated ? router.push("/studio") : openAuth()}
               className="inline-flex items-center gap-2 glass border border-white/[0.12] rounded-2xl h-12 px-7 text-sm font-semibold text-white hover:border-white/25 transition-all duration-200">
-                Explore all 30+ tools
+                {isAuthenticated ? "Open AI Studio" : "Explore all 30+ tools"}
                 <ArrowRight className="w-4 h-4" />
               </button>
           </div>
