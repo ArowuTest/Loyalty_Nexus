@@ -1925,40 +1925,47 @@ func (o *AIStudioOrchestrator) dispatchMusic(ctx context.Context, slug string, e
 			return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
 		}
 		// ── Hardcoded fallback chain ─────────────────────────────────────────────────────
-		// NOTE: Pollinations elevenmusic is currently OFF (45.9% success).
-		// Reordered: ElevenLabs direct → Mubert → Pollinations ElevenMusic (as last resort)
-		// Primary: ElevenLabs direct (reliable, uses existing ELEVENLABS_API_KEY)
+		// Tier 1: ElevenLabs direct (reliable, premium quality)
 		if el11Key := os.Getenv("ELEVENLABS_API_KEY"); el11Key != "" {
 			audioURL, err := o.callElevenLabsMusic(ctx, el11Key, prompt)
 			if err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "elevenlabs-sound", CostMicros: 500}, nil
 			}
-			log.Printf("[AIStudio] ElevenLabs Music failed for bg-music: %v — trying Mubert", err)
+			log.Printf("[AIStudio] ElevenLabs Music failed for bg-music: %v", err)
 		}
-		// Secondary: Mubert (royalty-free, text-to-music, paid plan)
+		// Tier 2: Mubert (royalty-free, text-to-music)
 		if mubertKey := os.Getenv("MUBERT_API_KEY"); mubertKey != "" {
 			audioURL, err := o.callMubert(ctx, mubertKey, prompt, 30)
 			if err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "mubert", CostMicros: 0}, nil
 			}
-			log.Printf("[AIStudio] Mubert failed: %v — trying Pollinations ElevenMusic", err)
+			log.Printf("[AIStudio] Mubert failed: %v", err)
 		}
-		// Tertiary: Pollinations ElevenMusic (currently OFF — kept as last resort in case it recovers)
+		// Tier 3: Suno instrumental (SUNO_API_KEY is set on Render — same key used by song-creator)
+		if sunoKey := os.Getenv("SUNO_API_KEY"); sunoKey != "" {
+			instrumentalPrompt := prompt + " [instrumental only, no vocals, background music]"
+			audioURL1, _, err := o.callSunoMusic(ctx, sunoKey, instrumentalPrompt, "background ambient", "Background Music", "", true)
+			if err == nil {
+				return &studioProviderResult{OutputURL: audioURL1, Provider: "suno-ai/bg-music", CostMicros: 20000}, nil
+			}
+			log.Printf("[AIStudio] Suno bg-music failed: %v", err)
+		}
+		// Tier 4: Pollinations ElevenMusic (kept as fallback — unreliable but free)
 		if sk := os.Getenv("POLLINATIONS_SECRET_KEY"); sk != "" {
 			audioURL, err := o.callPollinationsElevenMusic(ctx, prompt, true)
 			if err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "pollinations/elevenmusic", CostMicros: 500}, nil
 			}
-			log.Printf("[AIStudio] Pollinations ElevenMusic also failed for bg-music: %v", err)
+			log.Printf("[AIStudio] Pollinations ElevenMusic failed for bg-music: %v", err)
 		}
-		// Last resort: HuggingFace MusicGen-small (FREE — uses HF_TOKEN already required for image gen)
+		// Tier 5: HuggingFace MusicGen-small (FREE last resort)
 		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
 			if audioURL, err := o.callHFMusicGen(ctx, hfKey, prompt, 30); err == nil {
 				return &studioProviderResult{OutputURL: audioURL, Provider: "huggingface/musicgen-small", CostMicros: 0}, nil
 			}
 			log.Printf("[AIStudio] HF MusicGen also failed for bg-music")
 		}
-		return nil, fmt.Errorf("background music unavailable: configure ELEVENLABS_API_KEY, MUBERT_API_KEY, POLLINATIONS_SECRET_KEY, or HF_TOKEN")
+		return nil, fmt.Errorf("background music unavailable: all providers failed")
 	}
 }
 
