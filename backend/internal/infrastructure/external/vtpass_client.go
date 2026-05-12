@@ -151,7 +151,7 @@ func (c *VTPassHTTPClient) RequeryTransaction(ctx context.Context, requestID str
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	return c.parseResponse(requestID, raw), nil
 }
@@ -176,7 +176,7 @@ func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 
 	var parsed struct {
@@ -199,7 +199,7 @@ func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([
 	out := make([]VTPassVariation, 0, len(parsed.Content.Variations))
 	for _, v := range parsed.Content.Variations {
 		var amount float64
-		fmt.Sscanf(v.Amount, "%f", &amount) // parse "100.00" → 100.0
+		_, _ = fmt.Sscanf(v.Amount, "%f", &amount) // parse "100.00" → 100.0
 		out = append(out, VTPassVariation{
 			Code:   v.Code,
 			Name:   v.Name,
@@ -226,7 +226,7 @@ func (c *VTPassHTTPClient) doPurchase(ctx context.Context, reqID string, body ma
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	return c.parseResponse(reqID, raw), nil
 }
