@@ -88,6 +88,8 @@ func (w *LifecycleWorker) Run(ctx context.Context) {
 	go w.runEvery(ctx, 10*time.Minute, "studio-stale-recovery", w.studioStaleRecovery)
 	go w.runEvery(ctx, 24*time.Hour,   "wars-monthly-resolve",  w.RunWarsMonthlyResolve)
 	go w.runEvery(ctx, 24*time.Hour,   "chat-retention",        w.chatRetentionCleanup)
+	go w.runEvery(ctx, 1*time.Hour,    "stale-draw-expiry",     w.expireStaleDaws)
+	go w.runEvery(ctx, 6*time.Hour,    "stale-wars-expiry",     w.expireStaleWars)
 
 	<-ctx.Done()
 	log.Println("[WORKER] Lifecycle worker stopped")
@@ -334,6 +336,44 @@ func (w *LifecycleWorker) RunScheduledDraws(ctx context.Context) {
 }
 
 
+
+// expireStaleDraws marks past draws (end_time < now, still ACTIVE/UPCOMING) as COMPLETED.
+// Prevents stale draws from appearing as active on the user-facing draws list.
+func (w *LifecycleWorker) expireStaleDaws(ctx context.Context) {
+	now := time.Now().UTC()
+	result := w.db.WithContext(ctx).Exec(`
+		UPDATE draws
+		SET status = 'COMPLETED', updated_at = $1
+		WHERE status IN ('ACTIVE', 'UPCOMING')
+		  AND end_time < $2
+	`, now, now)
+	if result.Error != nil {
+		log.Printf("[lifecycle] stale-draw-expiry error: %v", result.Error)
+		return
+	}
+	if result.RowsAffected > 0 {
+		log.Printf("[lifecycle] stale-draw-expiry: expired %d stale draws", result.RowsAffected)
+	}
+}
+
+// expireStaleWars marks past wars (ends_at < now, still ACTIVE) as COMPLETED.
+// Handles months where RunWarsMonthlyResolve did not fire (e.g. missed cron, deploy gap).
+func (w *LifecycleWorker) expireStaleWars(ctx context.Context) {
+	now := time.Now().UTC()
+	result := w.db.WithContext(ctx).Exec(`
+		UPDATE regional_wars
+		SET status = 'COMPLETED', updated_at = $1
+		WHERE status = 'ACTIVE'
+		  AND ends_at < $2
+	`, now, now)
+	if result.Error != nil {
+		log.Printf("[lifecycle] stale-wars-expiry error: %v", result.Error)
+		return
+	}
+	if result.RowsAffected > 0 {
+		log.Printf("[lifecycle] stale-wars-expiry: expired %d stale wars", result.RowsAffected)
+	}
+}
 
 // ─── MoMo Held Prize Crons (spec §8.2) ───────────────────────────────────
 

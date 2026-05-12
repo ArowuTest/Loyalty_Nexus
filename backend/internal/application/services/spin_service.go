@@ -260,6 +260,17 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 	}
 	outcome.Message = s.buildWinMessage(outcome, user.PhoneNumber)
 
+	// Fire push + SMS notification for non-try_again prizes (best-effort)
+	if s.notifySvc != nil && prize.PrizeType != entities.PrizeTryAgain {
+		safe.Go(func() {
+			s.notifySvc.SendToUser(context.Background(), userID,
+				"🎉 You Won!", outcome.PrizeLabel,
+				map[string]string{"screen": "spin", "prize_type": string(prize.PrizeType)},
+			)
+			s.notifySvc.NotifyPrizeWon(context.Background(), user.PhoneNumber, outcome.PrizeLabel)
+		})
+	}
+
 	return outcome, nil
 }
 

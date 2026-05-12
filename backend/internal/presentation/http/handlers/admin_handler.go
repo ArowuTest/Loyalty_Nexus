@@ -1395,7 +1395,7 @@ func (h *AdminHandler) GetAIHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allProviders := []string{"GROQ", "GEMINI_LITE", "DEEPSEEK"}
+	allProviders := []string{"GEMINI_LITE", "DEEPSEEK"} // GROQ removed from rotation
 
 	// ── active_chat_provider ────────────────────────────────────────
 	activeProvider, _ := h.rdb.Get(ctx, "nexus:ai:active_chat_provider").Result()

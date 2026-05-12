@@ -10,6 +10,8 @@ interface User {
   tier: string;
   streak_count: number;
   is_active: boolean;
+  state?: string;
+  date_of_birth?: string;
 }
 
 interface Wallet {

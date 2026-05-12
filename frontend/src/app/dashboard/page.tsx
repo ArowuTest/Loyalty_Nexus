@@ -222,7 +222,7 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
     api.getWheelConfig()
       .then((res: unknown) => {
         const r = res as Record<string, unknown>;
-        const raw = ((r?.prizes ?? r?.segments ?? []) as Record<string, unknown>[]);
+        const raw = ((r?.slots ?? r?.prizes ?? r?.segments ?? []) as Record<string, unknown>[]);
         const mapped = raw.filter(p => p.is_active !== false).map(p => ({
           label:       String(p.name ?? p.label ?? p.prize_name ?? "Prize"),
           prize_type:  String((p.prize_type ?? p.type ?? "try_again")).toLowerCase(),

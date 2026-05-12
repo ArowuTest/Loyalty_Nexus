@@ -36,8 +36,8 @@ func GetPublicStats(db *gorm.DB) http.HandlerFunc {
 			log.Printf("[Stats] Error counting users: %v", err)
 		}
 
-		// Count total AI generations
-		if err := db.WithContext(r.Context()).Table("studio_generations").Count(&stats.TotalGenerations).Error; err != nil {
+		// Count total AI generations (table name from entities.AIGeneration.TableName())
+		if err := db.WithContext(r.Context()).Table("ai_generations").Count(&stats.TotalGenerations).Error; err != nil {
 			log.Printf("[Stats] Error counting generations: %v", err)
 		}
 

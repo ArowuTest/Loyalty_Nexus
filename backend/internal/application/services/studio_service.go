@@ -271,6 +271,11 @@ func (s *StudioService) CompleteGeneration(
 	tool, _ := s.studioRepo.FindToolByID(ctx, gen.ToolID)
 	if user != nil && tool != nil && s.notifySvc != nil {
 		s.notifySvc.NotifyAssetReady(ctx, user.PhoneNumber, tool.Name)
+		// Also send push notification so the app banner fires
+		go s.notifySvc.SendToUser(ctx, gen.UserID,
+			"Studio Ready ✨", tool.Name+" is ready — tap to download before it expires.",
+			map[string]string{"screen": "studio", "generation_id": gen.ID.String()},
+		)
 	}
 	return nil
 }

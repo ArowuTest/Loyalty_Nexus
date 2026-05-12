@@ -132,13 +132,17 @@ func (svc *PassportService) GetPassport(ctx context.Context, userID uuid.UUID) (
 		}
 	}
 
-	// Compute next tier
+	// Compute next tier — find the lowest threshold the user hasn't yet reached.
+	// tierThresholds is ordered descending [PLATINUM, GOLD, SILVER, BRONZE].
+	// We iterate in reverse (ascending) and break on the first tier still above the user.
 	nextTier := ""
 	pointsToNext := int64(0)
-	for _, th := range tierThresholds {
-		if u.LifetimePoints < th.Points {
+	for i := len(tierThresholds) - 1; i >= 0; i-- {
+		th := tierThresholds[i]
+		if th.Points > 0 && wallet.LifetimePoints < th.Points {
 			nextTier = th.Name
-			pointsToNext = th.Points - u.LifetimePoints
+			pointsToNext = th.Points - wallet.LifetimePoints
+			break
 		}
 	}
 
@@ -146,7 +150,7 @@ func (svc *PassportService) GetPassport(ctx context.Context, userID uuid.UUID) (
 		UserID:           userID,
 		Tier:             u.Tier,
 		StreakCount:      u.StreakCount,
-		LifetimePoints:   u.LifetimePoints,
+		LifetimePoints:   wallet.LifetimePoints, // authoritative value lives in wallets table
 		PulsePoints:      wallet.PulsePoints,
 		SpinCredits:      wallet.SpinCredits,
 		Badges:           badges,

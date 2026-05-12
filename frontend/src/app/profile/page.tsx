@@ -5,8 +5,17 @@ import { useRouter } from "next/navigation";
 import AppShell from "@/components/layout/AppShell";
 import { useStore } from "@/store/useStore";
 import { api } from "@/lib/api";
-import { User, Mail, Phone, CheckCircle, AlertCircle, Loader2, ArrowLeft } from "lucide-react";
+import { User, Mail, Phone, MapPin, Calendar, CheckCircle, AlertCircle, Loader2, ArrowLeft } from "lucide-react";
 import Link from "next/link";
+
+// All 37 Nigerian states (36 + FCT)
+const NIGERIAN_STATES = [
+  "Abia","Adamawa","Akwa Ibom","Anambra","Bauchi","Bayelsa","Benue","Borno",
+  "Cross River","Delta","Ebonyi","Edo","Ekiti","Enugu","FCT (Abuja)","Gombe",
+  "Imo","Jigawa","Kaduna","Kano","Katsina","Kebbi","Kogi","Kwara","Lagos",
+  "Nasarawa","Niger","Ogun","Ondo","Osun","Oyo","Plateau","Rivers","Sokoto",
+  "Taraba","Yobe","Zamfara",
+];
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -14,6 +23,8 @@ export default function ProfilePage() {
 
   const [displayName, setDisplayName] = useState(user?.display_name ?? "");
   const [email, setEmail]             = useState(user?.email ?? "");
+  const [state, setState]             = useState(user?.state ?? "");
+  const [dob, setDob]                 = useState(user?.date_of_birth ?? "");
   const [saving, setSaving]           = useState(false);
   const [status, setStatus]           = useState<"idle" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg]       = useState("");
@@ -22,7 +33,9 @@ export default function ProfilePage() {
   useEffect(() => {
     setDisplayName(user?.display_name ?? "");
     setEmail(user?.email ?? "");
-  }, [user?.display_name, user?.email]);
+    setState(user?.state ?? "");
+    setDob(user?.date_of_birth ?? "");
+  }, [user?.display_name, user?.email, user?.state, user?.date_of_birth]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -38,16 +51,26 @@ export default function ProfilePage() {
     }
 
     try {
+      // Fire profile update (name + email)
       const updated = await api.updateProfile({
         display_name: displayName.trim() || null,
         email:        email.trim()       || null,
       });
+
+      // Fire state update separately if changed
+      const currentState = user?.state ?? "";
+      if (state && state !== currentState) {
+        await api.updateProfileState(state);
+      }
+
       // Merge updated fields back into the store
       if (user) {
         setUser({
           ...user,
-          display_name: updated.display_name ?? (displayName.trim() || undefined),
-          email:        updated.email        ?? (email.trim()        || undefined),
+          display_name:   updated.display_name   ?? (displayName.trim() || undefined),
+          email:          updated.email           ?? (email.trim()        || undefined),
+          state:          state                   || user.state,
+          date_of_birth:  dob                     || user.date_of_birth,
         });
       }
       setStatus("success");
@@ -74,6 +97,10 @@ export default function ProfilePage() {
     return (user?.phone_number ?? "").slice(-2) || "?";
   }
 
+  const inputBox = "flex items-center gap-3 px-4 py-3 rounded-xl transition-all focus-within:border-[rgba(245,166,35,0.4)]";
+  const inputStyle = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" };
+  const inputClass = "flex-1 bg-transparent text-white text-[14px] outline-none placeholder:text-white/25";
+
   return (
     <AppShell>
       <div className="max-w-lg mx-auto px-4 py-8">
@@ -90,7 +117,7 @@ export default function ProfilePage() {
         {/* Page header */}
         <div className="mb-8">
           <h1 className="text-2xl font-black text-white">Edit Profile</h1>
-          <p className="text-white/40 text-[13px] mt-1">Update your display name and email address.</p>
+          <p className="text-white/40 text-[13px] mt-1">Update your name, email, state and date of birth.</p>
         </div>
 
         {/* Avatar preview */}
@@ -106,7 +133,7 @@ export default function ProfilePage() {
               {displayName.trim() || user?.phone_number || ""}
             </p>
             <p className="text-white/40 text-[12px] mt-0.5">
-              {email || "No email set"}
+              {tier} Member {state ? `· ${state}` : ""}
             </p>
           </div>
         </div>
@@ -114,24 +141,16 @@ export default function ProfilePage() {
         {/* Form card */}
         <div
           className="rounded-2xl p-6 space-y-5"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.07)",
-          }}
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
         >
           {/* Phone — read-only */}
           <div>
             <label className="block text-[12px] font-bold text-white/50 uppercase tracking-wider mb-2">
               Phone Number
             </label>
-            <div
-              className="flex items-center gap-3 px-4 py-3 rounded-xl"
-              style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
-            >
+            <div className={inputBox} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
               <Phone size={15} className="text-white/30 flex-shrink-0" />
-              <span className="text-white/50 text-[14px] font-mono">
-                {user?.phone_number ?? "—"}
-              </span>
+              <span className="text-white/50 text-[14px] font-mono">{user?.phone_number ?? "—"}</span>
               <span className="ml-auto text-[11px] text-white/25 italic">Cannot change</span>
             </div>
           </div>
@@ -141,10 +160,7 @@ export default function ProfilePage() {
             <label className="block text-[12px] font-bold text-white/50 uppercase tracking-wider mb-2">
               Display Name
             </label>
-            <div
-              className="flex items-center gap-3 px-4 py-3 rounded-xl transition-all focus-within:border-[rgba(245,166,35,0.4)]"
-              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}
-            >
+            <div className={inputBox} style={inputStyle}>
               <User size={15} className="text-white/40 flex-shrink-0" />
               <input
                 type="text"
@@ -152,12 +168,10 @@ export default function ProfilePage() {
                 onChange={(e) => { setDisplayName(e.target.value); setStatus("idle"); }}
                 placeholder="e.g. Amara Okafor"
                 maxLength={60}
-                className="flex-1 bg-transparent text-white text-[14px] outline-none placeholder:text-white/25"
+                className={inputClass}
               />
             </div>
-            <p className="text-white/25 text-[11px] mt-1.5">
-              This is how your name appears across the platform.
-            </p>
+            <p className="text-white/25 text-[11px] mt-1.5">This is how your name appears across the platform.</p>
           </div>
 
           {/* Email */}
@@ -165,10 +179,7 @@ export default function ProfilePage() {
             <label className="block text-[12px] font-bold text-white/50 uppercase tracking-wider mb-2">
               Email Address
             </label>
-            <div
-              className="flex items-center gap-3 px-4 py-3 rounded-xl transition-all focus-within:border-[rgba(245,166,35,0.4)]"
-              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}
-            >
+            <div className={inputBox} style={inputStyle}>
               <Mail size={15} className="text-white/40 flex-shrink-0" />
               <input
                 type="email"
@@ -176,12 +187,50 @@ export default function ProfilePage() {
                 onChange={(e) => { setEmail(e.target.value); setStatus("idle"); }}
                 placeholder="you@example.com"
                 maxLength={120}
-                className="flex-1 bg-transparent text-white text-[14px] outline-none placeholder:text-white/25"
+                className={inputClass}
               />
             </div>
-            <p className="text-white/25 text-[11px] mt-1.5">
-              Used for prize notifications and account recovery.
-            </p>
+            <p className="text-white/25 text-[11px] mt-1.5">Used for prize notifications and account recovery.</p>
+          </div>
+
+          {/* State — for Regional Wars */}
+          <div>
+            <label className="block text-[12px] font-bold text-white/50 uppercase tracking-wider mb-2">
+              State <span className="text-[#F5A623]/70 normal-case font-normal">(affects Regional Wars ranking)</span>
+            </label>
+            <div className={inputBox} style={inputStyle}>
+              <MapPin size={15} className="text-white/40 flex-shrink-0" />
+              <select
+                value={state}
+                onChange={(e) => { setState(e.target.value); setStatus("idle"); }}
+                className="flex-1 bg-transparent text-white text-[14px] outline-none appearance-none cursor-pointer"
+                style={{ color: state ? "white" : "rgba(255,255,255,0.25)" }}
+              >
+                <option value="" disabled style={{ background: "#13141e" }}>Select your state…</option>
+                {NIGERIAN_STATES.map(s => (
+                  <option key={s} value={s} style={{ background: "#13141e" }}>{s}</option>
+                ))}
+              </select>
+            </div>
+            <p className="text-white/25 text-[11px] mt-1.5">Your state determines which team you compete with in monthly wars.</p>
+          </div>
+
+          {/* Date of Birth */}
+          <div>
+            <label className="block text-[12px] font-bold text-white/50 uppercase tracking-wider mb-2">
+              Date of Birth
+            </label>
+            <div className={inputBox} style={inputStyle}>
+              <Calendar size={15} className="text-white/40 flex-shrink-0" />
+              <input
+                type="date"
+                value={dob}
+                onChange={(e) => { setDob(e.target.value); setStatus("idle"); }}
+                max={new Date().toISOString().split("T")[0]}
+                className="flex-1 bg-transparent text-white text-[14px] outline-none [color-scheme:dark]"
+              />
+            </div>
+            <p className="text-white/25 text-[11px] mt-1.5">Optional. Used for birthday bonus Pulse Points.</p>
           </div>
 
           {/* Status message */}
@@ -216,10 +265,7 @@ export default function ProfilePage() {
             }}
           >
             {saving ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Saving…
-              </>
+              <><Loader2 size={16} className="animate-spin" />Saving…</>
             ) : (
               "Save Changes"
             )}

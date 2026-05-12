@@ -138,6 +138,9 @@ class APIClient {
   updateProfile(data: { display_name?: string | null; email?: string | null }) {
     return this.request<{ display_name?: string; email?: string }>("PATCH", "/user/profile", data);
   }
+  updateProfileState(state: string) {
+    return this.request<{ status: string }>("POST", "/user/profile/state", { state });
+  }
   getWallet() { return this.request("GET", "/user/wallet"); }
   getTransactions() { return this.request("GET", "/user/transactions"); }
   requestMoMoLink(momoNumber: string) {
