@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:chewie/chewie.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
@@ -1615,10 +1616,11 @@ class _ToolCard extends StatelessWidget {
               ),
               clipBehavior: Clip.antiAlias,
               child: previewImg != null
-                  ? Image.network(
-                      previewImg,
+                  ? CachedNetworkImage(
+                      imageUrl: previewImg,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
+                      placeholder: (_, __) => Container(color: Colors.white.withValues(alpha: 0.05)),
+                      errorWidget: (_, __, ___) =>
                           Icon(cfg.icon, size: 18, color: cfg.color),
                     )
                   : Icon(cfg.icon, size: 18, color: cfg.color),
@@ -1880,6 +1882,10 @@ class _GenerationCard extends StatelessWidget {
 
         const SizedBox(height: 10),
 
+        // 48-hour expiry warning — R2 assets are auto-deleted after 48hrs
+        if (gen.status == 'completed' && gen.outputUrl != null)
+          _AssetExpiryBanner(createdAt: gen.createdAt),
+
         // Content by type
         if (gen.status == 'processing' || gen.status == 'pending')
           _ProcessingView(gen: gen)
@@ -1904,6 +1910,50 @@ class _GenerationCard extends StatelessWidget {
             ]),
           ),
       ]),
+    );
+  }
+}
+
+
+// ─── Asset Expiry Banner ──────────────────────────────────────────────────────
+// R2 assets are auto-deleted 48 hours after creation.
+// Shows a dismissible warning when < 24 hours remain.
+
+class _AssetExpiryBanner extends StatelessWidget {
+  final DateTime createdAt;
+  const _AssetExpiryBanner({required this.createdAt});
+
+  @override
+  Widget build(BuildContext context) {
+    final age     = DateTime.now().difference(createdAt);
+    final ttl     = const Duration(hours: 48);
+    final remaining = ttl - age;
+
+    // Only show when < 24 hrs left AND not yet expired
+    if (remaining.isNegative || remaining.inHours >= 24) return const SizedBox.shrink();
+
+    final hrs = remaining.inHours;
+    final mins = remaining.inMinutes % 60;
+    final label = hrs > 0 ? '${hrs}h ${mins}m' : '${mins}m';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF59E0B).withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.25)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.timer_outlined, size: 12, color: Color(0xFFF59E0B)),
+          const SizedBox(width: 6),
+          Expanded(child: Text(
+            'Asset expires in $label — download before it\'s removed.',
+            style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 10, height: 1.4),
+          )),
+        ]),
+      ),
     );
   }
 }
@@ -2060,12 +2110,16 @@ class _ImageOutput extends StatelessWidget {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: Image.network(gen.outputUrl!,
-              width: double.infinity, fit: BoxFit.cover,
-              loadingBuilder: (_, child, progress) => progress == null ? child
-                  : Container(height: 200, color: NexusColors.background,
-                      child: const Center(child: CircularProgressIndicator(color: NexusColors.primary))),
-              errorBuilder: (_, __, ___) => Container(height: 120, color: NexusColors.background,
+            child: CachedNetworkImage(
+              imageUrl: gen.outputUrl!,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              placeholder: (_, __) => Container(
+                height: 200, color: NexusColors.background,
+                child: const Center(child: CircularProgressIndicator(color: NexusColors.primary)),
+              ),
+              errorWidget: (_, __, ___) => Container(
+                height: 120, color: NexusColors.background,
                 child: const Center(child: Icon(Icons.broken_image_rounded,
                   color: NexusColors.textSecondary, size: 48))),
             ),
