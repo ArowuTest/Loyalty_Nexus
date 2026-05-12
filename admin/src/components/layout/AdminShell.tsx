@@ -23,6 +23,7 @@ const NAV = [
     { href: "/mtn-push-upload",   label: "📤 MTN CSV Upload" },
     { href: "/bonus-pulse",       label: "🎁 Bonus Pulse Points" },
     { href: "/recharge-config",   label: "⚡ Recharge Rewards" },
+    { href: "/networks",          label: "📡 Network Operators" },
   ]},
   { group: "Content & AI", items: [
     { href: "/studio-tools",   label: "🧠 Studio Tools" },

@@ -8,6 +8,7 @@ import { useStore } from "@/store/useStore";
 
 const NAV_LINKS = [
   { label: "Home",         href: "/",               anchor: null,            needsAuth: false },
+  { label: "Recharge",     href: "/recharge",       anchor: null,            needsAuth: false, highlight: true },
   { label: "How It Works", href: "/how-it-works",   anchor: null,            needsAuth: false },
   { label: "AI Studio",   href: "/studio",         anchor: "ai-studio",     needsAuth: false },
   { label: "Dashboard",   href: "/dashboard",      anchor: null,            needsAuth: true  },
@@ -123,11 +124,13 @@ export default function NavBar({ onLoginClick }: NavBarProps) {
 
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-0.5">
-            {NAV_LINKS.map(({ label, href, anchor, needsAuth }) => {
+            {NAV_LINKS.map(({ label, href, anchor, needsAuth, highlight }) => {
               const active = pathname === href;
-              const baseClass = `px-4 py-2 rounded-xl text-[13px] font-semibold transition-all duration-200 ${
-                active ? "bg-gold-500/12 text-gold-500" : "text-white/50 hover:text-white hover:bg-white/[0.06]"
-              }`;
+              const baseClass = highlight && !active
+                ? `px-4 py-2 rounded-xl text-[13px] font-black transition-all duration-200 text-gold-500 hover:bg-gold-500/10 border border-gold-500/30 hover:border-gold-500/60`
+                : `px-4 py-2 rounded-xl text-[13px] font-semibold transition-all duration-200 ${
+                  active ? "bg-gold-500/12 text-gold-500" : "text-white/50 hover:text-white hover:bg-white/[0.06]"
+                }`;
               if (needsAuth) {
                 return (
                   <button key={href} onClick={() => handleAuthNav(href)} className={baseClass}>{label}</button>

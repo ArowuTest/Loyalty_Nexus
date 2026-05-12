@@ -6,7 +6,7 @@ import {
   Zap, Sparkles, ArrowRight, RotateCcw, Lock, ChevronRight,
   Trophy, MapPin, Users, Gift, Star, Clock,
   Brain, Camera, Video, Mic, BookOpen, BarChart2,
-  Play, Phone, Wallet,
+  Play, Phone, Wallet, Smartphone,
 } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import NavBar from "@/components/landing/NavBar";
@@ -528,6 +528,54 @@ export default function HomePage() {
               Learn more about how it works
               <ChevronRight className="w-4 h-4" />
             </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* ══════════════════════════════════════════════════════
+          RECHARGE CTA — visible to all visitors, no login needed
+      ══════════════════════════════════════════════════════ */}
+      <section className="py-16 relative overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[300px] rounded-full bg-gold-500/5 blur-[100px]" />
+        </div>
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 relative z-10">
+          <div className="rounded-3xl border border-gold-500/20 bg-gold-500/[0.04] p-8 md:p-12 flex flex-col md:flex-row items-center gap-8">
+            {/* Left copy */}
+            <div className="flex-1 text-center md:text-left">
+              <div className="inline-flex items-center gap-2 bg-gold-500/10 border border-gold-500/20 rounded-full px-3 py-1 mb-4">
+                <Zap className="w-3 h-3 text-gold-500" />
+                <span className="text-[11px] font-bold text-gold-400 uppercase tracking-wider">No account needed</span>
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black text-white mb-3 leading-tight">
+                Recharge Now &amp;<br />
+                <span className="text-gold-500">Earn Double Points</span>
+              </h2>
+              <p className="text-white/50 text-[15px] leading-relaxed max-w-md">
+                Top up airtime or data for any Nigerian number — instantly.
+                No login required. Earn Pulse Points from the platform
+                <strong className="text-white/70"> and</strong> again when MTN confirms.
+              </p>
+              <div className="flex flex-wrap gap-3 mt-5 justify-center md:justify-start">
+                {["MTN", "GLO", "Airtel", "9mobile"].map((n, i) => (
+                  <span key={n} className={`text-[12px] font-bold px-3 py-1 rounded-full border ${i === 0 ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-400" : "border-white/10 text-white/30"}`}>
+                    {n}{i !== 0 && <span className="text-[9px] ml-1 opacity-50">soon</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+            {/* Right CTA */}
+            <div className="flex flex-col items-center gap-3 flex-shrink-0">
+              <Link
+                href="/recharge"
+                className="btn-gold rounded-2xl h-14 px-8 text-[15px] font-black glow-gold-sm inline-flex items-center gap-2"
+              >
+                <Smartphone className="w-5 h-5" />
+                Recharge Now
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+              <p className="text-[11px] text-white/25">Secured by Paystack · Instant delivery</p>
+            </div>
           </div>
         </div>
       </section>
