@@ -809,6 +809,170 @@ func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*
 	}, nil
 }
 
+
+// ─── Phone-based Live-Query Eligibility (RechargeMax Pattern) ────────────────
+
+// CheckEligibilityByPhone is the preferred eligibility path for authenticated users.
+// Instead of relying on the wallet.SpinCredits counter (which can drift), it
+// live-queries the recharges table by MSISDN for today's sum, then determines
+// the spin tier and counts spin_results rows for today.
+//
+// This is immune to stale counters and works correctly even if markSuccess
+// did not manage to update the wallet spin_credits field.
+func (s *SpinService) CheckEligibilityByPhone(ctx context.Context, phone string) (*SpinEligibility, error) {
+	// Normalise phone to E.164 (2348XXXXXXXXX)
+	phone = normaliseSpinPhone(phone)
+
+	todayMidnight := time.Now().UTC().Truncate(24 * time.Hour)
+
+	// 1. Sum successful recharges today by MSISDN (live query on recharges table)
+	var todayAmountKobo int64
+	err := s.db.WithContext(ctx).
+		Raw(`SELECT COALESCE(SUM(amount_kobo), 0)
+		     FROM recharges
+		     WHERE msisdn = ?
+		       AND status = 'SUCCESS'
+		       AND created_at >= ?`, phone, todayMidnight).
+		Scan(&todayAmountKobo).Error
+	if err != nil {
+		return nil, fmt.Errorf("eligibility recharge query failed: %w", err)
+	}
+	todayAmountNaira := float64(todayAmountKobo) / 100.0
+
+	// 2. Tier lookup
+	tierCalc := utils.NewSpinTierCalculatorDB(s.db)
+	allTiers, _ := tierCalc.GetAllTiersFromDB()
+	dailyCap := 0
+	currentTierName := ""
+	currentTierIdx := -1
+	progressPercent := 0.0
+
+	if currentTier, err := tierCalc.GetSpinTierFromDB(todayAmountKobo); err == nil && currentTier.SpinsPerDay > 0 {
+		dailyCap = currentTier.SpinsPerDay
+		currentTierName = currentTier.TierDisplayName
+		for i, t := range allTiers {
+			if t.TierDisplayName == currentTier.TierDisplayName {
+				currentTierIdx = i
+				break
+			}
+		}
+	}
+
+	// Progress toward next tier
+	if currentTierIdx >= 0 && currentTierIdx+1 < len(allTiers) {
+		nxt := allTiers[currentTierIdx+1]
+		cur := allTiers[currentTierIdx]
+		tierRange := float64(nxt.MinDailyAmount - cur.MinDailyAmount)
+		if tierRange > 0 {
+			progressPercent = float64(todayAmountKobo-cur.MinDailyAmount) / tierRange * 100
+			if progressPercent > 100 {
+				progressPercent = 100
+			}
+		}
+	} else if currentTierIdx < 0 && len(allTiers) > 0 {
+		nxt := allTiers[0]
+		if nxt.MinDailyAmount > 0 {
+			progressPercent = float64(todayAmountKobo) / float64(nxt.MinDailyAmount) * 100
+			if progressPercent > 100 {
+				progressPercent = 100
+			}
+		}
+	}
+
+	// 3. Look up this user to count their spin_results for today
+	user, _ := s.userRepo.FindByPhoneNumber(ctx, phone)
+
+	used := 0
+	if user != nil {
+		if n, err := s.prizeRepo.CountUserSpinsToday(ctx, user.ID); err == nil {
+			used = n
+		}
+	}
+
+	// 4. Check if today's recharges qualify (>= minimum spin trigger)
+	spinTriggerKobo := s.cfg.GetInt64("spin_trigger_naira", 1000) * 100
+	if todayAmountKobo < spinTriggerKobo {
+		trigger := s.cfg.GetInt64("spin_trigger_naira", 1000)
+		resp := &SpinEligibility{
+			Eligible:         false,
+			SpinCredits:      0,
+			Message:          fmt.Sprintf("Recharge ₦%d or more today to earn a free spin!", trigger),
+			TriggerNaira:     trigger,
+			CurrentTierName:  currentTierName,
+			TodayAmountNaira: todayAmountNaira,
+			ProgressPercent:  progressPercent,
+		}
+		for _, t := range allTiers {
+			if t.MinDailyAmount > todayAmountKobo {
+				resp.NextTierName = t.TierDisplayName
+				resp.NextTierMinAmount = t.MinDailyAmount
+				resp.AmountToNextTier = t.MinDailyAmount - todayAmountKobo
+				resp.NextTierSpins = t.SpinsPerDay
+				break
+			}
+		}
+		return resp, nil
+	}
+
+	// 5. Compute available spins from live query
+	// available = dailyCap - used (capped at 0 minimum)
+	available := dailyCap - used
+	if available < 0 {
+		available = 0
+	}
+
+	// No tier matched (recharge too small for any tier) but meets trigger
+	if dailyCap == 0 {
+		available = 1 // default: 1 spin per qualifying recharge day
+	}
+
+	if available == 0 {
+		resp := &SpinEligibility{
+			Eligible:         false,
+			SpinsUsedToday:   used,
+			MaxSpinsToday:    dailyCap,
+			SpinCredits:      0,
+			Message:          fmt.Sprintf("Daily spin limit reached (%d/%d). Recharge more today to unlock extra spins!", used, dailyCap),
+			CurrentTierName:  currentTierName,
+			TodayAmountNaira: todayAmountNaira,
+			ProgressPercent:  progressPercent,
+		}
+		for _, t := range allTiers {
+			if t.MinDailyAmount > todayAmountKobo {
+				resp.NextTierName = t.TierDisplayName
+				resp.NextTierMinAmount = t.MinDailyAmount
+				resp.AmountToNextTier = t.MinDailyAmount - todayAmountKobo
+				resp.NextTierSpins = t.SpinsPerDay
+				break
+			}
+		}
+		return resp, nil
+	}
+
+	return &SpinEligibility{
+		Eligible:         true,
+		AvailableSpins:   available,
+		SpinsUsedToday:   used,
+		MaxSpinsToday:    dailyCap,
+		SpinCredits:      available, // expose as spin_credits for backward compat
+		Message:          fmt.Sprintf("You have %d spin(s) available today! 🎡", available),
+		CurrentTierName:  currentTierName,
+		TodayAmountNaira: todayAmountNaira,
+		ProgressPercent:  progressPercent,
+	}, nil
+}
+
+// normaliseSpinPhone converts phone to E.164 without '+' (2348XXXXXXXXX).
+// Handles: 08XXXXXXXXX → 2348XXXXXXXXX, +2348XXXXXXXXX → 2348XXXXXXXXX.
+func normaliseSpinPhone(phone string) string {
+	if len(phone) == 11 && phone[0] == '0' {
+		return "234" + phone[1:]
+	}
+	if len(phone) > 1 && phone[0] == '+' {
+		return phone[1:]
+	}
+	return phone
+}
 // ─── MoMo Hold Flow (Spec §8.2 — new, not in RechargeMax) ───────────────
 
 // ConfirmMoMoPrize is called once the user links their MoMo number after winning.
