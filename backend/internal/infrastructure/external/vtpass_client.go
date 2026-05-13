@@ -200,7 +200,8 @@ func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([
 	raw, _ := io.ReadAll(resp.Body)
 
 	var parsed struct {
-		Code    string `json:"code"`
+		Code    string `json:"code"`                 // live API uses "code"
+		RespDesc string `json:"response_description"` // sandbox uses "response_description"
 		Content struct {
 			Variations []struct {
 				Code   string `json:"variation_code"`
@@ -212,8 +213,13 @@ func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("vtpass: parse variations: %w", err)
 	}
-	if parsed.Code != "000" {
-		return nil, fmt.Errorf("vtpass: GetVariations error code %s", parsed.Code)
+	// VTPass sandbox returns "response_description":"000"; live API returns "code":"000"
+	statusCode := parsed.Code
+	if statusCode == "" {
+		statusCode = parsed.RespDesc
+	}
+	if statusCode != "000" {
+		return nil, fmt.Errorf("vtpass: GetVariations error code %q", statusCode)
 	}
 
 	out := make([]VTPassVariation, 0, len(parsed.Content.Variations))
