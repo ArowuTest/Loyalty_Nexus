@@ -12,7 +12,7 @@ import NavBar from "@/components/landing/NavBar";
 import AuthModal from "@/components/landing/AuthModal";
 import { useStore } from "@/store/useStore";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "https://loyalty-nexus-api.onrender.com";
+const API = process.env.NEXT_PUBLIC_API_URL ?? "https://loyalty-nexus-api.onrender.com/api/v1";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -168,7 +168,7 @@ export default function RechargePage() {
 
       pollTimerRef.current = setTimeout(async () => {
         try {
-          const res = await fetch(`${API}/api/v1/recharge/status/${encodeURIComponent(reference)}`);
+          const res = await fetch(`${API}/recharge/status/${encodeURIComponent(reference)}`);
           if (!res.ok) throw new Error("not found");
           const data: RechargeStatusResult = await res.json();
 
@@ -219,7 +219,7 @@ export default function RechargePage() {
   // ── Fetch networks ────────────────────────────────────────────────────────
   const fetchNetworks = useCallback(() => {
     setLoadNets(true); setError("");
-    fetch(`${API}/api/v1/recharge/networks`)
+    fetch(`${API}/recharge/networks`)
       .then(r => r.json())
       .then(d => {
         const nets: Network[] = d.networks ?? [];
@@ -237,7 +237,7 @@ export default function RechargePage() {
   }, []);
 
   useEffect(() => {
-    fetch(`${API}/health`).catch(() => {});
+    fetch(`${API.replace(/\/api\/v1$/, "")}/health`).catch(() => {});
     fetchNetworks();
   }, [fetchNetworks]);
 
@@ -251,7 +251,7 @@ export default function RechargePage() {
       setDetecting(true);
       let detected: string | null = null; let source = "";
       try {
-        const r = await fetch(`${API}/api/v1/recharge/networks/detect?phone=${normalized}`);
+        const r = await fetch(`${API}/recharge/networks/detect?phone=${normalized}`);
         if (r.ok) { const d = await r.json(); if (d.network) { detected = d.network; source = "Last used"; } }
       } catch { /**/ }
       if (!detected) { detected = detectNetworkFromPrefix(normalized); if (detected) source = "Auto-detected"; }
@@ -266,7 +266,7 @@ export default function RechargePage() {
   const fetchBundles = useCallback(async (code: string) => {
     setLoadBundles(true); setBundles([]); setBundle(null);
     try {
-      const r = await fetch(`${API}/api/v1/recharge/networks/${code}/bundles`);
+      const r = await fetch(`${API}/recharge/networks/${code}/bundles`);
       const d = await r.json(); setBundles(d.bundles ?? []);
     } catch { setError("Failed to load data bundles."); }
     finally { setLoadBundles(false); }
@@ -297,7 +297,7 @@ export default function RechargePage() {
     setError(""); setSubmitting(true);
     const msisdn = normalized.startsWith("234") ? normalized : "234" + normalized.replace(/^0/, "");
     try {
-      const res = await fetch(`${API}/api/v1/recharge/initiate`, {
+      const res = await fetch(`${API}/recharge/initiate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
