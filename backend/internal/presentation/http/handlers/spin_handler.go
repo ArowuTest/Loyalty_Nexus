@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"loyalty-nexus/internal/application/services"
@@ -26,11 +27,36 @@ func (h *SpinHandler) GetWheelConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, payload)
 }
 
+// Play executes a spin for the authenticated user.
+// Extracts phone from JWT context (set by AuthMiddleware → ContextPhone).
+// Falls back to body-provided MSISDN for guest support.
+//
+// POST /api/v1/spin/play
 func (h *SpinHandler) Play(w http.ResponseWriter, r *http.Request) {
-	uid := r.Context().Value(middleware.ContextUserID).(string)
-	userID, err := uuid.Parse(uid)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid user"})
+	// Extract phone from context (preferred — from JWT)
+	phone, _ := r.Context().Value(middleware.ContextPhone).(string)
+
+	// Also extract userID — needed for wallet/ledger operations inside PlaySpin
+	uidStr, _ := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uidStr)
+
+	// If no phone from context, check request body (guest recharge flow)
+	if phone == "" {
+		var body struct {
+			MSISDN string `json:"msisdn"`
+			Phone  string `json:"phone"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			if body.MSISDN != "" {
+				phone = body.MSISDN
+			} else if body.Phone != "" {
+				phone = body.Phone
+			}
+		}
+	}
+
+	if phone == "" && userID == uuid.Nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required to spin"})
 		return
 	}
 
@@ -57,34 +83,35 @@ func (h *SpinHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"history": results})
 }
 
-// CheckEligibility returns the user's current spin eligibility state:
-// spin credits available, daily cap from their recharge tier, spins used today,
-// and a nudge toward the next tier if they have hit their daily cap.
+// CheckEligibility returns the user's current spin eligibility state.
+// Uses live-query approach: queries the recharges table by MSISDN for today's
+// sum, then looks up the matching spin tier and counts spins played today.
+// This mirrors the RechargeMax architecture and is immune to stale wallet counters.
 //
 // GET /api/v1/spin/eligibility
-//
-// Response shape (mirrors services.SpinEligibility):
-//
-//	{
-//	  "eligible":           true,
-//	  "spin_credits":       3,
-//	  "spins_used_today":   1,
-//	  "max_spins_today":    3,
-//	  "message":            "You have 2 spins left today!",
-//	  "trigger_naira":      1000,
-//	  "next_tier_name":     "Gold",          // only when cap is reached
-//	  "next_tier_min_amount": 1000000,       // kobo
-//	  "amount_to_next_tier":  500000,        // kobo remaining to unlock next tier
-//	  "next_tier_spins":    3
-//	}
 func (h *SpinHandler) CheckEligibility(w http.ResponseWriter, r *http.Request) {
-	uid := r.Context().Value(middleware.ContextUserID).(string)
-	userID, err := uuid.Parse(uid)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid user"})
+	// Extract phone from JWT context
+	phone, _ := r.Context().Value(middleware.ContextPhone).(string)
+
+	// Fallback: if no phone in context, use UUID-based lookup
+	if phone == "" {
+		uidStr, _ := r.Context().Value(middleware.ContextUserID).(string)
+		userID, err := uuid.Parse(uidStr)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid user"})
+			return
+		}
+		eligibility, err := h.spinSvc.CheckEligibility(r.Context(), userID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, eligibility)
 		return
 	}
-	eligibility, err := h.spinSvc.CheckEligibility(r.Context(), userID)
+
+	// Phone-based live-query eligibility check (preferred path)
+	eligibility, err := h.spinSvc.CheckEligibilityByPhone(r.Context(), phone)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
