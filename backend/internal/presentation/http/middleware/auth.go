@@ -14,10 +14,10 @@ import (
 
 type contextKey string
 const (
-	ContextUserID    contextKey = "user_id"
-	ContextPhone     contextKey = "phone"
-	ContextIsAdmin   contextKey = "is_admin"
-	ContextAdminRole contextKey = "admin_role"
+	ContextUserID      contextKey = "user_id"
+	ContextPhone       contextKey = "phone"
+	ContextIsAdmin     contextKey = "is_admin"
+	ContextAdminRole   contextKey = "admin_role"
 	ContextAdminClaims contextKey = "admin_claims"
 )
 
@@ -39,6 +39,29 @@ func AuthMiddleware(authSvc *services.AuthService) func(http.Handler) http.Handl
 			ctx = context.WithValue(ctx, ContextPhone, claims.PhoneNumber)
 			ctx = context.WithValue(ctx, ContextIsAdmin, false)
 			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// OptionalAuthMiddleware is like AuthMiddleware but non-blocking: if no token is
+// present (or the token is invalid), the request proceeds unauthenticated.
+// Handlers read the injected user_id with middleware.ContextUserID; it will be ""
+// for unauthenticated requests. Used on public endpoints that benefit from knowing
+// the caller's identity when they happen to be logged in (e.g. /recharge/initiate).
+func OptionalAuthMiddleware(authSvc *services.AuthService) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := extractBearer(r)
+			if token != "" {
+				if claims, err := authSvc.ValidateJWT(token); err == nil {
+					ctx := context.WithValue(r.Context(), ContextUserID, claims.UserID)
+					ctx = context.WithValue(ctx, ContextPhone, claims.PhoneNumber)
+					ctx = context.WithValue(ctx, ContextIsAdmin, false)
+					r = r.WithContext(ctx)
+				}
+				// Invalid token on a public route — silently ignore, proceed as guest
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }
