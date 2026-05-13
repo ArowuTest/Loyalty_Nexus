@@ -11,6 +11,7 @@ import {
 import NavBar from "@/components/landing/NavBar";
 import AuthModal from "@/components/landing/AuthModal";
 import { useStore } from "@/store/useStore";
+import api from "@/lib/api";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://loyalty-nexus-api.onrender.com/api/v1";
 
@@ -297,18 +298,14 @@ export default function RechargePage() {
     setError(""); setSubmitting(true);
     const msisdn = normalized.startsWith("234") ? normalized : "234" + normalized.replace(/^0/, "");
     try {
-      const res = await fetch(`${API}/recharge/initiate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          msisdn, network: selectedNetwork, recharge_type: rechargeType,
-          amount_kobo: amountKobo, variation_code: selectedBundle?.id ?? "",
-          email: email || "guest@loyaltynexus.ng",
-          user_id: (isAuthenticated && user?.id) ? user.id : undefined,
-        }),
+      // Use the api client so the JWT Bearer token is sent automatically when the
+      // user is logged in — the backend links the recharge to their account for
+      // reward attribution (points, spin credits, draw entries).
+      const data = await api.initiateRecharge({
+        msisdn, network: selectedNetwork!, recharge_type: rechargeType,
+        amount_kobo: amountKobo, variation_code: selectedBundle?.id ?? "",
+        email: email || undefined,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Something went wrong");
       window.location.href = data.payment_url;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to initiate recharge. Please try again.");
