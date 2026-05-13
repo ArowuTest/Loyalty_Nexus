@@ -374,6 +374,7 @@ func main() {
 		// VTU routes always registered — handler is always non-nil
 		mux.HandleFunc("GET /api/v1/recharge/networks",                vtuH.GetNetworks)
 		mux.HandleFunc("GET /api/v1/recharge/networks/{code}/bundles", vtuH.GetBundles)
+		mux.HandleFunc("GET /api/v1/recharge/status/{ref}",            vtuH.GetStatus)
 		mux.HandleFunc("POST /api/v1/recharge/initiate",               vtuH.Initiate)
 		mux.HandleFunc("POST /api/v1/recharge/vtu-webhook",            vtuH.PaystackWebhook)
 
