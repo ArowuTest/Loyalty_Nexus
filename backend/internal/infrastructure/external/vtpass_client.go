@@ -97,6 +97,26 @@ func NewVTPassHTTPClient() (*VTPassHTTPClient, error) {
 	}, nil
 }
 
+// NewVTPassHTTPClientUnchecked returns a VTPassHTTPClient without credential validation.
+// Used as a fallback when NewVTPassHTTPClient fails in sandbox mode — the client
+// will still work for network listing (uses DB, not VTPass), and will return an
+// error on actual purchase attempts if credentials are missing.
+func NewVTPassHTTPClientUnchecked() (*VTPassHTTPClient, error) {
+	sandbox := true // always sandbox when unchecked
+	baseURL := "https://sandbox.vtpass.com/api"
+	if override := os.Getenv("VTPASS_BASE_URL"); override != "" {
+		baseURL = override
+	}
+	return &VTPassHTTPClient{
+		apiKey:    os.Getenv("VTPASS_API_KEY"),
+		publicKey: os.Getenv("VTPASS_PUBLIC_KEY"),
+		secretKey: os.Getenv("VTPASS_SECRET_KEY"),
+		baseURL:   baseURL,
+		isSandbox: sandbox,
+		http:      &http.Client{Timeout: 60 * time.Second},
+	}, nil
+}
+
 // ── Airtime purchase ─────────────────────────────────────────────────────────
 
 func (c *VTPassHTTPClient) PurchaseAirtime(ctx context.Context, network, phone string, amountNaira int) (*VTPassPurchaseResult, error) {
