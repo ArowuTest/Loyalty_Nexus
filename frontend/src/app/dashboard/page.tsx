@@ -419,14 +419,13 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
   const isWin = outcome?.spin_result?.prize_type !== "try_again";
 
   return (
-    <>
-    <AnimatePresence>
-      {claimItem && (
-        <PrizeClaimModal item={claimItem} onClose={() => setClaimItem(null)} onSuccess={() => { mutateWallet(); }} />
-      )}
-    </AnimatePresence>
     <div className="relative rounded-2xl overflow-hidden"
       style={{ background: "linear-gradient(135deg, #0f1018 0%, #141520 100%)", border: "1px solid rgba(245,166,35,0.15)" }}>
+      <AnimatePresence>
+        {claimItem && (
+          <PrizeClaimModal item={claimItem} onClose={() => setClaimItem(null)} onSuccess={() => { mutateWallet(); }} />
+        )}
+      </AnimatePresence>
       <div className="absolute top-0 left-0 right-0 h-[2px]"
         style={{ background: "linear-gradient(to right, transparent, rgba(245,166,35,0.5), transparent)" }} />
       <div className="p-5 md:p-6">
