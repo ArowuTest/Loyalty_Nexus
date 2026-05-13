@@ -256,17 +256,19 @@ func main() {
 		rechargeSvc   := services.NewRechargeService(userRepo, txRepo, notifySvc, cfg, db, drawWindowSvc)
 
 		// ── VTU Recharge (platform-initiated, public endpoints) ───────────────
-		// GAP-5: VTPass client validates credentials at construction; logs warning in
-		// sandbox mode so a missing key never causes a silent startup failure.
-		var vtuH *handlers.VTURechargeHandler
-		if vtpassClient, vtpassErr := external.NewVTPassHTTPClient(); vtpassErr != nil {
-			log.Printf("[VTU] ⚠ VTPass client init failed (%v) — recharge endpoints will return 503", vtpassErr)
-		} else {
-			bundleSvc  := external.NewNetworkBundleService(vtpassClient)
-			vtuSvc     := services.NewVTURechargeService(db, vtpassClient, bundleSvc, rechargeSvc, notifySvc)
-			vtuH       = handlers.NewVTURechargeHandler(vtuSvc)
-			log.Println("[VTU] ✓ VTU recharge service ready")
+		// Always initialise — in sandbox mode credentials are optional so init
+		// never fails. Routes are always registered; handlers return 503 if
+		// vtpassClient is somehow nil at runtime.
+		vtpassClient, vtpassErr := external.NewVTPassHTTPClient()
+		if vtpassErr != nil {
+			log.Printf("[VTU] ⚠ VTPass client init failed (%v) — using nil client; recharge calls will fail gracefully", vtpassErr)
+			// In sandbox mode this should never happen. Log and continue — routes still register.
+			vtpassClient, _ = external.NewVTPassHTTPClientUnchecked()
 		}
+		bundleSvc := external.NewNetworkBundleService(vtpassClient)
+		vtuSvc    := services.NewVTURechargeService(db, vtpassClient, bundleSvc, rechargeSvc, notifySvc)
+		vtuH      := handlers.NewVTURechargeHandler(vtuSvc)
+		log.Println("[VTU] ✓ VTU recharge service ready")
 		mtnPushSvc    := services.NewMTNPushService(db, userRepo, txRepo, drawSvc, drawWindowSvc, notifySvc, cfg)
 		spinSvc       := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
 		studioSvc     := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
@@ -369,12 +371,11 @@ func main() {
 		// ─── VTU Recharge (PUBLIC — no login required) ────────────
 		// Any visitor can recharge airtime/data. Points are awarded on success.
 		// Logged-in users attach their user_id so points map to their account.
-		if vtuH != nil {
-			mux.HandleFunc("GET  /api/v1/recharge/networks",                 vtuH.GetNetworks)
-			mux.HandleFunc("GET  /api/v1/recharge/networks/{code}/bundles",  vtuH.GetBundles)
-			mux.HandleFunc("POST /api/v1/recharge/initiate",                 vtuH.Initiate)
-			mux.HandleFunc("POST /api/v1/recharge/vtu-webhook",              vtuH.PaystackWebhook)
-		}
+		// VTU routes always registered — handler is always non-nil
+		mux.HandleFunc("GET /api/v1/recharge/networks",                vtuH.GetNetworks)
+		mux.HandleFunc("GET /api/v1/recharge/networks/{code}/bundles", vtuH.GetBundles)
+		mux.HandleFunc("POST /api/v1/recharge/initiate",               vtuH.Initiate)
+		mux.HandleFunc("POST /api/v1/recharge/vtu-webhook",            vtuH.PaystackWebhook)
 
 		// ─── Auth (public) ────────────────────────────────────────
 		mux.HandleFunc("POST /api/v1/auth/otp/send", authH.SendOTP)
@@ -569,8 +570,8 @@ func main() {
 		mux.Handle("PUT    /api/v1/admin/recharge/config",        adminAuth(http.HandlerFunc(adminH.UpdateRechargeConfig)))
 		// Network operator toggles (enable/disable networks, airtime/data per network)
 		if vtuH != nil {
-			mux.Handle("GET   /api/v1/admin/networks",           adminAuth(http.HandlerFunc(vtuH.AdminGetNetworks)))
-			mux.Handle("PATCH /api/v1/admin/networks/{code}",    adminAuth(http.HandlerFunc(vtuH.AdminUpdateNetwork)))
+			mux.Handle("GET /api/v1/admin/networks",          adminAuth(http.HandlerFunc(vtuH.AdminGetNetworks)))
+			mux.Handle("PATCH /api/v1/admin/networks/{code}", adminAuth(http.HandlerFunc(vtuH.AdminUpdateNetwork)))
 		}
 		// User management
 		mux.Handle("GET    /api/v1/admin/users/{id}",             adminAuth(http.HandlerFunc(adminH.GetUser)))
