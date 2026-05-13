@@ -473,14 +473,17 @@ func (s *VTURechargeService) markSuccess(ctx context.Context, recharge *VTURecha
 	now := time.Now()
 	amountNaira := recharge.AmountKobo / 100
 
-	// Calculate rewards (same formula as RechargeMax: 1 point per ₦250)
-	pointsEarned := amountNaira / 250
-	// Draw entries: 1 per ₦1000 spent
-	drawEntries := int(amountNaira / 1000)
-	// Spin wheel unlock: ₦1000+ qualifies
-	spinEligible := amountNaira >= 1000
+	// Calculate rewards (₦250 = 1 Pulse Point, ₦200 = 1 draw entry, ₦1000+ = spin)
+	// Double-points for direct platform recharges — per product spec.
+	pointsEarned := amountNaira / 250 * 2 // 2× for platform recharge (vs. CDR path)
+	drawEntries  := int(amountNaira / 200) // ₦200 = 1 draw entry
+	spinEligible := amountNaira >= 1000    // ₦1,000+ unlocks spin wheel
 
-	s.db.WithContext(ctx).Model(&VTURecharge{}).Where("id = ?", recharge.ID).
+	log.Printf("[VTU] markSuccess: ref=%s msisdn=%s amount=₦%d pts=%d drawEntries=%d spin=%v",
+		recharge.PaymentReference, recharge.MSISDN, amountNaira, pointsEarned, drawEntries, spinEligible)
+
+	// Persist reward fields + SUCCESS status on the recharge record
+	if dbErr := s.db.WithContext(ctx).Model(&VTURecharge{}).Where("id = ?", recharge.ID).
 		Updates(map[string]interface{}{
 			"status":        "SUCCESS",
 			"completed_at":  now,
@@ -488,20 +491,40 @@ func (s *VTURechargeService) markSuccess(ctx context.Context, recharge *VTURecha
 			"points_earned": pointsEarned,
 			"draw_entries":  drawEntries,
 			"spin_eligible": spinEligible,
-		})
+		}).Error; dbErr != nil {
+		log.Printf("[VTU] markSuccess: DB update failed ref=%s: %v", recharge.PaymentReference, dbErr)
+	}
 
-	// Award points in the main platform ledger (double-points design)
-	if s.rechargeSvc != nil {
-		user, err := s.rechargeSvc.userRepo.FindByPhoneNumber(ctx, recharge.MSISDN)
-		if err == nil {
+	// ── Award points in the platform wallet ledger ─────────────────────────
+	// Uses FindByPhoneNumber which tries both "2348XXXXXXX" and "+2348XXXXXXX".
+	// If rechargeSvc is not wired (should never happen in prod) we skip gracefully.
+	if s.rechargeSvc == nil {
+		log.Printf("[VTU] markSuccess: rechargeSvc is nil — skipping wallet award for ref=%s", recharge.PaymentReference)
+	} else {
+		user, findErr := s.rechargeSvc.userRepo.FindByPhoneNumber(ctx, recharge.MSISDN)
+		if findErr != nil {
+			log.Printf("[VTU] markSuccess: user not found for msisdn=%s (err=%v) — no wallet award for ref=%s",
+				recharge.MSISDN, findErr, recharge.PaymentReference)
+		} else {
+			log.Printf("[VTU] markSuccess: found user id=%s for msisdn=%s — awarding %d pts",
+				user.ID, recharge.MSISDN, pointsEarned)
 			payRef := "vtu_" + recharge.PaymentReference
 			if awErr := s.rechargeSvc.processAwardTransaction(ctx, user, recharge.AmountKobo, payRef, false); awErr != nil {
-				log.Printf("[VTU] point award error for %s: %v", recharge.MSISDN, awErr)
+				log.Printf("[VTU] markSuccess: processAwardTransaction FAILED for msisdn=%s ref=%s: %v",
+					recharge.MSISDN, recharge.PaymentReference, awErr)
+			} else {
+				log.Printf("[VTU] markSuccess: wallet award committed — user=%s pts=%d spin=%v",
+					user.ID, pointsEarned, spinEligible)
+				// Back-fill user_id on the recharge record if it was a guest session
+				if recharge.UserID == nil {
+					s.db.WithContext(ctx).Model(&VTURecharge{}).Where("id = ?", recharge.ID).
+						Update("user_id", user.ID)
+				}
 			}
 		}
 	}
 
-	// SMS notification
+	// ── SMS notification ───────────────────────────────────────────────────
 	if s.notifySvc != nil {
 		displayPhone := recharge.MSISDN
 		if len(displayPhone) == 13 && displayPhone[:3] == "234" {
@@ -512,8 +535,8 @@ func (s *VTURechargeService) markSuccess(ctx context.Context, recharge *VTURecha
 			displayPhone, pointsEarned, recharge.PaymentReference)
 		go func() { _ = s.notifySvc.SendSMS(ctx, recharge.MSISDN, msg) }()
 	}
-	log.Printf("[VTU] ✓ SUCCESS %s %s ₦%d pts=%d entries=%d spin=%v",
-		recharge.Network, recharge.MSISDN, amountNaira, pointsEarned, drawEntries, spinEligible)
+	log.Printf("[VTU] ✓ SUCCESS ref=%s %s %s ₦%d pts=%d entries=%d spin=%v",
+		recharge.PaymentReference, recharge.Network, recharge.MSISDN, amountNaira, pointsEarned, drawEntries, spinEligible)
 }
 
 func (s *VTURechargeService) markFailed(ctx context.Context, recharge *VTURecharge, reason string, doRefund bool) {
