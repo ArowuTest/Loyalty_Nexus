@@ -494,7 +494,7 @@ func (s *VTURechargeService) markSuccess(ctx context.Context, recharge *VTURecha
 			displayPhone = "0" + displayPhone[3:]
 		}
 		msg := fmt.Sprintf("✅ Your ₦%d %s recharge to %s is complete! You earned %d Pulse Points. Ref: %s",
-			amountNaira, strings.Title(strings.ToLower(recharge.RechargeType)),
+			amountNaira, strings.ToUpper(recharge.RechargeType[:1])+strings.ToLower(recharge.RechargeType[1:]),
 			displayPhone, pointsEarned, recharge.PaymentReference)
 		go func() { _ = s.notifySvc.SendSMS(ctx, recharge.MSISDN, msg) }()
 	}
