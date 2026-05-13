@@ -94,7 +94,7 @@ jobs:
           echo "✅ Render Worker deploy triggered"
 
       - name: Wait for API deployment to complete
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: |
           if [ -z "$RENDER_API_DEPLOY_ID" ]; then
             echo "No deploy ID — skipping wait"
