@@ -368,6 +368,10 @@ func main() {
 		// ─── Public Stats ─────────────────────────────────────────
 		mux.HandleFunc("GET /api/v1/stats", handlers.GetPublicStats(db))
 
+		// optionalAuth: non-blocking auth — injects user context when JWT present,
+		// proceeds as guest otherwise.
+		optionalAuth := middleware.OptionalAuthMiddleware(authSvc)
+
 		// ─── VTU Recharge (PUBLIC — no login required) ────────────
 		// Any visitor can recharge airtime/data. Points are awarded on success.
 		// Logged-in users attach their user_id so points map to their account.
@@ -402,10 +406,6 @@ func main() {
 
 		// ─── Protected routes ─────────────────────────────────────
 		auth := middleware.AuthMiddleware(authSvc)
-		// optionalAuth: like auth but non-blocking — injects user_id when a valid JWT is
-		// present, proceeds as guest otherwise. Used on public endpoints that benefit
-		// from knowing the caller (e.g. /recharge/initiate for reward attribution).
-		optionalAuth := middleware.OptionalAuthMiddleware(authSvc)
 
 		// User profile & wallet
 		mux.Handle("GET /api/v1/user/profile", auth(http.HandlerFunc(userH.GetProfile)))
