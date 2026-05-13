@@ -1,4 +1,4 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://loyalty-nexus-api.onrender.com/api/v1";
 
 // ─── Passport Types ───────────────────────────────────────────────────────────
 
