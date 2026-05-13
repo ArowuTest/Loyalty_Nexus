@@ -296,14 +296,19 @@ func (s *VTURechargeService) HandlePaystackCallback(ctx context.Context, referen
 	}
 
 	// Atomically claim: PENDING → PROCESSING
+	log.Printf("[VTU] callback: Paystack verified ref=%s — attempting atomic claim", reference)
 	claim := s.db.WithContext(ctx).Model(&VTURecharge{}).
 		Where("payment_reference = ? AND status = 'PENDING'", reference).
 		Updates(map[string]interface{}{"status": "PROCESSING", "updated_at": time.Now()})
-	if claim.Error == nil && claim.RowsAffected > 0 {
+	if claim.Error != nil {
+		log.Printf("[VTU] callback: DB claim error ref=%s: %v", reference, claim.Error)
+	} else if claim.RowsAffected > 0 {
+		log.Printf("[VTU] callback: claimed ref=%s — launching fulfil goroutine", reference)
 		// Won the race — fire VTPass fulfillment in background
 		go s.fulfil(context.Background(), &recharge)
+	} else {
+		log.Printf("[VTU] callback: ref=%s already claimed (RowsAffected=0) — skipping", reference)
 	}
-	// If RowsAffected == 0, webhook already claimed it — VTPass already running, safe to redirect
 
 	// Redirect to frontend — frontend will poll for the result
 	q := url.Values{}
@@ -316,8 +321,10 @@ func (s *VTURechargeService) HandlePaystackCallback(ctx context.Context, referen
 func (s *VTURechargeService) verifyPaystackPayment(ctx context.Context, reference string) bool {
 	secret := os.Getenv("PAYSTACK_SECRET_KEY")
 	if secret == "" {
+		log.Printf("[VTU] verifyPaystackPayment: PAYSTACK_SECRET_KEY not set — cannot verify")
 		return false
 	}
+	log.Printf("[VTU] verifyPaystackPayment: checking ref=%s", reference)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		"https://api.paystack.co/transaction/verify/"+url.PathEscape(reference), nil)
 	if err != nil {
@@ -397,6 +404,9 @@ func (s *VTURechargeService) ProcessVTUPaystackWebhook(ctx context.Context, body
 
 func (s *VTURechargeService) fulfil(ctx context.Context, recharge *VTURecharge) {
 	amountNaira := int(recharge.AmountKobo / 100)
+	log.Printf("[VTU] fulfil: ref=%s type=%s network=%s msisdn=%s amount=%dNGN",
+		recharge.PaymentReference, recharge.RechargeType, recharge.Network, recharge.MSISDN, amountNaira)
+
 	var vtResult *external.VTPassPurchaseResult
 	var err error
 
@@ -407,9 +417,13 @@ func (s *VTURechargeService) fulfil(ctx context.Context, recharge *VTURecharge) 
 	}
 
 	if err != nil {
+		log.Printf("[VTU] fulfil error for ref=%s: %v", recharge.PaymentReference, err)
 		s.markFailed(ctx, recharge, err.Error(), true)
 		return
 	}
+
+	log.Printf("[VTU] fulfil VTPass result: ref=%s reqID=%s success=%v pending=%v failed=%v desc=%q",
+		recharge.PaymentReference, vtResult.RequestID, vtResult.Success, vtResult.Pending, vtResult.Failed, vtResult.Description)
 
 	s.db.WithContext(ctx).Model(&VTURecharge{}).Where("id = ?", recharge.ID).
 		Updates(map[string]interface{}{"vtpass_request_id": vtResult.RequestID, "vtpass_provider_ref": vtResult.ProviderRef})
