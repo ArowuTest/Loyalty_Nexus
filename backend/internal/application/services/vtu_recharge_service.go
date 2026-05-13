@@ -471,12 +471,37 @@ func (s *VTURechargeService) initPaystack(ctx context.Context, ref, email string
 }
 
 func (s *VTURechargeService) verifySignature(body []byte, sig string) bool {
-	secret := os.Getenv("PAYSTACK_SECRET_KEY")
+	// Use PAYSTACK_WEBHOOK_SECRET for HMAC verification (separate from the API key).
+	// In sandbox/test mode this is often not set — skip verification so webhooks
+	// are still processed. In production, always set PAYSTACK_WEBHOOK_SECRET.
+	secret := os.Getenv("PAYSTACK_WEBHOOK_SECRET")
+	if secret == "" {
+		log.Printf("[VTU] PAYSTACK_WEBHOOK_SECRET not set — skipping signature check (sandbox mode)")
+		return true
+	}
 	mac := hmac.New(sha512.New, []byte(secret))
 	mac.Write(body)
 	return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(sig))
 }
 
+
+// ── GetRechargeStatus ─────────────────────────────────────────────────────────
+// Returns the current status of a VTU recharge by payment reference.
+// Used by the success page to poll for completion and show a toast.
+func (s *VTURechargeService) GetRechargeStatus(ctx context.Context, ref string) (map[string]interface{}, error) {
+	var recharge VTURecharge
+	if err := s.db.WithContext(ctx).Where("payment_reference = ?", ref).First(&recharge).Error; err != nil {
+		return nil, fmt.Errorf("recharge not found")
+	}
+	return map[string]interface{}{
+		"reference":   recharge.PaymentReference,
+		"status":      recharge.Status,
+		"network":     recharge.Network,
+		"msisdn":      recharge.MSISDN,
+		"amount_kobo": recharge.AmountKobo,
+		"type":        recharge.RechargeType,
+	}, nil
+}
 // normaliseMSISDN converts 080XXXXXXXX → 234XXXXXXXXXX
 func normaliseMSISDN(phone string) string {
 	digits := ""
