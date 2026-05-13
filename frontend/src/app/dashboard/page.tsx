@@ -177,7 +177,7 @@ interface Segment {
   probability: number; color: string; is_active: boolean;
 }
 interface SpinOutcome {
-  spin_result?: { id: string; prize_type: string; prize_value: number; slot_index: number; fulfillment_status: string };
+  spin_result?: { id: string; prize_type: string; prize_value: number; slot_index: number; fulfillment_status: string; claim_status?: string };
   prize_label: string; slot_index: number;
 }
 interface SpinHistoryItem {
