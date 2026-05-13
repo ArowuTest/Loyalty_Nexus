@@ -106,12 +106,25 @@ export default function RechargePage() {
       .then(d => {
         const nets: Network[] = d.networks ?? [];
         setNetworks(nets);
+        // Auto-select: prefer MTN, fall back to first active network
+        // Only if user hasn't manually chosen yet
+        setNetwork(prev => {
+          if (prev) return prev; // user already picked — don't override
+          const mtn = nets.find(n => n.code === "MTN" && n.is_active);
+          if (mtn) return mtn.code;
+          const first = nets.find(n => n.is_active);
+          return first ? first.code : prev;
+        });
       })
       .catch(() => setError("Unable to load networks. Please try again."))
       .finally(() => setLoadNets(false));
   }, []);
 
-  useEffect(() => { fetchNetworks(); }, [fetchNetworks]);
+  useEffect(() => {
+    // Pre-warm the backend (Render free tier spins down after inactivity)
+    fetch(`${API}/health`).catch(() => {/* silent pre-warm */});
+    fetchNetworks();
+  }, [fetchNetworks]);
 
   // ── 3-Rule network auto-detect ─────────────────────────────────────────────
   // Rule 1: cached last recharge for this number (API call)
