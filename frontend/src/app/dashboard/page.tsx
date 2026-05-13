@@ -56,6 +56,7 @@ function PrizeClaimModal({ item, onClose, onSuccess }: { item: ClaimableItem | n
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!item) return;
     if (isCash && (!bankAccNum.trim() || !bankAccName.trim() || !bankName)) {
       toast.error("Please fill in all bank details"); return;
     }
