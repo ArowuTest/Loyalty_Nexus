@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"os"
 	"io"
 	"log"
 	"net/http"
