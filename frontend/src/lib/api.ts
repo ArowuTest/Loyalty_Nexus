@@ -340,6 +340,22 @@ class APIClient {
   getDraws() { return this.request("GET", "/draws"); }
   getDrawWinners(id: string) { return this.request("GET", `/draws/${id}/winners`); }
 
+  // ── VTU Recharge ─────────────────────────────────────────────────────────
+  // Uses the api client so the JWT is sent automatically — the backend links
+  // the recharge to the authenticated user for reward attribution.
+  initiateRecharge(payload: {
+    msisdn: string;
+    network: string;
+    recharge_type: string;
+    amount_kobo: number;
+    variation_code?: string;
+    email?: string;
+  }) {
+    return this.request<{ payment_url: string; recharge_id: string; payment_ref: string }>(
+      "POST", "/recharge/initiate", payload
+    );
+  }
+
   // ── Regional Wars ─────────────────────────────────────────────────────────
   getWarsLeaderboard(limit = 37) {
     return this.request<{
