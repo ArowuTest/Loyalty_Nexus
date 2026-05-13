@@ -376,7 +376,7 @@ func main() {
 		mux.HandleFunc("GET /api/v1/recharge/networks/{code}/bundles", vtuH.GetBundles)
 		mux.HandleFunc("GET /api/v1/recharge/status/{ref}",            vtuH.GetStatus)
 		mux.HandleFunc("GET /api/v1/recharge/callback",                vtuH.HandleCallback)
-		mux.HandleFunc("POST /api/v1/recharge/initiate",               vtuH.Initiate)
+		mux.Handle("POST /api/v1/recharge/initiate", optionalAuth(http.HandlerFunc(vtuH.Initiate)))
 		mux.HandleFunc("POST /api/v1/recharge/vtu-webhook",            vtuH.PaystackWebhook)
 
 		// ─── Auth (public) ────────────────────────────────────────
@@ -402,6 +402,10 @@ func main() {
 
 		// ─── Protected routes ─────────────────────────────────────
 		auth := middleware.AuthMiddleware(authSvc)
+		// optionalAuth: like auth but non-blocking — injects user_id when a valid JWT is
+		// present, proceeds as guest otherwise. Used on public endpoints that benefit
+		// from knowing the caller (e.g. /recharge/initiate for reward attribution).
+		optionalAuth := middleware.OptionalAuthMiddleware(authSvc)
 
 		// User profile & wallet
 		mux.Handle("GET /api/v1/user/profile", auth(http.HandlerFunc(userH.GetProfile)))
