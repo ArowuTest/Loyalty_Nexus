@@ -165,6 +165,36 @@ class RechargeFormNotifier extends StateNotifier<RechargeFormState> {
     }
   }
 
+  // ── 3-rule network prefix auto-detect ──────────────────────────────────────
+  // Rule 1: cached history (done via backend — future enhancement)
+  // Rule 2: HLR (done via backend — future enhancement)
+  // Rule 3: Nigerian prefix map (local, instant)
+  static const _prefixMap = <String, String>{
+    '0803': 'MTN', '0806': 'MTN', '0703': 'MTN', '0706': 'MTN',
+    '0813': 'MTN', '0816': 'MTN', '0810': 'MTN', '0814': 'MTN',
+    '0903': 'MTN', '0906': 'MTN', '0913': 'MTN',
+    '0805': 'GLO', '0807': 'GLO', '0705': 'GLO', '0815': 'GLO',
+    '0905': 'GLO', '0811': 'GLO',
+    '0802': 'AIRTEL', '0808': 'AIRTEL', '0708': 'AIRTEL', '0812': 'AIRTEL',
+    '0701': 'AIRTEL', '0902': 'AIRTEL', '0907': 'AIRTEL',
+    '0809': '9MOBILE', '0817': '9MOBILE', '0818': '9MOBILE',
+    '0908': '9MOBILE', '0909': '9MOBILE',
+  };
+
+  /// Call when phone changes and reaches 11 digits.
+  /// Only auto-sets network if user hasn't selected one yet.
+  String? autoDetectNetwork(String phone) {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    final normalized = digits.startsWith('234') ? '0${digits.substring(3)}' : digits;
+    if (normalized.length < 4) return null;
+    final prefix = normalized.substring(0, 4);
+    final detected = _prefixMap[prefix];
+    if (detected != null && state.selectedNetwork == null) {
+      state = state.copyWith(selectedNetwork: detected);
+    }
+    return detected;
+  }
+
   // ── Submit ───────────────────────────────────────────────────────────────────
 
   Future<String?> submit(Dio dio, String? userId) async {
@@ -228,10 +258,12 @@ final rechargeNetworksProvider =
 
 final rechargeBundlesProvider =
     FutureProvider.autoDispose.family<List<DataBundle>, String>((ref, networkCode) async {
+  // API returns {"bundles": [...]} — unwrap the key.
   final raw = await ref
       .read(dioProvider)
-      .apiGet<List<dynamic>>('/recharge/networks/$networkCode/bundles');
-  return raw
+      .apiGet<Map<String, dynamic>>('/recharge/networks/$networkCode/bundles');
+  final list = (raw['bundles'] as List<dynamic>? ?? []);
+  return list
       .map((e) => DataBundle.fromJson(e as Map<String, dynamic>))
       .toList();
 });
@@ -638,7 +670,12 @@ class _PhoneField extends ConsumerWidget {
             borderSide: const BorderSide(color: Color(0xFFF87171), width: 1.5),
           ),
         ),
-        onChanged: (v) => ref.read(rechargeFormProvider.notifier).setPhone(v),
+        onChanged: (v) {
+          ref.read(rechargeFormProvider.notifier).setPhone(v);
+          if (v.length >= 11) {
+            ref.read(rechargeFormProvider.notifier).autoDetectNetwork(v);
+          }
+        },
       ),
     );
   }
