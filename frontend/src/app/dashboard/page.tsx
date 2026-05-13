@@ -12,7 +12,7 @@ import {
   Zap, Wand2, Trophy, ChevronRight, Flame,
   MapPin, Gift, ArrowRight, RotateCcw, Loader2,
   CreditCard, X, Smartphone, Wallet, Sparkles,
-  Users, Award, Star, Clock,
+  Users, Award, Star, Clock, ChevronDown,
 } from "lucide-react";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -22,6 +22,153 @@ const TIER_HEX: Record<string, string> = {
 const TIER_EMOJI: Record<string, string> = {
   BRONZE: "🥉", SILVER: "🥈", GOLD: "🥇", PLATINUM: "💎",
 };
+// ── Nigerian banks ─────────────────────────────────────────────────────────
+const NIGERIAN_BANKS = [
+  "Access Bank","Access Bank (Diamond)","Carbon","Citibank Nigeria",
+  "Ecobank Nigeria","FCMB","FBNQuest","Fidelity Bank","First Bank of Nigeria",
+  "First City Monument Bank","Globus Bank","Guaranty Trust Bank (GTBank)",
+  "Heritage Bank","Jaiz Bank","Keystone Bank","Kuda Bank","Lotus Bank",
+  "Moniepoint MFB","OPay","Opay Digital Services","Palmpay","Parallex Bank",
+  "Polaris Bank","Providus Bank","PremiumTrust Bank","Rubies MFB",
+  "Sparkle Microfinance Bank","Standard Chartered Bank","Sterling Bank",
+  "Taj Bank","Titan Trust Bank","Union Bank of Nigeria",
+  "United Bank For Africa (UBA)","Unity Bank","VFD Microfinance Bank",
+  "Wema Bank","Zenith Bank",
+];
+
+interface ClaimableItem {
+  id: string; prize_type: string; prize_value: number;
+  fulfillment_status: string; claim_status?: string; created_at: string;
+}
+
+function PrizeClaimModal({ item, onClose, onSuccess }: { item: ClaimableItem | null; onClose: () => void; onSuccess: () => void }) {
+  const [bankAccNum, setBankAccNum] = useState("");
+  const [bankAccName, setBankAccName] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+
+  if (!item) return null;
+  const isCash = item.prize_type === "momo_cash";
+  const isAutoFulfill = item.prize_type === "airtime" || item.prize_type === "data_bundle";
+  const prizeAmt = item.prize_value ? (item.prize_value / 100).toLocaleString("en-NG", { style: "currency", currency: "NGN" }) : "";
+  const prizeLabel = isCash ? `${prizeAmt} Cash` : item.prize_type === "airtime" ? `${prizeAmt} Airtime` : `Data Bundle`;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (isCash && (!bankAccNum.trim() || !bankAccName.trim() || !bankName)) {
+      toast.error("Please fill in all bank details"); return;
+    }
+    setSubmitting(true);
+    try {
+      const payload: Record<string, string> = {};
+      if (isCash) {
+        payload.bank_account_number = bankAccNum.trim();
+        payload.bank_account_name = bankAccName.trim();
+        payload.bank_name = bankName;
+      }
+      await api.claimPrize(item.id, payload);
+      setDone(true);
+      toast.success(isCash ? "Bank details submitted! Payment processed within 24h." : "Prize claimed! Credited within 10 minutes.");
+      setTimeout(() => { onSuccess(); onClose(); }, 2000);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Claim failed. Try again.");
+    } finally { setSubmitting(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <motion.div
+        initial={{ opacity: 0, y: 40, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 40, scale: 0.96 }}
+        transition={{ type: "spring", damping: 24, stiffness: 300 }}
+        onClick={e => e.stopPropagation()}
+        className="relative z-10 w-full max-w-md rounded-2xl p-6 space-y-5"
+        style={{ background: "#13172b", border: "1px solid rgba(255,255,255,0.1)" }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: isCash ? "rgba(245,199,79,0.15)" : "rgba(95,114,249,0.15)" }}>
+              {isCash ? <CreditCard size={15} style={{ color: "var(--gold)" }} /> : <Smartphone size={15} className="text-nexus-400" />}
+            </div>
+            <div>
+              <p className="text-white font-bold text-sm">Claim Your Prize</p>
+              <p className="text-white/40 text-xs">{prizeLabel}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-white/30 hover:text-white/60 transition-colors"><X size={18} /></button>
+        </div>
+        {done ? (
+          <div className="text-center py-6 space-y-3">
+            <div className="w-12 h-12 rounded-full bg-green-400/15 flex items-center justify-center mx-auto">
+              <Gift size={20} className="text-green-400" />
+            </div>
+            <p className="text-white font-bold">Prize Claimed!</p>
+            <p className="text-white/40 text-sm">{isCash ? "Bank details received. Processing within 24 hours." : "Being credited to your phone now."}</p>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="rounded-xl px-4 py-3 text-center" style={{ background: isCash ? "rgba(245,199,79,0.08)" : "rgba(95,114,249,0.08)", border: isCash ? "1px solid rgba(245,199,79,0.2)" : "1px solid rgba(95,114,249,0.2)" }}>
+              <p className="text-xs text-white/40 uppercase tracking-widest mb-0.5">Prize Value</p>
+              <p className="text-2xl font-bold font-display" style={{ color: isCash ? "var(--gold)" : undefined }}>{prizeAmt}</p>
+            </div>
+            {isAutoFulfill && (
+              <div className="space-y-3">
+                <div className="rounded-xl p-4 text-sm text-white/60 space-y-1" style={{ background: "rgba(255,255,255,0.04)" }}>
+                  <p className="text-white/80 font-semibold text-sm">{item.prize_type === "airtime" ? "Airtime" : "Data"} auto-credited to your phone</p>
+                  <p>Will arrive within 5–10 minutes of confirmation.</p>
+                </div>
+                <button type="submit" disabled={submitting} className="w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-colors disabled:opacity-50" style={{ background: "rgba(95,114,249,0.8)" }}>
+                  {submitting ? <><Loader2 size={16} className="animate-spin" /> Processing…</> : "Confirm & Receive"}
+                </button>
+              </div>
+            )}
+            {isCash && (
+              <div className="space-y-3">
+                <p className="text-xs text-white/40">Enter the bank account for your cash payment. Our team processes within 24 hours.</p>
+                <div className="relative">
+                  <label className="block text-xs text-white/40 mb-1">Bank Name *</label>
+                  <div className="relative">
+                    <select value={bankName} onChange={e => setBankName(e.target.value)} required
+                      className="w-full appearance-none rounded-xl px-4 py-3 text-sm text-white focus:outline-none pr-9"
+                      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                      <option value="" style={{ background: "#13172b" }}>Select bank…</option>
+                      {NIGERIAN_BANKS.map(b => <option key={b} value={b} style={{ background: "#13172b" }}>{b}</option>)}
+                    </select>
+                    <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-white/40 mb-1">Account Number *</label>
+                  <input type="text" maxLength={10} value={bankAccNum} onChange={e => setBankAccNum(e.target.value.replace(/\D/g, ""))}
+                    placeholder="10-digit NUBAN" required
+                    className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div>
+                  <label className="block text-xs text-white/40 mb-1">Account Name *</label>
+                  <input type="text" value={bankAccName} onChange={e => setBankAccName(e.target.value)}
+                    placeholder="As it appears on the account" required
+                    className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <button type="submit" disabled={submitting || !bankAccNum || !bankAccName || !bankName}
+                  className="w-full py-3 rounded-xl font-bold text-nexus-900 flex items-center justify-center gap-2 transition-colors disabled:opacity-40"
+                  style={{ background: "var(--gold)" }}>
+                  {submitting ? <><Loader2 size={16} className="animate-spin" /> Submitting…</> : <><CreditCard size={16} /> Submit Bank Details</>}
+                </button>
+                <p className="text-center text-[10px] text-white/25">Processed manually within 24 hours.</p>
+              </div>
+            )}
+          </form>
+        )}
+      </motion.div>
+    </div>
+  );
+}
+
 
 // ─── Wheel types ──────────────────────────────────────────────────────────────
 interface Segment {
@@ -215,6 +362,7 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
   const [spun, setSpun]             = useState(false);
   const [outcome, setOutcome]       = useState<SpinOutcome | null>(null);
   const [showResult, setShowResult] = useState(false);
+  const [claimItem, setClaimItem]   = useState<ClaimableItem | null>(null);
 
   const { mutate: mutateWallet } = useSWR("/user/wallet");
 
@@ -271,6 +419,12 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
   const isWin = outcome?.spin_result?.prize_type !== "try_again";
 
   return (
+    <>
+    <AnimatePresence>
+      {claimItem && (
+        <PrizeClaimModal item={claimItem} onClose={() => setClaimItem(null)} onSuccess={() => { mutateWallet(); }} />
+      )}
+    </AnimatePresence>
     <div className="relative rounded-2xl overflow-hidden"
       style={{ background: "linear-gradient(135deg, #0f1018 0%, #141520 100%)", border: "1px solid rgba(245,166,35,0.15)" }}>
       <div className="absolute top-0 left-0 right-0 h-[2px]"
@@ -390,10 +544,21 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
                     <>
                       <p className="text-[11px] font-black uppercase tracking-wider mb-1" style={{ color: "var(--gold)" }}>🎉 You Won!</p>
                       <p className="text-white font-black text-base">{outcome.prize_label}</p>
-                      {outcome.spin_result?.prize_type === "momo_cash" && (
-                        <Link href="/prizes" className="text-[11px] text-white/50 underline underline-offset-2 mt-1 block hover:text-white/70">
-                          Claim in My Prizes →
-                        </Link>
+                      {outcome.spin_result && (outcome.spin_result.prize_type === "momo_cash" || outcome.spin_result.prize_type === "airtime" || outcome.spin_result.prize_type === "data_bundle") && (
+                        <button
+                          onClick={() => setClaimItem({
+                            id: outcome!.spin_result!.id,
+                            prize_type: outcome!.spin_result!.prize_type,
+                            prize_value: outcome!.spin_result!.prize_value,
+                            fulfillment_status: outcome!.spin_result!.fulfillment_status,
+                            claim_status: outcome!.spin_result!.claim_status,
+                            created_at: "",
+                          })}
+                          className="mt-2 w-full py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                          style={{ background: "rgba(245,199,79,0.12)", color: "var(--gold)", border: "1px solid rgba(245,199,79,0.25)" }}
+                        >
+                          <Gift size={12} /> Claim Prize Now
+                        </button>
                       )}
                     </>
                   ) : (
