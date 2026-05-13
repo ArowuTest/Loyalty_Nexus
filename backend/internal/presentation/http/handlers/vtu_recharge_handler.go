@@ -71,8 +71,46 @@ func (h *VTURechargeHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// GET /api/v1/recharge/status/{ref}
+// Polls recharge fulfillment status. Used by the frontend adaptive polling loop.
+// Returns: status, msisdn, network, amount_kobo, type, points_earned,
+//
+//	draw_entries, spin_eligible, failure_reason.
+func (h *VTURechargeHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+	ref := r.PathValue("ref")
+	if ref == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reference required"})
+		return
+	}
+	result, err := h.svc.GetRechargeStatus(r.Context(), ref)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "recharge not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GET /api/v1/recharge/callback?reference=REF
+// Paystack redirects the user's browser here after payment completes.
+// This endpoint:
+//  1. Verifies the payment with Paystack (or checks DB if webhook already confirmed it)
+//  2. Fires VTPass fulfillment in a background goroutine (atomic claim prevents double-fire)
+//  3. Redirects the browser to /recharge?payment=success&reference=REF
+//     so the frontend can show the in-page success banner and start polling.
+func (h *VTURechargeHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
+	ref := r.URL.Query().Get("reference")
+	redirectURL, err := h.svc.HandlePaystackCallback(r.Context(), ref)
+	if err != nil {
+		log.Printf("[VTU] callback error for ref=%s: %v", ref, err)
+		http.Redirect(w, r, "https://loyalty-nexus.vercel.app/recharge?payment=failed", http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
+}
+
 // POST /api/v1/recharge/vtu-webhook
 // Paystack webhook for VTU recharges (NX_ prefix refs).
+// Acks immediately (200) then processes async — Paystack requires fast response.
 func (h *VTURechargeHandler) PaystackWebhook(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
@@ -121,7 +159,7 @@ func (h *VTURechargeHandler) AdminUpdateNetwork(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
-// ── helpers ─────────────────────────────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────────────────────
 
 // userIDFromContext returns the authenticated user's UUID if a valid JWT is
 // present on the request. Returns nil for unauthenticated (guest) requests.
