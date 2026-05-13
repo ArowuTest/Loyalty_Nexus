@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -21,19 +22,25 @@ import (
 	"gorm.io/gorm"
 )
 
-// ─── VTU Recharge Service ────────────────────────────────────────────────────
+// ── VTU Recharge Service ──────────────────────────────────────────────────────
 // Handles platform-initiated recharges (user pays via Paystack → VTPass tops up).
 // Public endpoints — no authentication required to recharge.
 //
-// Double-points design: when a user recharges on the platform AND MTN sends the
-// CDR event, they earn points from both sources. This is intentional — "earn
-// double points when you recharge on Loyalty Nexus" is the marketing hook.
+// Payment flow (matches RechargeMax):
+//   1. Frontend calls POST /api/v1/recharge/initiate → gets Paystack URL
+//   2. Paystack callback_url = backend GET /api/v1/recharge/callback?ref=REF
+//   3. Backend verifies payment, fires VTPass async, redirects browser to
+//      /recharge?payment=success&reference=REF
+//   4. Frontend polls GET /api/v1/recharge/status/{ref} (adaptive intervals)
+//      until status=SUCCESS or FAILED, then shows in-page banner + reward details.
+//
+// Double-points design: Paystack path + MTN CDR both award points (intentional).
 
 type VTURechargeService struct {
 	db          *gorm.DB
 	vtpass      *external.VTPassHTTPClient
 	bundleSvc   *external.NetworkBundleService
-	rechargeSvc *RechargeService // for processAwardTransaction (double points)
+	rechargeSvc *RechargeService
 	notifySvc   *NotificationService
 }
 
@@ -42,9 +49,9 @@ type VTURechargeService struct {
 type InitiateRechargeRequest struct {
 	MSISDN        string     `json:"msisdn"`
 	Network       string     `json:"network"`
-	RechargeType  string     `json:"recharge_type"`  // "airtime" | "data"
+	RechargeType  string     `json:"recharge_type"`
 	AmountKobo    int64      `json:"amount_kobo"`
-	VariationCode string     `json:"variation_code"` // data only; VTPass variation_code
+	VariationCode string     `json:"variation_code"`
 	Email         string     `json:"email"`
 	UserID        *uuid.UUID `json:"user_id,omitempty"`
 }
@@ -58,7 +65,7 @@ type InitiateRechargeResponse struct {
 	RechargeType string    `json:"recharge_type"`
 }
 
-// ── Recharge DB entity ────────────────────────────────────────────────────────
+// ── VTURecharge DB entity ─────────────────────────────────────────────────────
 
 type VTURecharge struct {
 	ID                uuid.UUID  `gorm:"column:id;primaryKey"`
@@ -67,7 +74,7 @@ type VTURecharge struct {
 	Network           string     `gorm:"column:network"`
 	RechargeType      string     `gorm:"column:recharge_type"`
 	AmountKobo        int64      `gorm:"column:amount_kobo"`
-	DataVariationCode string     `gorm:"column:data_variation_code"` // GAP fix: actual VTPass variation_code
+	DataVariationCode string     `gorm:"column:data_variation_code"`
 	PaymentReference  string     `gorm:"column:payment_reference"`
 	VTPassRequestID   string     `gorm:"column:vtpass_request_id"`
 	VTPassProviderRef string     `gorm:"column:vtpass_provider_ref"`
@@ -75,14 +82,18 @@ type VTURecharge struct {
 	Status            string     `gorm:"column:status"`
 	FailureReason     string     `gorm:"column:failure_reason"`
 	Email             string     `gorm:"column:email"`
-	CreatedAt         time.Time  `gorm:"column:created_at"`
-	UpdatedAt         time.Time  `gorm:"column:updated_at"`
-	CompletedAt       *time.Time `gorm:"column:completed_at"`
+	// Reward fields — populated by markSuccess, returned by GetRechargeStatus
+	PointsEarned  int64  `gorm:"column:points_earned"`
+	DrawEntries   int    `gorm:"column:draw_entries"`
+	SpinEligible  bool   `gorm:"column:spin_eligible"`
+	CreatedAt     time.Time  `gorm:"column:created_at"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at"`
+	CompletedAt   *time.Time `gorm:"column:completed_at"`
 }
 
 func (VTURecharge) TableName() string { return "recharges" }
 
-// WebhookEventDedup — GAP-2 idempotency guard
+// WebhookEventDedup — idempotency guard
 type WebhookEventDedup struct {
 	ID          uuid.UUID `gorm:"column:id;primaryKey"`
 	Source      string    `gorm:"column:source"`
@@ -103,11 +114,8 @@ func NewVTURechargeService(
 	notifySvc *NotificationService,
 ) *VTURechargeService {
 	return &VTURechargeService{
-		db:          db,
-		vtpass:      vtpass,
-		bundleSvc:   bundleSvc,
-		rechargeSvc: rechargeSvc,
-		notifySvc:   notifySvc,
+		db: db, vtpass: vtpass, bundleSvc: bundleSvc,
+		rechargeSvc: rechargeSvc, notifySvc: notifySvc,
 	}
 }
 
@@ -145,7 +153,6 @@ func (s *VTURechargeService) GetActiveNetworks(ctx context.Context) ([]external.
 	return out, nil
 }
 
-// GetAllNetworksAdmin returns all networks including inactive ones (for admin panel).
 func (s *VTURechargeService) GetAllNetworksAdmin(ctx context.Context) ([]map[string]interface{}, error) {
 	var rows []struct {
 		ID             uuid.UUID `gorm:"column:id"`
@@ -176,7 +183,6 @@ func (s *VTURechargeService) GetAllNetworksAdmin(ctx context.Context) ([]map[str
 	return out, nil
 }
 
-// UpdateNetworkConfig updates a network's toggles (admin only).
 func (s *VTURechargeService) UpdateNetworkConfig(ctx context.Context, networkCode string, updates map[string]interface{}) error {
 	updates["updated_at"] = time.Now()
 	return s.db.WithContext(ctx).
@@ -198,7 +204,6 @@ func (s *VTURechargeService) InitiateRecharge(ctx context.Context, req InitiateR
 	req.RechargeType = strings.ToUpper(req.RechargeType)
 	msisdn := normaliseMSISDN(req.MSISDN)
 
-	// Validate network is active
 	var activeCount int64
 	s.db.WithContext(ctx).Table("network_operator_configs").
 		Where("network_code = ? AND is_active = true", req.Network).Count(&activeCount)
@@ -223,7 +228,7 @@ func (s *VTURechargeService) InitiateRecharge(ctx context.Context, req InitiateR
 		MSISDN: msisdn, Network: req.Network,
 		RechargeType:      req.RechargeType,
 		AmountKobo:        req.AmountKobo,
-		DataVariationCode: req.VariationCode, // GAP fix: store the actual variation code
+		DataVariationCode: req.VariationCode,
 		PaymentReference:  payRef,
 		Status:            "PENDING",
 		Email:             email,
@@ -244,18 +249,106 @@ func (s *VTURechargeService) InitiateRecharge(ctx context.Context, req InitiateR
 	}, nil
 }
 
+// ── HandlePaystackCallback ────────────────────────────────────────────────────
+// GET /api/v1/recharge/callback?reference=REF
+// Called by Paystack after the user completes (or cancels) payment.
+// Verifies payment with Paystack, fires VTPass fulfillment in background,
+// then redirects the browser to /recharge?payment=success&reference=REF
+// (or /recharge?payment=failed on failure).
+// The frontend polls GET /api/v1/recharge/status/{ref} for the final result.
+
+func (s *VTURechargeService) HandlePaystackCallback(ctx context.Context, reference string) (string, error) {
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "https://loyalty-nexus.vercel.app"
+	}
+
+	if reference == "" {
+		return frontendURL + "/recharge?payment=failed&reason=missing+reference", nil
+	}
+
+	// Check DB first — if webhook already processed this we skip the Paystack API call
+	var recharge VTURecharge
+	dbErr := s.db.WithContext(ctx).Where("payment_reference = ?", reference).First(&recharge).Error
+	if dbErr != nil {
+		return frontendURL + "/recharge?payment=failed&reference=" + url.QueryEscape(reference), nil
+	}
+
+	// If already SUCCESS (webhook beat us) — redirect with full result embedded
+	if recharge.Status == "SUCCESS" {
+		q := url.Values{}
+		q.Set("payment", "success")
+		q.Set("reference", reference)
+		q.Set("txn_status", "SUCCESS")
+		q.Set("amount", fmt.Sprintf("%d", recharge.AmountKobo/100))
+		q.Set("points", fmt.Sprintf("%d", recharge.PointsEarned))
+		q.Set("draw_entries", fmt.Sprintf("%d", recharge.DrawEntries))
+		if recharge.SpinEligible { q.Set("spin_eligible", "true") }
+		q.Set("msisdn", recharge.MSISDN)
+		q.Set("network", recharge.Network)
+		return frontendURL + "/recharge?" + q.Encode(), nil
+	}
+
+	// Verify payment with Paystack (only if not already confirmed by webhook)
+	verified := s.verifyPaystackPayment(ctx, reference)
+	if !verified {
+		return frontendURL + "/recharge?payment=failed&reference=" + url.QueryEscape(reference), nil
+	}
+
+	// Atomically claim: PENDING → PROCESSING
+	claim := s.db.WithContext(ctx).Model(&VTURecharge{}).
+		Where("payment_reference = ? AND status = 'PENDING'", reference).
+		Updates(map[string]interface{}{"status": "PROCESSING", "updated_at": time.Now()})
+	if claim.Error == nil && claim.RowsAffected > 0 {
+		// Won the race — fire VTPass fulfillment in background
+		go s.fulfil(context.Background(), &recharge)
+	}
+	// If RowsAffected == 0, webhook already claimed it — VTPass already running, safe to redirect
+
+	// Redirect to frontend — frontend will poll for the result
+	q := url.Values{}
+	q.Set("payment", "success")
+	q.Set("reference", reference)
+	return frontendURL + "/recharge?" + q.Encode(), nil
+}
+
+// verifyPaystackPayment calls Paystack verify API to confirm a payment
+func (s *VTURechargeService) verifyPaystackPayment(ctx context.Context, reference string) bool {
+	secret := os.Getenv("PAYSTACK_SECRET_KEY")
+	if secret == "" {
+		return false
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"https://api.paystack.co/transaction/verify/"+url.PathEscape(reference), nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+secret)
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Status bool `json:"status"`
+		Data   struct {
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return false
+	}
+	return result.Status && result.Data.Status == "success"
+}
+
 // ── ProcessVTUPaystackWebhook ─────────────────────────────────────────────────
-// Handles Paystack charge.success for VTU recharges only (prefix NX_).
-// Called from the existing PaystackWebhook handler after signature verification.
-// GAP-2: idempotent via webhook_events dedup table.
 
 func (s *VTURechargeService) ProcessVTUPaystackWebhook(ctx context.Context, body []byte, signature string) error {
-	// 1. Verify HMAC-SHA512 signature
 	if !s.verifySignature(body, signature) {
 		return fmt.Errorf("invalid webhook signature")
 	}
 
-	// 2. Parse
 	var event struct {
 		Event string `json:"event"`
 		Data  struct {
@@ -270,10 +363,9 @@ func (s *VTURechargeService) ProcessVTUPaystackWebhook(ctx context.Context, body
 	}
 	ref := event.Data.Reference
 	if !strings.HasPrefix(ref, "NX_") {
-		return nil // not a VTU recharge
+		return nil
 	}
 
-	// 3. GAP-2: idempotency guard
 	eventID := fmt.Sprintf("paystack_%d", event.Data.ID)
 	dedup := &WebhookEventDedup{
 		ID: uuid.New(), Source: "paystack", EventID: eventID,
@@ -284,22 +376,19 @@ func (s *VTURechargeService) ProcessVTUPaystackWebhook(ctx context.Context, body
 		return nil
 	}
 
-	// 4. Find recharge
 	var recharge VTURecharge
 	if err := s.db.WithContext(ctx).Where("payment_reference = ?", ref).First(&recharge).Error; err != nil {
 		log.Printf("[VTU] recharge not found: %s", ref)
 		return nil
 	}
 
-	// 5. Atomic claim
 	res := s.db.WithContext(ctx).Model(&VTURecharge{}).
 		Where("payment_reference = ? AND status = 'PENDING'", ref).
-		Updates(map[string]interface{}{"status": "PROCESSING", "paystack_event_id": eventID})
+		Updates(map[string]interface{}{"status": "PROCESSING", "paystack_event_id": eventID, "updated_at": time.Now()})
 	if res.Error != nil || res.RowsAffected == 0 {
 		return res.Error
 	}
 
-	// 6. Fulfil async
 	go s.fulfil(context.Background(), &recharge)
 	return nil
 }
@@ -314,7 +403,6 @@ func (s *VTURechargeService) fulfil(ctx context.Context, recharge *VTURecharge) 
 	if recharge.RechargeType == "AIRTIME" {
 		vtResult, err = s.vtpass.PurchaseAirtime(ctx, recharge.Network, recharge.MSISDN, amountNaira)
 	} else {
-		// GAP fix: DataVariationCode is the real VTPass variation_code (e.g. "mtn-10mb-100")
 		vtResult, err = s.vtpass.PurchaseData(ctx, recharge.Network, recharge.MSISDN, recharge.DataVariationCode, amountNaira)
 	}
 
@@ -363,12 +451,32 @@ func (s *VTURechargeService) requeryLoop(ctx context.Context, recharge *VTURecha
 	s.markFailed(ctx, recharge, "VTPass requery exhausted after 15 minutes — refund issued", true)
 }
 
+// ── markSuccess ───────────────────────────────────────────────────────────────
+// Awards points, calculates draw entries and spin eligibility, persists all
+// reward fields so GetRechargeStatus can return them to the frontend.
+
 func (s *VTURechargeService) markSuccess(ctx context.Context, recharge *VTURecharge) {
 	now := time.Now()
-	s.db.WithContext(ctx).Model(&VTURecharge{}).Where("id = ?", recharge.ID).
-		Updates(map[string]interface{}{"status": "SUCCESS", "completed_at": now, "updated_at": now})
+	amountNaira := recharge.AmountKobo / 100
 
-	// Award points (double-points design: Paystack path + MTN CDR path both award)
+	// Calculate rewards (same formula as RechargeMax: 1 point per ₦250)
+	pointsEarned := amountNaira / 250
+	// Draw entries: 1 per ₦1000 spent
+	drawEntries := int(amountNaira / 1000)
+	// Spin wheel unlock: ₦1000+ qualifies
+	spinEligible := amountNaira >= 1000
+
+	s.db.WithContext(ctx).Model(&VTURecharge{}).Where("id = ?", recharge.ID).
+		Updates(map[string]interface{}{
+			"status":        "SUCCESS",
+			"completed_at":  now,
+			"updated_at":    now,
+			"points_earned": pointsEarned,
+			"draw_entries":  drawEntries,
+			"spin_eligible": spinEligible,
+		})
+
+	// Award points in the main platform ledger (double-points design)
 	if s.rechargeSvc != nil {
 		user, err := s.rechargeSvc.userRepo.FindByPhoneNumber(ctx, recharge.MSISDN)
 		if err == nil {
@@ -379,17 +487,28 @@ func (s *VTURechargeService) markSuccess(ctx context.Context, recharge *VTURecha
 		}
 	}
 
+	// SMS notification
 	if s.notifySvc != nil {
-		msg := fmt.Sprintf("Your ₦%d %s recharge is complete! 🎉 You've earned double Pulse Points. Ref: %s",
-			recharge.AmountKobo/100, recharge.RechargeType, recharge.PaymentReference)
+		displayPhone := recharge.MSISDN
+		if len(displayPhone) == 13 && displayPhone[:3] == "234" {
+			displayPhone = "0" + displayPhone[3:]
+		}
+		msg := fmt.Sprintf("✅ Your ₦%d %s recharge to %s is complete! You earned %d Pulse Points. Ref: %s",
+			amountNaira, strings.Title(strings.ToLower(recharge.RechargeType)),
+			displayPhone, pointsEarned, recharge.PaymentReference)
 		go func() { _ = s.notifySvc.SendSMS(ctx, recharge.MSISDN, msg) }()
 	}
-	log.Printf("[VTU] ✓ success %s %s ₦%d", recharge.Network, recharge.MSISDN, recharge.AmountKobo/100)
+	log.Printf("[VTU] ✓ SUCCESS %s %s ₦%d pts=%d entries=%d spin=%v",
+		recharge.Network, recharge.MSISDN, amountNaira, pointsEarned, drawEntries, spinEligible)
 }
 
 func (s *VTURechargeService) markFailed(ctx context.Context, recharge *VTURecharge, reason string, doRefund bool) {
 	s.db.WithContext(ctx).Model(&VTURecharge{}).Where("id = ?", recharge.ID).
-		Updates(map[string]interface{}{"status": "FAILED", "failure_reason": reason, "updated_at": time.Now()})
+		Updates(map[string]interface{}{
+			"status":         "FAILED",
+			"failure_reason": reason,
+			"updated_at":     time.Now(),
+		})
 	if doRefund {
 		go s.issueRefund(context.Background(), recharge, reason)
 	}
@@ -419,27 +538,28 @@ func (s *VTURechargeService) issueRefund(ctx context.Context, recharge *VTURecha
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
-	s.db.WithContext(ctx).Model(&VTURecharge{}).Where("id = ?", recharge.ID).
-		Update("status", "CANCELLED")
+	s.db.WithContext(ctx).Model(&VTURecharge{}).Where("id = ?", recharge.ID).Update("status", "CANCELLED")
 	log.Printf("[VTU] refund issued for %s", recharge.PaymentReference)
 }
 
-// ── Paystack init ─────────────────────────────────────────────────────────────
+// ── initPaystack ──────────────────────────────────────────────────────────────
+// callback_url points to the BACKEND callback endpoint, which verifies payment,
+// fires VTPass, and redirects the browser to the frontend.
 
 func (s *VTURechargeService) initPaystack(ctx context.Context, ref, email string, amountKobo int64) (string, error) {
 	secret := os.Getenv("PAYSTACK_SECRET_KEY")
 	if secret == "" {
 		return "", fmt.Errorf("PAYSTACK_SECRET_KEY not set")
 	}
-	frontendURL := os.Getenv("FRONTEND_URL")
-	if frontendURL == "" {
-		frontendURL = "https://loyalty-nexus.vercel.app"
+	backendURL := os.Getenv("BACKEND_URL")
+	if backendURL == "" {
+		backendURL = "https://loyalty-nexus-api.onrender.com"
 	}
 	payload, _ := json.Marshal(map[string]interface{}{
 		"reference":    ref,
 		"email":        email,
 		"amount":       amountKobo,
-		"callback_url": frontendURL + "/recharge/success?ref=" + ref,
+		"callback_url": backendURL + "/api/v1/recharge/callback?reference=" + url.QueryEscape(ref),
 		"metadata": map[string]interface{}{
 			"custom_fields": []map[string]string{
 				{"display_name": "Platform", "variable_name": "platform", "value": "LoyaltyNexus VTU"},
@@ -460,8 +580,8 @@ func (s *VTURechargeService) initPaystack(ctx context.Context, ref, email string
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	var result struct {
-		Status bool   `json:"status"`
-		Data   struct{ AuthorizationURL string `json:"authorization_url"` } `json:"data"`
+		Status  bool   `json:"status"`
+		Data    struct{ AuthorizationURL string `json:"authorization_url"` } `json:"data"`
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil || !result.Status {
@@ -471,9 +591,6 @@ func (s *VTURechargeService) initPaystack(ctx context.Context, ref, email string
 }
 
 func (s *VTURechargeService) verifySignature(body []byte, sig string) bool {
-	// Use PAYSTACK_WEBHOOK_SECRET for HMAC verification (separate from the API key).
-	// In sandbox/test mode this is often not set — skip verification so webhooks
-	// are still processed. In production, always set PAYSTACK_WEBHOOK_SECRET.
 	secret := os.Getenv("PAYSTACK_WEBHOOK_SECRET")
 	if secret == "" {
 		log.Printf("[VTU] PAYSTACK_WEBHOOK_SECRET not set — skipping signature check (sandbox mode)")
@@ -484,25 +601,36 @@ func (s *VTURechargeService) verifySignature(body []byte, sig string) bool {
 	return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(sig))
 }
 
-
 // ── GetRechargeStatus ─────────────────────────────────────────────────────────
-// Returns the current status of a VTU recharge by payment reference.
-// Used by the success page to poll for completion and show a toast.
+// Returns full recharge status including reward fields.
+// Used by the frontend polling loop after payment.
+
 func (s *VTURechargeService) GetRechargeStatus(ctx context.Context, ref string) (map[string]interface{}, error) {
 	var recharge VTURecharge
 	if err := s.db.WithContext(ctx).Where("payment_reference = ?", ref).First(&recharge).Error; err != nil {
 		return nil, fmt.Errorf("recharge not found")
 	}
+	// Convert 234XXXXXXXXXX → 0XXXXXXXXXX for display
+	displayPhone := recharge.MSISDN
+	if len(displayPhone) == 13 && displayPhone[:3] == "234" {
+		displayPhone = "0" + displayPhone[3:]
+	}
 	return map[string]interface{}{
-		"reference":   recharge.PaymentReference,
-		"status":      recharge.Status,
-		"network":     recharge.Network,
-		"msisdn":      recharge.MSISDN,
-		"amount_kobo": recharge.AmountKobo,
-		"type":        recharge.RechargeType,
+		"reference":      recharge.PaymentReference,
+		"status":         recharge.Status,
+		"network":        recharge.Network,
+		"msisdn":         displayPhone,
+		"amount_kobo":    recharge.AmountKobo,
+		"type":           recharge.RechargeType,
+		"failure_reason": recharge.FailureReason,
+		"points_earned":  recharge.PointsEarned,
+		"draw_entries":   recharge.DrawEntries,
+		"spin_eligible":  recharge.SpinEligible,
 	}, nil
 }
-// normaliseMSISDN converts 080XXXXXXXX → 234XXXXXXXXXX
+
+// ── normaliseMSISDN ───────────────────────────────────────────────────────────
+
 func normaliseMSISDN(phone string) string {
 	digits := ""
 	for _, ch := range phone {
