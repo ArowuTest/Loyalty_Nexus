@@ -29,9 +29,9 @@ func (q *EventQueue) Publish(ctx context.Context, event map[string]interface{}) 
 	return q.rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: q.stream,
 		Values: map[string]interface{}{
-			"event":  event["type"],
-			"data":   string(data),
-			"ts":     time.Now().Unix(),
+			"event": event["type"],
+			"data":  string(data),
+			"ts":    time.Now().Unix(),
 		},
 	}).Err()
 }
@@ -39,6 +39,13 @@ func (q *EventQueue) Publish(ctx context.Context, event map[string]interface{}) 
 func (q *EventQueue) Subscribe(ctx context.Context, group, consumer string, handler func(map[string]interface{}) error) {
 	// Create consumer group if it doesn't exist
 	q.rdb.XGroupCreateMkStream(ctx, q.stream, group, "0")
+
+	// Exponential backoff on connection errors to avoid log flooding.
+	// Render's free-tier Redis resets idle TCP connections frequently;
+	// the go-redis client reconnects automatically on the next call,
+	// so we just need to wait briefly before retrying.
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
 
 	for {
 		select {
@@ -56,13 +63,31 @@ func (q *EventQueue) Subscribe(ctx context.Context, group, consumer string, hand
 		}).Result()
 
 		if err == redis.Nil || err == context.DeadlineExceeded {
+			// Normal: no messages / block timeout — reset backoff and continue
+			backoff = time.Second
 			continue
 		}
 		if err != nil {
-			log.Printf("[QUEUE] XReadGroup error: %v", err)
-			time.Sleep(time.Second)
+			if ctx.Err() != nil {
+				// Context cancelled — clean shutdown, not an error
+				return
+			}
+			// Connection error (EOF, reset, etc.) — log once per backoff window,
+			// then wait before retrying so we don't flood the log.
+			log.Printf("[QUEUE] XReadGroup error (retrying in %s): %v", backoff, err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			if backoff < maxBackoff {
+				backoff *= 2
+			}
 			continue
 		}
+
+		// Successful read — reset backoff
+		backoff = time.Second
 
 		for _, stream := range entries {
 			for _, msg := range stream.Messages {
