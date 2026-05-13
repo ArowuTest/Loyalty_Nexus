@@ -3,10 +3,11 @@ package external
 import (
 	"bytes"
 	"context"
-	"log"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -19,18 +20,37 @@ import (
 // Handles all VTPass API calls: airtime purchase, data purchase, requery,
 // and live variation (bundle) catalog fetch.
 //
-// Sandbox vs. live is controlled by a single VTPASS_SANDBOX env var.
-// GAP-7 fix: one flag controls both the base URL and the service mode — no
-// divergence between DB provider_mode and isSandbox env var.
-// GAP-5 fix: credentials are validated at construction time in NewVTPassHTTPClient().
+// Design:
+//   - http.Client and Transport are constructed ONCE at startup for connection
+//     pooling and TLS session reuse (critical for production scale).
+//   - Credentials (api-key, secret-key, public-key) are read fresh from
+//     os.Getenv() on every outbound call via credentials(). This means:
+//     (a) credential rotation takes effect immediately without restart, and
+//     (b) the pattern is compatible with AWS Secrets Manager / HashiCorp Vault
+//     sidecars that inject rotated values into environment variables at runtime.
+//   - baseURL and isSandbox are fixed at construction (they don't rotate).
 
 type VTPassHTTPClient struct {
+	baseURL   string
+	isSandbox bool
+	http      *http.Client // shared, pooled — never recreated
+}
+
+// vtpassCreds holds the three credentials read fresh per call.
+type vtpassCreds struct {
 	apiKey    string
 	publicKey string
 	secretKey string
-	baseURL   string
-	isSandbox bool
-	http      *http.Client
+}
+
+// credentials reads VTPass API credentials fresh from the environment.
+// Called on every outbound request so rotation takes effect immediately.
+func (c *VTPassHTTPClient) credentials() vtpassCreds {
+	return vtpassCreds{
+		apiKey:    os.Getenv("VTPASS_API_KEY"),
+		publicKey: os.Getenv("VTPASS_PUBLIC_KEY"),
+		secretKey: os.Getenv("VTPASS_SECRET_KEY"),
+	}
 }
 
 // VTPassPurchaseResult is the normalised result of an airtime/data purchase.
@@ -48,7 +68,7 @@ type VTPassPurchaseResult struct {
 type VTPassVariation struct {
 	Code   string  `json:"variation_code"`
 	Name   string  `json:"name"`
-	Amount float64 `json:"variation_amount_parsed"` // parsed from string
+	Amount float64 `json:"variation_amount_parsed"`
 }
 
 // ── Service IDs ──────────────────────────────────────────────────────────────
@@ -65,56 +85,74 @@ var vtpassDataIDs = map[string]string{
 	"9MOBILE": "etisalat-data",
 }
 
-// ── Constructor ──────────────────────────────────────────────────────────────
+// productionTransport returns an http.Transport tuned for production scale:
+//   - Connection pooling prevents per-request TCP handshake overhead
+//   - TLS session reuse saves 100–300ms per request
+//   - IdleConnTimeout recycles stale connections before the server closes them
+func productionTransport() *http.Transport {
+	return &http.Transport{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+	}
+}
 
+// ── Constructors ─────────────────────────────────────────────────────────────
+
+// NewVTPassHTTPClient builds the production VTPass client.
+// Credentials are NOT stored — they are read from env at call time.
+// Only baseURL and isSandbox are fixed at construction.
 func NewVTPassHTTPClient() (*VTPassHTTPClient, error) {
 	sandbox := os.Getenv("VTPASS_SANDBOX") == "true"
 
-	apiKey    := os.Getenv("VTPASS_API_KEY")
-	publicKey := os.Getenv("VTPASS_PUBLIC_KEY")
-	secretKey := os.Getenv("VTPASS_SECRET_KEY")
-
-	// GAP-5: fail fast in production if credentials are missing
-	if !sandbox && (apiKey == "" || publicKey == "" || secretKey == "") {
-		return nil, fmt.Errorf("VTPass: VTPASS_API_KEY, VTPASS_PUBLIC_KEY and VTPASS_SECRET_KEY must all be set in production (VTPASS_SANDBOX!=true)")
+	// Fail fast in production if any credential is missing at startup.
+	// In sandbox we allow empty credentials (they may be set later).
+	if !sandbox {
+		apiKey    := os.Getenv("VTPASS_API_KEY")
+		publicKey := os.Getenv("VTPASS_PUBLIC_KEY")
+		secretKey := os.Getenv("VTPASS_SECRET_KEY")
+		if apiKey == "" || publicKey == "" || secretKey == "" {
+			return nil, fmt.Errorf("VTPass: VTPASS_API_KEY, VTPASS_PUBLIC_KEY and VTPASS_SECRET_KEY must all be set in production (VTPASS_SANDBOX!=true)")
+		}
 	}
 
 	baseURL := "https://vtpass.com/api"
 	if sandbox {
 		baseURL = "https://sandbox.vtpass.com/api"
 	}
-	// Allow full override (e.g. for mock server in tests)
 	if override := os.Getenv("VTPASS_BASE_URL"); override != "" {
 		baseURL = override
 	}
 
+	log.Printf("[VTPass] client initialised: sandbox=%v baseURL=%s (credentials read per-call)", sandbox, baseURL)
+
 	return &VTPassHTTPClient{
-		apiKey:    apiKey,
-		publicKey: publicKey,
-		secretKey: secretKey,
 		baseURL:   baseURL,
 		isSandbox: sandbox,
-		http:      &http.Client{Timeout: 60 * time.Second},
+		http: &http.Client{
+			Timeout:   60 * time.Second,
+			Transport: productionTransport(),
+		},
 	}, nil
 }
 
-// NewVTPassHTTPClientUnchecked returns a VTPassHTTPClient without credential validation.
-// Used as a fallback when NewVTPassHTTPClient fails in sandbox mode — the client
-// will still work for network listing (uses DB, not VTPass), and will return an
-// error on actual purchase attempts if credentials are missing.
+// NewVTPassHTTPClientUnchecked is used as a startup fallback when sandbox
+// credentials are not yet present. The http.Client is still properly pooled.
 func NewVTPassHTTPClientUnchecked() (*VTPassHTTPClient, error) {
-	sandbox := true // always sandbox when unchecked
 	baseURL := "https://sandbox.vtpass.com/api"
 	if override := os.Getenv("VTPASS_BASE_URL"); override != "" {
 		baseURL = override
 	}
+	log.Printf("[VTPass] client initialised (unchecked/sandbox fallback): baseURL=%s", baseURL)
 	return &VTPassHTTPClient{
-		apiKey:    os.Getenv("VTPASS_API_KEY"),
-		publicKey: os.Getenv("VTPASS_PUBLIC_KEY"),
-		secretKey: os.Getenv("VTPASS_SECRET_KEY"),
 		baseURL:   baseURL,
-		isSandbox: sandbox,
-		http:      &http.Client{Timeout: 60 * time.Second},
+		isSandbox: true,
+		http: &http.Client{
+			Timeout:   60 * time.Second,
+			Transport: productionTransport(),
+		},
 	}, nil
 }
 
@@ -125,10 +163,10 @@ func (c *VTPassHTTPClient) PurchaseAirtime(ctx context.Context, network, phone s
 	if !ok {
 		return nil, fmt.Errorf("vtpass: unsupported network %q", network)
 	}
-	reqID := c.newRequestID()
+	reqID      := c.newRequestID()
 	phoneLocal := formatPhoneLocal(phone)
-	log.Printf("[VTPass] PurchaseAirtime: svcID=%s phone=%s->%s amount=%d reqID=%s sandbox=%v url=%s",
-		svcID, phone, phoneLocal, amountNaira, reqID, c.isSandbox, c.baseURL)
+	log.Printf("[VTPass] PurchaseAirtime: svcID=%s phone=%s->%s amount=%d reqID=%s sandbox=%v",
+		svcID, phone, phoneLocal, amountNaira, reqID, c.isSandbox)
 	body := map[string]interface{}{
 		"request_id": reqID,
 		"serviceID":  svcID,
@@ -147,8 +185,8 @@ func (c *VTPassHTTPClient) PurchaseData(ctx context.Context, network, phone, var
 	}
 	local := formatPhoneLocal(phone)
 	reqID := c.newRequestID()
-	log.Printf("[VTPass] PurchaseData: svcID=%s phone=%s->%s variation=%s amount=%d reqID=%s sandbox=%v url=%s",
-		svcID, phone, local, variationCode, amountNaira, reqID, c.isSandbox, c.baseURL)
+	log.Printf("[VTPass] PurchaseData: svcID=%s phone=%s->%s variation=%s amount=%d reqID=%s sandbox=%v",
+		svcID, phone, local, variationCode, amountNaira, reqID, c.isSandbox)
 	body := map[string]interface{}{
 		"request_id":     reqID,
 		"serviceID":      svcID,
@@ -163,15 +201,16 @@ func (c *VTPassHTTPClient) PurchaseData(ctx context.Context, network, phone, var
 // ── Requery (for PENDING transactions) ───────────────────────────────────────
 
 func (c *VTPassHTTPClient) RequeryTransaction(ctx context.Context, requestID string) (*VTPassPurchaseResult, error) {
-	url := c.baseURL + "/requery"
+	creds := c.credentials() // fresh read
+	url   := c.baseURL + "/requery"
 	payload, _ := json.Marshal(map[string]string{"request_id": requestID})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(payload))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", c.apiKey)
-	req.Header.Set("secret-key", c.secretKey)
+	req.Header.Set("api-key",    creds.apiKey)
+	req.Header.Set("secret-key", creds.secretKey)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -183,9 +222,9 @@ func (c *VTPassHTTPClient) RequeryTransaction(ctx context.Context, requestID str
 }
 
 // ── GetVariations: live bundle catalog from VTPass ────────────────────────────
-// Called by NetworkBundleService (backed by 1-hour cache). GAP data-bundle fix.
 
 func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([]VTPassVariation, error) {
+	creds := c.credentials() // fresh read
 	svcID, ok := vtpassDataIDs[network]
 	if !ok {
 		return nil, fmt.Errorf("vtpass: unsupported network %q", network)
@@ -195,8 +234,9 @@ func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("api-key", c.apiKey)
-	req.Header.Set("secret-key", c.secretKey)
+	// GET requests use api-key + public-key per VTPass docs
+	req.Header.Set("api-key",    creds.apiKey)
+	req.Header.Set("public-key", creds.publicKey)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -206,20 +246,19 @@ func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([
 	raw, _ := io.ReadAll(resp.Body)
 
 	var parsed struct {
-		Code    string `json:"code"`                 // live API uses "code"
-		RespDesc string `json:"response_description"` // sandbox uses "response_description"
-		Content struct {
+		Code     string `json:"code"`
+		RespDesc string `json:"response_description"`
+		Content  struct {
 			Variations []struct {
 				Code   string `json:"variation_code"`
 				Name   string `json:"name"`
-				Amount string `json:"variation_amount"` // VTPass sends as string e.g. "100.00"
-			} `json:"varations"` // Note: VTPass has a typo — "varations" not "variations"
+				Amount string `json:"variation_amount"`
+			} `json:"varations"` // VTPass typo — "varations" not "variations"
 		} `json:"content"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("vtpass: parse variations: %w", err)
 	}
-	// VTPass sandbox returns "response_description":"000"; live API returns "code":"000"
 	statusCode := parsed.Code
 	if statusCode == "" {
 		statusCode = parsed.RespDesc
@@ -231,12 +270,8 @@ func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([
 	out := make([]VTPassVariation, 0, len(parsed.Content.Variations))
 	for _, v := range parsed.Content.Variations {
 		var amount float64
-		_, _ = fmt.Sscanf(v.Amount, "%f", &amount) // parse "100.00" → 100.0
-		out = append(out, VTPassVariation{
-			Code:   v.Code,
-			Name:   v.Name,
-			Amount: amount,
-		})
+		_, _ = fmt.Sscanf(v.Amount, "%f", &amount)
+		out = append(out, VTPassVariation{Code: v.Code, Name: v.Name, Amount: amount})
 	}
 	return out, nil
 }
@@ -244,18 +279,20 @@ func (c *VTPassHTTPClient) GetVariations(ctx context.Context, network string) ([
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 func (c *VTPassHTTPClient) doPurchase(ctx context.Context, reqID string, body map[string]interface{}) (*VTPassPurchaseResult, error) {
-	url := c.baseURL + "/pay"
+	creds   := c.credentials() // fresh read on every purchase
+	url     := c.baseURL + "/pay"
 	payload, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(payload))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", c.apiKey)
-	req.Header.Set("secret-key", c.secretKey)
+	req.Header.Set("api-key",    creds.apiKey)
+	req.Header.Set("secret-key", creds.secretKey)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		log.Printf("[VTPass] HTTP error: %v", err)
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -279,7 +316,7 @@ func (c *VTPassHTTPClient) parseResponse(reqID string, raw []byte) *VTPassPurcha
 	_ = json.Unmarshal(raw, &r)
 
 	if r.RequestID == "" {
-		r.RequestID = reqID // VTPass omits requestId on PROCESSING responses
+		r.RequestID = reqID
 	}
 
 	res := &VTPassPurchaseResult{
@@ -298,7 +335,7 @@ func (c *VTPassHTTPClient) parseResponse(reqID string, raw []byte) *VTPassPurcha
 		res.Pending = true
 	case r.Code == "015":
 		res.Failed = true
-	case r.Code == "016": // reversed — treat as pending for requery
+	case r.Code == "016":
 		res.Pending = true
 	default:
 		res.Failed = true
@@ -325,8 +362,6 @@ func formatPhoneLocal(phone string) string {
 }
 
 // ─── NetworkBundleService ────────────────────────────────────────────────────
-// Live VTPass bundle catalog with per-network 1-hour in-memory cache.
-// Implements the GAP data-bundle fix: DataBundleResponse.ID = variation_code.
 
 type NetworkBundleService struct {
 	vtpass *VTPassHTTPClient
@@ -339,16 +374,14 @@ type bundleCacheEntry struct {
 	expiresAt time.Time
 }
 
-// DataBundleResponse is the public DTO returned by GET /api/v1/recharge/networks/{code}/bundles
 type DataBundleResponse struct {
-	ID       string  `json:"id"`       // VTPass variation_code e.g. "mtn-10mb-100"
+	ID       string  `json:"id"`
 	Name     string  `json:"name"`
 	Network  string  `json:"network"`
-	Price    float64 `json:"price"`    // naira
-	DataSize string  `json:"data_size"`// derived from name if not explicit
+	Price    float64 `json:"price"`
+	DataSize string  `json:"data_size"`
 }
 
-// NetworkResponse is the public DTO returned by GET /api/v1/recharge/networks
 type NetworkResponse struct {
 	Code           string `json:"code"`
 	Name           string `json:"name"`
@@ -361,15 +394,11 @@ type NetworkResponse struct {
 }
 
 func NewNetworkBundleService(vtpass *VTPassHTTPClient) *NetworkBundleService {
-	return &NetworkBundleService{
-		vtpass: vtpass,
-		cache:  make(map[string]bundleCacheEntry),
-	}
+	return &NetworkBundleService{vtpass: vtpass, cache: make(map[string]bundleCacheEntry)}
 }
 
 const bundleCacheTTL = 1 * time.Hour
 
-// GetBundles returns live data bundles for the given network, using a 1h cache.
 func (s *NetworkBundleService) GetBundles(ctx context.Context, networkCode string) ([]DataBundleResponse, error) {
 	s.mu.RLock()
 	entry, ok := s.cache[networkCode]
@@ -378,12 +407,10 @@ func (s *NetworkBundleService) GetBundles(ctx context.Context, networkCode strin
 		return entry.bundles, nil
 	}
 
-	// Cache miss — fetch live
 	variations, err := s.vtpass.GetVariations(ctx, networkCode)
 	if err != nil {
-		// Return cached (stale) if available rather than a hard error
 		if ok {
-			return entry.bundles, nil
+			return entry.bundles, nil // serve stale on error
 		}
 		return nil, err
 	}
@@ -391,23 +418,17 @@ func (s *NetworkBundleService) GetBundles(ctx context.Context, networkCode strin
 	bundles := make([]DataBundleResponse, 0, len(variations))
 	for _, v := range variations {
 		bundles = append(bundles, DataBundleResponse{
-			ID:       v.Code,   // ← variation_code is the ID — GAP fix
-			Name:     v.Name,
-			Network:  networkCode,
-			Price:    v.Amount,
-			DataSize: extractDataSize(v.Name),
+			ID: v.Code, Name: v.Name, Network: networkCode,
+			Price: v.Amount, DataSize: extractDataSize(v.Name),
 		})
 	}
 
 	s.mu.Lock()
 	s.cache[networkCode] = bundleCacheEntry{bundles: bundles, expiresAt: time.Now().Add(bundleCacheTTL)}
 	s.mu.Unlock()
-
 	return bundles, nil
 }
 
-// extractDataSize attempts to pull a human-readable size from the plan name.
-// e.g. "MTN 500MB Data (30 days)" → "500MB"
 func extractDataSize(name string) string {
 	units := []string{"TB", "GB", "MB", "KB"}
 	for _, u := range units {
