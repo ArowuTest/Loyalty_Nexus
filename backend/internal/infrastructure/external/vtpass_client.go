@@ -3,6 +3,7 @@ package external
 import (
 	"bytes"
 	"context"
+	"log"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -125,11 +126,14 @@ func (c *VTPassHTTPClient) PurchaseAirtime(ctx context.Context, network, phone s
 		return nil, fmt.Errorf("vtpass: unsupported network %q", network)
 	}
 	reqID := c.newRequestID()
+	phoneLocal := formatPhoneLocal(phone)
+	log.Printf("[VTPass] PurchaseAirtime: svcID=%s phone=%s->%s amount=%d reqID=%s sandbox=%v url=%s",
+		svcID, phone, phoneLocal, amountNaira, reqID, c.isSandbox, c.baseURL)
 	body := map[string]interface{}{
 		"request_id": reqID,
 		"serviceID":  svcID,
 		"amount":     amountNaira,
-		"phone":      formatPhoneLocal(phone),
+		"phone":      phoneLocal,
 	}
 	return c.doPurchase(ctx, reqID, body)
 }
@@ -143,6 +147,8 @@ func (c *VTPassHTTPClient) PurchaseData(ctx context.Context, network, phone, var
 	}
 	local := formatPhoneLocal(phone)
 	reqID := c.newRequestID()
+	log.Printf("[VTPass] PurchaseData: svcID=%s phone=%s->%s variation=%s amount=%d reqID=%s sandbox=%v url=%s",
+		svcID, phone, local, variationCode, amountNaira, reqID, c.isSandbox, c.baseURL)
 	body := map[string]interface{}{
 		"request_id":     reqID,
 		"serviceID":      svcID,
@@ -254,6 +260,7 @@ func (c *VTPassHTTPClient) doPurchase(ctx context.Context, reqID string, body ma
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
+	log.Printf("[VTPass] response: httpStatus=%d body=%s", resp.StatusCode, string(raw))
 	return c.parseResponse(reqID, raw), nil
 }
 
