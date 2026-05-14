@@ -333,16 +333,16 @@ export default function HomePage() {
                   <Zap className="w-3.5 h-3.5 text-black" />
                 </div>
                 <p className="text-[12px] sm:text-[13px] text-white/50 leading-snug min-w-0">
-                  <button onClick={openAuth} className="font-black text-gold-500 hover:underline underline-offset-2 mr-1">Sign in</button>
+                  <button onClick={() => isAuthenticated ? router.push('/dashboard') : openAuth()} className="font-black text-gold-500 hover:underline underline-offset-2 mr-1">{isAuthenticated ? 'Dashboard' : 'Sign in'}</button>
                   to see your Pulse Points, spin the wheel, and unlock{" "}
                   <span className="font-bold text-white">30+ premium AI tools</span> — all from your MTN recharges.
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <button onClick={openAuth}
+                <button onClick={() => isAuthenticated ? router.push('/dashboard') : openAuth()}
                   className="hidden sm:inline-flex items-center gap-1.5 rounded-xl h-8 px-4 text-[11px] font-black whitespace-nowrap btn-gold">
                   <Sparkles className="w-3 h-3" />
-                  Get Started
+                  {isAuthenticated ? 'Go to Dashboard' : 'Get Started'}
                 </button>
                 <button onClick={() => setBannerVisible(false)} className="text-white/25 hover:text-white/60 transition-colors text-lg leading-none">×</button>
               </div>
@@ -928,11 +928,11 @@ export default function HomePage() {
               No subscription. No hidden fees. Just rewards.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <button onClick={openAuth}
+              <button onClick={() => isAuthenticated ? router.push('/dashboard') : openAuth()}
                 className="btn-gold rounded-2xl h-14 px-10 text-[16px] font-black inline-flex items-center gap-2 w-full sm:w-auto justify-center"
                 style={{ boxShadow: "0 0 32px rgba(245,166,35,0.4)" }}>
                 <Zap className="w-5 h-5" />
-                Start Earning Now — It&apos;s Free
+                {isAuthenticated ? 'Go to Dashboard' : 'Start Earning Now — It's Free'}
               </button>
               <Link href="/wars">
                 <button className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-gold-500/30 transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
