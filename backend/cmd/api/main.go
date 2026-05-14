@@ -351,7 +351,8 @@ func main() {
 		bonusPulseSvc := services.NewBonusPulseService(db, userRepo)
 		userH    := handlers.NewUserHandler(userRepo, hlrSvc, momoSvc, fulfillSvc).
 					WithBonusPulseService(bonusPulseSvc).
-					WithPassportService(passportSvc)
+					WithPassportService(passportSvc).
+					WithDB(db)
 		adminH   := handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, drawWindowSvc, fraudSvc, warssSvc, studioSvc, adminClaimSvc, rdb).
 				WithNotificationService(notifySvc).
 					WithCSVService(services.NewMTNPushCSVService(db, mtnPushSvc)).
