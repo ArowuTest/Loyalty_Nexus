@@ -80,7 +80,7 @@ export default function TransactionsPage() {
 
   const { data, isLoading, mutate } = useSWR<Recharge[]>(
     "/user/transactions",
-    () => api.getTransactions() as unknown as Promise<Recharge[]>,
+    () => api.getTransactions() as Promise<Recharge[]>,
     { refreshInterval: 30_000 }
   );
 
