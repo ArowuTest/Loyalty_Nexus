@@ -403,11 +403,11 @@ export default function HomePage() {
           {/* CTA buttons */}
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.30 }}
             className="flex flex-col sm:flex-row gap-3 mb-8">
-            <button onClick={openAuth}
+            <button onClick={() => isAuthenticated ? router.push('/recharge') : openAuth()}
               className="btn-gold rounded-2xl h-14 px-8 text-[15px] font-black inline-flex items-center justify-center gap-2 min-w-[220px]"
               style={{ boxShadow: "0 0 28px rgba(245,166,35,0.45)" }}>
               <Zap className="w-5 h-5" />
-              Start Earning — It&apos;s Free
+              {isAuthenticated ? 'Start Recharging' : 'Start Earning — It’s Free'}
             </button>
             <button
               className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-white/25 transition-all inline-flex items-center justify-center gap-2 min-w-[200px] w-full"
@@ -806,10 +806,10 @@ export default function HomePage() {
           </StaggerGrid>
 
           <div className="text-center mt-10">
-            <button onClick={openAuth}
+            <button onClick={() => isAuthenticated ? router.push('/wars') : openAuth()}
               className="btn-gold rounded-2xl h-12 px-8 text-[14px] font-black inline-flex items-center gap-2">
               <Trophy className="w-4 h-4" />
-              Join Your State&apos;s Battle
+              {isAuthenticated ? 'View Battle' : 'Join Your State’s Battle'}
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
