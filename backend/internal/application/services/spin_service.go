@@ -313,7 +313,7 @@ func (s *SpinService) selectPrize(ctx context.Context, forceLowValue bool, today
 	if forceLowValue {
 		prizes, err = s.prizeRepo.ListActivePrizesMaxValue(ctx, 5000) // Max ₦50 when cap hit
 	} else {
-		prizes, err = s.prizeRepo.ListActivePrizes(ctx)
+		prizes, err = s.prizeRepo.ListActivePrizesSorted(ctx)
 	}
 	if err != nil || len(prizes) == 0 {
 		return nil, 0, fmt.Errorf("no active prizes available")
