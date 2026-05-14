@@ -760,12 +760,19 @@ function RecentActivity() {
       <div className="p-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-[14px] font-black text-white">Recent Activity</h3>
-          <Link href="/prizes">
-            <button className="text-[11px] font-black flex items-center gap-1 hover:opacity-80 transition-opacity"
-              style={{ color: "var(--gold)" }}>
-              View all <ArrowRight className="w-3 h-3" />
-            </button>
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/transactions">
+              <button className="text-[11px] font-semibold flex items-center gap-1 hover:opacity-80 transition-opacity text-white/40">
+                Recharges <ArrowRight className="w-3 h-3" />
+              </button>
+            </Link>
+            <Link href="/prizes">
+              <button className="text-[11px] font-black flex items-center gap-1 hover:opacity-80 transition-opacity"
+                style={{ color: "var(--gold)" }}>
+                Prizes <ArrowRight className="w-3 h-3" />
+              </button>
+            </Link>
+          </div>
         </div>
         {drawWins.length > 0 && (
           <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 mb-4">
