@@ -142,7 +142,21 @@ class APIClient {
     return this.request<{ status: string }>("POST", "/user/profile/state", { state });
   }
   getWallet() { return this.request("GET", "/user/wallet"); }
-  getTransactions() { return this.request("GET", "/user/transactions"); }
+  getTransactions() {
+    return this.request<Array<{
+      id: string;
+      msisdn: string;
+      network: string;
+      recharge_type: string;
+      amount_kobo: number;
+      status: string;
+      points_earned: number;
+      draw_entries: number;
+      spin_eligible: boolean;
+      payment_reference: string;
+      created_at: string;
+    }>>("GET", "/user/transactions");
+  }
   requestMoMoLink(momoNumber: string) {
     return this.request("POST", "/user/momo/request", { momo_number: momoNumber });
   }
