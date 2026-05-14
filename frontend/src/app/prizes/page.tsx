@@ -308,10 +308,12 @@ export default function PrizesPage() {
                         <p className="text-white font-semibold text-sm leading-tight">{win.prize_label}</p>
                         {claimBadge(win.claim_status)}
                       </div>
-                      <p className="text-brand-gold font-bold text-sm mt-0.5">
-                        {win.prize_type === "pulse_points"
-                          ? `+${win.prize_value.toLocaleString()} pts`
-                          : `₦${win.prize_value.toLocaleString()}`}
+                      <p className="text-brand-gold/80 text-[11px] font-semibold mt-0.5 uppercase tracking-wide">
+                        {win.prize_type === "pulse_points" ? "Pulse Points"
+                          : win.prize_type === "airtime" ? "Airtime"
+                          : win.prize_type === "data_bundle" ? "Data Bundle"
+                          : win.prize_type === "momo_cash" ? "MoMo Cash"
+                          : "Prize"}
                       </p>
                       <div className="flex items-center gap-3 mt-0.5">
                         {fulfillBadge(win.fulfillment_status)}
