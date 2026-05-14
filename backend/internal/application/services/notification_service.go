@@ -277,12 +277,12 @@ func (n *NotificationService) SendToUser(ctx context.Context, userID uuid.UUID, 
 		return nil // db not wired — non-fatal
 	}
 	type userRow struct {
-		Phone    string `gorm:"column:phone"`
+		Phone    string `gorm:"column:phone_number"`
 		FCMToken string `gorm:"column:fcm_token"`
 	}
 	var u userRow
 	if err := n.db.WithContext(ctx).Raw(
-		`SELECT phone, COALESCE(fcm_token,'') AS fcm_token FROM users WHERE id = ?`, userID,
+		`SELECT phone_number AS phone, COALESCE(fcm_token,'') AS fcm_token FROM users WHERE id = ?`, userID,
 	).Scan(&u).Error; err != nil || u.Phone == "" {
 		return nil // user not found — non-fatal
 	}
