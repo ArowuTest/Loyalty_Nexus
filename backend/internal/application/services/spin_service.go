@@ -158,7 +158,8 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 			fulfillStatus = entities.FulfillNA
 			claimStatus = entities.ClaimClaimed // No claim needed
 		case entities.PrizePulsePoints:
-			// Points are auto-credited immediately, no claim needed
+			// Points are auto-credited immediately — mark fulfillment complete
+			fulfillStatus = entities.FulfillCompleted
 			claimStatus = entities.ClaimClaimed
 		case entities.PrizeAirtime, entities.PrizeDataBundle:
 			// Airtime and Data require user to click "Claim" before fulfillment
