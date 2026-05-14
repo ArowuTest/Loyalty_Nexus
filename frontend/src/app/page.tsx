@@ -932,7 +932,7 @@ export default function HomePage() {
                 className="btn-gold rounded-2xl h-14 px-10 text-[16px] font-black inline-flex items-center gap-2 w-full sm:w-auto justify-center"
                 style={{ boxShadow: "0 0 32px rgba(245,166,35,0.4)" }}>
                 <Zap className="w-5 h-5" />
-                {isAuthenticated ? 'Go to Dashboard' : 'Start Earning Now — It's Free'}
+                {isAuthenticated ? 'Go to Dashboard' : "Start Earning Now — It's Free"}
               </button>
               <Link href="/wars">
                 <button className="glass border border-white/[0.12] rounded-2xl h-14 px-8 text-[15px] font-semibold text-white hover:border-gold-500/30 transition-all inline-flex items-center gap-2 w-full sm:w-auto justify-center">
