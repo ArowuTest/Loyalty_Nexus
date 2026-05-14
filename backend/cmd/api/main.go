@@ -180,6 +180,19 @@ func main() {
 				last_activity_at TIMESTAMPTZ DEFAULT now(),
 				created_at       TIMESTAMPTZ DEFAULT now()
 			)`},
+		// ── spin_results claim lifecycle columns (idempotent ALTER TABLE) ──────────
+		// Added to SpinResult entity after table creation — safe on every startup.
+		{"spin_results_claim_status",       `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS claim_status         TEXT        NOT NULL DEFAULT 'PENDING'`},
+		{"spin_results_expires_at",          `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS expires_at           TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days'`},
+		{"spin_results_momo_claim_number",   `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS momo_claim_number    TEXT        NOT NULL DEFAULT ''`},
+		{"spin_results_bank_account_number", `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS bank_account_number TEXT        NOT NULL DEFAULT ''`},
+		{"spin_results_bank_account_name",   `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS bank_account_name   TEXT        NOT NULL DEFAULT ''`},
+		{"spin_results_bank_name",           `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS bank_name           TEXT        NOT NULL DEFAULT ''`},
+		{"spin_results_reviewed_by",         `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS reviewed_by         UUID`},
+		{"spin_results_reviewed_at",         `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS reviewed_at         TIMESTAMPTZ`},
+		{"spin_results_rejection_reason",    `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS rejection_reason    TEXT        NOT NULL DEFAULT ''`},
+		{"spin_results_admin_notes",         `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS admin_notes         TEXT        NOT NULL DEFAULT ''`},
+		{"spin_results_payment_reference",   `ALTER TABLE spin_results ADD COLUMN IF NOT EXISTS payment_reference   TEXT        NOT NULL DEFAULT ''`},
 		}
 		for _, bt := range bootstrapDDLs {
 			if execErr := db.Exec(bt.ddl).Error; execErr != nil {
