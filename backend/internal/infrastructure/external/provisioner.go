@@ -12,28 +12,61 @@ import (
 
 // VTPassAdapter implements VTPassClient against the VTPass REST API.
 // Ref: https://vtpass.com/documentation
+//
+// Design:
+//   - baseURL is chosen at construction time based on VTPASS_SANDBOX env var.
+//   - Credentials (api-key, public-key, secret-key) are read FRESH from env on
+//     every call so that credential rotation takes effect without a restart.
+//   - request_id is formatted as required by VTPass: YYYYMMDDHHIISS + truncated ref.
 type VTPassAdapter struct {
-	apiKey    string
-	pubKey    string
 	baseURL   string
+	isSandbox bool
 	client    *http.Client
 }
 
 func NewVTPassAdapter() *VTPassAdapter {
+	sandbox := os.Getenv("VTPASS_SANDBOX") == "true"
+	baseURL := "https://vtpass.com/api"
+	if sandbox {
+		baseURL = "https://sandbox.vtpass.com/api"
+	}
 	return &VTPassAdapter{
-		apiKey:  os.Getenv("VTPASS_API_KEY"),
-		pubKey:  os.Getenv("VTPASS_PUBLIC_KEY"),
-		baseURL: "https://vtpass.com/api",
-		client:  &http.Client{Timeout: 30 * time.Second},
+		baseURL:   baseURL,
+		isSandbox: sandbox,
+		client:    &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
+// vtpassRequestID formats an idempotency key acceptable to VTPass.
+// VTPass requires: YYYYMMDDHHIISS + alphanumeric suffix, max 50 chars.
+func vtpassRequestID(ref string) string {
+	ts := time.Now().Format("20060102150405")
+	// Sanitise ref: strip non-alphanumeric, truncate
+	safe := ""
+	for _, c := range ref {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			safe += string(c)
+		}
+		if len(safe) >= 20 {
+			break
+		}
+	}
+	return ts + safe // e.g. "20260514143022LNabc123"
+}
+
+// credentials reads VTPass API credentials fresh from the environment.
+// Called on every outbound request so rotation takes effect immediately.
+func (v *VTPassAdapter) credentials() (apiKey, pubKey, secretKey string) {
+	return os.Getenv("VTPASS_API_KEY"), os.Getenv("VTPASS_PUBLIC_KEY"), os.Getenv("VTPASS_SECRET_KEY")
+}
+
 func (v *VTPassAdapter) TopUpAirtime(ctx context.Context, phone, network string, amountNaira float64, ref string) (string, error) {
+	reqID := vtpassRequestID(ref)
 	payload := map[string]interface{}{
-		"request_id":   ref,
-		"serviceID":    networkToVTPassID(network),
-		"amount":       amountNaira,
-		"phone":        phone,
+		"request_id": reqID,
+		"serviceID":  networkToVTPassID(network),
+		"amount":     int(amountNaira), // VTPass expects integer naira amount
+		"phone":      phone,
 	}
 	return v.post(ctx, "/pay", payload)
 }
@@ -41,13 +74,14 @@ func (v *VTPassAdapter) TopUpAirtime(ctx context.Context, phone, network string,
 func (v *VTPassAdapter) TopUpData(ctx context.Context, phone, network string, dataMB float64, ref string) (string, error) {
 	serviceID := networkToVTPassDataID(network)
 	billersCode := networkDataCode(network, dataMB)
+	reqID := vtpassRequestID(ref)
 	payload := map[string]interface{}{
-		"request_id":   ref,
-		"serviceID":    serviceID,
-		"billersCode":  billersCode,
+		"request_id":     reqID,
+		"serviceID":      serviceID,
+		"billersCode":    phone, // VTPass data: billersCode = phone number
 		"variation_code": billersCode,
-		"amount":       0, // Determined by variation
-		"phone":        phone,
+		"amount":         0, // Determined by variation
+		"phone":          phone,
 	}
 	return v.post(ctx, "/pay", payload)
 }
@@ -57,11 +91,17 @@ func (v *VTPassAdapter) VerifyService(ctx context.Context, serviceID string) (bo
 }
 
 func (v *VTPassAdapter) post(ctx context.Context, path string, payload map[string]interface{}) (string, error) {
+	apiKey, pubKey, secretKey := v.credentials()
+	_ = pubKey // public-key is for GET requests; POST uses api-key + secret-key
+	if apiKey == "" {
+		return "", fmt.Errorf("VTPass: VTPASS_API_KEY not set")
+	}
+
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, v.baseURL+path, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", v.apiKey)
-	req.Header.Set("public-key", v.pubKey)
+	req.Header.Set("api-key", apiKey)
+	req.Header.Set("secret-key", secretKey) // required for purchase endpoints
 
 	resp, err := v.client.Do(req)
 	if err != nil {
@@ -70,7 +110,8 @@ func (v *VTPassAdapter) post(ctx context.Context, path string, payload map[strin
 	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
-		Code    string `json:"code"`
+		Code             string `json:"code"`
+		ResponseDesc     string `json:"response_description"`
 		Content struct {
 			Transactions struct {
 				TransactionID string `json:"transactionId"`
@@ -81,8 +122,9 @@ func (v *VTPassAdapter) post(ctx context.Context, path string, payload map[strin
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", fmt.Errorf("VTPass decode error: %w", err)
 	}
-	if result.Code != "000" {
-		return "", fmt.Errorf("VTPass error code: %s", result.Code)
+	// VTPass success codes: "000" = delivered, "099" = processing/initiated
+	if result.Code != "000" && result.Code != "099" {
+		return "", fmt.Errorf("VTPass error [%s]: %s", result.Code, result.ResponseDesc)
 	}
 	return result.Content.Transactions.TransactionID, nil
 }
