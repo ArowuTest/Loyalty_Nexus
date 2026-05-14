@@ -6,6 +6,7 @@ import (
 
 	"loyalty-nexus/internal/application/services"
 	"context"
+	"gorm.io/gorm"
 
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/external"
@@ -22,6 +23,7 @@ type UserHandler struct {
 	fulfillSvc    *services.PrizeFulfillmentService
 	bonusPulseSvc *services.BonusPulseService
 	passportSvc   *services.PassportService
+	db            *gorm.DB
 }
 
 func NewUserHandler(ur repositories.UserRepository, hs *services.HLRService, ma external.MoMoPayer, fs *services.PrizeFulfillmentService) *UserHandler {
@@ -38,6 +40,12 @@ func (h *UserHandler) WithBonusPulseService(svc *services.BonusPulseService) *Us
 // WithPassportService attaches the PassportService to generate wallet URLs.
 func (h *UserHandler) WithPassportService(svc *services.PassportService) *UserHandler {
 	h.passportSvc = svc
+	return h
+}
+
+// WithDB attaches the gorm.DB instance for raw-query endpoints (e.g. GetTransactions).
+func (h *UserHandler) WithDB(db *gorm.DB) *UserHandler {
+	h.db = db
 	return h
 }
 
@@ -64,7 +72,37 @@ func (h *UserHandler) GetWallet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) GetTransactions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, []interface{}{})
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uid)
+
+	type RechargeRow struct {
+		ID               string `gorm:"column:id"                json:"id"`
+		MSISDN           string `gorm:"column:msisdn"            json:"msisdn"`
+		Network          string `gorm:"column:network"           json:"network"`
+		RechargeType     string `gorm:"column:recharge_type"     json:"recharge_type"`
+		AmountKobo       int64  `gorm:"column:amount_kobo"       json:"amount_kobo"`
+		Status           string `gorm:"column:status"            json:"status"`
+		PointsEarned     int64  `gorm:"column:points_earned"     json:"points_earned"`
+		DrawEntries      int    `gorm:"column:draw_entries"      json:"draw_entries"`
+		SpinEligible     bool   `gorm:"column:spin_eligible"     json:"spin_eligible"`
+		PaymentReference string `gorm:"column:payment_reference" json:"payment_reference"`
+		CreatedAt        string `gorm:"column:created_at"        json:"created_at"`
+	}
+
+	var rows []RechargeRow
+	if h.db != nil {
+		h.db.WithContext(r.Context()).
+			Table("recharges").
+			Select("id, msisdn, network, recharge_type, amount_kobo, status, points_earned, draw_entries, spin_eligible, payment_reference, created_at").
+			Where("user_id = ?", userID).
+			Order("created_at DESC").
+			Limit(100).
+			Scan(&rows)
+	}
+	if rows == nil {
+		rows = []RechargeRow{}
+	}
+	writeJSON(w, http.StatusOK, rows)
 }
 
 type MoMoLinkRequest struct {
