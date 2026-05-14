@@ -137,7 +137,7 @@ function ClaimModal({ win, onClose, onSuccess }: {
           <div>
             <h3 className="text-white font-bold">{win.prize_label}</h3>
             <p className="text-[rgb(130_140_180)] text-xs">
-              {win.prize_type === "momo_cash" ? `Cash prize — ₦${(win.prize_value / 100).toLocaleString()}` :
+              {win.prize_type === "momo_cash" ? `Cash prize — ₦${win.prize_value.toLocaleString()}` :
                win.prize_type === "airtime" ? "Airtime credited to your number" :
                "Data bundle provisioned to your number"}
             </p>
@@ -151,7 +151,7 @@ function ClaimModal({ win, onClose, onSuccess }: {
         {needsMomo && (
           <div>
             <label className="text-xs font-medium text-[rgb(130_140_180)] block mb-2">
-              MTN MoMo Number (to receive ₦{(win.prize_value / 100).toLocaleString()})
+              MTN MoMo Number (to receive ₦{win.prize_value.toLocaleString()})
             </label>
             <input
               type="tel"
@@ -308,6 +308,11 @@ export default function PrizesPage() {
                         <p className="text-white font-semibold text-sm leading-tight">{win.prize_label}</p>
                         {claimBadge(win.claim_status)}
                       </div>
+                      <p className="text-brand-gold font-bold text-sm mt-0.5">
+                        {win.prize_type === "pulse_points"
+                          ? `+${win.prize_value.toLocaleString()} pts`
+                          : `₦${win.prize_value.toLocaleString()}`}
+                      </p>
                       <div className="flex items-center gap-3 mt-0.5">
                         {fulfillBadge(win.fulfillment_status)}
                         <span className="text-[10px] text-white/30">{timeAgo(win.created_at)}</span>
