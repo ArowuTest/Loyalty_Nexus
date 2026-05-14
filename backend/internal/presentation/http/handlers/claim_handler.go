@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -36,7 +37,53 @@ func (h *ClaimHandler) GetMyWins(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jsonOK(w, wins)
+	// Enrich each result with a human-readable prize_label so the frontend
+	// can display the prize name without computing it from type + value.
+	type enrichedWin struct {
+		ID                interface{} `json:"id"`
+		PrizeType         interface{} `json:"prize_type"`
+		PrizeValue        interface{} `json:"prize_value"`
+		PrizeLabel        string      `json:"prize_label"`
+		FulfillmentStatus interface{} `json:"fulfillment_status"`
+		FulfillmentRef    interface{} `json:"fulfillment_ref,omitempty"`
+		ClaimStatus       interface{} `json:"claim_status"`
+		CreatedAt         interface{} `json:"created_at"`
+		ExpiresAt         interface{} `json:"expires_at"`
+		MoMoClaimNumber   interface{} `json:"momo_claim_number,omitempty"`
+	}
+	out := make([]enrichedWin, 0, len(wins))
+	for _, w := range wins {
+		label := prizeLabelFor(string(w.PrizeType), w.PrizeValue)
+		out = append(out, enrichedWin{
+			ID:                w.ID,
+			PrizeType:         w.PrizeType,
+			PrizeValue:        w.PrizeValue,
+			PrizeLabel:        label,
+			FulfillmentStatus: w.FulfillmentStatus,
+			FulfillmentRef:    w.FulfillmentRef,
+			ClaimStatus:       w.ClaimStatus,
+			CreatedAt:         w.CreatedAt,
+			ExpiresAt:         w.ExpiresAt,
+			MoMoClaimNumber:   w.MoMoClaimNumber,
+		})
+	}
+	jsonOK(w, out)
+}
+
+// prizeLabelFor returns a human-readable label for a prize.
+func prizeLabelFor(prizeType string, value float64) string {
+	switch prizeType {
+	case "airtime":
+		return fmt.Sprintf("₦%.0f Airtime", value)
+	case "data_bundle":
+		return fmt.Sprintf("%.0fMB Data Bundle", value)
+	case "pulse_points":
+		return fmt.Sprintf("+%.0f Pulse Points", value)
+	case "momo_cash":
+		return fmt.Sprintf("₦%.0f MoMo Cash", value)
+	default:
+		return "Prize"
+	}
 }
 
 func (h *ClaimHandler) ClaimPrize(w http.ResponseWriter, r *http.Request) {
