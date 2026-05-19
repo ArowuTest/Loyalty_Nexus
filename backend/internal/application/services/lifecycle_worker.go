@@ -6,10 +6,12 @@ import (
 	"log"
 	"time"
 
+	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
+	"loyalty-nexus/internal/infrastructure/config"
+	"loyalty-nexus/internal/pkg/safe"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"loyalty-nexus/internal/infrastructure/config"
 )
 
 // LifecycleWorker runs background cron jobs:
@@ -206,19 +208,35 @@ func (w *LifecycleWorker) adminTokenCleanup(ctx context.Context) {
 }
 
 func (w *LifecycleWorker) fulfillmentRetry(ctx context.Context) {
+	// Query prizes stuck in pending/processing state
 	pending, err := w.prizeRepo.ListPendingFulfillments(ctx, 20)
 	if err != nil {
 		log.Printf("[WORKER] fulfillment-retry query failed: %v", err)
 		return
 	}
-	for _, result := range pending {
+
+	// Also query prizes marked failed that have retries remaining
+	failed, err := w.prizeRepo.ListFailedFulfillments(ctx, 20)
+	if err != nil {
+		log.Printf("[WORKER] fulfillment-retry failed-query error: %v", err)
+		// Non-fatal: continue with pending list
+	}
+
+	all := append(pending, failed...)
+	for _, result := range all {
 		if result.RetryCount >= 3 {
 			log.Printf("[WORKER] fulfillment %s exceeded max retries, holding", result.ID)
 			continue
 		}
-		go func(r interface{ }) {
-			// Retry dispatched — actual type is entities.SpinResult
-		}(result)
+		r := result // capture loop variable
+		safe.Go(func() {
+			log.Printf("[WORKER] retrying fulfillment %s (attempt %d) type=%s", r.ID, r.RetryCount+1, r.PrizeType)
+			if err := w.fulfillSvc.Fulfill(context.Background(), &r); err != nil {
+				log.Printf("[WORKER] fulfillment retry failed %s: %v", r.ID, err)
+			} else {
+				log.Printf("[WORKER] fulfillment retry succeeded %s", r.ID)
+			}
+		})
 	}
 }
 
