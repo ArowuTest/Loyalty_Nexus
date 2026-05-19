@@ -81,6 +81,15 @@ func (r *postgresPrizeRepository) ListPendingFulfillments(ctx context.Context, l
 	return results, nil
 }
 
+// ListFailedFulfillments returns prizes that failed but still have retries remaining.
+func (r *postgresPrizeRepository) ListFailedFulfillments(ctx context.Context, limit int) ([]entities.SpinResult, error) {
+	var results []entities.SpinResult
+	err := r.db.WithContext(ctx).Table("spin_results").
+		Where("fulfillment_status = 'failed' AND retry_count < 3").
+		Order("created_at ASC").Limit(limit).Find(&results).Error
+	return results, err
+}
+
 func (r *postgresPrizeRepository) CountUserSpinsToday(ctx context.Context, userID uuid.UUID) (int, error) {
 	var count int64
 	today := time.Now().UTC().Truncate(24 * time.Hour)
