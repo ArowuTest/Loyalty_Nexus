@@ -360,17 +360,23 @@ func (s *SpinService) selectPrize(ctx context.Context, forceLowValue bool, today
 }
 
 func (s *SpinService) buildPrizeLabel(p *entities.PrizePoolEntry) string {
+	// base_value is stored in KOBO for monetary prizes; pulse_points use whole units.
+	naira := p.BaseValue / 100.0
 	switch p.PrizeType {
 	case entities.PrizeTryAgain:
 		return "Try Again"
 	case entities.PrizePulsePoints:
-		return fmt.Sprintf("+%.0f Points", p.BaseValue)
+		return fmt.Sprintf("+%.0f Points", p.BaseValue) // points are whole units, not kobo
 	case entities.PrizeAirtime:
-		return fmt.Sprintf("₦%.0f Airtime", p.BaseValue)
+		return fmt.Sprintf("₦%.0f Airtime", naira)
 	case entities.PrizeDataBundle:
-		return fmt.Sprintf("%.0fMB Data", p.BaseValue)
+		// Use the admin-configured name (e.g. "500MB Data") which already contains the MB label.
+		if p.Name != "" {
+			return p.Name
+		}
+		return fmt.Sprintf("₦%.0f Data Bundle", naira)
 	case entities.PrizeMoMoCash:
-		return fmt.Sprintf("₦%.0f MoMo Cash", p.BaseValue)
+		return fmt.Sprintf("₦%.0f MoMo Cash", naira)
 	default:
 		return p.Name
 	}
