@@ -70,7 +70,9 @@ func (s *PrizeFulfillmentService) fulfillAirtime(ctx context.Context, result *en
 		return err
 	}
 
-	vtRef, err := s.vtpass.TopUpAirtime(ctx, user.PhoneNumber, "MTN", result.PrizeValue, ref)
+	// base_value (PrizeValue) is stored in KOBO — divide by 100 for Naira
+	amountNaira := result.PrizeValue / 100.0
+	vtRef, err := s.vtpass.TopUpAirtime(ctx, user.PhoneNumber, "MTN", amountNaira, ref)
 	if err != nil {
 		log.Printf("[FULFILL] VTPass airtime failed (will retry): %v", err)
 		return s.markFailed(ctx, result.ID, err.Error())
@@ -81,7 +83,7 @@ func (s *PrizeFulfillmentService) fulfillAirtime(ctx context.Context, result *en
 	}
 
 	s.notifySvc.NotifyPrizeWon(ctx, user.PhoneNumber,
-		fmt.Sprintf("You won ₦%.0f airtime! It has been credited to %s.", result.PrizeValue, user.PhoneNumber))
+		fmt.Sprintf("You won ₦%.0f airtime! It has been credited to %s.", amountNaira, user.PhoneNumber))
 	return nil
 }
 
@@ -93,14 +95,16 @@ func (s *PrizeFulfillmentService) fulfillData(ctx context.Context, result *entit
 
 	_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillProcessing, ref, "")
 
-	vtRef, err := s.vtpass.TopUpData(ctx, user.PhoneNumber, "MTN", result.PrizeValue, ref)
+	// base_value (PrizeValue) is in KOBO — pass Naira-equivalent to VTPass
+	dataValueNaira := result.PrizeValue / 100.0
+	vtRef, err := s.vtpass.TopUpData(ctx, user.PhoneNumber, "MTN", dataValueNaira, ref)
 	if err != nil {
 		return s.markFailed(ctx, result.ID, err.Error())
 	}
 
 	_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillCompleted, vtRef, "")
 	s.notifySvc.NotifyPrizeWon(ctx, user.PhoneNumber,
-		fmt.Sprintf("You won %.0fMB data bundle! It has been added to %s.", result.PrizeValue, user.PhoneNumber))
+		fmt.Sprintf("You won a ₦%.0f data bundle! It has been added to %s.", dataValueNaira, user.PhoneNumber))
 	return nil
 }
 
@@ -121,7 +125,9 @@ func (s *PrizeFulfillmentService) fulfillMoMo(ctx context.Context, result *entit
 	_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillProcessing, ref, "")
 
 	// MTN MoMo disbursement — amount in naira, MoMo uses naira
-	momoRef, err := s.momo.Disburse(ctx, user.MoMoNumber, int64(result.PrizeValue), ref)
+	// base_value (PrizeValue) is in KOBO — convert to Naira for MoMo disbursement
+	amountNairaMoMo := int64(result.PrizeValue / 100.0)
+	momoRef, err := s.momo.Disburse(ctx, user.MoMoNumber, amountNairaMoMo, ref)
 	if err != nil {
 		return s.markFailed(ctx, result.ID, err.Error())
 	}
@@ -131,7 +137,7 @@ func (s *PrizeFulfillmentService) fulfillMoMo(ctx context.Context, result *entit
 	_ = s.updateClaimedAt(ctx, result.ID, now)
 
 	s.notifySvc.NotifyPrizeWon(ctx, user.PhoneNumber,
-		fmt.Sprintf("₦%.0f MoMo Cash has been sent to %s! Check your MoMo wallet.", result.PrizeValue, user.MoMoNumber))
+		fmt.Sprintf("₦%d MoMo Cash has been sent to %s! Check your MoMo wallet.", amountNairaMoMo, user.MoMoNumber))
 	return nil
 }
 
