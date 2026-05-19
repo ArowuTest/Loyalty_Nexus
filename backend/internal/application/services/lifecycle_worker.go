@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/pkg/safe"
