@@ -36,6 +36,18 @@ services:
         value: staging
       - key: OPERATION_MODE
         value: independent
+      - key: VTPASS_API_KEY
+        sync: false
+      - key: VTPASS_PUBLIC_KEY
+        sync: false
+      - key: VTPASS_SECRET_KEY
+        sync: false
+      - key: VTPASS_BASE_URL
+        value: https://sandbox.vtpass.com/api
+      - key: VTPASS_SANDBOX
+        value: "true"
+      - key: VTPASS_SANDBOX_MODE
+        value: "true"
 
       # ── Database ─────────────────────────────────────────────────────────
       # DATABASE_URL uses the internal hostname (fast, no SSL needed at runtime)
@@ -150,6 +162,8 @@ services:
       - key: VTPASS_MODE
         value: sandbox
       - key: VTPASS_SANDBOX_MODE
+        value: "true"
+      - key: VTPASS_SANDBOX
         value: "true"
       - key: MTN_MOMO_BASE_URL
         value: https://sandbox.momodeveloper.mtn.com
