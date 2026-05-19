@@ -10,6 +10,7 @@ import (
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/infrastructure/external"
 	"loyalty-nexus/internal/pkg/safe"
+	"github.com/google/uuid"
 )
 
 // PrizeFulfillmentService handles airtime, data, and MoMo cash prize delivery.
@@ -124,7 +125,6 @@ func (s *PrizeFulfillmentService) fulfillMoMo(ctx context.Context, result *entit
 
 	_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillProcessing, ref, "")
 
-	// MTN MoMo disbursement — amount in naira, MoMo uses naira
 	// base_value (PrizeValue) is in KOBO — convert to Naira for MoMo disbursement
 	amountNairaMoMo := int64(result.PrizeValue / 100.0)
 	momoRef, err := s.momo.Disburse(ctx, user.MoMoNumber, amountNairaMoMo, ref)
@@ -132,16 +132,16 @@ func (s *PrizeFulfillmentService) fulfillMoMo(ctx context.Context, result *entit
 		return s.markFailed(ctx, result.ID, err.Error())
 	}
 
-	now := time.Now()
 	_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillCompleted, momoRef, "")
-	_ = s.updateClaimedAt(ctx, result.ID, now)
+	// Mark claimed_at — MoMo cash is auto-claimed on successful Disburse
+	_ = s.updateClaimedAt(ctx, result.ID, time.Now())
 
 	s.notifySvc.NotifyPrizeWon(ctx, user.PhoneNumber,
 		fmt.Sprintf("₦%d MoMo Cash has been sent to %s! Check your MoMo wallet.", amountNairaMoMo, user.MoMoNumber))
 	return nil
 }
 
-// ReleaseMoMoHeldPrize is called when a user links their MoMo number.
+// ReleaseMoMoHeldPrizes is called when a user links their MoMo number.
 // It picks up all held prizes and dispatches them.
 func (s *PrizeFulfillmentService) ReleaseMoMoHeldPrizes(ctx context.Context, userID interface{}) {
 	pendingResults, err := s.prizeRepo.ListPendingFulfillments(ctx, 50)
@@ -149,22 +149,33 @@ func (s *PrizeFulfillmentService) ReleaseMoMoHeldPrizes(ctx context.Context, use
 		return
 	}
 	for _, result := range pendingResults {
-			if result.FulfillmentStatus == entities.FulfillPendingMoMo {
-				r := result // capture loop variable
-				safe.Go(func() {
-					if err := s.Fulfill(context.Background(), &r); err != nil {
-						log.Printf("[FULFILL] MoMo release failed for %s: %v", r.ID, err)
-					}
-				})
-			}
+		if result.FulfillmentStatus == entities.FulfillPendingMoMo {
+			r := result // capture loop variable
+			safe.Go(func() {
+				if err := s.Fulfill(context.Background(), &r); err != nil {
+					log.Printf("[FULFILL] MoMo release failed for %s: %v", r.ID, err)
+				}
+			})
+		}
 	}
 }
 
-func (s *PrizeFulfillmentService) markFailed(ctx context.Context, id interface{ }, errMsg string) error {
-	log.Printf("[FULFILL] Marking failed: %v — %s", id, errMsg)
-	return nil // Type-safe update handled in repo
+// markFailed writes FulfillFailed + error message to the DB so the retry worker
+// can detect the failure and retry up to the configured max attempts.
+func (s *PrizeFulfillmentService) markFailed(ctx context.Context, id uuid.UUID, errMsg string) error {
+	log.Printf("[FULFILL] Marking failed: %s — %s", id, errMsg)
+	if dbErr := s.prizeRepo.UpdateSpinFulfillment(ctx, id, entities.FulfillFailed, "", errMsg); dbErr != nil {
+		log.Printf("[FULFILL] markFailed DB write error: %v", dbErr)
+	}
+	return fmt.Errorf("%s", errMsg)
 }
 
-func (s *PrizeFulfillmentService) updateClaimedAt(_ context.Context, _ interface{}, _ time.Time) error {
-	return nil // Handled by repo
+// updateClaimedAt records claimed_at via UpdateSpinClaimStatus (ClaimClaimed sets claimed_at = NOW()).
+// Used for MoMo cash after a successful Disburse call.
+func (s *PrizeFulfillmentService) updateClaimedAt(ctx context.Context, id uuid.UUID, _ time.Time) error {
+	if err := s.prizeRepo.UpdateSpinClaimStatus(ctx, id, entities.ClaimClaimed, nil); err != nil {
+		log.Printf("[FULFILL] updateClaimedAt DB write error for %s: %v", id, err)
+		return err
+	}
+	return nil
 }
