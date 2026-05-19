@@ -118,7 +118,7 @@ func (s *PrizeFulfillmentService) fulfillMoMo(ctx context.Context, result *entit
 		// Hold the prize — user needs to link MoMo first
 		_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillPendingMoMo, "", "")
 		s.notifySvc.NotifyPrizeWon(ctx, user.PhoneNumber,
-			fmt.Sprintf("You won ₦%.0f MoMo Cash! Link your MTN MoMo number in the app to receive it.", result.PrizeValue))
+			fmt.Sprintf("You won ₦%.0f MoMo Cash! Link your MTN MoMo number in the app to receive it.", result.PrizeValue/100.0))
 		return nil
 	}
 
