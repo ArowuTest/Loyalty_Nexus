@@ -320,9 +320,15 @@ func (s *SpinService) selectPrize(ctx context.Context, forceLowValue bool, today
 		return nil, 0, fmt.Errorf("no active prizes available")
 	}
 
-	// Check daily inventory caps and minimum recharge
-	eligible := make([]entities.PrizePoolEntry, 0, len(prizes))
-	for _, p := range prizes {
+	// Check daily inventory caps and minimum recharge.
+	// fullIdx tracks each eligible prize's position in the full sorted prizes slice
+	// so slot_index always maps to the correct wheel segment on the frontend.
+	type eligibleEntry struct {
+		prize   entities.PrizePoolEntry
+		fullIdx int
+	}
+	eligible := make([]eligibleEntry, 0, len(prizes))
+	for fullI, p := range prizes {
 		if p.MinimumRecharge > 0 && todayAmountKobo < p.MinimumRecharge {
 			continue // User hasn't recharged enough today for this prize
 		}
@@ -332,17 +338,20 @@ func (s *SpinService) selectPrize(ctx context.Context, forceLowValue bool, today
 				continue // Inventory exhausted for this prize today
 			}
 		}
-		eligible = append(eligible, p)
+		eligible = append(eligible, eligibleEntry{prize: p, fullIdx: fullI})
 	}
 	if len(eligible) == 0 {
-		eligible = prizes // Fallback: no inventory caps remain, use all
+		// Fallback: all prizes eligible — rebuild with full indices
+		for fullI, p := range prizes {
+			eligible = append(eligible, eligibleEntry{prize: p, fullIdx: fullI})
+		}
 	}
 
 	// Weighted CSPRNG selection — weights are NUMERIC(5,2) summing to 100.00
 	// Scale to integer precision (multiply by 100 → range 0–10000) for rand.Int
 	totalWeightF := 0.0
-	for _, p := range eligible {
-		totalWeightF += p.ProbWeight
+	for _, e := range eligible {
+		totalWeightF += e.prize.ProbWeight
 	}
 	if totalWeightF == 0 {
 		return nil, 0, fmt.Errorf("all prizes have zero weight")
@@ -350,13 +359,15 @@ func (s *SpinService) selectPrize(ctx context.Context, forceLowValue bool, today
 	totalWeightInt := int64(totalWeightF * 100)
 	roll, _ := rand.Int(rand.Reader, big.NewInt(totalWeightInt))
 	cursor := int64(0)
-	for i, p := range eligible {
-		cursor += int64(p.ProbWeight * 100)
+	for _, e := range eligible {
+		cursor += int64(e.prize.ProbWeight * 100)
 		if roll.Int64() < cursor {
-			return &eligible[i], i, nil
+			p := e.prize
+			return &p, e.fullIdx, nil // fullIdx = correct wheel segment position
 		}
 	}
-	return &eligible[0], 0, nil
+	p := eligible[0].prize
+	return &p, eligible[0].fullIdx, nil
 }
 
 func (s *SpinService) buildPrizeLabel(p *entities.PrizePoolEntry) string {
