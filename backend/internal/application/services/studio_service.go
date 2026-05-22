@@ -477,3 +477,30 @@ func (s *StudioService) GetSessionUsage(ctx context.Context, userID uuid.UUID) (
 func (s *StudioService) GetPromptHistory(ctx context.Context, userID uuid.UUID, toolSlug string, limit int) ([]repositories.PromptHistoryItem, error) {
 	return s.studioRepo.GetPromptHistory(ctx, userID, toolSlug, limit)
 }
+
+// CheckProviderHealthGate returns true when the primary active provider for
+// the given tool slug's category was last tested as unhealthy within the past
+// 30 minutes.  Returns false (allow through) when data is absent or stale.
+// Called by the Generate handler BEFORE point deduction (BUG-050).
+func (s *StudioService) CheckProviderHealthGate(ctx context.Context, toolSlug string) bool {
+	cat, ok := slugCategory[toolSlug]
+	if !ok {
+		return false // unknown slug — allow through
+	}
+	var cfg struct {
+		LastTestOK   *bool      `gorm:"column:last_test_ok"`
+		LastTestedAt *time.Time `gorm:"column:last_tested_at"`
+	}
+	err := s.db.WithContext(ctx).
+		Table("ai_provider_configs").
+		Select("last_test_ok, last_tested_at").
+		Where("category = ? AND is_active = true AND is_primary = true", string(cat)).
+		Order("priority ASC").
+		Limit(1).
+		Scan(&cfg).Error
+	if err != nil || cfg.LastTestOK == nil || cfg.LastTestedAt == nil {
+		return false // no data → allow through
+	}
+	// Block only if the last test explicitly failed AND was recent (< 30 min)
+	return !*cfg.LastTestOK && time.Since(*cfg.LastTestedAt) <= 30*time.Minute
+}
