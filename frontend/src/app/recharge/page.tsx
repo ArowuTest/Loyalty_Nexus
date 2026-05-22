@@ -629,7 +629,7 @@ export default function RechargePage() {
 
           {/* Trust signals */}
           <div className="flex items-center justify-center gap-5 text-[11px] text-white/25">
-            <span className="flex items-center gap-1"><Shield className="w-3 h-3" /> Secured by Paystack</span>
+            <span className="flex items-center gap-1"><Shield className="w-3 h-3" /> Payment by Paystack · Fulfillment by VTPass</span>
             <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> Instant delivery</span>
             <span className="flex items-center gap-1"><Star className="w-3 h-3" /> Double points</span>
           </div>
