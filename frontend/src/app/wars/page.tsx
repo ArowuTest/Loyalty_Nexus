@@ -69,7 +69,7 @@ function NoActiveWar() {
         🌍
       </motion.div>
       <div className="space-y-2">
-        <h2 className="text-xl font-black text-white">No Active War Yet</h2>
+        <h2 className="text-xl font-black text-white">War Active — No Rankings Yet</h2>
         <p className="text-[rgb(130_140_180)] text-sm max-w-xs">
           Regional Wars kick off monthly. Keep recharging and building your points — 
           your state will need you when the battle begins!
@@ -120,7 +120,9 @@ export default function RegionalWarsPage() {
     ? leaderboard.slice(0, 3).reduce((sum, e) => sum + (e.prize_kobo || 0), 0)
     : 0;
 
-  const hasActiveWar = leaderboard.length > 0;
+  // BUG-041 fix: war_active from API tells us a war is configured regardless
+  // of whether the leaderboard has entries yet.
+  const hasActiveWar = data?.war_active === true;
 
   return (
     <AppShell>
