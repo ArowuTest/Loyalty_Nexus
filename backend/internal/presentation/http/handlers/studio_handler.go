@@ -237,6 +237,18 @@ func (h *StudioHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// BUG-050: Provider health gate — runs BEFORE point deduction.
+	// Only fires when tool_slug is provided (cheap check; skipped for tool_id-only requests).
+	if req.ToolSlug != "" {
+		if h.studioSvc.CheckProviderHealthGate(r.Context(), req.ToolSlug) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+				"error":       "AI service temporarily unavailable, please try again in a few minutes",
+				"retry_after": 1800,
+			})
+			return
+		}
+	}
+
 	// Enrich prompt with structured template params before dispatching.
 	// The AI orchestrator receives a single enriched prompt string; extra params
 	// are serialised into a structured prefix so the provider can parse them.
