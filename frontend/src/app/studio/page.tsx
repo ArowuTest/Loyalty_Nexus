@@ -2338,6 +2338,12 @@ function ToolDrawer({
   const [jingleDuration, setJingleDuration] = useState("30 seconds");
   const [jingleVocals,   setJingleVocals]   = useState("With Vocals");
   const [jingleBrand,    setJingleBrand]    = useState("");
+  const [websiteIndustry, setWebsiteIndustry] = useState("");
+  const [websitePages, setWebsitePages] = useState("5");
+  const [websiteStyle, setWebsiteStyle] = useState("Modern & Professional");
+  const [websiteColorScheme, setWebsiteColorScheme] = useState("Blue & White");
+  const [websiteBusinessName, setWebsiteBusinessName] = useState("");
+  const [websiteContactInfo, setWebsiteContactInfo] = useState("");
   useEffect(() => {
     let cancelled = false;
     api.getPromptHistory(tool.slug, 8).then(res => {
@@ -2396,13 +2402,28 @@ function ToolDrawer({
   // We stash the payload then open the confirmation modal.
   function handleTemplateSubmit(payload: GeneratePayload) {
     if (generating) return;
+    let finalPrompt = payload.prompt ?? "";
     // Prepend structured fields for marketing-jingle / jingle tools
     const isJingle = slug === "marketing-jingle" || slug === "jingle" || slug === "my-marketing-jingle";
-    if (isJingle && payload.prompt) {
+    if (isJingle && finalPrompt) {
       const brandPart = jingleBrand.trim() ? ` [Brand: ${jingleBrand.trim()}]` : "";
       const prefix = `[Genre: ${jingleGenre}] [Mood: ${jingleMood}] [Duration: ${jingleDuration}] [Vocals: ${jingleVocals}]${brandPart}`;
-      payload = { ...payload, prompt: `${prefix}\n${payload.prompt}` };
+      finalPrompt = `${prefix}
+${finalPrompt}`;
     }
+    if ((slug === "website-builder" || slug === "website_builder") && finalPrompt) {
+      const prefix = [
+        websiteBusinessName && `[Business: ${websiteBusinessName}]`,
+        websiteIndustry && `[Industry: ${websiteIndustry}]`,
+        `[Pages: ${websitePages}]`,
+        `[Style: ${websiteStyle}]`,
+        `[Colors: ${websiteColorScheme}]`,
+        websiteContactInfo && `[Contact: ${websiteContactInfo}]`,
+      ].filter(Boolean).join(" ");
+      finalPrompt = `${prefix}
+${finalPrompt}`;
+    }
+    payload = { ...payload, prompt: finalPrompt };
     setPendingPayload(payload);
     setShowConfirm(true);
   }
@@ -2678,6 +2699,31 @@ function ToolDrawer({
                       <input value={jingleBrand} onChange={e => setJingleBrand(e.target.value)}
                         placeholder="Brand / Product name (optional)"
                         style={{gridColumn:"1/-1",background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}} />
+                    </div>
+                  )}
+                  {(activeTool?.slug === 'website-builder' || activeTool?.slug === 'website_builder') && (
+                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'12px'}}>
+                      <input value={websiteBusinessName} onChange={e=>setWebsiteBusinessName(e.target.value)}
+                        placeholder="Business/Brand name" style={{gridColumn:'1/-1', background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}} />
+                      <select value={websiteIndustry} onChange={e=>setWebsiteIndustry(e.target.value)}
+                        style={{background:'#1a1a2e', color: websiteIndustry ? '#fff' : '#666', border:'1px solid #333', borderRadius:'6px', padding:'8px'}}>
+                        <option value="">Select industry...</option>
+                        {['E-commerce','Restaurant/Food','Healthcare','Education','Real Estate','Tech/SaaS','Portfolio','NGO/Nonprofit','Finance','Fashion','Other'].map(i=><option key={i} value={i}>{i}</option>)}
+                      </select>
+                      <select value={websitePages} onChange={e=>setWebsitePages(e.target.value)}
+                        style={{background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}}>
+                        {['1 (Landing)','3 (Basic)','5 (Standard)','8 (Full)','10+ (Enterprise)'].map(p=><option key={p} value={p}>{p} pages</option>)}
+                      </select>
+                      <select value={websiteStyle} onChange={e=>setWebsiteStyle(e.target.value)}
+                        style={{background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}}>
+                        {['Modern & Professional','Bold & Creative','Minimal & Clean','Traditional & Corporate','Fun & Playful'].map(s=><option key={s}>{s}</option>)}
+                      </select>
+                      <select value={websiteColorScheme} onChange={e=>setWebsiteColorScheme(e.target.value)}
+                        style={{background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}}>
+                        {['Blue & White','Green & Gold','Red & Black','Purple & Silver','Orange & Dark','Custom (describe in prompt)'].map(c=><option key={c}>{c}</option>)}
+                      </select>
+                      <input value={websiteContactInfo} onChange={e=>setWebsiteContactInfo(e.target.value)}
+                        placeholder="Contact info (phone/email, optional)" style={{background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}} />
                     </div>
                   )}
                   {renderTemplate(tool, handleTemplateSubmit, generating, userPoints, preloadImageUrl, preloadVideoUrl)}
