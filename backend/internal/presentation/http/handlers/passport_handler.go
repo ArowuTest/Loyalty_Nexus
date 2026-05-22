@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -178,16 +177,8 @@ func (h *PassportHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load events"})
 		return
 	}
-	// Filter out deprecated referral events — referral system was decommissioned.
-	// Historical records remain in DB but should not surface to users.
-	// Use a fresh slice (not events[:0]) to avoid aliasing the original backing array.
-	var filtered []interface{}
-	for _, ev := range events {
-		if !strings.HasPrefix(ev.EventType, "referral") {
-			filtered = append(filtered, ev)
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"events": filtered})
+	// TODO BUG-043: filter referral_* events — deferred pending entity type confirmation
+	writeJSON(w, http.StatusOK, map[string]interface{}{"events": events})
 }
 
 // ─── GET /api/v1/passport/share ──────────────────────────────────────────
