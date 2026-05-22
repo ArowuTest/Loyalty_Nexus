@@ -1519,7 +1519,7 @@ function renderInfographic(text: string) {
 
 // ─── Mind Map renderer ──────────────────────────────────────────────────────
 function MindMapRenderer({ text }: { text: string }) {
-  const [viewMode, setViewMode] = React.useState<"visual" | "text">("visual");
+  const [viewMode, setViewMode] = useState<"visual" | "text">("visual");
 
   // Try JSON parse first (existing format)
   interface MindBranch { label: string; color?: string; children?: { label: string; children?: { label: string }[] }[] }
