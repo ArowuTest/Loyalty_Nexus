@@ -210,8 +210,13 @@ func (s *VTURechargeService) InitiateRecharge(ctx context.Context, req InitiateR
 	if activeCount == 0 {
 		return nil, fmt.Errorf("network %s is not currently available", req.Network)
 	}
+	if req.AmountKobo == 0 {
+		// Likely a field name mistake: frontend may have sent "amount" instead of "amount_kobo".
+		// Return a descriptive error rather than the generic ₦100 minimum message.
+		return nil, fmt.Errorf("amount_kobo is required and must be in kobo (e.g. 100000 = ₦1,000); received 0 — did you send \"amount\" instead of \"amount_kobo\"?")
+	}
 	if req.AmountKobo < 10000 {
-		return nil, fmt.Errorf("minimum recharge amount is ₦100")
+		return nil, fmt.Errorf("minimum recharge amount is ₦100 (10000 kobo)")
 	}
 	if req.RechargeType == "DATA" && req.VariationCode == "" {
 		return nil, fmt.Errorf("variation_code is required for data recharges")
