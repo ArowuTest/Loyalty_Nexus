@@ -236,6 +236,23 @@ func (o *AIStudioOrchestrator) SetLLMOrch(orch *external.LLMOrchestrator) {
 	o.llmOrch = orch
 }
 
+// classifyErrorType classifies an error message string into one of four
+// canonical error-type labels used as a prefix in the error_message field
+// (no migration required — stored as "[TYPE][provider] original message").
+func classifyErrorType(msg string) string {
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "429") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "quota exceeded"):
+		return "RATE_LIMIT"
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded") || strings.Contains(lower, "context deadline"):
+		return "TIMEOUT"
+	case strings.Contains(lower, "invalid") || strings.Contains(lower, "bad request") || strings.Contains(lower, "400"):
+		return "INVALID_INPUT"
+	default:
+		return "PROVIDER_ERROR"
+	}
+}
+
 // Dispatch is the main entry point: resolves category, calls the right provider chain,
 // then persists the result via StudioService.
 func (o *AIStudioOrchestrator) Dispatch(ctx context.Context, genID uuid.UUID) error {
@@ -254,8 +271,17 @@ func (o *AIStudioOrchestrator) Dispatch(ctx context.Context, genID uuid.UUID) er
 	elapsed := int(time.Since(start).Milliseconds())
 
 	if dispatchErr != nil {
-		failErr := o.studioSvc.FailGeneration(ctx, genID, dispatchErr.Error())
-		if failErr != nil {
+		// BUG-039: determine the attempted provider from the category chain
+		attemptedProvider := "unknown"
+		if cat, ok := slugCategory[gen.ToolSlug]; ok {
+			if providers := o.dbProviders(ctx, string(cat)); len(providers) > 0 {
+				attemptedProvider = providers[0].Slug
+			}
+		}
+		// BUG-040: classify error type; prefix into error_message (no migration)
+		errType := classifyErrorType(dispatchErr.Error())
+		classifiedMsg := "[" + errType + "][" + attemptedProvider + "] " + dispatchErr.Error()
+		if failErr := o.studioSvc.FailGeneration(ctx, genID, classifiedMsg); failErr != nil {
 			log.Printf("[AIStudio] FailGeneration for %s: %v", genID, failErr)
 		}
 		return dispatchErr
