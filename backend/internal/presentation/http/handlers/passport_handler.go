@@ -180,9 +180,10 @@ func (h *PassportHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	// Filter out deprecated referral events — referral system was decommissioned.
 	// Historical records remain in DB but should not surface to users.
-	filtered := events[:0]
+	// Use a fresh slice (not events[:0]) to avoid aliasing the original backing array.
+	var filtered []interface{}
 	for _, ev := range events {
-		if !strings.HasPrefix(string(ev.EventType), "referral") {
+		if !strings.HasPrefix(ev.EventType, "referral") {
 			filtered = append(filtered, ev)
 		}
 	}
