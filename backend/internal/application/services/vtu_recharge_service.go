@@ -506,10 +506,14 @@ func (s *VTURechargeService) markSuccess(ctx context.Context, recharge *VTURecha
 	if s.rechargeSvc == nil {
 		log.Printf("[VTU] markSuccess: rechargeSvc is nil — skipping wallet award for ref=%s", recharge.PaymentReference)
 	} else {
-		user, findErr := s.rechargeSvc.userRepo.FindByPhoneNumber(ctx, recharge.MSISDN)
+		msisdnNorm := normaliseMSISDN(recharge.MSISDN)
+		user, findErr := s.rechargeSvc.userRepo.FindByPhoneNumber(ctx, msisdnNorm)
+		if findErr != nil && msisdnNorm != recharge.MSISDN {
+			user, findErr = s.rechargeSvc.userRepo.FindByPhoneNumber(ctx, recharge.MSISDN)
+		}
 		if findErr != nil {
-			log.Printf("[VTU] markSuccess: user not found for msisdn=%s (err=%v) — no wallet award for ref=%s",
-				recharge.MSISDN, findErr, recharge.PaymentReference)
+			log.Printf("[VTU] markSuccess: user not found for msisdn=%s (normalised=%s, err=%v) — no wallet award for ref=%s",
+				recharge.MSISDN, msisdnNorm, findErr, recharge.PaymentReference)
 		} else {
 			log.Printf("[VTU] markSuccess: found user id=%s for msisdn=%s — awarding %d pts",
 				user.ID, recharge.MSISDN, pointsEarned)
