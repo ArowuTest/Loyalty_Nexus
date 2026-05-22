@@ -22,6 +22,9 @@ interface WarLeaderboardData {
   leaderboard: LeaderboardEntry[];
   count: number;
   period: string;
+  war_active?: boolean;   // true when a war is configured (BUG-041 fix)
+  war_name?: string;
+  war_period?: string;
 }
 
 interface MyRankData {
