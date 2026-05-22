@@ -31,9 +31,9 @@ services:
       - key: PORT
         value: "10000"
       - key: GO_ENV
-        value: staging
+        value: production
       - key: ENVIRONMENT
-        value: staging
+        value: production
       - key: OPERATION_MODE
         value: independent
       - key: VTPASS_API_KEY
