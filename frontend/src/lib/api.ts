@@ -157,6 +157,20 @@ class APIClient {
       created_at: string;
     }>>("GET", "/user/transactions");
   }
+  getUserRecharges() {
+    return this.request<Array<{
+      id: string;
+      msisdn: string;
+      network: string;
+      recharge_type: "AIRTIME" | "DATA";
+      amount_kobo: number;
+      status: "PENDING" | "PROCESSING" | "SUCCESS" | "FAILED";
+      points_earned: number;
+      spin_eligible: boolean;
+      draw_entries: number;
+      created_at: string;
+    }>>("GET", "/user/recharges");
+  }
   requestMoMoLink(momoNumber: string) {
     return this.request("POST", "/user/momo/request", { momo_number: momoNumber });
   }
