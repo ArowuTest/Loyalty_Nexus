@@ -187,9 +187,15 @@ function ProviderCard({
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" as const }}>
             <span style={{ fontWeight: 700, color: TEXT, fontSize: 14 }}>{provider.name}</span>
             <Badge label={provider.category} color={cc} />
-            <Badge label={priorityLabel(provider.priority)}
-                   color={provider.priority === 1 ? SUCCESS : provider.priority <= 2 ? WARN : MUTED} />
-            {provider.is_primary && <Badge label="PRIMARY" color={PRIMARY} />}
+            {provider.category === "text" && (
+              <span style={{ fontSize: 10, color: "#f59e0b", background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 4, padding: "1px 6px", marginLeft: 4 }}>
+                LLM uses Groq→Gemini→DeepSeek hardcoded cascade; admin order applies only in DB-first mode
+              </span>
+            )}
+            {provider.is_primary
+              ? <Badge label="PRIMARY" color={PRIMARY} />
+              : <Badge label={priorityLabel(provider.priority)}
+                       color={provider.priority === 1 ? SUCCESS : provider.priority <= 2 ? WARN : MUTED} />}
             {!provider.is_active && <Badge label="DISABLED" color={MUTED} />}
           </div>
           <div style={{ fontSize: 11, color: MUTED, marginTop: 3 }}>
