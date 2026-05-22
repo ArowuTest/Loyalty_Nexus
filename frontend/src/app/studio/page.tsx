@@ -2701,7 +2701,7 @@ ${finalPrompt}`;
                         style={{gridColumn:"1/-1",background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}} />
                     </div>
                   )}
-                  {(activeTool?.slug === 'website-builder' || activeTool?.slug === 'website_builder') && (
+                  {(slug === 'website-builder' || slug === 'website_builder') && (
                     <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'12px'}}>
                       <input value={websiteBusinessName} onChange={e=>setWebsiteBusinessName(e.target.value)}
                         placeholder="Business/Brand name" style={{gridColumn:'1/-1', background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}} />
