@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"strings"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -177,7 +178,15 @@ func (h *PassportHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load events"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"events": events})
+	// Filter out deprecated referral events — referral system was decommissioned.
+	// Historical records remain in DB but should not surface to users.
+	filtered := events[:0]
+	for _, ev := range events {
+		if !strings.HasPrefix(string(ev.EventType), "referral") {
+			filtered = append(filtered, ev)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"events": filtered})
 }
 
 // ─── GET /api/v1/passport/share ──────────────────────────────────────────
