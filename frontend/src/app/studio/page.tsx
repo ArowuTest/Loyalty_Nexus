@@ -1518,73 +1518,144 @@ function renderInfographic(text: string) {
 }
 
 // ─── Mind Map renderer ──────────────────────────────────────────────────────
-function renderMindMap(text: string) {
+function MindMapRenderer({ text }: { text: string }) {
+  const [viewMode, setViewMode] = React.useState<"visual" | "text">("visual");
+
+  // Try JSON parse first (existing format)
   interface MindBranch { label: string; color?: string; children?: { label: string; children?: { label: string }[] }[] }
   interface MindMapData { center?: string; branches?: MindBranch[] }
-  let data: MindMapData | null = null;
+  let jsonData: MindMapData | null = null;
   try {
     const raw = JSON.parse(text);
-    if (raw && typeof raw === 'object' && raw.center) data = raw;
+    if (raw && typeof raw === "object" && raw.center) jsonData = raw;
   } catch { /* not JSON */ }
-  if (!data || !data.branches) {
-    return (
-      <div className="bg-white/5 border border-white/10 rounded-xl p-3">
-        <p className="text-white/70 text-xs leading-relaxed whitespace-pre-wrap">{text}</p>
-      </div>
-    );
+
+  // Indentation-based text parser (fallback / plain text response)
+  type MindNode = { text: string; level: number; children: MindNode[] };
+  function parseIndent(raw: string): MindNode[] {
+    const lines = raw.split("\n").filter(l => l.trim());
+    const roots: MindNode[] = [];
+    const stack: MindNode[] = [];
+    for (const line of lines) {
+      const indent = (line.match(/^(\s*)/)?.[1].length) ?? 0;
+      const level  = Math.floor(indent / 2);
+      const node: MindNode = { text: line.trim().replace(/^[-*#>\u2022\u25CF]\s*/, ""), level, children: [] };
+      while (stack.length > 0 && stack[stack.length - 1].level >= level) stack.pop();
+      if (stack.length === 0) roots.push(node); else stack[stack.length - 1].children.push(node);
+      stack.push(node);
+    }
+    return roots;
   }
-  const branches = data.branches ?? [];
-  const BRANCH_COLORS = ['#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#ec4899'];
+
+  // Derive display data from JSON or parsed text
+  const BRANCH_COLORS = ["#f59e0b","#3b82f6","#10b981","#8b5cf6","#ef4444","#06b6d4","#f97316","#ec4899"];
+  let centralLabel = "";
+  let branches: { label: string; color: string; children: { label: string; children: { label: string }[] }[] }[] = [];
+
+  if (jsonData && jsonData.branches) {
+    centralLabel = jsonData.center ?? "";
+    branches = jsonData.branches.map((b, bi) => ({
+      label:    b.label,
+      color:    b.color ?? BRANCH_COLORS[bi % BRANCH_COLORS.length],
+      children: (b.children ?? []).map(c => ({ label: c.label, children: (c.children ?? []).map(l => ({ label: l.label })) })),
+    }));
+  } else {
+    const nodes = parseIndent(text);
+    const root  = nodes[0];
+    if (root) {
+      centralLabel = root.text;
+      branches = root.children.map((b, bi) => ({
+        label:    b.text,
+        color:    BRANCH_COLORS[bi % BRANCH_COLORS.length],
+        children: b.children.map(c => ({ label: c.text, children: c.children.map(l => ({ label: l.text })) })),
+      }));
+    }
+  }
+
+  const hasBranches = branches.length > 0;
+
   return (
-    <div className="space-y-3">
-      {/* Central topic */}
-      <div className="flex justify-center">
-        <div className="bg-gradient-to-br from-purple-600 to-indigo-600 text-white font-bold text-sm px-5 py-2.5 rounded-2xl shadow-lg shadow-purple-900/40 text-center max-w-[200px]">
-          {data.center}
-        </div>
+    <div>
+      {/* Toggle row */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+        {(["visual", "text"] as const).map(mode => (
+          <button key={mode} onClick={() => setViewMode(mode)}
+            style={{
+              padding: "5px 14px", borderRadius: "6px", cursor: "pointer", fontSize: "12px",
+              background: viewMode === mode ? "#F5A623" : "rgba(255,255,255,0.05)",
+              color: viewMode === mode ? "#000" : "rgba(255,255,255,0.6)",
+              border: `1px solid ${viewMode === mode ? "#F5A623" : "rgba(255,255,255,0.12)"}`,
+              fontWeight: viewMode === mode ? 700 : 400,
+            }}>
+            {mode === "visual" ? "Visual View" : "Text View"}
+          </button>
+        ))}
       </div>
-      {/* Branches */}
-      <div className="grid grid-cols-1 gap-2">
-        {branches.map((branch: MindBranch, bi: number) => {
-          const color = branch.color ?? BRANCH_COLORS[bi % BRANCH_COLORS.length];
-          return (
-            <div key={bi} className="rounded-xl border overflow-hidden" style={{ borderColor: color + '40' }}>
-              {/* Branch header */}
-              <div className="flex items-center gap-2 px-3 py-2" style={{ backgroundColor: color + '20' }}>
-                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-                <span className="text-white font-semibold text-xs">{branch.label}</span>
-              </div>
-              {/* Sub-branches */}
-              {Array.isArray(branch.children) && branch.children.length > 0 && (
-                <div className="px-3 py-2 space-y-1.5 bg-white/[0.02]">
-                  {branch.children.map((child: { label: string; children?: { label: string }[] }, ci: number) => (
-                    <div key={ci}>
-                      <div className="flex items-start gap-1.5">
-                        <span className="text-[10px] mt-0.5 flex-shrink-0" style={{ color }}>▸</span>
-                        <span className="text-white/80 text-[11px] font-medium leading-snug">{child.label}</span>
-                      </div>
-                      {/* Leaf nodes */}
-                      {Array.isArray(child.children) && child.children.length > 0 && (
-                        <div className="ml-4 mt-1 space-y-0.5">
-                          {child.children.map((leaf: { label: string }, li: number) => (
-                            <div key={li} className="flex items-start gap-1.5">
-                              <span className="text-[9px] mt-0.5 flex-shrink-0 text-white/30">–</span>
-                              <span className="text-white/55 text-[10px] leading-snug">{leaf.label}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+
+      {/* Text View */}
+      {viewMode === "text" && (
+        <pre style={{ whiteSpace: "pre-wrap", color: "rgba(255,255,255,0.75)", fontSize: "13px", lineHeight: 1.6 }}>
+          {text}
+        </pre>
+      )}
+
+      {/* Visual View */}
+      {viewMode === "visual" && (
+        <div style={{ overflowX: "auto", padding: "4px 0 16px" }}>
+          {/* Central topic */}
+          {centralLabel && (
+            <div style={{ textAlign: "center", marginBottom: "20px" }}>
+              <span style={{
+                display: "inline-block", padding: "10px 24px",
+                border: "2px solid #F5A623", borderRadius: "12px",
+                color: "#F5A623", fontWeight: 700, fontSize: "15px",
+                background: "rgba(245,166,35,0.10)",
+              }}>{centralLabel}</span>
+            </div>
+          )}
+
+          {hasBranches ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", justifyContent: "center" }}>
+              {branches.map((branch, bi) => (
+                <div key={bi} style={{ minWidth: "150px", maxWidth: "210px" }}>
+                  {/* Branch header */}
+                  <div style={{
+                    padding: "7px 14px", borderRadius: "8px", marginBottom: "6px", textAlign: "center",
+                    background: branch.color + "22", border: `1px solid ${branch.color}55`,
+                    color: "#fff", fontWeight: 600, fontSize: "13px",
+                  }}>{branch.label}</div>
+                  {/* Sub-nodes */}
+                  {branch.children.map((sub, si) => (
+                    <div key={si}>
+                      <div style={{
+                        padding: "5px 10px", borderRadius: "6px", marginBottom: "3px", marginLeft: "8px",
+                        background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.10)",
+                        color: "rgba(255,255,255,0.75)", fontSize: "12px",
+                      }}>{sub.label}</div>
+                      {sub.children.map((leaf, li) => (
+                        <div key={li} style={{
+                          padding: "3px 8px", borderRadius: "4px", marginBottom: "2px", marginLeft: "18px",
+                          color: "rgba(255,255,255,0.45)", fontSize: "11px",
+                        }}>{leaf.label}</div>
+                      ))}
                     </div>
                   ))}
                 </div>
-              )}
+              ))}
             </div>
-          );
-        })}
-      </div>
+          ) : (
+            <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: "10px", padding: "12px" }}>
+              <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "13px", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{text}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
+// Backward-compatible wrapper so existing JSX call sites still compile
+function renderMindMap(text: string) { return <MindMapRenderer text={text} />; }
 
 // ─── Status pill ─────────────────────────────────────────────────────────────
 function StatusPill({ status }: { status: Generation["status"] }) {
