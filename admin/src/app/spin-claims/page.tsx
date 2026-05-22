@@ -24,6 +24,15 @@ function fmtNaira(kobo: number) {
   return `₦${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function formatPrizeValue(claim: SpinClaim): string {
+  const val = claim.prize_value ?? 0;
+  const type = (claim.prize_type ?? "").toLowerCase();
+  if (type.includes("point") || type.includes("pulse")) return `${val.toLocaleString()} pts`;
+  if (type.includes("data")) return `${val}MB Data`;
+  return `₦${(val / 100).toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+
 function fmtDate(iso: string) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" });
@@ -328,7 +337,7 @@ export default function SpinClaimsPage() {
                         <AgeBadge createdAt={c.created_at} />
                       </td>
                       <td style={{ padding: "10px 14px", color: "#e2e8ff" }}>{PRIZE_TYPE_LABELS[c.prize_type] ?? c.prize_type}</td>
-                      <td style={{ padding: "10px 14px", color: "#10b981", fontWeight: 700 }}>{fmtNaira(c.prize_value)}</td>
+                      <td style={{ padding: "10px 14px", color: "#10b981", fontWeight: 700 }}>{formatPrizeValue(c)}</td>
                       <td style={{ padding: "10px 14px", color: "#c4cde8", fontSize: 11, fontFamily: "monospace", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {paymentTarget}
                       </td>
@@ -419,7 +428,7 @@ export default function SpinClaimsPage() {
                 {[
                   ["Claim ID",       modal.claim.id],
                   ["Prize Type",     PRIZE_TYPE_LABELS[modal.claim.prize_type] ?? modal.claim.prize_type],
-                  ["Prize Value",    fmtNaira(modal.claim.prize_value)],
+                  ["Prize Value",    formatPrizeValue(modal.claim)],
                   ["Fulfillment",    modal.claim.fulfillment_status],
                   ["Admin Notes",    modal.claim.admin_notes || "—"],
                   ["Rejection",      modal.claim.rejection_reason || "—"],
@@ -462,7 +471,7 @@ export default function SpinClaimsPage() {
               <>
                 <h2 style={{ fontSize: 16, fontWeight: 700, color: "#10b981", marginBottom: 4 }}>✓ Approve Claim</h2>
                 <p style={{ fontSize: 13, color: "#828cb4", marginBottom: 16 }}>
-                  Approving {fmtNaira(modal.claim.prize_value)} cash prize.
+                  Approving {formatPrizeValue(modal.claim)} prize.
                 </p>
 
                 {/* Show bank details if provided */}
@@ -505,7 +514,7 @@ export default function SpinClaimsPage() {
               <>
                 <h2 style={{ fontSize: 16, fontWeight: 700, color: "#ef4444", marginBottom: 4 }}>✕ Reject Claim</h2>
                 <p style={{ fontSize: 13, color: "#828cb4", marginBottom: 16 }}>
-                  Rejecting {fmtNaira(modal.claim.prize_value)} claim. The user will be notified.
+                  Rejecting {formatPrizeValue(modal.claim)} claim. The user will be notified.
                 </p>
                 <label style={{ fontSize: 12, color: "#828cb4", display: "block", marginBottom: 6 }}>
                   Rejection Reason <span style={{ color: "#ef4444" }}>*</span>
