@@ -254,14 +254,13 @@ export default function RechargePage() {
     if (detectTimerRef.current) clearTimeout(detectTimerRef.current);
     detectTimerRef.current = setTimeout(async () => {
       setDetecting(true);
-      let detected: string | null = null; let source = "";
       try {
-        const r = await fetch(`${API}/recharge/networks/detect?phone=${normalized}`);
-        if (r.ok) { const d = await r.json(); if (d.network) { detected = d.network; source = "Last used"; } }
-      } catch { /**/ }
-      if (!detected) { detected = detectNetworkFromPrefix(normalized); if (detected) source = "Auto-detected"; }
-      if (detected) { if (!selectedNetwork) setNetwork(detected); setNetworkHint(`${source}: ${detected}`); }
-      else setNetworkHint("");
+        const { network, hint } = await detectNetworkSmart(normalized, selectedNetwork || "");
+        if (!selectedNetwork && network) setNetwork(network);
+        setNetworkHint(hint);
+      } catch { setNetworkHint(""); }
+      finally { setDetecting(false); return; }
+      setDetecting(false);
       setDetecting(false);
     }, 500);
   // eslint-disable-next-line react-hooks/exhaustive-deps
