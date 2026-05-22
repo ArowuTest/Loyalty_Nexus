@@ -59,21 +59,25 @@ const AIRTIME_PRESETS = [100, 200, 500, 1000, 2000, 5000];
 const NETWORK_COLORS: Record<string, string> = {
   MTN: "#FFCC00", GLO: "#00A651", AIRTEL: "#FF0000", "9MOBILE": "#00A859",
 };
-const PREFIX_MAP: Record<string, string> = {
-  "0803":"MTN","0806":"MTN","0703":"MTN","0706":"MTN","0813":"MTN",
-  "0816":"MTN","0810":"MTN","0814":"MTN","0903":"MTN","0906":"MTN","0913":"MTN",
-  "0805":"GLO","0807":"GLO","0705":"GLO","0815":"GLO","0905":"GLO","0811":"GLO",
-  "0802":"AIRTEL","0808":"AIRTEL","0708":"AIRTEL","0812":"AIRTEL",
-  "0701":"AIRTEL","0902":"AIRTEL","0907":"AIRTEL",
-  "0809":"9MOBILE","0817":"9MOBILE","0818":"9MOBILE","0908":"9MOBILE","0909":"9MOBILE",
-};
-
-function detectNetworkFromPrefix(phone: string): string | null {
-  const d = phone.replace(/\D/g, "");
-  const n = d.startsWith("234") ? "0" + d.slice(3) : d;
-  return PREFIX_MAP[n.slice(0, 4)] ?? null;
+// 3-tier network detection: cached history → VTPass verify → user selection
+async function detectNetworkSmart(msisdn: string, userSelected: string): Promise<{network: string; hint: string}> {
+  try {
+    const res = await fetch(
+      `${API}/recharge/networks/detect?msisdn=${encodeURIComponent(msisdn)}&network=${encodeURIComponent(userSelected)}`,
+      { signal: AbortSignal.timeout(3000) }
+    );
+    if (!res.ok) throw new Error('detect failed');
+    const data = await res.json();
+    const hints: Record<string, string> = {
+      cached:        '✓ Detected from your recharge history',
+      verified:      '✓ Network verified',
+      user_selected: 'ℹ️ Using your selected network',
+    };
+    return { network: data.network ?? userSelected, hint: hints[data.confidence] ?? '' };
+  } catch {
+    return { network: userSelected, hint: '' };
+  }
 }
-
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function RechargePage() {
