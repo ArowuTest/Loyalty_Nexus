@@ -1293,11 +1293,13 @@ func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	dbLatency := time.Since(dbStart).Milliseconds()
 
-	var dbPoolUsed, dbPoolMax int
+	var dbPoolOpen, dbPoolUsed, dbPoolIdle, dbPoolMax int
 	if sqlDB, err := h.db.DB(); err == nil {
 		stats := sqlDB.Stats()
+		dbPoolOpen = stats.OpenConnections
 		dbPoolUsed = stats.InUse
-		dbPoolMax = stats.MaxOpenConnections
+		dbPoolIdle = stats.Idle
+		dbPoolMax  = stats.MaxOpenConnections
 	}
 
 	// Check Redis
@@ -1356,8 +1358,12 @@ func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		"webhook_success_rate_24h":  100.0, // Placeholder for real metrics
 		"paystack_success_rate_24h": 100.0, // Placeholder for real metrics
 		"api_p99_ms":                50,    // Placeholder for real metrics
-		"db_pool_used":              dbPoolUsed,
-		"db_pool_max":               dbPoolMax,
+		"db_pool": map[string]interface{}{
+			"open":     dbPoolOpen,
+			"in_use":   dbPoolUsed,
+			"idle":     dbPoolIdle,
+			"max_open": dbPoolMax,
+		},
 		"redis_hit_rate":            100.0, // Placeholder for real metrics
 		"checked_at":                time.Now(),
 		"pending_prizes":            pendingPrizes,
