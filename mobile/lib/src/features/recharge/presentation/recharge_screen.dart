@@ -165,34 +165,29 @@ class RechargeFormNotifier extends StateNotifier<RechargeFormState> {
     }
   }
 
-  // ── 3-rule network prefix auto-detect ──────────────────────────────────────
-  // Rule 1: cached history (done via backend — future enhancement)
-  // Rule 2: HLR (done via backend — future enhancement)
-  // Rule 3: Nigerian prefix map (local, instant)
-  static const _prefixMap = <String, String>{
-    '0803': 'MTN', '0806': 'MTN', '0703': 'MTN', '0706': 'MTN',
-    '0813': 'MTN', '0816': 'MTN', '0810': 'MTN', '0814': 'MTN',
-    '0903': 'MTN', '0906': 'MTN', '0913': 'MTN',
-    '0805': 'GLO', '0807': 'GLO', '0705': 'GLO', '0815': 'GLO',
-    '0905': 'GLO', '0811': 'GLO',
-    '0802': 'AIRTEL', '0808': 'AIRTEL', '0708': 'AIRTEL', '0812': 'AIRTEL',
-    '0701': 'AIRTEL', '0902': 'AIRTEL', '0907': 'AIRTEL',
-    '0809': '9MOBILE', '0817': '9MOBILE', '0818': '9MOBILE',
-    '0908': '9MOBILE', '0909': '9MOBILE',
-  };
-
-  /// Call when phone changes and reaches 11 digits.
-  /// Only auto-sets network if user hasn't selected one yet.
-  String? autoDetectNetwork(String phone) {
+  // ── 3-tier smart network detection ─────────────────────────────────────────
+  // Tier 1: recent successful recharge history (backend DB cache)
+  // Tier 2: VTPass merchant-verify (authoritative for ported numbers)
+  // Tier 3: user selection passthrough (silent fail-through)
+  Future<void> detectNetworkSmart(Dio dio, String phone) async {
     final digits = phone.replaceAll(RegExp(r'\D'), '');
-    final normalized = digits.startsWith('234') ? '0${digits.substring(3)}' : digits;
-    if (normalized.length < 4) return null;
-    final prefix = normalized.substring(0, 4);
-    final detected = _prefixMap[prefix];
-    if (detected != null && state.selectedNetwork == null) {
-      state = state.copyWith(selectedNetwork: detected);
+    final msisdn = digits.startsWith('234') ? '0\${digits.substring(3)}' : digits;
+    if (msisdn.length < 11) return;
+    final userSelected = state.selectedNetwork ?? '';
+    try {
+      final resp = await dio
+          .get(
+            '/recharge/networks/detect',
+            queryParameters: {'msisdn': msisdn, 'network': userSelected},
+          )
+          .timeout(const Duration(seconds: 3));
+      final network = (resp.data as Map<String, dynamic>?)?['network'] as String?;
+      if (network != null && network.isNotEmpty && state.selectedNetwork == null) {
+        state = state.copyWith(selectedNetwork: network);
+      }
+    } catch (_) {
+      // Tier 3: silently fall through — user keeps their selection or picks manually
     }
-    return detected;
   }
 
   // ── Submit ───────────────────────────────────────────────────────────────────
@@ -673,7 +668,8 @@ class _PhoneField extends ConsumerWidget {
         onChanged: (v) {
           ref.read(rechargeFormProvider.notifier).setPhone(v);
           if (v.length >= 11) {
-            ref.read(rechargeFormProvider.notifier).autoDetectNetwork(v);
+            final dio = ref.read(dioProvider);
+            ref.read(rechargeFormProvider.notifier).detectNetworkSmart(dio, v);
           }
         },
       ),
