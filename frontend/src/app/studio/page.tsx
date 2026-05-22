@@ -2261,6 +2261,12 @@ function ToolDrawer({
   const generatingRef = useRef<HTMLDivElement>(null);
   // ── Prompt history: recent prompts for this tool ──────────────────────────
   const [recentPrompts, setRecentPrompts] = useState<string[]>([]);
+  // ── Marketing-jingle structured fields ──────────────────────────────────
+  const [jingleGenre,    setJingleGenre]    = useState("Afrobeats");
+  const [jingleMood,     setJingleMood]     = useState("Upbeat");
+  const [jingleDuration, setJingleDuration] = useState("30 seconds");
+  const [jingleVocals,   setJingleVocals]   = useState("With Vocals");
+  const [jingleBrand,    setJingleBrand]    = useState("");
   useEffect(() => {
     let cancelled = false;
     api.getPromptHistory(tool.slug, 8).then(res => {
@@ -2319,6 +2325,13 @@ function ToolDrawer({
   // We stash the payload then open the confirmation modal.
   function handleTemplateSubmit(payload: GeneratePayload) {
     if (generating) return;
+    // Prepend structured fields for marketing-jingle / jingle tools
+    const isJingle = slug === "marketing-jingle" || slug === "jingle" || slug === "my-marketing-jingle";
+    if (isJingle && payload.prompt) {
+      const brandPart = jingleBrand.trim() ? ` [Brand: ${jingleBrand.trim()}]` : "";
+      const prefix = `[Genre: ${jingleGenre}] [Mood: ${jingleMood}] [Duration: ${jingleDuration}] [Vocals: ${jingleVocals}]${brandPart}`;
+      payload = { ...payload, prompt: `${prefix}\n${payload.prompt}` };
+    }
     setPendingPayload(payload);
     setShowConfirm(true);
   }
@@ -2571,6 +2584,31 @@ function ToolDrawer({
                 </div>
               ) : (
                 <div className="min-h-0">
+                  {/* ── Marketing-jingle structured fields ── */}
+                  {(slug === "marketing-jingle" || slug === "jingle" || slug === "my-marketing-jingle") && !formCollapsed && (
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"12px"}}>
+                      <select value={jingleGenre} onChange={e => setJingleGenre(e.target.value)}
+                        style={{background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}}>
+                        {["Afrobeats","Gospel","Highlife","Pop","R&B","Hip-Hop","Jingle/Advert"].map(g => <option key={g}>{g}</option>)}
+                      </select>
+                      <select value={jingleMood} onChange={e => setJingleMood(e.target.value)}
+                        style={{background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}}>
+                        {["Upbeat","Calm","Intense","Playful","Professional"].map(m => <option key={m}>{m}</option>)}
+                      </select>
+                      <select value={jingleDuration} onChange={e => setJingleDuration(e.target.value)}
+                        style={{background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}}>
+                        {["15 seconds","30 seconds","60 seconds"].map(d => <option key={d}>{d}</option>)}
+                      </select>
+                      <select value={jingleVocals} onChange={e => setJingleVocals(e.target.value)}
+                        style={{background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}}>
+                        <option>With Vocals</option>
+                        <option>Instrumental</option>
+                      </select>
+                      <input value={jingleBrand} onChange={e => setJingleBrand(e.target.value)}
+                        placeholder="Brand / Product name (optional)"
+                        style={{gridColumn:"1/-1",background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}} />
+                    </div>
+                  )}
                   {renderTemplate(tool, handleTemplateSubmit, generating, userPoints, preloadImageUrl, preloadVideoUrl)}
                 </div>
               )}
