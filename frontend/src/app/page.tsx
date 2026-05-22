@@ -286,6 +286,28 @@ function DemoSpinWheel({ onLoginClick }: { onLoginClick: () => void }) {
       <p className="text-[11px] text-white/30 text-center max-w-[220px]">
         Sign in for your daily free spin. Extra spins with Pulse Points.
       </p>
+      {/* BUG-037: Prize disclosure table for conversion & trust */}
+      <div className="mt-3 w-full max-w-[260px] rounded-xl border border-white/[0.07] p-3"
+        style={{ background: "rgba(255,255,255,0.02)" }}>
+        <p className="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-2 text-center">Prize Pool</p>
+        <div className="space-y-1">
+          {[
+            { label: "₦5,000 Cash",    prob: "5%",  color: "#F5A623" },
+            { label: "₦2,500 Cash",    prob: "8%",  color: "#F5A623" },
+            { label: "5GB Data",       prob: "5%",  color: "#00D4FF" },
+            { label: "2GB Data",       prob: "10%", color: "#00D4FF" },
+            { label: "1GB Data",       prob: "15%", color: "#06B6D4" },
+            { label: "₦1,000 Airtime", prob: "12%", color: "#10B981" },
+            { label: "500 Points",     prob: "15%", color: "#8B5CF6" },
+            { label: "Try Again",      prob: "30%", color: "#4B5563" },
+          ].map(({ label, prob, color }) => (
+            <div key={label} className="flex items-center justify-between text-[11px]">
+              <span style={{ color }} className="font-semibold">{label}</span>
+              <span className="text-white/30">{prob}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
