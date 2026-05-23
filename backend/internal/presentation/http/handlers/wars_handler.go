@@ -42,11 +42,11 @@ func (h *WarsHandler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load leaderboard"})
 		return
 	}
-	// war_active = true whenever the leaderboard API succeeds, even with 0 entries.
-	// This lets the frontend distinguish "war exists, no participants yet" from
-	// "no war configured". Fixes BUG-041 ("No Active War Yet" false positive).
+	// war_active is determined by a real DB check — not hardcoded.
+	// An empty leaderboard does not mean no war exists (users may not have recharged yet).
+	warActive := h.warsSvc.HasActiveWar(r.Context())
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"war_active":  true,
+		"war_active":  warActive,
 		"leaderboard": entries,
 		"count":       len(entries),
 		"period":      currentWarPeriod(),
