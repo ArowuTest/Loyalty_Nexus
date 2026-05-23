@@ -44,19 +44,36 @@ func NewAuthHandler(as *services.AuthService) *AuthHandler {
 }
 
 type SendOTPRequest struct {
-	PhoneNumber string `json:"phone_number"`
-	Purpose     string `json:"purpose"` // login | momo_link | prize_claim
+	PhoneNumber    string `json:"phone_number"`
+	PhoneLegacy    string `json:"phone"` // accepted for backwards-compat with older mobile clients
+	Purpose        string `json:"purpose"` // login | momo_link | prize_claim
+}
+
+// effectivePhone returns phone_number, falling back to legacy "phone" field.
+func (r SendOTPRequest) effectivePhone() string {
+	if r.PhoneNumber != "" {
+		return r.PhoneNumber
+	}
+	return r.PhoneLegacy
 }
 
 type VerifyOTPRequest struct {
-	PhoneNumber string `json:"phone_number"`
-	Code        string `json:"code"`
-	Purpose     string `json:"purpose"`
+	PhoneNumber    string `json:"phone_number"`
+	PhoneLegacy    string `json:"phone"` // accepted for backwards-compat with older mobile clients
+	Code           string `json:"code"`
+	Purpose        string `json:"purpose"`
+}
+
+func (r VerifyOTPRequest) effectivePhone() string {
+	if r.PhoneNumber != "" {
+		return r.PhoneNumber
+	}
+	return r.PhoneLegacy
 }
 
 func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
 	var req SendOTPRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PhoneNumber == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.effectivePhone() == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "phone_number is required"})
 		return
 	}
@@ -65,9 +82,9 @@ func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Normalise to E.164 before any DB/OTP operation so every new account
 	// is created with the canonical "+234…" format and no duplicates arise.
-	req.PhoneNumber = normalizeE164NG(req.PhoneNumber)
+	req.PhoneNumber = normalizeE164NG(req.effectivePhone())
 
-	devCode, err := h.authSvc.SendOTP(r.Context(), req.PhoneNumber, req.Purpose)
+	devCode, err := h.authSvc.SendOTP(r.Context(), req.effectivePhone(), req.Purpose)
 	if err != nil {
 		statusCode := http.StatusBadRequest
 		msg := err.Error()
@@ -99,9 +116,9 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Normalise to E.164 here too — must match the format used in SendOTP so the
 	// OTP lookup (FindLatestPendingOTP WHERE phone_number = ?) hits the right row.
-	req.PhoneNumber = normalizeE164NG(req.PhoneNumber)
+	req.PhoneNumber = normalizeE164NG(req.effectivePhone())
 
-	token, isNew, err := h.authSvc.VerifyOTP(r.Context(), req.PhoneNumber, req.Code, req.Purpose)
+	token, isNew, err := h.authSvc.VerifyOTP(r.Context(), req.effectivePhone(), req.Code, req.Purpose)
 	if err != nil {
 		statusCode := http.StatusUnauthorized
 		if errors.Is(err, services.ErrOTPExpired) {
