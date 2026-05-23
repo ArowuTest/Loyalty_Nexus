@@ -77,6 +77,14 @@ func (svc *RegionalWarsService) EnsureActiveWar(ctx context.Context, defaultPriz
 
 // GetLeaderboard returns top-N states for the current month, ranked by
 // aggregate points_award transactions during the war window.
+
+// HasActiveWar returns true when there is an ACTIVE war record for the current calendar month.
+func (svc *RegionalWarsService) HasActiveWar(ctx context.Context) bool {
+	period := periodStr(time.Now().UTC())
+	_, err := svc.warsRepo.FindActiveWar(ctx, period)
+	return err == nil
+}
+
 func (svc *RegionalWarsService) GetLeaderboard(ctx context.Context, limit int) ([]entities.LeaderboardEntry, error) {
 	now := time.Now().UTC()
 	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
