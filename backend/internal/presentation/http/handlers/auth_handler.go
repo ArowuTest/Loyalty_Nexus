@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 
 	"loyalty-nexus/internal/application/services"
@@ -98,8 +99,13 @@ func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := map[string]interface{}{"message": "OTP sent"}
-	// Non-production only: include plaintext OTP in response so tests don't need log access
-	if devCode != "" {
+	// Only expose plaintext OTP when ENVIRONMENT is explicitly "development" or "staging".
+	// Absence of the env var, or any other value (including "production"), means production
+	// mode — the OTP is never returned in the response body.
+	// BUG-001 fix: previously this leaked whenever devCode was non-empty regardless of env.
+	env := strings.ToLower(strings.TrimSpace(os.Getenv("ENVIRONMENT")))
+	isNonProd := env == "development" || env == "staging"
+	if devCode != "" && isNonProd {
 		resp["dev_otp"] = devCode
 	}
 	writeJSON(w, http.StatusOK, resp)
