@@ -39,7 +39,7 @@ type User struct {
 	PointsExpireAt        *time.Time `db:"points_expire_at"        gorm:"column:points_expire_at"         json:"points_expire_at,omitempty"`
 	TotalPoints           int64      `db:"total_points"            gorm:"column:total_points"             json:"total_points"`
 	StampsCount           int        `db:"stamps_count"            gorm:"column:stamps_count"             json:"stamps_count"`
-	LifetimePoints        int64      `db:"lifetime_points"         gorm:"column:lifetime_points"          json:"lifetime_points"`
+	LifetimePoints        int64      `db:"lifetime_points"         gorm:"column:lifetime_points"          json:"-"` // deprecated: source of truth is wallet.lifetime_points
 	TotalSpins            int        `db:"total_spins"             gorm:"column:total_spins"              json:"total_spins"`
 	StudioUseCount        int        `db:"studio_use_count"        gorm:"column:studio_use_count"         json:"studio_use_count"`
 	GoogleWalletObjectID  string     `db:"google_wallet_object_id" gorm:"column:google_wallet_object_id" json:"google_wallet_object_id,omitempty"`
