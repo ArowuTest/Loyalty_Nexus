@@ -20,6 +20,9 @@ on:
         required: false
         default: 'all'
 
+permissions:
+  contents: read
+
 env:
   RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
   VERCEL_TOKEN:   ${{ secrets.VERCEL_TOKEN }}
