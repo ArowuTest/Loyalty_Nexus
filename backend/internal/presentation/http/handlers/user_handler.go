@@ -57,7 +57,16 @@ func (h *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
 		return
 	}
-	writeJSON(w, http.StatusOK, user)
+	// Enrich with wallet-derived lifetime_points so /user/profile and /user/wallet
+	// always return identical values. wallet is the single source of truth.
+	var lifetimePoints int64
+	if wallet, werr := h.userRepo.GetWallet(r.Context(), userID); werr == nil && wallet != nil {
+		lifetimePoints = wallet.LifetimePoints
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"user":            user,
+		"lifetime_points": lifetimePoints,
+	})
 }
 
 func (h *UserHandler) GetWallet(w http.ResponseWriter, r *http.Request) {
