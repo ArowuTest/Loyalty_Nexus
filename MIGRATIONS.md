@@ -67,3 +67,26 @@ The next deploy will re-run version `NNN` from `database/migrations/`.
 | Bootstrap of 3 critical tables in Go | Keep — safety net only; migrations remain the system of record |
 | Separate `up.sql` / `down.sql` files | Keep — enables rollbacks |
 | GORM `AutoMigrate` for production | Do not introduce — unsafe for live schema changes |
+
+## Non-Migration SQL Files
+
+Historical schema dumps and ad-hoc fix scripts that are **not** managed by
+the migration runner live in `docs/database/`:
+
+```
+docs/database/consolidated_schema.sql    ← full schema snapshot (reference only)
+docs/database/fix_missing_tables.sql     ← ad-hoc DDL used during early dev
+docs/database/020_streak_grace_and_expiry.sql  ← unnumbered historical patch
+docs/database/021_pwa_install_referrals.sql
+docs/database/022_dynamic_multipliers.sql
+docs/database/023_dynamic_content_updates.sql
+```
+
+These files are **not executed by `golang-migrate`** — they lack the required
+`NNN_description.up.sql` / `NNN_description.down.sql` naming pattern.
+Do not move them back into `database/migrations/` expecting them to run.
+If a change they describe is still needed, create a properly numbered migration.
+
+**Rule of thumb:** if it lives in `database/migrations/` and does not match
+`NNN_description.{up|down}.sql` exactly, golang-migrate will silently ignore it.
+
