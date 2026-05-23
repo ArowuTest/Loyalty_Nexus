@@ -430,6 +430,7 @@ func main() {
 		mux.Handle("POST /api/v1/user/profile/state", auth(http.HandlerFunc(userH.UpdateProfileState)))
 		mux.Handle("POST /api/v1/user/momo/verify", auth(http.HandlerFunc(userH.VerifyMoMo)))
 		mux.Handle("GET /api/v1/user/transactions", auth(http.HandlerFunc(userH.GetTransactions)))
+		mux.Handle("GET /api/v1/user/recharges",    auth(http.HandlerFunc(userH.GetUserRecharges)))
 		mux.Handle("GET /api/v1/user/passport",    auth(http.HandlerFunc(userH.GetPassportURLs)))
 		mux.Handle("GET /api/v1/user/bonus-pulse", auth(http.HandlerFunc(userH.GetBonusPulseAwards)))
 
