@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"loyalty-nexus/internal/application/services"
 	"context"
@@ -275,3 +277,97 @@ func (h *UserHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		"email":        user.Email,
 	})
 }
+
+// GetUserRecharges returns the authenticated user's recharge history.
+// Query params:
+//   limit  (int, default 50, max 200)
+//   offset (int, default 0)
+//   status (string, optional: SUCCESS|FAILED|PENDING)
+// BUG-052: backend endpoint added so the frontend Recharge History tab
+// (calls GET /api/v1/user/recharges) actually has a server to talk to.
+func (h *UserHandler) GetUserRecharges(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, _ := uuid.Parse(uid)
+
+	type RechargeRow struct {
+		ID                string `gorm:"column:id"                  json:"id"`
+		MSISDN            string `gorm:"column:msisdn"              json:"msisdn"`
+		Network           string `gorm:"column:network"             json:"network"`
+		RechargeType      string `gorm:"column:recharge_type"       json:"recharge_type"`
+		AmountKobo        int64  `gorm:"column:amount_kobo"         json:"amount_kobo"`
+		DataVariationCode string `gorm:"column:data_variation_code" json:"data_variation_code"`
+		Status            string `gorm:"column:status"              json:"status"`
+		FailureReason     string `gorm:"column:failure_reason"      json:"failure_reason"`
+		PointsEarned      int64  `gorm:"column:points_earned"       json:"points_earned"`
+		DrawEntries       int    `gorm:"column:draw_entries"        json:"draw_entries"`
+		SpinEligible      bool   `gorm:"column:spin_eligible"       json:"spin_eligible"`
+		PaymentReference  string `gorm:"column:payment_reference"   json:"payment_reference"`
+		VTPassProviderRef string `gorm:"column:vtpass_provider_ref" json:"vtpass_provider_ref"`
+		CreatedAt         string `gorm:"column:created_at"          json:"created_at"`
+		CompletedAt       string `gorm:"column:completed_at"        json:"completed_at"`
+	}
+
+	// Parse pagination + filter
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := safeAtoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := safeAtoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	statusFilter := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("status")))
+
+	var rows []RechargeRow
+	var total int64
+	if h.db != nil {
+		q := h.db.WithContext(r.Context()).
+			Table("recharges").
+			Where("user_id = ?", userID)
+		if statusFilter == "SUCCESS" || statusFilter == "FAILED" || statusFilter == "PENDING" {
+			q = q.Where("status = ?", statusFilter)
+		}
+		// Count first (for pagination UI)
+		_ = q.Count(&total).Error
+		q.Select("id, msisdn, network, recharge_type, amount_kobo, data_variation_code, " +
+			"status, failure_reason, points_earned, draw_entries, spin_eligible, " +
+			"payment_reference, vtpass_provider_ref, created_at, completed_at").
+			Order("created_at DESC").
+			Limit(limit).
+			Offset(offset).
+			Scan(&rows)
+	}
+	if rows == nil {
+		rows = []RechargeRow{}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"recharges": rows,
+		"total":     total,
+		"limit":     limit,
+		"offset":    offset,
+	})
+}
+
+// safeAtoi parses an integer without bringing in strconv at package scope
+// (avoids reshuffling the existing import block).
+func safeAtoi(s string) (int, error) {
+	n := 0
+	if s == "" {
+		return 0, fmt.Errorf("empty")
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("invalid digit")
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, nil
+}
+
