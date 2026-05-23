@@ -34,7 +34,7 @@ function getInitials(user: { display_name?: string; phone_number?: string } | nu
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
     return parts[0].slice(0, 2).toUpperCase();
   }
-  return (user.phone_number ?? "").slice(-2) || "?";
+  return "?"; // phone-only users: no meaningful initials, show generic icon
 }
 
 export default function AppShell({ children }: { children: ReactNode }) {
@@ -129,6 +129,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
         {/* Right side */}
         <div className="flex items-center gap-3">
+          {/* Points pill — desktop (BUG-032) */}
+          {wallet && (
+            <div
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-black"
+              style={{ background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.25)", color: "var(--gold)" }}
+            >
+              <Zap size={11} />
+              {(wallet.pulse_points ?? 0) >= 1_000_000
+                ? `${((wallet.pulse_points ?? 0) / 1_000_000).toFixed(1)}M`
+                : (wallet.pulse_points ?? 0) >= 1000
+                ? `${((wallet.pulse_points ?? 0) / 1000).toFixed(1)}K`
+                : (wallet.pulse_points ?? 0).toLocaleString()} pts
+            </div>
+          )}
+
           {/* Tier badge */}
           <span className={cn("tier-badge", `tier-${user?.tier || "BRONZE"}`)}>
             {TIER_ICONS[tier]} {tier}
@@ -251,7 +266,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               style={{ background: "rgba(245,166,35,0.12)", border: "1px solid rgba(245,166,35,0.25)", color: "var(--gold)" }}
             >
               <Zap size={11} />
-              {points >= 1000 ? `${(points / 1000).toFixed(1)}K` : points.toLocaleString()}
+              {points >= 1_000_000 ? `${(points / 1_000_000).toFixed(1)}M` : points >= 1000 ? `${(points / 1000).toFixed(1)}K` : points.toLocaleString()}
             </div>
           )}
 
