@@ -600,8 +600,8 @@ export default function NexusChat() {
               <div className={cn(
                 'px-4 py-3 rounded-2xl',
                 msg.role === 'user'
-                  ? 'bg-gradient-to-br from-gold-500/80 to-amber-600 text-white rounded-tr-sm text-sm leading-relaxed'
-                  : 'bg-[#1c1e2e] rounded-tl-sm border border-white/[0.07] shadow-sm',
+                  ? 'bg-gradient-to-br from-gold-500/80 to-amber-600 text-white rounded-tr-sm text-sm leading-relaxed break-words'
+                  : 'bg-[#1c1e2e] rounded-tl-sm border border-white/[0.07] shadow-sm break-words',
               )}>
                 {msg.role === 'user'
                   ? <p className="text-sm leading-relaxed">{msg.content}</p>
