@@ -348,6 +348,23 @@ func main() {
 			}()
 		}
 
+		// ─── Lifecycle Worker (scheduled draws, points expiry, wars, studio recovery) ─
+		// CRITICAL: This goroutine runs all background cron jobs including:
+		//   - RunScheduledDraws  (every 1h): auto-executes UPCOMING draws past their draw_time
+		//   - RunWarsMonthlyResolve (every 24h): resolves war leaderboard at month-end
+		//   - studioStaleRecovery (every 10m): refunds points for stuck PROCESSING generations
+		//   - pointsExpiryJobs (every 24h): expires stale points
+		//   - fulfillmentRetry  (every 5m): retries failed prize fulfillments
+		winnerSvc := services.NewWinnerService(db, userRepo, prizeRepo, notifySvc)
+		lifecycleWorker := services.NewLifecycleWorker(
+			db, userRepo, studioRepo, prizeRepo, authRepo, chatRepo, warsRepo,
+			fulfillSvc, drawSvc, winnerSvc, warssSvc, studioSvc, notifySvc, cfg,
+		)
+		if db != nil {
+			go lifecycleWorker.Run(ctx)
+			log.Println("[main] ✓ Lifecycle worker started (draws, expiry, wars, studio recovery)")
+		}
+
 		// ─── HTTP Handlers ────────────────────────────────────────
 		authH    := handlers.NewAuthHandler(authSvc)
 		adminAuthH := handlers.NewAdminAuthHandler(adminAuthSvc)    // Admin RBAC
@@ -682,3 +699,4 @@ func main() {
 func currentWarPeriodStr() string {
 	return time.Now().UTC().Format("2006-01")
 }
+
