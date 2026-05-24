@@ -45,7 +45,7 @@ function AnnouncementBanner({ onLoginClick }: { onLoginClick: () => void }) {
               Sign in
             </button>
             to see your Pulse Points balance, spin the wheel for recharge rewards, and unlock{" "}
-            <span className="font-bold text-foreground">30+ premium AI tools</span>{" "}
+            <span className="font-bold text-foreground">44 premium AI tools</span>{" "}
             — all earned from your everyday MTN recharges.
           </p>
         </div>
@@ -317,7 +317,7 @@ export default function Home() {
     {
       n: "04", icon: "🚀", color: "#8B5CF6",
       title: "Unlock AI Studio",
-      body: "Spend points to access 30+ AI tools — create stunning photos, generate videos, build business plans, make music, and more.",
+      body: "Spend points to access 44 AI tools — create stunning photos, generate videos, build business plans, make music, and more.",
       stat: "1.2M+ generations created",
     },
   ];
@@ -393,7 +393,7 @@ export default function Home() {
             >
               Recharge MTN <span className="font-black text-foreground">₦1,000+</span> and get a{" "}
               <span className="text-primary font-bold">free wheel spin</span> — win cash up to ₦5,000, data & airtime instantly.
-              Plus earn <span className="text-primary font-bold">Pulse Points</span> for 30+ AI tools.
+              Plus earn <span className="text-primary font-bold">Pulse Points</span> for 44 AI tools.
             </motion.p>
           </div>
 
@@ -407,7 +407,7 @@ export default function Home() {
             <FeaturePill icon={RotateCcw} label="Free spin on ₦1,000+ recharge" color="text-primary" />
             <FeaturePill icon={Trophy}    label="Win up to ₦5,000 instantly"     color="text-chart-2" />
             <FeaturePill icon={Zap}       label="Pulse Points on every recharge" color="text-chart-3" />
-            <FeaturePill icon={Sparkles}  label="30+ AI tools unlocked"          color="text-chart-4" />
+            <FeaturePill icon={Sparkles}  label="44 AI tools unlocked"          color="text-chart-4" />
           </motion.div>
 
           {/* CTAs */}
@@ -592,7 +592,7 @@ export default function Home() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <SectionHeader
             eyebrow="AI Studio"
-            title={<><span className="text-gold">30+</span> AI Tools — One Platform</>}
+            title={<><span className="text-gold">44</span> AI Tools — One Platform</>}
             sub="Chat is always free. Spend your Pulse Points to unlock the most powerful AI creation tools in Africa — photos, videos, music, business plans and beyond. No expensive subscriptions. No monthly fees."
           />
 
@@ -688,7 +688,7 @@ export default function Home() {
           <div className="text-center mt-8">
             <Link to={ROUTES.STUDIO}>
               <button className="inline-flex items-center gap-2 glass border border-white/[0.12] rounded-2xl h-12 px-7 text-sm font-semibold text-foreground hover:border-white/25 transition-all duration-200">
-                Explore all 30+ tools
+                Explore all 44 tools
                 <ArrowRight className="w-4 h-4" />
               </button>
             </Link>
@@ -1109,3 +1109,4 @@ function SpinWheelPreview({ onLoginClick }: { onLoginClick: () => void }) {
     </div>
   );
 }
+
