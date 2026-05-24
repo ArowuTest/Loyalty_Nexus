@@ -535,6 +535,7 @@ func main() {
 		mux.Handle("GET    /api/v1/admin/studio-generations",        adminAuth(http.HandlerFunc(adminH.GetStudioGenerations)))
 		mux.Handle("GET    /api/v1/admin/users",              adminAuth(http.HandlerFunc(adminH.ListUsers)))
 		mux.Handle("GET    /api/v1/admin/regional-wars",      adminAuth(http.HandlerFunc(adminH.GetRegionalWars)))
+		mux.Handle("GET    /api/v1/admin/regional-stats",     adminAuth(http.HandlerFunc(adminH.GetRegionalStats)))
 		mux.Handle("POST /api/v1/admin/wars/resolve",          adminAuth(http.HandlerFunc(warsH.AdminResolve)))
 		mux.Handle("PUT  /api/v1/admin/wars/prize-pool",       adminAuth(http.HandlerFunc(warsH.AdminUpdatePrizePool)))
 		mux.Handle("GET  /api/v1/admin/wars/{war_id}/winners",            adminAuth(http.HandlerFunc(warsH.GetWinnersByWarID)))
