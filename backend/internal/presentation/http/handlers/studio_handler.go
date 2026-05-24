@@ -16,6 +16,7 @@ package handlers
 // repository + wallet + ledger).  This handler never calls gorm.DB directly.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -552,8 +553,8 @@ func (h *StudioHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
 	// Stream from Gemini
 	var fullText string
 	var streamErr error
-	if h.geminiAdapter != nil {
-		fullText, streamErr = h.geminiAdapter.CompleteStream(r.Context(), systemPrompt, req.Message, func(chunk string) {
+	if h.gemini != nil {
+		fullText, streamErr = h.gemini.CompleteStream(r.Context(), systemPrompt, req.Message, func(chunk string) {
 			data, _ := json.Marshal(map[string]string{"text": chunk})
 			writeSSE(data)
 		})
