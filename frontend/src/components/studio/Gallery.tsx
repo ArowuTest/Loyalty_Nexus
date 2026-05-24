@@ -42,9 +42,14 @@ function extractPromptText(raw: string): string {
   if (!raw) return '';
   try {
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.prompt === 'string') return parsed.prompt;
+    // parsed.prompt may itself be a JSON-encoded string (double-encoded) —
+    // strip any leading/trailing double-quote characters that survived.
+    if (parsed && typeof parsed.prompt === 'string') {
+      return parsed.prompt.replace(/^"+|"+$/g, '');
+    }
   } catch { /* not JSON — use as-is */ }
-  return raw;
+  // Fall back: raw string — strip leading/trailing quotes if present
+  return raw.replace(/^"+|"+$/g, '');
 }
 
 export default function Gallery() {
@@ -211,3 +216,4 @@ export default function Gallery() {
     </div>
   );
 }
+
