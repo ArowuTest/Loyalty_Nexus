@@ -114,6 +114,33 @@ func NewLLMOrchestrator(
 
 // ─── buildMemoryBlock constructs the [NEXUS MEMORY] context block ────────────
 
+// ResolveOrCreateSession returns a real UUID session string for the given
+// (userID, toolSlug) pair. It reuses the active session if one exists, or
+// creates a new one. This ensures buildMemoryBlock can always parse the session
+// ID and load conversation history — fixing the STU-002 blank-context bug.
+func (o *LLMOrchestrator) ResolveOrCreateSession(ctx context.Context, userID, toolSlug string) string {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		// Fallback: return a fresh UUID so at least this message is persisted
+		return uuid.New().String()
+	}
+	if toolSlug == "" {
+		toolSlug = "general"
+	}
+	// Reuse existing active session if present
+	session, err := o.chatRepo.GetActiveSession(ctx, uid, toolSlug)
+	if err == nil && session != nil {
+		return session.ID.String()
+	}
+	// Create a new session
+	newSession, err := o.chatRepo.CreateSession(ctx, uid, toolSlug)
+	if err != nil || newSession == nil {
+		// Last resort: ephemeral UUID (history won't persist but won't crash)
+		return uuid.New().String()
+	}
+	return newSession.ID.String()
+}
+
 func (o *LLMOrchestrator) buildMemoryBlock(ctx context.Context, uid uuid.UUID, sessionID, toolSlug string) string {
 	if toolSlug == "" {
 		toolSlug = "general"
