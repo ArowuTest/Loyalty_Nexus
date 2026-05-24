@@ -538,6 +538,7 @@ func (h *StudioHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable nginx/Render proxy buffering for true streaming
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	flusher, canFlush := w.(http.Flusher)
 
@@ -897,3 +898,4 @@ func (h *StudioHandler) GetPromptHistory(w http.ResponseWriter, r *http.Request)
 		"count":   len(items),
 	})
 }
+
