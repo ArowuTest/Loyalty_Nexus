@@ -377,10 +377,19 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// ── Session ID: if frontend doesn't send one, mint a new one ──────────────
+	// ── Session ID: resolve or create a real UUID session ──────────────────────
+	// If the frontend sends a valid UUID session ID, use it. Otherwise look up
+	// the active session for this user+toolSlug or create a new one. This ensures
+	// buildMemoryBlock can always parse the ID and inject prior conversation history
+	// into the LLM context (fixes STU-002: chat history was always blank).
+	toolSlugForSession := req.ToolSlug
+	if toolSlugForSession == "" {
+		toolSlugForSession = "general"
+	}
 	sessionID := req.SessionID
-	if sessionID == "" {
-		sessionID = "sess_" + uid[:8] + "_" + fmt.Sprintf("%d", timeNowUnix())
+	if _, parseErr := uuid.Parse(sessionID); parseErr != nil {
+		// Not a valid UUID (e.g. empty string or old "sess_..." format) — resolve a real one
+		sessionID = h.llmOrch.ResolveOrCreateSession(r.Context(), uid, toolSlugForSession)
 	}
 
 	// ── Route by tool_slug ─────────────────────────────────────────────────
