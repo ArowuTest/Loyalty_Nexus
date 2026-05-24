@@ -1152,12 +1152,12 @@ function ChatBubble({ msg }: { msg: Message }) {
         <div className={cn(
           "px-4 py-2.5",
           isUser
-            ? "bg-gradient-to-br from-gold-500/80 to-amber-600 text-white rounded-2xl rounded-tr-sm text-sm leading-relaxed"
+            ? "bg-gradient-to-br from-gold-500/80 to-amber-600 text-white rounded-2xl rounded-tr-sm text-sm leading-relaxed break-words"
             : mode === 'code'
-              ? "bg-gray-950/80 border border-green-500/15 rounded-2xl rounded-tl-sm"
+              ? "bg-gray-950/80 border border-green-500/15 rounded-2xl rounded-tl-sm break-words"
               : mode === 'search'
-              ? "bg-sky-950/40 border border-sky-500/15 rounded-2xl rounded-tl-sm"
-              : "bg-[#1c1e2e] rounded-2xl rounded-tl-sm border border-white/[0.07] shadow-sm"
+              ? "bg-sky-950/40 border border-sky-500/15 rounded-2xl rounded-tl-sm break-words"
+              : "bg-[#1c1e2e] rounded-2xl rounded-tl-sm border border-white/[0.07] shadow-sm break-words"
         )}>
           {isUser
             ? <p className="text-sm leading-relaxed">{msg.content}</p>
