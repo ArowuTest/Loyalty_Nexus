@@ -924,6 +924,122 @@ func (a *GeminiAdapter) Complete(ctx context.Context, systemPrompt, userPrompt s
 	return result.Candidates[0].Content.Parts[0].Text, nil
 }
 
+// CompleteStream sends a prompt to Gemini's streaming endpoint and calls the
+// callback with each text chunk as it arrives. The callback receives chunks of
+// raw text; the caller is responsible for flushing them to the HTTP client.
+// Returns the full accumulated text (for persistence) and any error.
+func (a *GeminiAdapter) CompleteStream(ctx context.Context, systemPrompt, userPrompt string, onChunk func(string)) (string, error) {
+	url := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?key=%s&alt=sse",
+		a.apiKey,
+	)
+
+	payload := map[string]interface{}{
+		"system_instruction": map[string]interface{}{
+			"parts": []map[string]string{{"text": systemPrompt}},
+		},
+		"contents": []map[string]interface{}{
+			{"parts": []map[string]string{{"text": userPrompt}}},
+		},
+		"generationConfig": map[string]interface{}{
+			"maxOutputTokens": 65536,
+			"temperature":     0.85,
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("gemini stream marshal: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("gemini stream new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	// Use a streaming-capable client (no read deadline — streaming is long-lived)
+	streamClient := &http.Client{Timeout: 120 * time.Second}
+	resp, err := streamClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("gemini stream http: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("gemini stream status %d: %s", resp.StatusCode, string(errBody))
+	}
+
+	var fullText strings.Builder
+	buf := make([]byte, 4096)
+	var leftover string
+
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			chunk := leftover + string(buf[:n])
+			leftover = ""
+			lines := strings.Split(chunk, "
+")
+			for li, line := range lines {
+				line = strings.TrimSpace(line)
+				if !strings.HasPrefix(line, "data:") {
+					if li == len(lines)-1 && line != "" {
+						leftover = line // incomplete line — buffer it
+					}
+					continue
+				}
+				data := strings.TrimPrefix(line, "data:")
+				data = strings.TrimSpace(data)
+				if data == "[DONE]" || data == "" {
+					continue
+				}
+				var streamResp struct {
+					Candidates []struct {
+						Content struct {
+							Parts []struct {
+								Text string `json:"text"`
+							} `json:"parts"`
+						} `json:"content"`
+					} `json:"candidates"`
+					Error *struct {
+						Message string `json:"message"`
+						Code    int    `json:"code"`
+					} `json:"error"`
+				}
+				if jsonErr := json.Unmarshal([]byte(data), &streamResp); jsonErr != nil {
+					continue // skip malformed chunks
+				}
+				if streamResp.Error != nil {
+					return fullText.String(), fmt.Errorf("gemini stream API error %d: %s", streamResp.Error.Code, streamResp.Error.Message)
+				}
+				for _, cand := range streamResp.Candidates {
+					for _, part := range cand.Content.Parts {
+						if part.Text != "" {
+							fullText.WriteString(part.Text)
+							if onChunk != nil {
+								onChunk(part.Text)
+							}
+						}
+					}
+				}
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return fullText.String(), fmt.Errorf("gemini stream read: %w", readErr)
+		}
+	}
+
+	if fullText.Len() == 0 {
+		return "", fmt.Errorf("gemini stream: no content returned")
+	}
+	return fullText.String(), nil
+}
+
 // CompleteWithImages sends a multimodal prompt (text + base64 images) to Gemini.
 // Used by the website builder to pass product photos alongside the prompt.
 func (a *GeminiAdapter) CompleteWithImages(ctx context.Context, systemPrompt, userPrompt string, base64Images []string) (string, error) {
