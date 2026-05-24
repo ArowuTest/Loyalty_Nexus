@@ -309,7 +309,7 @@ func main() {
 			}
 		}
 
-		// ─── LLM Orchestrator (Groq → Gemini → DeepSeek) ─────────
+		// ─── LLM Orchestrator (Gemini 2.5 Flash → DeepSeek V3; Groq removed from chat path) ─────────
 		groqLimit   := cfg.GetInt("chat_groq_daily_limit", 1000)
 		geminiLimit := cfg.GetInt("chat_gemini_daily_limit", 2000)
 		tavilyKey := os.Getenv("TAVILY_API_KEY")
@@ -364,6 +364,17 @@ func main() {
 			go lifecycleWorker.Run(ctx)
 			log.Println("[main] ✓ Lifecycle worker started (draws, expiry, wars, studio recovery)")
 		}
+
+		// ─── Gemini warmup (eliminates cold-start fallthrough to DeepSeek) ────
+		// Fires a lightweight ping 5s after startup to pre-warm the TCP connection.
+		go func() {
+			time.Sleep(5 * time.Second)
+			if _, err := gemini.Complete(context.Background(), "warmup", "ping"); err != nil {
+				log.Printf("[main] Gemini warmup skipped: %v", err)
+			} else {
+				log.Println("[main] ✓ Gemini pre-warmed — cold-start provider fallthrough eliminated")
+			}
+		}()
 
 		// ─── HTTP Handlers ────────────────────────────────────────
 		authH    := handlers.NewAuthHandler(authSvc)
@@ -699,4 +710,5 @@ func main() {
 func currentWarPeriodStr() string {
 	return time.Now().UTC().Format("2006-01")
 }
+
 
