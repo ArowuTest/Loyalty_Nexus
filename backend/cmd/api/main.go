@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"crypto/tls"
+
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
@@ -219,6 +221,13 @@ func main() {
 		// redis.ParseURL handles redis://, rediss://, and plain host:port formats.
 		var rdb *redis.Client
 		if redisOpts, parseErr := redis.ParseURL(os.Getenv("REDIS_URL")); parseErr == nil {
+			// rediss:// (TLS) URLs require InsecureSkipVerify on Render's Redis
+			// which uses a certificate that Go's default verifier rejects.
+			if redisOpts.TLSConfig != nil {
+				redisOpts.TLSConfig.InsecureSkipVerify = true //nolint:gosec
+			} else {
+				redisOpts.TLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+			}
 			rdb = redis.NewClient(redisOpts)
 		} else {
 			// Fallback: treat REDIS_URL as plain host:port (e.g. "localhost:6379")
