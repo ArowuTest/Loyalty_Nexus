@@ -715,53 +715,11 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 		}
 		return resp, nil
 
-	// ── Code tools: Pollinations Qwen-Coder ───────────────────────────────
+	// ── Code tools: Gemini with code-specific system prompt ─────────────────
+	// Pollinations Qwen-Coder removed — unreliable and adds latency.
+	// Chat() already switches to the code-helper system prompt via its tool-slug case.
 	case "code-helper", "code-pro":
-		sk := os.Getenv("POLLINATIONS_SECRET_KEY")
-		if sk == "" {
-			// No Pollinations key — fall back to Gemini with code prompt
-			return o.Chat(ctx, req)
-		}
-
-		attachedBlock := ""
-		if req.AttachedContext != "" {
-			name := req.AttachedName
-			if name == "" {
-				name = "attached document"
-			}
-			attachedBlock = "\n\n[ATTACHED DOCUMENT: " + name + "]\n" +
-				req.AttachedContext + "\n[END ATTACHED DOCUMENT]"
-		}
-
-		payload := map[string]interface{}{
-			"model": "qwen-coder",
-			"messages": []map[string]interface{}{
-				{"role": "system", "content": `You are Nexus Code — a senior software engineer and expert coding assistant.
-RULES:
-- Always wrap code in fenced blocks with the language name.
-- Write complete, runnable code. Never use placeholder comments.
-- Include proper error handling and edge cases.
-- After each code block, explain the key logic in 3-5 numbered points.
-- If debugging: quote the broken line, explain why it fails, then show the fix.`},
-				{"role": "user", "content": req.Prompt + attachedBlock},
-			},
-		}
-
-		text, err := o.callPollinationsChat(ctx, sk, payload)
-		if err != nil {
-			log.Printf("[LLM] Qwen-Coder failed → Gemini fallback: %v", err)
-			go o.recordProviderUse(context.Background(), "POLLINATIONS_QWEN", false, err.Error())
-			return o.Chat(ctx, req)
-		}
-
-		resolvedSessionID := o.persistMessages(ctx, uid, req.SessionID, req.ToolSlug, req.Prompt, text)
-		go o.recordProviderUse(context.Background(), "POLLINATIONS_QWEN", true, "")
-
-		return &LLMResponse{
-			Text:      text,
-			Provider:  "POLLINATIONS_QWEN",
-			SessionID: resolvedSessionID,
-		}, nil
+		return o.Chat(ctx, req)
 
 	// ── All other slugs ────────────────────────────────────────────────────
 	default:
