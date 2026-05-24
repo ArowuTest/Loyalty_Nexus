@@ -4428,7 +4428,7 @@ function StudioPageInner() {
                 </p>
               </div>
 
-              {toolsLoading ? (
+              {(toolsLoading || !hasHydrated) ? (
                 <div className="space-y-2">
                   {[...Array(6)].map((_, i) => (
                     <div key={i} className="glass border border-white/[0.08] h-20 animate-pulse opacity-50" />
