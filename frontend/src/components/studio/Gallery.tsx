@@ -35,6 +35,18 @@ function toolLabel(slug: string): string {
     .join(' ');
 }
 
+// The backend stores the enriched prompt as a JSON string:
+// {"prompt":"user text","aspect_ratio":"16:9",...}
+// Extract the human-readable prompt field; fall back to the raw string.
+function extractPromptText(raw: string): string {
+  if (!raw) return '';
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.prompt === 'string') return parsed.prompt;
+  } catch { /* not JSON — use as-is */ }
+  return raw;
+}
+
 export default function Gallery() {
   const [items,   setItems]   = useState<Generation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -164,7 +176,7 @@ export default function Gallery() {
                       {toolLabel(item.tool_slug)}
                     </p>
                     <p className="text-[11px] text-slate-300 font-medium line-clamp-1 italic">
-                      &ldquo;{item.prompt}&rdquo;
+                      &ldquo;{extractPromptText(item.prompt)}&rdquo;
                     </p>
                     <div className="flex items-center gap-1 pt-1 opacity-60">
                       <Calendar size={10} className="text-slate-500" />
