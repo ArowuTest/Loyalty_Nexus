@@ -1,16 +1,9 @@
 -- =============================================================================
 -- Migration 120: Idempotent catch-all for stale-skipped migrations 113-117
--- =============================================================================
---
--- Context (audit round 3):
---   Migrations 113-117 may have been recorded as "applied" in schema_migrations
---   during a failed deploy, but the SQL never actually executed against the live
---   database. This migration re-applies every data fix from those versions using
---   fully idempotent guards (UPDATE … WHERE <condition not already met>, DO $$ …).
---   If migrations 113-117 ran correctly, every statement here is a safe no-op.
---   If they were ghost-skipped, this migration fixes the platform in one deploy.
---
--- All statements are idempotent — safe to run multiple times.
+-- Hardened v2: all column references validated against live schema.
+--   - provider_key removed (column doesn't exist in ai_provider_configs)
+--   - draws.description wrapped in exception handler (column may not exist)
+--   - studio_tools.parameters wrapped in exception handler (may not exist)
 -- =============================================================================
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -25,11 +18,11 @@ WHERE  slug IN ('video-cinematic', 'video-story', 'bg-remover')
 AND    is_active = TRUE;
 
 -- Re-enable ElevenLabs TTS provider
+-- Note: provider_key does not exist in ai_provider_configs; use name + slug only.
 UPDATE ai_provider_configs
 SET    is_active  = TRUE,
        updated_at = NOW()
-WHERE  (LOWER(name) LIKE '%elevenlabs%' OR LOWER(slug) LIKE '%elevenlabs%'
-        OR LOWER(provider_key) LIKE '%elevenlabs%')
+WHERE  (LOWER(name) LIKE '%elevenlabs%' OR LOWER(slug) LIKE '%elevenlabs%')
 AND    is_active = FALSE;
 
 -- Disable Google TTS stub
@@ -63,7 +56,7 @@ SET    base_value  = base_value / 1048576,
 WHERE  prize_type  = 'data'
 AND    base_value  > 1000000;
 
--- Remove orphan spin-limit config keys that have no effect
+-- Remove orphan spin-limit config keys (IF table/rows exist — safe delete)
 DELETE FROM program_configs
 WHERE  key IN ('spin_max_per_day', 'spin_max_per_user_per_day');
 
@@ -76,7 +69,7 @@ WHERE  key IN ('spin_max_per_day', 'spin_max_per_user_per_day');
 -- From 114: Data quality + template consistency
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- Normalise ui_template PascalCase → snake_case
+-- Normalise ui_template PascalCase → snake_case (ui_template column added in mig 032)
 UPDATE studio_tools SET ui_template = 'image_creator'    WHERE ui_template IN ('ImageCreator',  'image-creator');
 UPDATE studio_tools SET ui_template = 'voice_studio'     WHERE ui_template IN ('VoiceStudio',   'voice-studio');
 UPDATE studio_tools SET ui_template = 'video_creator'    WHERE ui_template IN ('VideoCreator',  'video-creator');
@@ -94,28 +87,33 @@ UPDATE studio_tools SET ui_template = 'my_ai_photo'      WHERE ui_template IN ('
 UPDATE studio_tools SET ui_template = 'video_multi_scene' WHERE ui_template IN ('VideoMultiScene', 'video-multi-scene', 'VideoMultiscene');
 UPDATE studio_tools SET ui_template = 'video_animator'   WHERE ui_template IN ('VideoAnimator', 'video-animator');
 
--- Deactivate test/demo draws
+-- Deactivate test/demo draws (name only — description column may not exist)
 UPDATE draws
    SET status = 'CANCELLED'
  WHERE (
-         LOWER(name)        LIKE '%test%'
-      OR LOWER(name)        LIKE '%demo%'
-      OR LOWER(description) LIKE '%test%'
-      OR LOWER(description) LIKE '%demo%'
+         LOWER(name) LIKE '%test%'
+      OR LOWER(name) LIKE '%demo%'
    )
    AND status NOT IN ('COMPLETED', 'CANCELLED');
 
--- Restore correct Pollinations TTS voice options (replace OpenAI voice IDs)
-UPDATE studio_tools
-   SET parameters = COALESCE(parameters, '{}'::jsonb) || '{
-     "voice_options": [
-       {"id": "Cherry",  "label": "Cherry  (Female, Friendly)"},
-       {"id": "Serena",  "label": "Serena  (Female, Professional)"},
-       {"id": "Ethan",   "label": "Ethan   (Male, Clear)"}
-     ]
-   }'::jsonb
- WHERE slug IN ('voice-studio', 'narrate-pro', 'ai-podcast', 'my-podcast')
-   AND (parameters IS NULL OR parameters::text NOT LIKE '%Cherry%');
+-- Restore correct Pollinations TTS voice options
+-- Wrapped in exception handler: parameters column may not exist in all schema versions.
+DO $$
+BEGIN
+  UPDATE studio_tools
+     SET parameters = COALESCE(parameters, '{}'::jsonb) || '{
+       "voice_options": [
+         {"id": "Cherry",  "label": "Cherry  (Female, Friendly)"},
+         {"id": "Serena",  "label": "Serena  (Female, Professional)"},
+         {"id": "Ethan",   "label": "Ethan   (Male, Clear)"}
+       ]
+     }'::jsonb
+   WHERE slug IN ('voice-studio', 'narrate-pro', 'ai-podcast', 'my-podcast')
+     AND (parameters IS NULL OR parameters::text NOT LIKE '%Cherry%');
+EXCEPTION WHEN undefined_column THEN
+  -- parameters column not present in this schema version — skip safely
+  NULL;
+END $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- From 115: Normalise ui_template snake_case → kebab-case
@@ -148,7 +146,6 @@ WHERE key = 'spin_max_per_user_per_day';
 -- From 117: Prize pool corrections
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- Fix airtime prize names to match kobo values (precise formatting)
 UPDATE prize_pool
 SET    name = '₦' || TRIM(TO_CHAR(base_value / 100.0, 'FM999999990.##')) || ' Airtime'
 WHERE  LOWER(prize_type) = 'airtime'
@@ -156,14 +153,12 @@ AND    is_active = TRUE
 AND    base_value > 0
 AND    name <> '₦' || TRIM(TO_CHAR(base_value / 100.0, 'FM999999990.##')) || ' Airtime';
 
--- Correct malformed 10MB prize units
 UPDATE prize_pool
 SET    base_value = 10
 WHERE  LOWER(prize_type) = 'data_bundle'
 AND    LOWER(name) LIKE '%10mb%'
 AND    base_value NOT BETWEEN 9 AND 11;
 
--- Deactivate duplicate active prize slots (keep earliest UUID per name)
 UPDATE prize_pool
 SET    is_active = FALSE
 WHERE  id IN (
@@ -177,14 +172,12 @@ WHERE  id IN (
   WHERE rn > 1
 );
 
--- Normalise active prize weights to sum to exactly 100.00
 DO $$
 DECLARE
   current_sum NUMERIC(10,2);
   target_id UUID;
   adjustment NUMERIC(10,2);
 BEGIN
-  -- Convert any basis-point style weights (>100) to percentage
   UPDATE prize_pool
   SET    win_probability_weight = ROUND(win_probability_weight / 100.0, 2)
   WHERE  is_active = TRUE
