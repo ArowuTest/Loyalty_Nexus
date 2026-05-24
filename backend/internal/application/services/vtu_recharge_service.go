@@ -138,7 +138,7 @@ func (s *VTURechargeService) DetectNetworkSmart(ctx context.Context, msisdn, use
 	// Tier 1: recent successful recharge in the past 90 days
 	var lastNetwork string
 	err := s.db.WithContext(ctx).
-		Table("vtu_recharges").
+		Table("recharges").
 		Select("network").
 		Where("msisdn = ? AND status = 'SUCCESS' AND created_at > NOW() - INTERVAL '90 days'", norm).
 		Order("created_at DESC").
