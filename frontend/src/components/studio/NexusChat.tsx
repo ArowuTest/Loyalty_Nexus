@@ -383,7 +383,7 @@ export default function NexusChat() {
 
 
 
-  // ─── Send message ────────────────────────────────────────────────────────
+  // ─── Send message (SSE streaming) ───────────────────────────────────────
   const handleSend = async (text?: string) => {
     const msg = (text ?? input).trim();
     if (!msg || isLoading) return;
@@ -402,7 +402,6 @@ export default function NexusChat() {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
 
-    // Capture and clear attachment before async call
     const fileURL  = attachedFileURL;
     const linkURL  = attachedLink;
     const fileName = attachedFile?.name ?? '';
@@ -410,44 +409,95 @@ export default function NexusChat() {
 
     setIsLoading(true);
 
+    // Create a placeholder assistant message that we stream into
+    const assistantId = (Date.now() + 1).toString();
+    setMessages(prev => [...prev, {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+    }]);
+
     try {
-      const res = await api.sendChat(
-        msg,
-        sessionId.current,
-        undefined,   // toolSlug — general AI for standalone chat page
-        undefined,   // imageURL
-        undefined,   // documentURL
-        fileURL  || undefined,
-        linkURL  || undefined,
-        fileName || undefined,
-      ) as {
-        response: string;
-        provider?: string;
-        session_id?: string;
-        message_count?: number;
-      };
+      const token = typeof window !== 'undefined'
+        ? document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('auth_token='))?.split('=')[1]
+          || localStorage.getItem('auth_token') || ''
+        : '';
 
-      if (res.session_id && res.session_id !== sessionId.current) {
-        sessionId.current = res.session_id;
-        try { localStorage.setItem('nexus_chat_session', res.session_id); } catch { /* ignore */ }
+      const baseURL = process.env.NEXT_PUBLIC_API_URL || '';
+      const res = await fetch(`${baseURL}/api/v1/studio/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          message:    msg,
+          session_id: sessionId.current,
+          tool_slug:  undefined,
+          file_url:   fileURL  || undefined,
+          link_url:   linkURL  || undefined,
+          file_name:  fileName || undefined,
+        }),
+      });
+
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';   // last incomplete line stays in buffer
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
+          try {
+            const event = JSON.parse(data) as {
+              text?: string;
+              done?: boolean;
+              session_id?: string;
+              provider?: string;
+              message_count?: number;
+              error?: string;
+            };
+            if (event.error) throw new Error(event.error);
+            if (event.text) {
+              setMessages(prev => prev.map(m =>
+                m.id === assistantId
+                  ? { ...m, content: m.content + event.text! }
+                  : m
+              ));
+            }
+            if (event.done) {
+              if (event.session_id && event.session_id !== sessionId.current) {
+                sessionId.current = event.session_id;
+                try { localStorage.setItem('nexus_chat_session', event.session_id); } catch { /* ignore */ }
+              }
+              if (event.message_count !== undefined) setMsgCount(event.message_count);
+              if (event.provider) {
+                setMessages(prev => prev.map(m =>
+                  m.id === assistantId ? { ...m, provider: event.provider?.toUpperCase() } : m
+                ));
+              }
+            }
+          } catch { /* skip malformed events */ }
+        }
       }
-      if (res.message_count !== undefined) setMsgCount(res.message_count);
-
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: res.response,
-        timestamp: new Date(),
-        provider: res.provider?.toUpperCase(),
-      }]);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : 'Request failed';
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `⚠️ ${errMsg} — please try again shortly.`,
-        timestamp: new Date(),
-      }]);
+      setMessages(prev => prev.map(m =>
+        m.id === assistantId
+          ? { ...m, content: `⚠️ ${errMsg} — please try again shortly.` }
+          : m
+      ));
     } finally {
       setIsLoading(false);
     }
