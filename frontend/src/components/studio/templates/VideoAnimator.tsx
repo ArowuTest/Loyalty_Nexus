@@ -61,7 +61,11 @@ export default function VideoAnimator({ tool, onSubmit, isLoading, userPoints, p
   // ── Motion controls ────────────────────────────────────────────────────────
   const [motionPrompt,  setMotionPrompt]  = useState('');
   const [selStyles,     setSelStyles]     = useState<string[]>([]);
-  const [duration,      setDuration]      = useState<number>(cfg.default_duration ?? 6);
+  const [duration,      setDuration]      = useState<number>(() => {
+    if (cfg.default_duration != null) return cfg.default_duration as number;
+    const availDur = cfg.duration_options ?? (isKling ? KLING_DURATIONS : isGrok ? GROK_DURATIONS : WAN_DURATIONS);
+    return (availDur as number[])[0];
+  });
   const [intensity,     setIntensity]     = useState<number>(1); // 0=Subtle, 1=Moderate, 2=Strong
   const [aspectRatio,   setAspectRatio]   = useState<string>(cfg.default_aspect ?? '16:9');
   const [resolution,    setResolution]    = useState<'720p' | '480p'>('720p');

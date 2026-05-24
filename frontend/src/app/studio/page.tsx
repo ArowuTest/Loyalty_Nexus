@@ -109,7 +109,7 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "bg-music":           { time: "~30 sec",  output: "15-second music clip",          tip: "Describe mood: 'calm', 'energetic', 'corporate'" },
   "jingle":             { time: "~25 sec",  output: "AI music jingle",               tip: "Add brand name and target emotion in prompt" },
   "song-creator":       { time: "~2 min",   output: "Full AI song with vocals",      tip: "Afrobeats, Gospel, Amapiano — be specific about genre" },
-  "instrumental":       { time: "~2 min",   output: "Instrumental music track",      tip: "Describe instruments: 'piano, strings, light percussion'" },
+  "instrumental":       { time: "~2.5 min",   output: "Instrumental music track",      tip: "Describe instruments: 'piano, strings, light percussion'" },
   "code-helper":        { time: "~5 sec",   output: "Code + explanation",            tip: "Mention the programming language in your prompt" },
   // ── Gemma 4 / Nexus AI Tools ──────────────────────────────────────────────────────────────────────────────────────
   "code-pro":           { time: "~6 sec",   output: "Code + visual debug analysis",   tip: "Attach a screenshot of the error or UI bug for best results" },
@@ -160,6 +160,7 @@ const DOC_EXPORT_SLUGS = new Set([
 
 function getOutputType(slug: string): { label: string; emoji: string; noun: string } {
   if (VIDEO_SLUGS.has(slug))  return { label: "Video MP4",  emoji: "🎬", noun: "video" };
+  if (slug === 'instrumental') return { label: "Audio MP3",  emoji: "🎵", noun: "audio-instrumental" };
   if (AUDIO_SLUGS.has(slug))  return { label: "Audio MP3",  emoji: "🎵", noun: "audio" };
   if (IMAGE_SLUGS.has(slug))  return { label: "Image file", emoji: "🖼️", noun: "image" };
   if (CODE_SLUGS.has(slug))   return { label: "Code output",emoji: "💻", noun: "code" };
@@ -891,10 +892,11 @@ function parseEstimatedSeconds(time?: string): number {
 
 /** Contextual rotating stage messages shown during generation */
 const STAGE_MESSAGES: Record<string, string[]> = {
-  image:  ['Composing your vision…', 'Applying style and lighting…', 'Rendering fine details…', 'Almost ready…'],
-  video:  ['Building your scene…', 'Animating motion…', 'Encoding frames…', 'Finalising video…'],
-  audio:  ['Composing melody…', 'Adding vocal layers…', 'Mixing and mastering…', 'Almost done…'],
-  text:   ['Thinking…', 'Structuring content…', 'Polishing the result…', 'Almost ready…'],
+  image:              ['Composing your vision…', 'Applying style and lighting…', 'Rendering fine details…', 'Almost ready…'],
+  video:              ['Building your scene…', 'Animating motion…', 'Encoding frames…', 'Finalising video…'],
+  audio:              ['Composing melody…', 'Adding vocal layers…', 'Mixing and mastering…', 'Almost done…'],
+  'audio-instrumental': ['Composing the arrangement…', 'Adding instrument layers…', 'Mixing and mastering…', 'Almost done…'],
+  text:               ['Thinking…', 'Structuring content…', 'Polishing the result…', 'Almost ready…'],
 };
 function useStageMessage(outputType: string, estimatedSeconds: number) {
   const messages = STAGE_MESSAGES[outputType] ?? STAGE_MESSAGES.text;
@@ -2477,7 +2479,7 @@ ${finalPrompt}`;
               unsub();
               setGenerating(false);
               setGenStartedAt(null);
-              toast.error(`${tool.name} failed. Points refunded automatically.`);
+              toast.error(`${tool.name} failed.${tool.point_cost > 0 ? " Points refunded automatically." : " Please try again."}`);
               onGenerated?.();
             }
           },
@@ -2494,7 +2496,7 @@ ${finalPrompt}`;
                     onGenerated?.();
                   } else if (s?.status === "failed") {
                     setGenerating(false); setGenStartedAt(null);
-                    toast.error(`${tool.name} failed. Points refunded automatically.`);
+                    toast.error(`${tool.name} failed.${tool.point_cost > 0 ? " Points refunded automatically." : " Please try again."}`);
                     onGenerated?.();
                   } else {
                     // Still processing — keep polling every 3s as last resort
@@ -2510,7 +2512,7 @@ ${finalPrompt}`;
                           onGenerated?.();
                         } else if (ps?.status === "failed") {
                           clearInterval(poll); setGenerating(false); setGenStartedAt(null);
-                          toast.error(`${tool.name} failed. Points refunded automatically.`);
+                          toast.error(`${tool.name} failed.${tool.point_cost > 0 ? " Points refunded automatically." : " Please try again."}`);
                           onGenerated?.();
                         }
                       } catch { clearInterval(poll); setGenerating(false); }
@@ -2833,7 +2835,7 @@ ${finalPrompt}`;
                   </div>
                   {meta && (
                     <p className="text-white/30 text-[10px] text-center">
-                      Usually ready in {meta.time} · Points refunded automatically if it fails
+                      Usually ready in {meta.time}{tool.point_cost > 0 ? " · Points refunded automatically if it fails" : ""}
                     </p>
                   )}
                 </motion.div>
@@ -3484,7 +3486,7 @@ function StudioPageInner() {
     { refreshInterval: 15000 }
   );
   // Always fetch fresh wallet balance on Studio load
-  const { data: freshWallet } = useSWR(
+  const { data: freshWallet, mutate: mutateWallet } = useSWR(
     hasHydrated && isAuthenticated ? "/user/wallet" : null,
     () => import("@/lib/api").then(m => m.api.getWallet()),
     { onSuccess: (d) => setWallet(d as Parameters<typeof setWallet>[0]), refreshInterval: 30000 }
@@ -4730,10 +4732,11 @@ function StudioPageInner() {
       <AnimatePresence>
         {selectedTool && (
           <ToolDrawer
+            key={selectedTool.id}
             tool={selectedTool}
             onClose={() => openTool(null)}
             userPoints={userPoints}
-            onGenerated={() => { mutateGallery(); }}
+            onGenerated={() => { mutateGallery(); mutateWallet(); }}
             preloadImageUrl={crossToolPreload.imageUrl}
             preloadVideoUrl={crossToolPreload.videoUrl}
             onCrossToolAction={(toolSlug, imageUrl, videoUrl) => {

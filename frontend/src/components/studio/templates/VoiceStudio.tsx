@@ -256,7 +256,7 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
             'w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 bg-gradient-to-br',
             AVATAR_GRADIENTS[selectedVoice.id] ?? 'from-green-600 to-teal-700',
           )}>
-            {selectedVoice.name[0]}
+            {selectedVoice.name?.[0] ?? '?'}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
@@ -319,7 +319,7 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
                       : 'from-white/10 to-white/5',
                   )}>
                     <span className={isSelected ? 'text-white' : 'text-white/50'}>
-                      {v.name[0]}
+                      {v.name?.[0] ?? '?'}
                     </span>
                   </div>
 

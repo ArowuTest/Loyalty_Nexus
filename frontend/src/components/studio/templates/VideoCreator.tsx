@@ -42,6 +42,15 @@ const PROMPT_INSPIRATIONS = [
   'A lion running through the savanna, slow motion, dust particles, epic',
 ];
 
+// Prompt inspirations specific to Video Jingle (brand/music-focused)
+const JINGLE_INSPIRATIONS = [
+  '15-second energetic brand intro for a Nigerian fintech app, bold and memorable',
+  'Upbeat 30-second product launch jingle for a telecoms brand, Afrobeats vibe',
+  'Fun 10-second e-commerce ad, colourful products, catchy and modern',
+  'Corporate brand video, 20 seconds, professional, confident, black and gold',
+  'Radio-style 30-second jingle, local market brand, cheerful and singable',
+];
+
 export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: TemplateProps) {
   const cfg           = tool.ui_config ?? {};
   const aspectRatios  = cfg.aspect_ratios        ?? DEFAULT_ASPECT_RATIOS;
@@ -370,7 +379,9 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
           onChange={(e) => setPrompt(e.target.value)}
           placeholder={
             cfg.prompt_placeholder ??
-            'Describe the scene — subject, setting, lighting, atmosphere…\ne.g. A hawk soaring over Lagos skyline at dusk, golden light, cinematic'
+            (showMusicStyle
+              ? 'Describe your brand video — brand name, energy, style, music vibe…'
+              : 'Describe the scene — subject, setting, lighting, atmosphere…\ne.g. A hawk soaring over Lagos skyline at dusk, golden light, cinematic')
           }
           rows={4}
           autoFocus
@@ -390,7 +401,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
         {/* Quick inspiration chips — always visible when prompt empty (Runway-style) */}
         {!prompt && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {PROMPT_INSPIRATIONS.slice(0, 3).map((inspo) => (
+            {(showMusicStyle ? JINGLE_INSPIRATIONS : PROMPT_INSPIRATIONS).slice(0, 3).map((inspo) => (
               <button
                 key={inspo}
                 onClick={() => setPrompt(inspo)}
@@ -405,7 +416,7 @@ export default function VideoCreator({ tool, onSubmit, isLoading, userPoints }: 
 
         {showInspo && (
           <div className="mt-2 grid grid-cols-1 gap-1.5">
-            {PROMPT_INSPIRATIONS.slice(3).map((inspo) => (
+            {(showMusicStyle ? JINGLE_INSPIRATIONS : PROMPT_INSPIRATIONS).slice(3).map((inspo) => (
               <button
                 key={inspo}
                 onClick={() => { setPrompt(inspo); setShowInspo(false); }}
