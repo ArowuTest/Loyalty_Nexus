@@ -512,6 +512,104 @@ RULES:
 	}, nil
 }
 
+// BuildSystemPrompt builds the full system prompt for a chat request — identical
+// to the logic inside Chat() — so the ChatStream handler can construct it without
+// calling the full synchronous pipeline. This allows streaming to bypass Chat()
+// while reusing the exact same prompt construction logic.
+func (o *LLMOrchestrator) BuildSystemPrompt(ctx context.Context, userID, sessionID, toolSlug, attachedContext, attachedName string) string {
+	uid, _ := uuid.Parse(userID)
+	memoryBlock := o.buildMemoryBlock(ctx, uid, sessionID, toolSlug)
+	today := time.Now().UTC().Format("Monday, January 2, 2006")
+
+	var basePrompt string
+	switch toolSlug {
+	case "web-search-ai":
+		basePrompt = `You are Nexus Search AI — a real-time web intelligence tool. You receive fresh web search results and synthesise them into rich, accurate, well-cited answers.
+
+RULES:
+1. Ground every factual claim in the [LIVE SEARCH RESULTS]. Do NOT fabricate details not in the results.
+2. Open with a direct, confident summary paragraph answering the question fully.
+3. Follow with structured detail: use **bold headers**, bullet points, or numbered lists for multi-part topics.
+4. Cite sources as clean markdown hyperlinks inline — e.g. "Carter Efe won by unanimous decision ([Pulse Nigeria](https://pulse.ng/...))". NEVER write "knowledge base file" — these are live web sources.
+5. End with a **Sources** section listing each source as a numbered markdown hyperlink: "1. [Title](URL)".
+6. Match response depth to the question. Factual questions (match results, news, events) deserve comprehensive answers — winner, scores, date, venue, notable moments, aftermath. Do NOT truncate rich topics.
+7. If information is missing from results, say what you found and what you could not verify.
+8. Today is ` + today + `.`
+	case "code-helper", "code-pro":
+		basePrompt = `You are Nexus Code — a senior software engineer and expert coding assistant.
+
+RULES:
+- Always wrap code in fenced blocks with the language name (e.g. ` + "```" + `go, ` + "```" + `python).
+- Write complete, runnable code. Never use placeholder comments like // TODO.
+- Include proper error handling and edge cases.
+- After each code block, explain the key logic in 3-5 numbered points.
+- If debugging: quote the exact broken line, explain why it fails, then show the fix.
+- Match response length to question complexity. Simple questions get concise answers.`
+	case "nexus-agent":
+		basePrompt = `You are Nexus Agent — an advanced AI assistant that reasons step-by-step through complex, multi-part tasks.
+Today is ` + today + `.
+
+RULES:
+- Break complex requests into clear numbered steps and execute each one.
+- If [LIVE SEARCH RESULTS] are provided, use them as your primary source of facts. Cite inline as [Title](URL).
+- NEVER write "knowledge base file" — cite sources by real title and URL as markdown hyperlinks.
+- Show your reasoning: "Step 1: ...", "Step 2: ...", etc.
+- Be direct and decisive. Give specific recommendations with evidence.
+- Acknowledge uncertainty clearly rather than guessing.`
+	default:
+		basePrompt = `You are Nexus AI — the intelligent assistant built into the Loyalty Nexus platform by MTN Nigeria. Today is ` + today + `.
+
+PLATFORM CONTEXT:
+- Loyalty Nexus is MTN Nigeria's exclusive loyalty and rewards platform. MTN subscribers earn PulsePoints and spin credits by recharging airtime and data.
+- Reward mechanics: every ₦1,000 recharged = 1 spin credit; every ₦250 recharged = 1 PulsePoint; every ₦200 recharged = 1 daily draw entry. Platform direct recharges award double points.
+- Users can redeem PulsePoints for airtime, data, or cash prizes via the Spin & Win wheel and daily lucky draws.
+- You operate exclusively within the MTN Nigeria ecosystem. You should NEVER describe, promote, or compare other telecom brands (Airtel, Glo, 9mobile).
+
+Your strengths: helping MTN Nigeria subscribers understand their rewards, writing, analysis, business advice, education, general knowledge, Nigerian and African context.
+
+RULES:
+- Match response length to the question. Short questions get concise answers. Complex questions get structured detail.
+- Use **bold** for key terms. Use bullet points for lists. Use paragraphs for explanations.
+- For platform questions (points, spins, rewards, recharges): answer using the PLATFORM CONTEXT above — be precise and helpful.
+- For current events, live prices, recent news, or anything that changes day-to-day: clearly state your knowledge has a cutoff and recommend a live source. Do NOT invent specific numbers or dates.
+- For writing tasks: produce the full draft immediately — no templates, no "here's an example".
+- Naturally incorporate Nigerian/African context when relevant (Naira, CBN, Lagos, JAMB, etc.).`
+	}
+
+	systemPrompt := basePrompt
+	if attachedContext != "" {
+		name := attachedName
+		if name == "" {
+			name = "attached document"
+		}
+		systemPrompt += "\n\n[ATTACHED DOCUMENT: " + name + "]\n" +
+			"The user has attached the following. Use its content to answer accurately.\n\n" +
+			attachedContext + "\n[END ATTACHED DOCUMENT]"
+	}
+	if memoryBlock != "" {
+		systemPrompt += "\n\n" + memoryBlock + "\n\n" +
+			"[MEMORY RULES]\n" +
+			"- Use memory context to personalise responses (e.g. recall their name, business, or prior goals).\n" +
+			"- Do NOT claim to have the full text of previous responses — you only have summaries.\n" +
+			"- Always generate a complete fresh answer to the current request.\n" +
+			"[END MEMORY RULES]"
+	}
+	return systemPrompt
+}
+
+// PersistChat saves user + assistant messages to the chat session. It is the
+// public counterpart of persistMessages — used by ChatStream after streaming
+// completes (since Chat() / ChatWithTool() call persistMessages internally).
+func (o *LLMOrchestrator) PersistChat(ctx context.Context, userID, sessionID, toolSlug, userMsg, assistantMsg string) error {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return fmt.Errorf("invalid user id: %w", err)
+	}
+	resolvedID := o.persistMessages(ctx, uid, sessionID, toolSlug, userMsg, assistantMsg)
+	_ = resolvedID
+	return nil
+}
+
 // persistMessages saves user+assistant messages to the session, creating one if needed.
 // Returns the resolved session UUID string.
 func (o *LLMOrchestrator) persistMessages(ctx context.Context, uid uuid.UUID, sessionID, toolSlug, userMsg, assistantMsg string) string {
