@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -660,23 +659,17 @@ func (o *LLMOrchestrator) Summarize(ctx context.Context, transcript string) (str
 
 // ─── ChatWithTool ─────────────────────────────────────────────────────────────
 
-// ChatWithTool routes a chat message to a specific Pollinations-backed tool
-// (web-search-ai → gemini-search, code-helper → qwen-coder) and persists the
-// exchange to the session just like a normal Chat() call.
-
-
-// ─── ChatWithTool routes search-backed tools through Tavily → Gemini ─────────
+// ChatWithTool routes a chat message to the appropriate AI backend and
+// persists the exchange to the session just like a normal Chat() call.
 //
 // Routing logic:
 //   web-search-ai, research-brief, deep-research-brief, nexus-agent
 //     → searchTavily() for live grounding → Gemini synthesises results
 //   code-helper, code-pro
-//     → Pollinations Qwen-Coder (specialised code model)
+//     → Chat() with code-helper system prompt (Gemini; Pollinations Qwen removed)
 //   everything else
-//     → Chat() (standard Gemini)
+//     → Chat() (Gemini 2.5 Flash → DeepSeek V3 fallback)
 func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
-	uid, _ := uuid.Parse(req.UserID)
-
 	switch req.ToolSlug {
 
 	// ── Search-grounded tools: Tavily → Gemini ─────────────────────────────
