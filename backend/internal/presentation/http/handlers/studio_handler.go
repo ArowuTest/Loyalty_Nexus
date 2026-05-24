@@ -542,9 +542,7 @@ func (h *StudioHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
 	flusher, canFlush := w.(http.Flusher)
 
 	writeSSE := func(payload []byte) {
-		_, _ = fmt.Fprintf(w, "data: %s
-
-", payload)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
 		if canFlush {
 			flusher.Flush()
 		}
