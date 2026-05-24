@@ -1078,8 +1078,7 @@ func (a *GeminiAdapter) CompleteStream(ctx context.Context, systemPrompt, userPr
 		if n > 0 {
 			chunk := leftover + string(buf[:n])
 			leftover = ""
-			lines := strings.Split(chunk, "
-")
+			lines := strings.Split(chunk, "\n")
 			for li, line := range lines {
 				line = strings.TrimSpace(line)
 				if !strings.HasPrefix(line, "data:") {
