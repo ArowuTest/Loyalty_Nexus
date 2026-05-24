@@ -480,6 +480,129 @@ func (h *StudioHandler) handleGeneralChat(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// ─── POST /api/v1/studio/chat/stream ─────────────────────────────────────────
+// ChatStream is the streaming variant of the Chat endpoint. It:
+//   - Resolves/creates a real UUID session (same logic as Chat)
+//   - Builds the system prompt via LLMOrchestrator
+//   - Calls GeminiAdapter.CompleteStream to get live token chunks
+//   - Pushes each chunk as an SSE event: data: {"text":"..."}
+
+
+//   - Sends a final event: data: {"done":true,"session_id":"...","provider":"GEMINI_LITE"}
+
+
+//
+// Falls back to a single-shot response (wrapped in SSE) if streaming fails.
+func (h *StudioHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+
+	var req chatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+		http.Error(w, `{"error":"message is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Resolve real UUID session (same logic as Chat handler)
+	toolSlugForSession := req.ToolSlug
+	if toolSlugForSession == "" {
+		toolSlugForSession = "general"
+	}
+	sessionID := req.SessionID
+	if _, parseErr := uuid.Parse(sessionID); parseErr != nil {
+		sessionID = h.llmOrch.ResolveOrCreateSession(r.Context(), uid, toolSlugForSession)
+	}
+
+	// Extract attached file/link context
+	var attachedContext, attachedName string
+	extractor := external.NewTextExtractor()
+	if req.FileURL != "" {
+		if text, err := extractor.ExtractFromURL(r.Context(), req.FileURL); err == nil && text != "" {
+			attachedContext = text
+			attachedName = req.FileName
+			if attachedName == "" {
+				attachedName = "uploaded file"
+			}
+		}
+	} else if req.LinkURL != "" {
+		if text, err := extractor.ExtractFromURL(r.Context(), req.LinkURL); err == nil && text != "" {
+			attachedContext = text
+			attachedName = req.LinkURL
+		}
+	}
+
+	// Build system prompt via orchestrator's exported helper
+	systemPrompt := h.llmOrch.BuildSystemPrompt(r.Context(), uid, sessionID, req.ToolSlug, attachedContext, attachedName)
+
+	// SSE headers — must be set before any write
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	flusher, canFlush := w.(http.Flusher)
+
+	writeSSE := func(payload []byte) {
+		_, _ = fmt.Fprintf(w, "data: %s
+
+", payload)
+		if canFlush {
+			flusher.Flush()
+		}
+	}
+
+	// Stream from Gemini
+	var fullText string
+	var streamErr error
+	if h.geminiAdapter != nil {
+		fullText, streamErr = h.geminiAdapter.CompleteStream(r.Context(), systemPrompt, req.Message, func(chunk string) {
+			data, _ := json.Marshal(map[string]string{"text": chunk})
+			writeSSE(data)
+		})
+	} else {
+		streamErr = fmt.Errorf("gemini adapter not configured")
+	}
+
+	// If streaming failed, fall back to non-streaming Chat and wrap in SSE
+	if streamErr != nil {
+		log.Printf("[SSE] stream failed, falling back to sync: %v", streamErr)
+		resp, err := h.llmOrch.Chat(r.Context(), external.LLMRequest{
+			UserID:          uid,
+			SessionID:       sessionID,
+			Prompt:          req.Message,
+			History:         req.History,
+			ToolSlug:        req.ToolSlug,
+			AttachedContext: attachedContext,
+			AttachedName:    attachedName,
+		})
+		if err != nil {
+			errData, _ := json.Marshal(map[string]string{"error": "Nexus Chat temporarily unavailable"})
+			writeSSE(errData)
+			return
+		}
+		// Send full text as a single chunk
+		chunkData, _ := json.Marshal(map[string]string{"text": resp.Text})
+		writeSSE(chunkData)
+		fullText = resp.Text
+	}
+
+	// Persist the exchange to chat history
+	go func() {
+		persistCtx := context.Background()
+		_ = h.llmOrch.PersistChat(persistCtx, uid, sessionID, req.ToolSlug, req.Message, fullText)
+	}()
+
+	// Increment daily chat counter
+	msgCount := h.llmOrch.IncrDailyChatCount(r.Context(), uid)
+
+	// Send final done event
+	doneData, _ := json.Marshal(map[string]interface{}{
+		"done":          true,
+		"session_id":    sessionID,
+		"provider":      "GEMINI_LITE",
+		"message_count": msgCount,
+	})
+	writeSSE(doneData)
+}
+
 // timeNowUnix returns the current Unix timestamp (abstracted so tests can stub it).
 func timeNowUnix() int64 {
 	return time.Now().UnixNano() / 1e6 // milliseconds
