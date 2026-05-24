@@ -479,6 +479,7 @@ func main() {
 
 			// ─── Nexus Chat ─────────────────────────────────────────────────────
 			mux.Handle("POST /api/v1/studio/chat", auth(http.HandlerFunc(studioH.Chat)))
+			mux.Handle("POST /api/v1/studio/chat/stream", auth(http.HandlerFunc(studioH.ChatStream))) // STU-003: SSE streaming
 			mux.Handle("GET /api/v1/studio/chat/history", auth(http.HandlerFunc(studioH.GetChatHistory))) // BUG-05: restore chat history on page load
 				mux.Handle("GET /api/v1/studio/chat/usage", auth(http.HandlerFunc(studioH.GetChatUsage)))
 
