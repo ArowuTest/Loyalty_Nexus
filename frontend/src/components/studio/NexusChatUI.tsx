@@ -530,7 +530,8 @@ function RichMessage({ content }: { content: string }) {
 }
 
 function renderInline(text: string) {
-  const chunks = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g);
+  // Split on bold, italic, inline-code, AND markdown links [text](url)
+  const chunks = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g);
   return chunks.map((c, k) => {
     if (c.startsWith("**") && c.endsWith("**"))
       return <strong key={k} className="text-white font-semibold">{c.slice(2, -2)}</strong>;
@@ -538,6 +539,10 @@ function renderInline(text: string) {
       return <em key={k} className="text-white/70 italic">{c.slice(1, -1)}</em>;
     if (c.startsWith("`") && c.endsWith("`"))
       return <code key={k} className="text-[11.5px] font-mono px-1.5 py-0.5 rounded-md bg-white/10 text-amber-200/90">{c.slice(1, -1)}</code>;
+    // Markdown link: [label](url) → clickable anchor
+    const linkMatch = c.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (linkMatch)
+      return <a key={k} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline hover:text-blue-300 break-all">{linkMatch[1]}</a>;
     return c;
   });
 }
@@ -1178,3 +1183,4 @@ export default function NexusChatUI({
     </div>
   );
 }
+
