@@ -1300,7 +1300,7 @@ func (h *AdminHandler) GetRegionalStats(w http.ResponseWriter, r *http.Request) 
 			COUNT(DISTINCT u.id)                           AS active_members
 		FROM users u
 		LEFT JOIN wallets w ON w.user_id = u.id
-		WHERE u.is_suspended = false
+		WHERE u.is_active = true
 		  AND u.deleted_at IS NULL
 		GROUP BY COALESCE(NULLIF(TRIM(u.state), ''), 'Unknown')
 		ORDER BY total_points DESC
