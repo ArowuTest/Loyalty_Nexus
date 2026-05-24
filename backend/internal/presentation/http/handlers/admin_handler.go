@@ -1275,6 +1275,53 @@ func (h *AdminHandler) GetRegionalWars(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetRegionalStats returns per-state aggregated points and active-member counts.
+// Response: { stats: [{ state, total_points, active_members, rank }] }
+// Backing query: joins users → wallets, groups by users.state, orders by total_points DESC.
+// The admin client calls GET /api/v1/admin/regional-stats.
+func (h *AdminHandler) GetRegionalStats(w http.ResponseWriter, r *http.Request) {
+	type RegionalStat struct {
+		State         string `json:"state"`
+		TotalPoints   int64  `json:"total_points"`
+		ActiveMembers int64  `json:"active_members"`
+		Rank          int    `json:"rank"`
+	}
+
+	var rows []struct {
+		State         string `gorm:"column:state"`
+		TotalPoints   int64  `gorm:"column:total_points"`
+		ActiveMembers int64  `gorm:"column:active_members"`
+	}
+
+	err := h.db.WithContext(r.Context()).Raw(`
+		SELECT
+			COALESCE(NULLIF(TRIM(u.state), ''), 'Unknown') AS state,
+			COALESCE(SUM(w.lifetime_points), 0)            AS total_points,
+			COUNT(DISTINCT u.id)                           AS active_members
+		FROM users u
+		LEFT JOIN wallets w ON w.user_id = u.id
+		WHERE u.is_suspended = false
+		  AND u.deleted_at IS NULL
+		GROUP BY COALESCE(NULLIF(TRIM(u.state), ''), 'Unknown')
+		ORDER BY total_points DESC
+	`).Scan(&rows).Error
+	if err != nil {
+		jsonError(w, "failed to query regional stats: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	stats := make([]RegionalStat, 0, len(rows))
+	for i, row := range rows {
+		stats = append(stats, RegionalStat{
+			State:         row.State,
+			TotalPoints:   row.TotalPoints,
+			ActiveMembers: row.ActiveMembers,
+			Rank:          i + 1,
+		})
+	}
+	jsonOK(w, map[string]interface{}{"stats": stats})
+}
+
 // ResetWarsCycle is kept for backward-compat; admin should use POST /wars/resolve instead.
 func (h *AdminHandler) ResetWarsCycle(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{
