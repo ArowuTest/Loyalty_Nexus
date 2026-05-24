@@ -23,7 +23,7 @@ BEGIN
   IF keep_id IS NOT NULL THEN
     -- Update the keeper with the combined weight (cap at 30.00 = 3000 basis points to avoid dominating the pool)
     UPDATE prize_pool
-    SET    win_probability_weight = LEAST(total_wt, 3000),
+    SET    win_probability_weight = LEAST(total_wt, 30.00),
            name = 'Try Again',
            updated_at = NOW()
     WHERE  id = keep_id;
@@ -37,7 +37,7 @@ BEGIN
       AND  id <> keep_id;
   END IF;
 
-  -- Re-normalise remaining active prize weights to sum to 10000 basis points (100.00%)
+  -- Re-normalise remaining active prize weights to sum to 100.00 percent
   WITH active AS (
     SELECT id, win_probability_weight,
            SUM(win_probability_weight) OVER () AS total
@@ -45,7 +45,7 @@ BEGIN
     WHERE  is_active = true
   )
   UPDATE prize_pool pp
-  SET    win_probability_weight = ROUND((a.win_probability_weight::NUMERIC / a.total) * 10000),
+  SET    win_probability_weight = ROUND((a.win_probability_weight::NUMERIC / a.total) * 100, 2),
          updated_at = NOW()
   FROM   active a
   WHERE  pp.id = a.id;
