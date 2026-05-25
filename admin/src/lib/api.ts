@@ -402,6 +402,7 @@ export interface StudioTool {
   refund_window_mins: number;  // minutes user can dispute after generation (0 = no refunds)
   refund_pct: number;          // % of pts returned on approved dispute (0-100)
   is_free: boolean;            // true = bypass all point checks (e.g. chat)
+  coming_soon: boolean;        // true = show Coming Soon overlay; tool is not yet available
   ui_template: string;         // which input form to render (e.g. "image-creator", "music-composer")
   ui_config?: Record<string, unknown>; // template parameter bag
 }

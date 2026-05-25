@@ -765,19 +765,20 @@ func (h *AdminHandler) ExportDrawEntries(w http.ResponseWriter, r *http.Request)
 func (h *AdminHandler) GetStudioTools(w http.ResponseWriter, r *http.Request) {
 	// Query the real studio_tools table (seeded with all tools by migrations)
 	type toolRow struct {
-		ID          string `gorm:"column:id"          json:"id"`
-		Slug        string `gorm:"column:slug"        json:"slug"`
-		Name        string `gorm:"column:name"        json:"name"`
-		Category    string `gorm:"column:category"    json:"category"`
-		Provider    string `gorm:"column:provider"    json:"provider"`
-		PointCost   int64  `gorm:"column:point_cost"  json:"point_cost"`
-		IsActive    bool   `gorm:"column:is_active"   json:"is_active"`
-		Description string `gorm:"column:description" json:"description"`
+		ID          string `gorm:"column:id"           json:"id"`
+		Slug        string `gorm:"column:slug"         json:"slug"`
+		Name        string `gorm:"column:name"         json:"name"`
+		Category    string `gorm:"column:category"     json:"category"`
+		Provider    string `gorm:"column:provider"     json:"provider"`
+		PointCost   int64  `gorm:"column:point_cost"   json:"point_cost"`
+		IsActive    bool   `gorm:"column:is_active"    json:"is_active"`
+		ComingSoon  bool   `gorm:"column:coming_soon"  json:"coming_soon"`
+		Description string `gorm:"column:description"  json:"description"`
 		UsageCount  int64  `json:"usage_count"`
 	}
 	var rows []toolRow
 	h.db.WithContext(r.Context()).
-		Raw(`SELECT t.id, t.slug, t.name, t.category, t.provider, t.point_cost, t.is_active, t.description,
+		Raw(`SELECT t.id, t.slug, t.name, t.category, t.provider, t.point_cost, t.is_active, t.coming_soon, t.description,
 		     COUNT(g.id) AS usage_count
 		     FROM studio_tools t
 		     LEFT JOIN ai_generations g ON g.tool_id = t.id
@@ -797,6 +798,7 @@ func (h *AdminHandler) UpdateStudioTool(w http.ResponseWriter, r *http.Request) 
 	var body struct {
 		PointCost        int64   `json:"point_cost"`
 		IsActive         *bool   `json:"is_active"`
+		ComingSoon       *bool   `json:"coming_soon"`
 		Provider         *string `json:"provider"`
 		Description      *string `json:"description"`
 		Icon             *string `json:"icon"`
@@ -817,6 +819,13 @@ func (h *AdminHandler) UpdateStudioTool(w http.ResponseWriter, r *http.Request) 
 	}
 	if body.IsActive != nil {
 		updates["is_active"] = *body.IsActive
+	}
+	if body.ComingSoon != nil {
+		updates["coming_soon"] = *body.ComingSoon
+		// when marking as coming_soon, always ensure is_active=false
+		if *body.ComingSoon {
+			updates["is_active"] = false
+		}
 	}
 	if body.Provider != nil {
 		updates["provider"] = *body.Provider
