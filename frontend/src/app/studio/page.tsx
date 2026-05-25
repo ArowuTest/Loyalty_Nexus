@@ -42,6 +42,7 @@ interface Tool {
   category: string;
   point_cost: number;
   is_active: boolean;
+  coming_soon?: boolean;
   provider?: string;
   entry_point_cost: number;
   refund_window_mins: number;
@@ -1305,6 +1306,7 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
   const isNew       = NEW_TOOL_SLUGS.has(tool.slug);
   const meta        = TOOL_META[tool.slug];
   const outType     = getOutputType(tool.slug);
+  const isComingSoon = tool.coming_soon === true;
   const entryLocked = !tool.is_free && tool.entry_point_cost > 0 && userPoints < tool.entry_point_cost;
   const isChatTool  = CHAT_REDIRECT_SLUGS.has(tool.slug);
   const previewImg  = TOOL_PREVIEW_IMAGES[tool.slug];
@@ -1321,9 +1323,17 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
     <motion.button
       whileHover={{ y: -2, scale: 1.01 }}
       whileTap={{ scale: 0.98 }}
-      onClick={onClick}
+      onClick={isComingSoon ? undefined : onClick}
       className="w-full text-left group relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04] hover:border-white/20 hover:bg-white/[0.07] hover:shadow-card-hover transition-all duration-200 flex flex-col"
     >
+      {/* Coming Soon overlay */}
+      {isComingSoon && (
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] rounded-2xl flex flex-col items-center justify-center z-20 gap-1.5">
+          <span className="text-2xl">🚧</span>
+          <p className="text-white/80 text-xs font-semibold tracking-wide">Coming Soon</p>
+        </div>
+      )}
+
       {/* Locked overlay */}
       {entryLocked && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-[3px] rounded-2xl flex flex-col items-center justify-center z-20 gap-1.5">
@@ -1344,16 +1354,21 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
           />
           {/* Gradient fade into card body */}
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/70" />
-          {/* Output type + NEW badge overlaid on image */}
+          {/* Output type + NEW/FREE/SOON badge overlaid on image */}
           <div className="absolute top-2 left-2 flex gap-1.5">
             {isNew && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/80 text-purple-100 border border-purple-400/50 leading-none backdrop-blur-sm">
                 NEW
               </span>
             )}
-            {isFree && (
+            {isFree && !isComingSoon && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/80 text-green-100 border border-green-400/50 leading-none backdrop-blur-sm">
                 FREE
+              </span>
+            )}
+            {isComingSoon && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/20 text-white/70 border border-white/20 leading-none backdrop-blur-sm">
+                SOON
               </span>
             )}
           </div>
@@ -1386,9 +1401,14 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
                   NEW
                 </span>
               )}
-              {isFree && (
+              {isFree && !isComingSoon && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/25 text-green-200 border border-green-400/30 leading-none">
                   FREE
+                </span>
+              )}
+              {isComingSoon && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/20 text-white/70 border border-white/20 leading-none">
+                  SOON
                 </span>
               )}
               {isChatTool && (
@@ -1438,14 +1458,20 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
               </span>
             )}
           </div>
-          <div className={cn(
-            "flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 rounded-xl border transition-all",
-            isChatTool
-              ? "bg-cyan-600/20 text-cyan-300 border-cyan-500/30 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-500"
-              : "bg-gold-500/10 text-gold-400 border-gold-500/25 group-hover:bg-gold-500/25 group-hover:text-white group-hover:border-gold-500"
-          )}>
-            {isChatTool ? "Open Chat" : "Generate"} <ChevronRight size={11} />
-          </div>
+          {isComingSoon ? (
+            <div className="flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 rounded-xl border border-white/10 text-white/30 bg-white/5 cursor-default">
+              Coming Soon
+            </div>
+          ) : (
+            <div className={cn(
+              "flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 rounded-xl border transition-all",
+              isChatTool
+                ? "bg-cyan-600/20 text-cyan-300 border-cyan-500/30 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-500"
+                : "bg-gold-500/10 text-gold-400 border-gold-500/25 group-hover:bg-gold-500/25 group-hover:text-white group-hover:border-gold-500"
+            )}>
+              {isChatTool ? "Open Chat" : "Generate"} <ChevronRight size={11} />
+            </div>
+          )}
         </div>
       </div>
     </motion.button>

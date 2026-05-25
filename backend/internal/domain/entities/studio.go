@@ -54,6 +54,7 @@ type StudioTool struct {
 	Provider     string       `json:"-"            gorm:"column:provider;default:''"`
 	ProviderTool string       `json:"-"            gorm:"column:provider_tool;default:''"`
 	IsActive     bool         `json:"is_active"    gorm:"column:is_active;default:true"`
+	ComingSoon   bool         `json:"coming_soon"  gorm:"column:coming_soon;default:false"`
 	Icon         string       `json:"icon"         gorm:"column:icon;default:''"`
 	SortOrder        int          `json:"sort_order"         gorm:"column:sort_order;default:0"`
 	EntryPointCost   int64        `json:"entry_point_cost"   gorm:"column:entry_point_cost;default:0"`
