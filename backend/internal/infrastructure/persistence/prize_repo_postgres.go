@@ -70,6 +70,11 @@ func (r *postgresPrizeRepository) UpdateSpinFulfillment(ctx context.Context, id 
 	if errMsg != "" {
 		updates["error_message"] = errMsg
 	}
+	// Increment retry_count each time a fulfillment is marked failed so the
+	// lifecycle worker's cap (retry_count >= 3) eventually stops retrying.
+	if status == entities.FulfillFailed {
+		updates["retry_count"] = gorm.Expr("retry_count + 1")
+	}
 	return r.db.WithContext(ctx).Table("spin_results").Where("id = ?", id).Updates(updates).Error
 }
 
