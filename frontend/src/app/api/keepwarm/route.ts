@@ -1,11 +1,13 @@
 /**
  * Keep-warm endpoint — called by Vercel Cron every 10 minutes.
  *
- * Pings the Render backend /health to prevent the free-tier instance from
- * going to sleep (Render suspends after ~15 min of inactivity).
+ * Pings the Render backend /health to wake the free-tier instance on demand.
+ * Also called by Vercel Cron once per day (Hobby plan limit).
+ * For higher-frequency pinging, call this endpoint from an external service
+ * such as UptimeRobot (free, supports 5-minute intervals).
  *
  * Route: GET /api/keepwarm
- * Schedule: see vercel.json → crons
+ * Schedule: see vercel.json → crons (daily at 06:00 UTC)
  */
 export const runtime = "edge";
 
