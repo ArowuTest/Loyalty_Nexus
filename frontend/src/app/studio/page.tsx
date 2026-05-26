@@ -2489,7 +2489,17 @@ ${finalPrompt}`;
               unsub();
               setGenerating(false);
               setGenStartedAt(null);
-              appendPromptHistory(pendingPayload?.prompt ?? "");
+              // Extract a human-readable label for the history chip.
+              // Music/audio tools store a JSON envelope in pendingPayload.prompt
+              // (e.g. {"duration":30,"extra":{...}}) — parse it the same way
+              // confirmPrompt does so chips never show raw JSON.
+              const rawHistPrompt = pendingPayload?.prompt ?? "";
+              let histLabel = rawHistPrompt;
+              try {
+                const env = JSON.parse(rawHistPrompt);
+                if (env?.prompt) histLabel = env.prompt as string;
+              } catch { /* plain text — use as-is */ }
+              appendPromptHistory(histLabel);
               const resultPayload = {
                 output_url:   status.output_url,
                 output_url_2: status.output_url_2,
