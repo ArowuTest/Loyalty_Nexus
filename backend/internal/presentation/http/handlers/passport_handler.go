@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -177,7 +178,17 @@ func (h *PassportHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load events"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"events": events})
+	// BUG-043: filter referral_* events — referral system was decommissioned.
+	// GetPassportEvents returns []map[string]interface{} (raw GORM rows).
+	// Access the snake_case DB column key "event_type" directly via map lookup.
+	filtered := make([]map[string]interface{}, 0, len(events))
+	for _, ev := range events {
+		// If the type assertion fails the event is non-string / malformed — exclude it too.
+		if et, ok := ev["event_type"].(string); ok && !strings.HasPrefix(et, "referral") {
+			filtered = append(filtered, ev)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"events": filtered})
 }
 
 // ─── GET /api/v1/passport/share ──────────────────────────────────────────

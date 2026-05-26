@@ -765,19 +765,20 @@ func (h *AdminHandler) ExportDrawEntries(w http.ResponseWriter, r *http.Request)
 func (h *AdminHandler) GetStudioTools(w http.ResponseWriter, r *http.Request) {
 	// Query the real studio_tools table (seeded with all tools by migrations)
 	type toolRow struct {
-		ID          string `gorm:"column:id"          json:"id"`
-		Slug        string `gorm:"column:slug"        json:"slug"`
-		Name        string `gorm:"column:name"        json:"name"`
-		Category    string `gorm:"column:category"    json:"category"`
-		Provider    string `gorm:"column:provider"    json:"provider"`
-		PointCost   int64  `gorm:"column:point_cost"  json:"point_cost"`
-		IsActive    bool   `gorm:"column:is_active"   json:"is_active"`
-		Description string `gorm:"column:description" json:"description"`
+		ID          string `gorm:"column:id"           json:"id"`
+		Slug        string `gorm:"column:slug"         json:"slug"`
+		Name        string `gorm:"column:name"         json:"name"`
+		Category    string `gorm:"column:category"     json:"category"`
+		Provider    string `gorm:"column:provider"     json:"provider"`
+		PointCost   int64  `gorm:"column:point_cost"   json:"point_cost"`
+		IsActive    bool   `gorm:"column:is_active"    json:"is_active"`
+		ComingSoon  bool   `gorm:"column:coming_soon"  json:"coming_soon"`
+		Description string `gorm:"column:description"  json:"description"`
 		UsageCount  int64  `json:"usage_count"`
 	}
 	var rows []toolRow
 	h.db.WithContext(r.Context()).
-		Raw(`SELECT t.id, t.slug, t.name, t.category, t.provider, t.point_cost, t.is_active, t.description,
+		Raw(`SELECT t.id, t.slug, t.name, t.category, t.provider, t.point_cost, t.is_active, t.coming_soon, t.description,
 		     COUNT(g.id) AS usage_count
 		     FROM studio_tools t
 		     LEFT JOIN ai_generations g ON g.tool_id = t.id
@@ -797,6 +798,7 @@ func (h *AdminHandler) UpdateStudioTool(w http.ResponseWriter, r *http.Request) 
 	var body struct {
 		PointCost        int64   `json:"point_cost"`
 		IsActive         *bool   `json:"is_active"`
+		ComingSoon       *bool   `json:"coming_soon"`
 		Provider         *string `json:"provider"`
 		Description      *string `json:"description"`
 		Icon             *string `json:"icon"`
@@ -817,6 +819,13 @@ func (h *AdminHandler) UpdateStudioTool(w http.ResponseWriter, r *http.Request) 
 	}
 	if body.IsActive != nil {
 		updates["is_active"] = *body.IsActive
+	}
+	if body.ComingSoon != nil {
+		updates["coming_soon"] = *body.ComingSoon
+		// when marking as coming_soon, always ensure is_active=false
+		if *body.ComingSoon {
+			updates["is_active"] = false
+		}
 	}
 	if body.Provider != nil {
 		updates["provider"] = *body.Provider
@@ -1275,6 +1284,52 @@ func (h *AdminHandler) GetRegionalWars(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetRegionalStats returns per-state aggregated points and active-member counts.
+// Response: { stats: [{ state, total_points, active_members, rank }] }
+// Backing query: joins users → wallets, groups by users.state, orders by total_points DESC.
+// The admin client calls GET /api/v1/admin/regional-stats.
+func (h *AdminHandler) GetRegionalStats(w http.ResponseWriter, r *http.Request) {
+	type RegionalStat struct {
+		State         string `json:"state"`
+		TotalPoints   int64  `json:"total_points"`
+		ActiveMembers int64  `json:"active_members"`
+		Rank          int    `json:"rank"`
+	}
+
+	var rows []struct {
+		State         string `gorm:"column:state"`
+		TotalPoints   int64  `gorm:"column:total_points"`
+		ActiveMembers int64  `gorm:"column:active_members"`
+	}
+
+	err := h.db.WithContext(r.Context()).Raw(`
+		SELECT
+			COALESCE(NULLIF(TRIM(u.state), ''), 'Unknown') AS state,
+			COALESCE(SUM(w.lifetime_points), 0)            AS total_points,
+			COUNT(DISTINCT u.id)                           AS active_members
+		FROM users u
+		LEFT JOIN wallets w ON w.user_id = u.id
+		WHERE u.is_active = true
+		GROUP BY COALESCE(NULLIF(TRIM(u.state), ''), 'Unknown')
+		ORDER BY total_points DESC
+	`).Scan(&rows).Error
+	if err != nil {
+		jsonError(w, "failed to query regional stats: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	stats := make([]RegionalStat, 0, len(rows))
+	for i, row := range rows {
+		stats = append(stats, RegionalStat{
+			State:         row.State,
+			TotalPoints:   row.TotalPoints,
+			ActiveMembers: row.ActiveMembers,
+			Rank:          i + 1,
+		})
+	}
+	jsonOK(w, map[string]interface{}{"stats": stats})
+}
+
 // ResetWarsCycle is kept for backward-compat; admin should use POST /wars/resolve instead.
 func (h *AdminHandler) ResetWarsCycle(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{
@@ -1293,11 +1348,13 @@ func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	dbLatency := time.Since(dbStart).Milliseconds()
 
-	var dbPoolUsed, dbPoolMax int
+	var dbPoolOpen, dbPoolUsed, dbPoolIdle, dbPoolMax int
 	if sqlDB, err := h.db.DB(); err == nil {
 		stats := sqlDB.Stats()
+		dbPoolOpen = stats.OpenConnections
 		dbPoolUsed = stats.InUse
-		dbPoolMax = stats.MaxOpenConnections
+		dbPoolIdle = stats.Idle
+		dbPoolMax  = stats.MaxOpenConnections
 	}
 
 	// Check Redis
@@ -1356,8 +1413,12 @@ func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		"webhook_success_rate_24h":  100.0, // Placeholder for real metrics
 		"paystack_success_rate_24h": 100.0, // Placeholder for real metrics
 		"api_p99_ms":                50,    // Placeholder for real metrics
-		"db_pool_used":              dbPoolUsed,
-		"db_pool_max":               dbPoolMax,
+		"db_pool": map[string]interface{}{
+			"open":     dbPoolOpen,
+			"in_use":   dbPoolUsed,
+			"idle":     dbPoolIdle,
+			"max_open": dbPoolMax,
+		},
 		"redis_hit_rate":            100.0, // Placeholder for real metrics
 		"checked_at":                time.Now(),
 		"pending_prizes":            pendingPrizes,

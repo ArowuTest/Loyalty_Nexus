@@ -22,6 +22,9 @@ interface WarLeaderboardData {
   leaderboard: LeaderboardEntry[];
   count: number;
   period: string;
+  war_active?: boolean;   // true when a war is configured (BUG-041 fix)
+  war_name?: string;
+  war_period?: string;
 }
 
 interface MyRankData {
@@ -69,7 +72,7 @@ function NoActiveWar() {
         🌍
       </motion.div>
       <div className="space-y-2">
-        <h2 className="text-xl font-black text-white">No Active War Yet</h2>
+        <h2 className="text-xl font-black text-white">War Active — No Rankings Yet</h2>
         <p className="text-[rgb(130_140_180)] text-sm max-w-xs">
           Regional Wars kick off monthly. Keep recharging and building your points — 
           your state will need you when the battle begins!
@@ -112,7 +115,8 @@ export default function RegionalWarsPage() {
   );
 
   const leaderboard = data?.leaderboard ?? [];
-  const period = data?.period ?? "";
+  const period = data?.war_period ?? data?.period ?? "";
+  const warName = data?.war_name?.trim() || "Regional War";
   const daysLeft = daysUntilEnd(period);
 
   // Top-3 prize pool is sum of top 3 entries' prize_kobo
@@ -120,7 +124,9 @@ export default function RegionalWarsPage() {
     ? leaderboard.slice(0, 3).reduce((sum, e) => sum + (e.prize_kobo || 0), 0)
     : 0;
 
-  const hasActiveWar = leaderboard.length > 0;
+  // BUG-041 fix: war_active from API tells us a war is configured regardless
+  // of whether the leaderboard has entries yet.
+  const hasActiveWar = data?.war_active === true;
 
   return (
     <AppShell>
@@ -165,7 +171,7 @@ export default function RegionalWarsPage() {
               style={{ background: "linear-gradient(135deg, #10b981 0%, #059669 100%)" }}
             >
               <div className="absolute right-4 top-1/2 -translate-y-1/2 text-6xl opacity-20">🌍</div>
-              <p className="text-white/80 text-sm uppercase tracking-wider mb-1">Monthly Prize Pool</p>
+              <p className="text-white/80 text-sm uppercase tracking-wider mb-1">{warName} Prize Pool</p>
               <p className="text-4xl font-bold font-display text-white">
                 {totalPrizeKobo > 0 ? formatKobo(totalPrizeKobo) : "TBA"}
               </p>
@@ -226,37 +232,56 @@ export default function RegionalWarsPage() {
             <div>
               <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
                 <Trophy size={16} className="text-brand-gold" />
-                State Leaderboard
+                {warName} Leaderboard
                 <span className="text-xs text-[rgb(130_140_180)] font-normal ml-auto">Period: {period}</span>
               </h2>
-              <div className="space-y-2">
-                {leaderboard.map((row, i) => (
-                  <motion.div
-                    key={row.state}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.03 }}
-                    className={cn(
-                      "nexus-card p-3 flex items-center gap-3",
-                      row.rank <= 3 && "border-brand-gold/30"
-                    )}
-                  >
-                    <div className="w-8 text-center text-lg">
-                      {MEDALS[row.rank] || <span className="text-sm font-bold text-[rgb(130_140_180)]">#{row.rank}</span>}
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-white font-semibold text-sm">{row.state}</p>
-                      <p className="text-[rgb(130_140_180)] text-xs">{row.active_members.toLocaleString()} members</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-white font-bold text-sm">{formatPoints(row.total_points)} pts</p>
-                      {row.prize_kobo > 0 && (
-                        <p className="text-brand-gold text-xs font-semibold">{formatKobo(row.prize_kobo)}</p>
+
+              {hasActiveWar && leaderboard.length === 0 ? (
+                <div style={{textAlign:'center', padding:'40px 20px'}}>
+                  <div style={{fontSize:'48px', marginBottom:'16px'}}>⚔️</div>
+                  <h3 style={{color:'#F5A623', fontWeight:'bold', fontSize:'20px', marginBottom:'8px'}}>
+                    War is Active!
+                  </h3>
+                  <p style={{color:'#aaa', fontSize:'15px', marginBottom:'8px'}}>
+                    No one from your state has recharged yet.
+                  </p>
+                  <p style={{color:'#fff', fontWeight:'600', fontSize:'16px'}}>
+                    Be the first from your state to recharge and claim the top spot! 🏆
+                  </p>
+                  <a href="/recharge" style={{display:'inline-block', marginTop:'20px', padding:'12px 28px', background:'#F5A623', color:'#000', borderRadius:'8px', fontWeight:'bold', textDecoration:'none'}}>
+                    Recharge Now →
+                  </a>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {leaderboard.map((row, i) => (
+                    <motion.div
+                      key={row.state}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.03 }}
+                      className={cn(
+                        "nexus-card p-3 flex items-center gap-3",
+                        row.rank <= 3 && "border-brand-gold/30"
                       )}
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
+                    >
+                      <div className="w-8 text-center text-lg">
+                        {MEDALS[row.rank] || <span className="text-sm font-bold text-[rgb(130_140_180)]">#{row.rank}</span>}
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-white font-semibold text-sm">{row.state}</p>
+                        <p className="text-[rgb(130_140_180)] text-xs">{row.active_members.toLocaleString()} members</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-white font-bold text-sm">{formatPoints(row.total_points)} pts</p>
+                        {row.prize_kobo > 0 && (
+                          <p className="text-brand-gold text-xs font-semibold">{formatKobo(row.prize_kobo)}</p>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
             </div>
           </>
         )}

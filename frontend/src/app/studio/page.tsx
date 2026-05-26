@@ -42,6 +42,7 @@ interface Tool {
   category: string;
   point_cost: number;
   is_active: boolean;
+  coming_soon?: boolean;
   provider?: string;
   entry_point_cost: number;
   refund_window_mins: number;
@@ -109,7 +110,7 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "bg-music":           { time: "~30 sec",  output: "15-second music clip",          tip: "Describe mood: 'calm', 'energetic', 'corporate'" },
   "jingle":             { time: "~25 sec",  output: "AI music jingle",               tip: "Add brand name and target emotion in prompt" },
   "song-creator":       { time: "~2 min",   output: "Full AI song with vocals",      tip: "Afrobeats, Gospel, Amapiano — be specific about genre" },
-  "instrumental":       { time: "~2 min",   output: "Instrumental music track",      tip: "Describe instruments: 'piano, strings, light percussion'" },
+  "instrumental":       { time: "~2.5 min",   output: "Instrumental music track",      tip: "Describe instruments: 'piano, strings, light percussion'" },
   "code-helper":        { time: "~5 sec",   output: "Code + explanation",            tip: "Mention the programming language in your prompt" },
   // ── Gemma 4 / Nexus AI Tools ──────────────────────────────────────────────────────────────────────────────────────
   "code-pro":           { time: "~6 sec",   output: "Code + visual debug analysis",   tip: "Attach a screenshot of the error or UI bug for best results" },
@@ -160,6 +161,7 @@ const DOC_EXPORT_SLUGS = new Set([
 
 function getOutputType(slug: string): { label: string; emoji: string; noun: string } {
   if (VIDEO_SLUGS.has(slug))  return { label: "Video MP4",  emoji: "🎬", noun: "video" };
+  if (slug === 'instrumental') return { label: "Audio MP3",  emoji: "🎵", noun: "audio-instrumental" };
   if (AUDIO_SLUGS.has(slug))  return { label: "Audio MP3",  emoji: "🎵", noun: "audio" };
   if (IMAGE_SLUGS.has(slug))  return { label: "Image file", emoji: "🖼️", noun: "image" };
   if (CODE_SLUGS.has(slug))   return { label: "Code output",emoji: "💻", noun: "code" };
@@ -891,10 +893,11 @@ function parseEstimatedSeconds(time?: string): number {
 
 /** Contextual rotating stage messages shown during generation */
 const STAGE_MESSAGES: Record<string, string[]> = {
-  image:  ['Composing your vision…', 'Applying style and lighting…', 'Rendering fine details…', 'Almost ready…'],
-  video:  ['Building your scene…', 'Animating motion…', 'Encoding frames…', 'Finalising video…'],
-  audio:  ['Composing melody…', 'Adding vocal layers…', 'Mixing and mastering…', 'Almost done…'],
-  text:   ['Thinking…', 'Structuring content…', 'Polishing the result…', 'Almost ready…'],
+  image:              ['Composing your vision…', 'Applying style and lighting…', 'Rendering fine details…', 'Almost ready…'],
+  video:              ['Building your scene…', 'Animating motion…', 'Encoding frames…', 'Finalising video…'],
+  audio:              ['Composing melody…', 'Adding vocal layers…', 'Mixing and mastering…', 'Almost done…'],
+  'audio-instrumental': ['Composing the arrangement…', 'Adding instrument layers…', 'Mixing and mastering…', 'Almost done…'],
+  text:               ['Thinking…', 'Structuring content…', 'Polishing the result…', 'Almost ready…'],
 };
 function useStageMessage(outputType: string, estimatedSeconds: number) {
   const messages = STAGE_MESSAGES[outputType] ?? STAGE_MESSAGES.text;
@@ -1152,12 +1155,12 @@ function ChatBubble({ msg }: { msg: Message }) {
         <div className={cn(
           "px-4 py-2.5",
           isUser
-            ? "bg-gradient-to-br from-gold-500/80 to-amber-600 text-white rounded-2xl rounded-tr-sm text-sm leading-relaxed"
+            ? "bg-gradient-to-br from-gold-500/80 to-amber-600 text-white rounded-2xl rounded-tr-sm text-sm leading-relaxed break-words"
             : mode === 'code'
-              ? "bg-gray-950/80 border border-green-500/15 rounded-2xl rounded-tl-sm"
+              ? "bg-gray-950/80 border border-green-500/15 rounded-2xl rounded-tl-sm break-words"
               : mode === 'search'
-              ? "bg-sky-950/40 border border-sky-500/15 rounded-2xl rounded-tl-sm"
-              : "bg-[#1c1e2e] rounded-2xl rounded-tl-sm border border-white/[0.07] shadow-sm"
+              ? "bg-sky-950/40 border border-sky-500/15 rounded-2xl rounded-tl-sm break-words"
+              : "bg-[#1c1e2e] rounded-2xl rounded-tl-sm border border-white/[0.07] shadow-sm break-words"
         )}>
           {isUser
             ? <p className="text-sm leading-relaxed">{msg.content}</p>
@@ -1303,6 +1306,7 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
   const isNew       = NEW_TOOL_SLUGS.has(tool.slug);
   const meta        = TOOL_META[tool.slug];
   const outType     = getOutputType(tool.slug);
+  const isComingSoon = tool.coming_soon === true;
   const entryLocked = !tool.is_free && tool.entry_point_cost > 0 && userPoints < tool.entry_point_cost;
   const isChatTool  = CHAT_REDIRECT_SLUGS.has(tool.slug);
   const previewImg  = TOOL_PREVIEW_IMAGES[tool.slug];
@@ -1319,9 +1323,17 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
     <motion.button
       whileHover={{ y: -2, scale: 1.01 }}
       whileTap={{ scale: 0.98 }}
-      onClick={onClick}
+      onClick={isComingSoon ? undefined : onClick}
       className="w-full text-left group relative overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.04] hover:border-white/20 hover:bg-white/[0.07] hover:shadow-card-hover transition-all duration-200 flex flex-col"
     >
+      {/* Coming Soon overlay */}
+      {isComingSoon && (
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] rounded-2xl flex flex-col items-center justify-center z-20 gap-1.5">
+          <span className="text-2xl">🚧</span>
+          <p className="text-white/80 text-xs font-semibold tracking-wide">Coming Soon</p>
+        </div>
+      )}
+
       {/* Locked overlay */}
       {entryLocked && (
         <div className="absolute inset-0 bg-black/60 backdrop-blur-[3px] rounded-2xl flex flex-col items-center justify-center z-20 gap-1.5">
@@ -1342,16 +1354,21 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
           />
           {/* Gradient fade into card body */}
           <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/70" />
-          {/* Output type + NEW badge overlaid on image */}
+          {/* Output type + NEW/FREE/SOON badge overlaid on image */}
           <div className="absolute top-2 left-2 flex gap-1.5">
             {isNew && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-500/80 text-purple-100 border border-purple-400/50 leading-none backdrop-blur-sm">
                 NEW
               </span>
             )}
-            {isFree && (
+            {isFree && !isComingSoon && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/80 text-green-100 border border-green-400/50 leading-none backdrop-blur-sm">
                 FREE
+              </span>
+            )}
+            {isComingSoon && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/20 text-white/70 border border-white/20 leading-none backdrop-blur-sm">
+                SOON
               </span>
             )}
           </div>
@@ -1384,9 +1401,14 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
                   NEW
                 </span>
               )}
-              {isFree && (
+              {isFree && !isComingSoon && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-500/25 text-green-200 border border-green-400/30 leading-none">
                   FREE
+                </span>
+              )}
+              {isComingSoon && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/20 text-white/70 border border-white/20 leading-none">
+                  SOON
                 </span>
               )}
               {isChatTool && (
@@ -1436,14 +1458,20 @@ function ToolCard({ tool, onClick, userPoints = 0 }: { tool: Tool; onClick: () =
               </span>
             )}
           </div>
-          <div className={cn(
-            "flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 rounded-xl border transition-all",
-            isChatTool
-              ? "bg-cyan-600/20 text-cyan-300 border-cyan-500/30 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-500"
-              : "bg-gold-500/10 text-gold-400 border-gold-500/25 group-hover:bg-gold-500/25 group-hover:text-white group-hover:border-gold-500"
-          )}>
-            {isChatTool ? "Open Chat" : "Generate"} <ChevronRight size={11} />
-          </div>
+          {isComingSoon ? (
+            <div className="flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 rounded-xl border border-white/10 text-white/30 bg-white/5 cursor-default">
+              Coming Soon
+            </div>
+          ) : (
+            <div className={cn(
+              "flex items-center gap-1 text-[10px] font-bold px-3 py-1.5 rounded-xl border transition-all",
+              isChatTool
+                ? "bg-cyan-600/20 text-cyan-300 border-cyan-500/30 group-hover:bg-cyan-600 group-hover:text-white group-hover:border-cyan-500"
+                : "bg-gold-500/10 text-gold-400 border-gold-500/25 group-hover:bg-gold-500/25 group-hover:text-white group-hover:border-gold-500"
+            )}>
+              {isChatTool ? "Open Chat" : "Generate"} <ChevronRight size={11} />
+            </div>
+          )}
         </div>
       </div>
     </motion.button>
@@ -1518,73 +1546,144 @@ function renderInfographic(text: string) {
 }
 
 // ─── Mind Map renderer ──────────────────────────────────────────────────────
-function renderMindMap(text: string) {
+function MindMapRenderer({ text }: { text: string }) {
+  const [viewMode, setViewMode] = useState<"visual" | "text">("visual");
+
+  // Try JSON parse first (existing format)
   interface MindBranch { label: string; color?: string; children?: { label: string; children?: { label: string }[] }[] }
   interface MindMapData { center?: string; branches?: MindBranch[] }
-  let data: MindMapData | null = null;
+  let jsonData: MindMapData | null = null;
   try {
     const raw = JSON.parse(text);
-    if (raw && typeof raw === 'object' && raw.center) data = raw;
+    if (raw && typeof raw === "object" && raw.center) jsonData = raw;
   } catch { /* not JSON */ }
-  if (!data || !data.branches) {
-    return (
-      <div className="bg-white/5 border border-white/10 rounded-xl p-3">
-        <p className="text-white/70 text-xs leading-relaxed whitespace-pre-wrap">{text}</p>
-      </div>
-    );
+
+  // Indentation-based text parser (fallback / plain text response)
+  type MindNode = { text: string; level: number; children: MindNode[] };
+  function parseIndent(raw: string): MindNode[] {
+    const lines = raw.split("\n").filter(l => l.trim());
+    const roots: MindNode[] = [];
+    const stack: MindNode[] = [];
+    for (const line of lines) {
+      const indent = (line.match(/^(\s*)/)?.[1].length) ?? 0;
+      const level  = Math.floor(indent / 2);
+      const node: MindNode = { text: line.trim().replace(/^[-*#>\u2022\u25CF]\s*/, ""), level, children: [] };
+      while (stack.length > 0 && stack[stack.length - 1].level >= level) stack.pop();
+      if (stack.length === 0) roots.push(node); else stack[stack.length - 1].children.push(node);
+      stack.push(node);
+    }
+    return roots;
   }
-  const branches = data.branches ?? [];
-  const BRANCH_COLORS = ['#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444','#06b6d4','#f97316','#ec4899'];
+
+  // Derive display data from JSON or parsed text
+  const BRANCH_COLORS = ["#f59e0b","#3b82f6","#10b981","#8b5cf6","#ef4444","#06b6d4","#f97316","#ec4899"];
+  let centralLabel = "";
+  let branches: { label: string; color: string; children: { label: string; children: { label: string }[] }[] }[] = [];
+
+  if (jsonData && jsonData.branches) {
+    centralLabel = jsonData.center ?? "";
+    branches = jsonData.branches.map((b, bi) => ({
+      label:    b.label,
+      color:    b.color ?? BRANCH_COLORS[bi % BRANCH_COLORS.length],
+      children: (b.children ?? []).map(c => ({ label: c.label, children: (c.children ?? []).map(l => ({ label: l.label })) })),
+    }));
+  } else {
+    const nodes = parseIndent(text);
+    const root  = nodes[0];
+    if (root) {
+      centralLabel = root.text;
+      branches = root.children.map((b, bi) => ({
+        label:    b.text,
+        color:    BRANCH_COLORS[bi % BRANCH_COLORS.length],
+        children: b.children.map(c => ({ label: c.text, children: c.children.map(l => ({ label: l.text })) })),
+      }));
+    }
+  }
+
+  const hasBranches = branches.length > 0;
+
   return (
-    <div className="space-y-3">
-      {/* Central topic */}
-      <div className="flex justify-center">
-        <div className="bg-gradient-to-br from-purple-600 to-indigo-600 text-white font-bold text-sm px-5 py-2.5 rounded-2xl shadow-lg shadow-purple-900/40 text-center max-w-[200px]">
-          {data.center}
-        </div>
+    <div>
+      {/* Toggle row */}
+      <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+        {(["visual", "text"] as const).map(mode => (
+          <button key={mode} onClick={() => setViewMode(mode)}
+            style={{
+              padding: "5px 14px", borderRadius: "6px", cursor: "pointer", fontSize: "12px",
+              background: viewMode === mode ? "#F5A623" : "rgba(255,255,255,0.05)",
+              color: viewMode === mode ? "#000" : "rgba(255,255,255,0.6)",
+              border: `1px solid ${viewMode === mode ? "#F5A623" : "rgba(255,255,255,0.12)"}`,
+              fontWeight: viewMode === mode ? 700 : 400,
+            }}>
+            {mode === "visual" ? "Visual View" : "Text View"}
+          </button>
+        ))}
       </div>
-      {/* Branches */}
-      <div className="grid grid-cols-1 gap-2">
-        {branches.map((branch: MindBranch, bi: number) => {
-          const color = branch.color ?? BRANCH_COLORS[bi % BRANCH_COLORS.length];
-          return (
-            <div key={bi} className="rounded-xl border overflow-hidden" style={{ borderColor: color + '40' }}>
-              {/* Branch header */}
-              <div className="flex items-center gap-2 px-3 py-2" style={{ backgroundColor: color + '20' }}>
-                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-                <span className="text-white font-semibold text-xs">{branch.label}</span>
-              </div>
-              {/* Sub-branches */}
-              {Array.isArray(branch.children) && branch.children.length > 0 && (
-                <div className="px-3 py-2 space-y-1.5 bg-white/[0.02]">
-                  {branch.children.map((child: { label: string; children?: { label: string }[] }, ci: number) => (
-                    <div key={ci}>
-                      <div className="flex items-start gap-1.5">
-                        <span className="text-[10px] mt-0.5 flex-shrink-0" style={{ color }}>▸</span>
-                        <span className="text-white/80 text-[11px] font-medium leading-snug">{child.label}</span>
-                      </div>
-                      {/* Leaf nodes */}
-                      {Array.isArray(child.children) && child.children.length > 0 && (
-                        <div className="ml-4 mt-1 space-y-0.5">
-                          {child.children.map((leaf: { label: string }, li: number) => (
-                            <div key={li} className="flex items-start gap-1.5">
-                              <span className="text-[9px] mt-0.5 flex-shrink-0 text-white/30">–</span>
-                              <span className="text-white/55 text-[10px] leading-snug">{leaf.label}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+
+      {/* Text View */}
+      {viewMode === "text" && (
+        <pre style={{ whiteSpace: "pre-wrap", color: "rgba(255,255,255,0.75)", fontSize: "13px", lineHeight: 1.6 }}>
+          {text}
+        </pre>
+      )}
+
+      {/* Visual View */}
+      {viewMode === "visual" && (
+        <div style={{ overflowX: "auto", padding: "4px 0 16px" }}>
+          {/* Central topic */}
+          {centralLabel && (
+            <div style={{ textAlign: "center", marginBottom: "20px" }}>
+              <span style={{
+                display: "inline-block", padding: "10px 24px",
+                border: "2px solid #F5A623", borderRadius: "12px",
+                color: "#F5A623", fontWeight: 700, fontSize: "15px",
+                background: "rgba(245,166,35,0.10)",
+              }}>{centralLabel}</span>
+            </div>
+          )}
+
+          {hasBranches ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", justifyContent: "center" }}>
+              {branches.map((branch, bi) => (
+                <div key={bi} style={{ minWidth: "150px", maxWidth: "210px" }}>
+                  {/* Branch header */}
+                  <div style={{
+                    padding: "7px 14px", borderRadius: "8px", marginBottom: "6px", textAlign: "center",
+                    background: branch.color + "22", border: `1px solid ${branch.color}55`,
+                    color: "#fff", fontWeight: 600, fontSize: "13px",
+                  }}>{branch.label}</div>
+                  {/* Sub-nodes */}
+                  {branch.children.map((sub, si) => (
+                    <div key={si}>
+                      <div style={{
+                        padding: "5px 10px", borderRadius: "6px", marginBottom: "3px", marginLeft: "8px",
+                        background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.10)",
+                        color: "rgba(255,255,255,0.75)", fontSize: "12px",
+                      }}>{sub.label}</div>
+                      {sub.children.map((leaf, li) => (
+                        <div key={li} style={{
+                          padding: "3px 8px", borderRadius: "4px", marginBottom: "2px", marginLeft: "18px",
+                          color: "rgba(255,255,255,0.45)", fontSize: "11px",
+                        }}>{leaf.label}</div>
+                      ))}
                     </div>
                   ))}
                 </div>
-              )}
+              ))}
             </div>
-          );
-        })}
-      </div>
+          ) : (
+            <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: "10px", padding: "12px" }}>
+              <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "13px", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{text}</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
+// Backward-compatible wrapper so existing JSX call sites still compile
+function renderMindMap(text: string) { return <MindMapRenderer text={text} />; }
 
 // ─── Status pill ─────────────────────────────────────────────────────────────
 function StatusPill({ status }: { status: Generation["status"] }) {
@@ -2263,6 +2362,18 @@ function ToolDrawer({
   const generatingRef = useRef<HTMLDivElement>(null);
   // ── Prompt history: recent prompts for this tool ──────────────────────────
   const [recentPrompts, setRecentPrompts] = useState<string[]>([]);
+  // ── Marketing-jingle structured fields ──────────────────────────────────
+  const [jingleGenre,    setJingleGenre]    = useState("Afrobeats");
+  const [jingleMood,     setJingleMood]     = useState("Upbeat");
+  const [jingleDuration, setJingleDuration] = useState("30 seconds");
+  const [jingleVocals,   setJingleVocals]   = useState("With Vocals");
+  const [jingleBrand,    setJingleBrand]    = useState("");
+  const [websiteIndustry, setWebsiteIndustry] = useState("");
+  const [websitePages, setWebsitePages] = useState("5");
+  const [websiteStyle, setWebsiteStyle] = useState("Modern & Professional");
+  const [websiteColorScheme, setWebsiteColorScheme] = useState("Blue & White");
+  const [websiteBusinessName, setWebsiteBusinessName] = useState("");
+  const [websiteContactInfo, setWebsiteContactInfo] = useState("");
   useEffect(() => {
     let cancelled = false;
     api.getPromptHistory(tool.slug, 8).then(res => {
@@ -2321,6 +2432,28 @@ function ToolDrawer({
   // We stash the payload then open the confirmation modal.
   function handleTemplateSubmit(payload: GeneratePayload) {
     if (generating) return;
+    let finalPrompt = payload.prompt ?? "";
+    // Prepend structured fields for marketing-jingle / jingle tools
+    const isJingle = slug === "marketing-jingle" || slug === "jingle" || slug === "my-marketing-jingle";
+    if (isJingle && finalPrompt) {
+      const brandPart = jingleBrand.trim() ? ` [Brand: ${jingleBrand.trim()}]` : "";
+      const prefix = `[Genre: ${jingleGenre}] [Mood: ${jingleMood}] [Duration: ${jingleDuration}] [Vocals: ${jingleVocals}]${brandPart}`;
+      finalPrompt = `${prefix}
+${finalPrompt}`;
+    }
+    if ((slug === "website-builder" || slug === "website_builder") && finalPrompt) {
+      const prefix = [
+        websiteBusinessName && `[Business: ${websiteBusinessName}]`,
+        websiteIndustry && `[Industry: ${websiteIndustry}]`,
+        `[Pages: ${websitePages}]`,
+        `[Style: ${websiteStyle}]`,
+        `[Colors: ${websiteColorScheme}]`,
+        websiteContactInfo && `[Contact: ${websiteContactInfo}]`,
+      ].filter(Boolean).join(" ");
+      finalPrompt = `${prefix}
+${finalPrompt}`;
+    }
+    payload = { ...payload, prompt: finalPrompt };
     setPendingPayload(payload);
     setShowConfirm(true);
   }
@@ -2375,7 +2508,7 @@ function ToolDrawer({
               unsub();
               setGenerating(false);
               setGenStartedAt(null);
-              toast.error(`${tool.name} failed. Points refunded automatically.`);
+              toast.error(`${tool.name} failed.${tool.point_cost > 0 ? " Points refunded automatically." : " Please try again."}`);
               onGenerated?.();
             }
           },
@@ -2392,7 +2525,7 @@ function ToolDrawer({
                     onGenerated?.();
                   } else if (s?.status === "failed") {
                     setGenerating(false); setGenStartedAt(null);
-                    toast.error(`${tool.name} failed. Points refunded automatically.`);
+                    toast.error(`${tool.name} failed.${tool.point_cost > 0 ? " Points refunded automatically." : " Please try again."}`);
                     onGenerated?.();
                   } else {
                     // Still processing — keep polling every 3s as last resort
@@ -2408,7 +2541,7 @@ function ToolDrawer({
                           onGenerated?.();
                         } else if (ps?.status === "failed") {
                           clearInterval(poll); setGenerating(false); setGenStartedAt(null);
-                          toast.error(`${tool.name} failed. Points refunded automatically.`);
+                          toast.error(`${tool.name} failed.${tool.point_cost > 0 ? " Points refunded automatically." : " Please try again."}`);
                           onGenerated?.();
                         }
                       } catch { clearInterval(poll); setGenerating(false); }
@@ -2574,6 +2707,56 @@ function ToolDrawer({
                 </div>
               ) : (
                 <div className="min-h-0">
+                  {/* ── Marketing-jingle structured fields ── */}
+                  {(slug === "marketing-jingle" || slug === "jingle" || slug === "my-marketing-jingle") && !formCollapsed && (
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"12px"}}>
+                      <select value={jingleGenre} onChange={e => setJingleGenre(e.target.value)}
+                        style={{background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}}>
+                        {["Afrobeats","Gospel","Highlife","Pop","R&B","Hip-Hop","Jingle/Advert"].map(g => <option key={g}>{g}</option>)}
+                      </select>
+                      <select value={jingleMood} onChange={e => setJingleMood(e.target.value)}
+                        style={{background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}}>
+                        {["Upbeat","Calm","Intense","Playful","Professional"].map(m => <option key={m}>{m}</option>)}
+                      </select>
+                      <select value={jingleDuration} onChange={e => setJingleDuration(e.target.value)}
+                        style={{background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}}>
+                        {["15 seconds","30 seconds","60 seconds"].map(d => <option key={d}>{d}</option>)}
+                      </select>
+                      <select value={jingleVocals} onChange={e => setJingleVocals(e.target.value)}
+                        style={{background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}}>
+                        <option>With Vocals</option>
+                        <option>Instrumental</option>
+                      </select>
+                      <input value={jingleBrand} onChange={e => setJingleBrand(e.target.value)}
+                        placeholder="Brand / Product name (optional)"
+                        style={{gridColumn:"1/-1",background:"#12122a",color:"#fff",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"8px",padding:"8px 10px",fontSize:"13px"}} />
+                    </div>
+                  )}
+                  {(slug === 'website-builder' || slug === 'website_builder') && (
+                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'12px'}}>
+                      <input value={websiteBusinessName} onChange={e=>setWebsiteBusinessName(e.target.value)}
+                        placeholder="Business/Brand name" style={{gridColumn:'1/-1', background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}} />
+                      <select value={websiteIndustry} onChange={e=>setWebsiteIndustry(e.target.value)}
+                        style={{background:'#1a1a2e', color: websiteIndustry ? '#fff' : '#666', border:'1px solid #333', borderRadius:'6px', padding:'8px'}}>
+                        <option value="">Select industry...</option>
+                        {['E-commerce','Restaurant/Food','Healthcare','Education','Real Estate','Tech/SaaS','Portfolio','NGO/Nonprofit','Finance','Fashion','Other'].map(i=><option key={i} value={i}>{i}</option>)}
+                      </select>
+                      <select value={websitePages} onChange={e=>setWebsitePages(e.target.value)}
+                        style={{background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}}>
+                        {['1 (Landing)','3 (Basic)','5 (Standard)','8 (Full)','10+ (Enterprise)'].map(p=><option key={p} value={p}>{p} pages</option>)}
+                      </select>
+                      <select value={websiteStyle} onChange={e=>setWebsiteStyle(e.target.value)}
+                        style={{background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}}>
+                        {['Modern & Professional','Bold & Creative','Minimal & Clean','Traditional & Corporate','Fun & Playful'].map(s=><option key={s}>{s}</option>)}
+                      </select>
+                      <select value={websiteColorScheme} onChange={e=>setWebsiteColorScheme(e.target.value)}
+                        style={{background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}}>
+                        {['Blue & White','Green & Gold','Red & Black','Purple & Silver','Orange & Dark','Custom (describe in prompt)'].map(c=><option key={c}>{c}</option>)}
+                      </select>
+                      <input value={websiteContactInfo} onChange={e=>setWebsiteContactInfo(e.target.value)}
+                        placeholder="Contact info (phone/email, optional)" style={{background:'#1a1a2e', color:'#fff', border:'1px solid #333', borderRadius:'6px', padding:'8px'}} />
+                    </div>
+                  )}
                   {renderTemplate(tool, handleTemplateSubmit, generating, userPoints, preloadImageUrl, preloadVideoUrl)}
                 </div>
               )}
@@ -2681,7 +2864,7 @@ function ToolDrawer({
                   </div>
                   {meta && (
                     <p className="text-white/30 text-[10px] text-center">
-                      Usually ready in {meta.time} · Points refunded automatically if it fails
+                      Usually ready in {meta.time}{tool.point_cost > 0 ? " · Points refunded automatically if it fails" : ""}
                     </p>
                   )}
                 </motion.div>
@@ -3350,7 +3533,7 @@ function StudioPageInner() {
     { refreshInterval: 15000 }
   );
   // Always fetch fresh wallet balance on Studio load
-  const { data: freshWallet } = useSWR(
+  const { data: freshWallet, mutate: mutateWallet } = useSWR(
     hasHydrated && isAuthenticated ? "/user/wallet" : null,
     () => import("@/lib/api").then(m => m.api.getWallet()),
     { onSuccess: (d) => setWallet(d as Parameters<typeof setWallet>[0]), refreshInterval: 30000 }
@@ -4294,7 +4477,7 @@ function StudioPageInner() {
                 </p>
               </div>
 
-              {toolsLoading ? (
+              {(toolsLoading || !hasHydrated) ? (
                 <div className="space-y-2">
                   {[...Array(6)].map((_, i) => (
                     <div key={i} className="glass border border-white/[0.08] h-20 animate-pulse opacity-50" />
@@ -4596,10 +4779,11 @@ function StudioPageInner() {
       <AnimatePresence>
         {selectedTool && (
           <ToolDrawer
+            key={selectedTool.id}
             tool={selectedTool}
             onClose={() => openTool(null)}
             userPoints={userPoints}
-            onGenerated={() => { mutateGallery(); }}
+            onGenerated={() => { mutateGallery(); mutateWallet(); }}
             preloadImageUrl={crossToolPreload.imageUrl}
             preloadVideoUrl={crossToolPreload.videoUrl}
             onCrossToolAction={(toolSlug, imageUrl, videoUrl) => {

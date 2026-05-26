@@ -27,7 +27,7 @@ func NewPostgresStudioRepository(db *gorm.DB) repositories.StudioRepository {
 func (r *postgresStudioRepository) ListActiveTools(ctx context.Context) ([]entities.StudioTool, error) {
 	var tools []entities.StudioTool
 	err := r.db.WithContext(ctx).
-		Where("is_active = true").
+		Where("is_active = true OR coming_soon = true").
 		Order("sort_order ASC, name ASC").
 		Find(&tools).Error
 	return tools, err

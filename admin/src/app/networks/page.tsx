@@ -33,19 +33,27 @@ export default function NetworksPage() {
   const [success, setSuccess]     = useState("");
 
   const token = typeof window !== "undefined"
-    ? localStorage.getItem("admin_token") ?? ""
+    ? localStorage.getItem("nexus_admin_token") ?? ""
     : "";
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       const r = await fetch(`${API}/admin/networks`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
+      if (!r.ok) {
+        const message = r.status === 401 || r.status === 403
+          ? "Admin session expired. Please sign in again."
+          : "Failed to load network configurations.";
+        throw new Error(message);
+      }
       const d = await r.json();
-      setNetworks(d.networks ?? []);
-    } catch {
-      setError("Failed to load network configurations.");
+      setNetworks(d?.networks ?? []);
+    } catch (e: unknown) {
+      setNetworks([]);
+      setError(e instanceof Error ? e.message : "Failed to load network configurations.");
     } finally {
       setLoading(false);
     }

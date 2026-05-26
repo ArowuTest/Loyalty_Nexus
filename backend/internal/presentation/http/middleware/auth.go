@@ -107,10 +107,26 @@ func RequireRole(w http.ResponseWriter, r *http.Request, roles ...entities.Admin
 	return false
 }
 
-// CORS middleware — restrict to known origins in production.
+// allowedOrigins lists every origin permitted to call the API.
+// Add new frontend domains here — never use * in production.
+var allowedOrigins = map[string]bool{
+	"https://loyalty-nexus.vercel.app":       true,
+	"https://loyalty-nexus-admin.vercel.app": true,
+	"http://localhost:3000":                  true,
+	"http://localhost:3001":                  true,
+	"http://localhost:8080":                  true,
+}
+
+// CORS middleware — restricts requests to known frontend origins.
+// Wildcard (*) is never used; each preflight echoes the requesting origin back
+// only if it is in the allowedOrigins map.
 func CORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*") // Tighten in production
+		origin := r.Header.Get("Origin")
+		if allowedOrigins[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		if r.Method == http.MethodOptions {

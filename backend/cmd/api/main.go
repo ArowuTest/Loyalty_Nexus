@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"crypto/tls"
+
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
@@ -219,6 +221,13 @@ func main() {
 		// redis.ParseURL handles redis://, rediss://, and plain host:port formats.
 		var rdb *redis.Client
 		if redisOpts, parseErr := redis.ParseURL(os.Getenv("REDIS_URL")); parseErr == nil {
+			// rediss:// (TLS) URLs require InsecureSkipVerify on Render's Redis
+			// which uses a certificate that Go's default verifier rejects.
+			if redisOpts.TLSConfig != nil {
+				redisOpts.TLSConfig.InsecureSkipVerify = true //nolint:gosec
+			} else {
+				redisOpts.TLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+			}
 			rdb = redis.NewClient(redisOpts)
 		} else {
 			// Fallback: treat REDIS_URL as plain host:port (e.g. "localhost:6379")
@@ -300,7 +309,7 @@ func main() {
 			}
 		}
 
-		// ─── LLM Orchestrator (Groq → Gemini → DeepSeek) ─────────
+		// ─── LLM Orchestrator (Gemini 2.5 Flash → DeepSeek V3; Groq removed from chat path) ─────────
 		groqLimit   := cfg.GetInt("chat_groq_daily_limit", 1000)
 		geminiLimit := cfg.GetInt("chat_gemini_daily_limit", 2000)
 		tavilyKey := os.Getenv("TAVILY_API_KEY")
@@ -338,6 +347,34 @@ func main() {
 				expiryWorker.Stop()
 			}()
 		}
+
+		// ─── Lifecycle Worker (scheduled draws, points expiry, wars, studio recovery) ─
+		// CRITICAL: This goroutine runs all background cron jobs including:
+		//   - RunScheduledDraws  (every 1h): auto-executes UPCOMING draws past their draw_time
+		//   - RunWarsMonthlyResolve (every 24h): resolves war leaderboard at month-end
+		//   - studioStaleRecovery (every 10m): refunds points for stuck PROCESSING generations
+		//   - pointsExpiryJobs (every 24h): expires stale points
+		//   - fulfillmentRetry  (every 5m): retries failed prize fulfillments
+		winnerSvc := services.NewWinnerService(db, userRepo, prizeRepo, notifySvc)
+		lifecycleWorker := services.NewLifecycleWorker(
+			db, userRepo, studioRepo, prizeRepo, authRepo, chatRepo, warsRepo,
+			fulfillSvc, drawSvc, winnerSvc, warssSvc, studioSvc, notifySvc, cfg,
+		)
+		if db != nil {
+			go lifecycleWorker.Run(ctx)
+			log.Println("[main] ✓ Lifecycle worker started (draws, expiry, wars, studio recovery)")
+		}
+
+		// ─── Gemini warmup (eliminates cold-start fallthrough to DeepSeek) ────
+		// Fires a lightweight ping 5s after startup to pre-warm the TCP connection.
+		go func() {
+			time.Sleep(5 * time.Second)
+			if _, err := gemini.Complete(context.Background(), "warmup", "ping"); err != nil {
+				log.Printf("[main] Gemini warmup skipped: %v", err)
+			} else {
+				log.Println("[main] ✓ Gemini pre-warmed — cold-start provider fallthrough eliminated")
+			}
+		}()
 
 		// ─── HTTP Handlers ────────────────────────────────────────
 		authH    := handlers.NewAuthHandler(authSvc)
@@ -392,6 +429,7 @@ func main() {
 		// VTU routes always registered — handler is always non-nil
 		mux.HandleFunc("GET /api/v1/recharge/networks",                vtuH.GetNetworks)
 		mux.HandleFunc("GET /api/v1/recharge/networks/{code}/bundles", vtuH.GetBundles)
+			mux.HandleFunc("GET /api/v1/recharge/networks/detect",              vtuH.DetectNetwork)
 		mux.HandleFunc("GET /api/v1/recharge/status/{ref}",            vtuH.GetStatus)
 		mux.HandleFunc("GET /api/v1/recharge/callback",                vtuH.HandleCallback)
 		mux.Handle("POST /api/v1/recharge/initiate", optionalAuth(http.HandlerFunc(vtuH.Initiate)))
@@ -429,6 +467,7 @@ func main() {
 		mux.Handle("POST /api/v1/user/profile/state", auth(http.HandlerFunc(userH.UpdateProfileState)))
 		mux.Handle("POST /api/v1/user/momo/verify", auth(http.HandlerFunc(userH.VerifyMoMo)))
 		mux.Handle("GET /api/v1/user/transactions", auth(http.HandlerFunc(userH.GetTransactions)))
+		mux.Handle("GET /api/v1/user/recharges",    auth(http.HandlerFunc(userH.GetUserRecharges)))
 		mux.Handle("GET /api/v1/user/passport",    auth(http.HandlerFunc(userH.GetPassportURLs)))
 		mux.Handle("GET /api/v1/user/bonus-pulse", auth(http.HandlerFunc(userH.GetBonusPulseAwards)))
 
@@ -468,6 +507,7 @@ func main() {
 
 			// ─── Nexus Chat ─────────────────────────────────────────────────────
 			mux.Handle("POST /api/v1/studio/chat", auth(http.HandlerFunc(studioH.Chat)))
+			mux.Handle("POST /api/v1/studio/chat/stream", auth(http.HandlerFunc(studioH.ChatStream))) // STU-003: SSE streaming
 			mux.Handle("GET /api/v1/studio/chat/history", auth(http.HandlerFunc(studioH.GetChatHistory))) // BUG-05: restore chat history on page load
 				mux.Handle("GET /api/v1/studio/chat/usage", auth(http.HandlerFunc(studioH.GetChatUsage)))
 
@@ -533,6 +573,7 @@ func main() {
 		mux.Handle("GET    /api/v1/admin/studio-generations",        adminAuth(http.HandlerFunc(adminH.GetStudioGenerations)))
 		mux.Handle("GET    /api/v1/admin/users",              adminAuth(http.HandlerFunc(adminH.ListUsers)))
 		mux.Handle("GET    /api/v1/admin/regional-wars",      adminAuth(http.HandlerFunc(adminH.GetRegionalWars)))
+		mux.Handle("GET    /api/v1/admin/regional-stats",     adminAuth(http.HandlerFunc(adminH.GetRegionalStats)))
 		mux.Handle("POST /api/v1/admin/wars/resolve",          adminAuth(http.HandlerFunc(warsH.AdminResolve)))
 		mux.Handle("PUT  /api/v1/admin/wars/prize-pool",       adminAuth(http.HandlerFunc(warsH.AdminUpdatePrizePool)))
 		mux.Handle("GET  /api/v1/admin/wars/{war_id}/winners",            adminAuth(http.HandlerFunc(warsH.GetWinnersByWarID)))
@@ -669,3 +710,5 @@ func main() {
 func currentWarPeriodStr() string {
 	return time.Now().UTC().Format("2006-01")
 }
+
+

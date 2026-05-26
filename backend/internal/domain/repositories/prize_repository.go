@@ -20,6 +20,7 @@ type PrizeRepository interface {
 	FindSpinResult(ctx context.Context, id uuid.UUID) (*entities.SpinResult, error)
 	UpdateSpinFulfillment(ctx context.Context, id uuid.UUID, status entities.FulfillmentStatus, ref string, errMsg string) error
 	ListPendingFulfillments(ctx context.Context, limit int) ([]entities.SpinResult, error)
+	ListFailedFulfillments(ctx context.Context, limit int) ([]entities.SpinResult, error)
 	CountUserSpinsToday(ctx context.Context, userID uuid.UUID) (int, error)
 
 	// Claims

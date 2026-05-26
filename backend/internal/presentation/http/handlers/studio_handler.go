@@ -16,6 +16,7 @@ package handlers
 // repository + wallet + ledger).  This handler never calls gorm.DB directly.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -237,6 +238,18 @@ func (h *StudioHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// BUG-050: Provider health gate — runs BEFORE point deduction.
+	// Only fires when tool_slug is provided (cheap check; skipped for tool_id-only requests).
+	if req.ToolSlug != "" {
+		if h.studioSvc.CheckProviderHealthGate(r.Context(), req.ToolSlug) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+				"error":       "AI service temporarily unavailable, please try again in a few minutes",
+				"retry_after": 1800,
+			})
+			return
+		}
+	}
+
 	// Enrich prompt with structured template params before dispatching.
 	// The AI orchestrator receives a single enriched prompt string; extra params
 	// are serialised into a structured prefix so the provider can parse them.
@@ -365,10 +378,19 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// ── Session ID: if frontend doesn't send one, mint a new one ──────────────
+	// ── Session ID: resolve or create a real UUID session ──────────────────────
+	// If the frontend sends a valid UUID session ID, use it. Otherwise look up
+	// the active session for this user+toolSlug or create a new one. This ensures
+	// buildMemoryBlock can always parse the ID and inject prior conversation history
+	// into the LLM context (fixes STU-002: chat history was always blank).
+	toolSlugForSession := req.ToolSlug
+	if toolSlugForSession == "" {
+		toolSlugForSession = "general"
+	}
 	sessionID := req.SessionID
-	if sessionID == "" {
-		sessionID = "sess_" + uid[:8] + "_" + fmt.Sprintf("%d", timeNowUnix())
+	if _, parseErr := uuid.Parse(sessionID); parseErr != nil {
+		// Not a valid UUID (e.g. empty string or old "sess_..." format) — resolve a real one
+		sessionID = h.llmOrch.ResolveOrCreateSession(r.Context(), uid, toolSlugForSession)
 	}
 
 	// ── Route by tool_slug ─────────────────────────────────────────────────
@@ -457,6 +479,128 @@ func (h *StudioHandler) handleGeneralChat(w http.ResponseWriter, r *http.Request
 		"session_id":    resolvedSession,
 		"message_count": msgCount,
 	})
+}
+
+// ─── POST /api/v1/studio/chat/stream ─────────────────────────────────────────
+// ChatStream is the streaming variant of the Chat endpoint. It:
+//   - Resolves/creates a real UUID session (same logic as Chat)
+//   - Builds the system prompt via LLMOrchestrator
+//   - Calls GeminiAdapter.CompleteStream to get live token chunks
+//   - Pushes each chunk as an SSE event: data: {"text":"..."}
+
+
+//   - Sends a final event: data: {"done":true,"session_id":"...","provider":"GEMINI_LITE"}
+
+
+//
+// Falls back to a single-shot response (wrapped in SSE) if streaming fails.
+func (h *StudioHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+
+	var req chatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+		http.Error(w, `{"error":"message is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Resolve real UUID session (same logic as Chat handler)
+	toolSlugForSession := req.ToolSlug
+	if toolSlugForSession == "" {
+		toolSlugForSession = "general"
+	}
+	sessionID := req.SessionID
+	if _, parseErr := uuid.Parse(sessionID); parseErr != nil {
+		sessionID = h.llmOrch.ResolveOrCreateSession(r.Context(), uid, toolSlugForSession)
+	}
+
+	// Extract attached file/link context
+	var attachedContext, attachedName string
+	extractor := external.NewTextExtractor()
+	if req.FileURL != "" {
+		if text, err := extractor.ExtractFromURL(r.Context(), req.FileURL); err == nil && text != "" {
+			attachedContext = text
+			attachedName = req.FileName
+			if attachedName == "" {
+				attachedName = "uploaded file"
+			}
+		}
+	} else if req.LinkURL != "" {
+		if text, err := extractor.ExtractFromURL(r.Context(), req.LinkURL); err == nil && text != "" {
+			attachedContext = text
+			attachedName = req.LinkURL
+		}
+	}
+
+	// Build system prompt via orchestrator's exported helper
+	systemPrompt := h.llmOrch.BuildSystemPrompt(r.Context(), uid, sessionID, req.ToolSlug, attachedContext, attachedName)
+
+	// SSE headers — must be set before any write
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable nginx/Render proxy buffering for true streaming
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	flusher, canFlush := w.(http.Flusher)
+
+	writeSSE := func(payload []byte) {
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+		if canFlush {
+			flusher.Flush()
+		}
+	}
+
+	// Stream from Gemini
+	var fullText string
+	var streamErr error
+	if h.gemini != nil {
+		fullText, streamErr = h.gemini.CompleteStream(r.Context(), systemPrompt, req.Message, func(chunk string) {
+			data, _ := json.Marshal(map[string]string{"text": chunk})
+			writeSSE(data)
+		})
+	} else {
+		streamErr = fmt.Errorf("gemini adapter not configured")
+	}
+
+	// If streaming failed, fall back to non-streaming Chat and wrap in SSE
+	if streamErr != nil {
+		log.Printf("[SSE] stream failed, falling back to sync: %v", streamErr)
+		resp, err := h.llmOrch.Chat(r.Context(), external.LLMRequest{
+			UserID:          uid,
+			SessionID:       sessionID,
+			Prompt:          req.Message,
+			History:         req.History,
+			ToolSlug:        req.ToolSlug,
+			AttachedContext: attachedContext,
+			AttachedName:    attachedName,
+		})
+		if err != nil {
+			errData, _ := json.Marshal(map[string]string{"error": "Nexus Chat temporarily unavailable"})
+			writeSSE(errData)
+			return
+		}
+		// Send full text as a single chunk
+		chunkData, _ := json.Marshal(map[string]string{"text": resp.Text})
+		writeSSE(chunkData)
+		fullText = resp.Text
+	}
+
+	// Persist the exchange to chat history
+	go func() {
+		persistCtx := context.Background()
+		_ = h.llmOrch.PersistChat(persistCtx, uid, sessionID, req.ToolSlug, req.Message, fullText)
+	}()
+
+	// Increment daily chat counter
+	msgCount := h.llmOrch.IncrDailyChatCount(r.Context(), uid)
+
+	// Send final done event
+	doneData, _ := json.Marshal(map[string]interface{}{
+		"done":          true,
+		"session_id":    sessionID,
+		"provider":      "GEMINI_LITE",
+		"message_count": msgCount,
+	})
+	writeSSE(doneData)
 }
 
 // timeNowUnix returns the current Unix timestamp (abstracted so tests can stub it).
@@ -754,3 +898,4 @@ func (h *StudioHandler) GetPromptHistory(w http.ResponseWriter, r *http.Request)
 		"count":   len(items),
 	})
 }
+

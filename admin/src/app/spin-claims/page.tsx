@@ -24,9 +24,52 @@ function fmtNaira(kobo: number) {
   return `₦${(kobo / 100).toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function formatPrizeValue(claim: SpinClaim): string {
+  const val = claim.prize_value ?? 0;
+  const type = (claim.prize_type ?? "").toLowerCase();
+  if (type.includes("point") || type.includes("pulse")) return `${val.toLocaleString()} pts`;
+  if (type.includes("data")) return `${val}MB Data`;
+  return `₦${(val / 100).toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+
 function fmtDate(iso: string) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" });
+}
+
+// ── SLA age helpers (BUG-024) ─────────────────────────────────────────────────
+function claimAgeHours(iso: string): number {
+  return (Date.now() - new Date(iso).getTime()) / 3_600_000;
+}
+
+function AgeBadge({ createdAt }: { createdAt: string }) {
+  const h = claimAgeHours(createdAt);
+  if (h < 48) return null;
+  const days = Math.floor(h / 24);
+  const hrs  = Math.floor(h % 24);
+  if (h >= 168) {
+    return (
+      <span style={{
+        background: "rgba(239,68,68,0.15)", color: "#ef4444",
+        border: "1px solid rgba(239,68,68,0.4)", borderRadius: 6,
+        padding: "2px 6px", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap",
+        display: "inline-block",
+      }}>
+        🚨 OVERDUE {days}d
+      </span>
+    );
+  }
+  return (
+    <span style={{
+      background: "rgba(245,158,11,0.15)", color: "#f59e0b",
+      border: "1px solid rgba(245,158,11,0.4)", borderRadius: 6,
+      padding: "2px 6px", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap",
+      display: "inline-block",
+    }}>
+      ⚠️ {days}d {hrs}h
+    </span>
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -54,6 +97,7 @@ export default function SpinClaimsPage() {
   const [page, setPage]               = useState(1);
   const [statusFilter, setStatus]     = useState("");
   const [typeFilter, setTypeFilter]   = useState("");
+  const [showOverdueOnly, setShowOverdueOnly] = useState(false);
   const [loading, setLoading]         = useState(true);
   const [error, setError]             = useState<string | null>(null);
   const [modal, setModal]             = useState<ModalState>(null);
@@ -86,6 +130,22 @@ export default function SpinClaimsPage() {
   }, [statusFilter, typeFilter, page]);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── Derived: overdue count + sorted/filtered display list (BUG-024) ────────
+  const overdue48hCount = claims.filter(
+    c => c.claim_status === "PENDING_ADMIN_REVIEW" && claimAgeHours(c.created_at) > 48
+  ).length;
+
+  // Sort: PENDING_ADMIN_REVIEW claims older than 48 h float to the top
+  const displayClaims = [...claims]
+    .sort((a, b) => {
+      const aOv = a.claim_status === "PENDING_ADMIN_REVIEW" && claimAgeHours(a.created_at) > 48;
+      const bOv = b.claim_status === "PENDING_ADMIN_REVIEW" && claimAgeHours(b.created_at) > 48;
+      if (aOv && !bOv) return -1;
+      if (!aOv && bOv) return 1;
+      return 0;
+    })
+    .filter(c => !showOverdueOnly || claimAgeHours(c.created_at) > 48);
 
   const handleApprove = async () => {
     if (!modal || modal.type !== "approve") return;
@@ -166,6 +226,30 @@ export default function SpinClaimsPage() {
           </div>
         )}
 
+        {/* ── SLA Overdue Banner (BUG-024) ── */}
+        {!loading && overdue48hCount > 0 && (
+          <div style={{
+            background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.35)",
+            borderRadius: 10, padding: "12px 18px",
+            display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+          }}>
+            <span style={{ fontSize: 20 }}>⚠️</span>
+            <span style={{ color: "#f59e0b", fontSize: 13, fontWeight: 600, flex: 1 }}>
+              {overdue48hCount} claim{overdue48hCount !== 1 ? "s have" : " has"} been waiting over 48 hours
+            </span>
+            <button
+              onClick={() => setShowOverdueOnly(v => !v)}
+              style={{
+                padding: "5px 14px", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                border: "1px solid rgba(245,158,11,0.5)",
+                color: showOverdueOnly ? "#1c2038" : "#f59e0b",
+                background: showOverdueOnly ? "#f59e0b" : "transparent",
+              }}>
+              {showOverdueOnly ? "✕ Show All" : "Filter by Overdue"}
+            </button>
+          </div>
+        )}
+
         {/* Stats Cards */}
         {stats && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(148px, 1fr))", gap: 12 }}>
@@ -178,7 +262,7 @@ export default function SpinClaimsPage() {
               { label: "Pending Value",  value: `₦${(stats.pending_value_ngn ?? 0).toLocaleString()}`,  color: "#f59e0b" },
               { label: "Approved Value", value: `₦${(stats.approved_value_ngn ?? 0).toLocaleString()}`, color: "#10b981" },
             ].map(s => (
-              <div key={s.label} className="card" style={{ padding: "14px 16px", border: (s as any).highlight ? "1px solid rgba(239,68,68,0.3)" : undefined }}>
+              <div key={s.label} className="card" style={{ padding: "14px 16px", border: (s as { highlight?: boolean }).highlight ? "1px solid rgba(239,68,68,0.3)" : undefined }}>
                 <p style={{ fontSize: 11, color: "#828cb4", marginBottom: 4 }}>{s.label}</p>
                 <p style={{ fontSize: 20, fontWeight: 700, color: s.color }}>{s.value}</p>
               </div>
@@ -207,7 +291,7 @@ export default function SpinClaimsPage() {
             <option value="pulse_points">Pulse Points</option>
           </select>
           <span style={{ color: "#828cb4", fontSize: 13 }}>
-            {loading ? "Loading…" : `${total} claim${total !== 1 ? "s" : ""}`}
+            {loading ? "Loading…" : `${showOverdueOnly ? displayClaims.length : total} claim${total !== 1 ? "s" : ""}`}
           </span>
         </div>
 
@@ -216,31 +300,44 @@ export default function SpinClaimsPage() {
           <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}>
             <div style={{ width: 32, height: 32, border: "3px solid #5f72f9", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
           </div>
-        ) : claims.length === 0 ? (
+        ) : displayClaims.length === 0 ? (
           <div className="card" style={{ padding: "40px 0", textAlign: "center", color: "#828cb4" }}>
-            No claims found{statusFilter ? ` with status "${statusFilter}"` : ""}{typeFilter ? ` for ${PRIZE_TYPE_LABELS[typeFilter] ?? typeFilter}` : ""}.
+            {showOverdueOnly
+              ? "No overdue claims found."
+              : `No claims found${statusFilter ? ` with status "${statusFilter}"` : ""}${typeFilter ? ` for ${PRIZE_TYPE_LABELS[typeFilter] ?? typeFilter}` : ""}.`}
           </div>
         ) : (
           <div className="card" style={{ overflow: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(95,114,249,0.15)" }}>
-                  {["Date", "Prize Type", "Value", "Bank / Phone", "Status", "Expires", "Actions"].map(h => (
+                  {["Date", "Age", "Prize Type", "Value", "Bank / Phone", "Status", "Expires", "Actions"].map(h => (
                     <th key={h} style={{ padding: "10px 14px", textAlign: "left", color: "#828cb4", fontWeight: 600, whiteSpace: "nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {claims.map(c => {
+                {displayClaims.map(c => {
                   const paymentTarget = c.bank_account_number
                     ? `${c.bank_name ?? "?"} • ${c.bank_account_number}`
                     : c.momo_claim_number || c.momo_number || "—";
                   const isCashReview = c.claim_status === "PENDING_ADMIN_REVIEW";
+                  const isOverdue = claimAgeHours(c.created_at) > 48;
                   return (
-                    <tr key={c.id} style={{ borderBottom: "1px solid rgba(95,114,249,0.08)", background: isCashReview ? "rgba(239,68,68,0.04)" : undefined }}>
+                    <tr key={c.id} style={{
+                      borderBottom: "1px solid rgba(95,114,249,0.08)",
+                      background: isCashReview && isOverdue
+                        ? "rgba(239,68,68,0.07)"
+                        : isCashReview
+                          ? "rgba(239,68,68,0.04)"
+                          : undefined,
+                    }}>
                       <td style={{ padding: "10px 14px", color: "#c4cde8", whiteSpace: "nowrap", fontSize: 12 }}>{fmtDate(c.created_at)}</td>
+                      <td style={{ padding: "10px 14px" }}>
+                        <AgeBadge createdAt={c.created_at} />
+                      </td>
                       <td style={{ padding: "10px 14px", color: "#e2e8ff" }}>{PRIZE_TYPE_LABELS[c.prize_type] ?? c.prize_type}</td>
-                      <td style={{ padding: "10px 14px", color: "#10b981", fontWeight: 700 }}>{fmtNaira(c.prize_value)}</td>
+                      <td style={{ padding: "10px 14px", color: "#10b981", fontWeight: 700 }}>{formatPrizeValue(c)}</td>
                       <td style={{ padding: "10px 14px", color: "#c4cde8", fontSize: 11, fontFamily: "monospace", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {paymentTarget}
                       </td>
@@ -331,7 +428,7 @@ export default function SpinClaimsPage() {
                 {[
                   ["Claim ID",       modal.claim.id],
                   ["Prize Type",     PRIZE_TYPE_LABELS[modal.claim.prize_type] ?? modal.claim.prize_type],
-                  ["Prize Value",    fmtNaira(modal.claim.prize_value)],
+                  ["Prize Value",    formatPrizeValue(modal.claim)],
                   ["Fulfillment",    modal.claim.fulfillment_status],
                   ["Admin Notes",    modal.claim.admin_notes || "—"],
                   ["Rejection",      modal.claim.rejection_reason || "—"],
@@ -374,7 +471,7 @@ export default function SpinClaimsPage() {
               <>
                 <h2 style={{ fontSize: 16, fontWeight: 700, color: "#10b981", marginBottom: 4 }}>✓ Approve Claim</h2>
                 <p style={{ fontSize: 13, color: "#828cb4", marginBottom: 16 }}>
-                  Approving {fmtNaira(modal.claim.prize_value)} cash prize.
+                  Approving {formatPrizeValue(modal.claim)} prize.
                 </p>
 
                 {/* Show bank details if provided */}
@@ -417,7 +514,7 @@ export default function SpinClaimsPage() {
               <>
                 <h2 style={{ fontSize: 16, fontWeight: 700, color: "#ef4444", marginBottom: 4 }}>✕ Reject Claim</h2>
                 <p style={{ fontSize: 13, color: "#828cb4", marginBottom: 16 }}>
-                  Rejecting {fmtNaira(modal.claim.prize_value)} claim. The user will be notified.
+                  Rejecting {formatPrizeValue(modal.claim)} claim. The user will be notified.
                 </p>
                 <label style={{ fontSize: 12, color: "#828cb4", display: "block", marginBottom: 6 }}>
                   Rejection Reason <span style={{ color: "#ef4444" }}>*</span>

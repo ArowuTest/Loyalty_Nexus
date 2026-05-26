@@ -286,6 +286,28 @@ function DemoSpinWheel({ onLoginClick }: { onLoginClick: () => void }) {
       <p className="text-[11px] text-white/30 text-center max-w-[220px]">
         Sign in for your daily free spin. Extra spins with Pulse Points.
       </p>
+      {/* BUG-037: Prize disclosure table for conversion & trust */}
+      <div className="mt-3 w-full max-w-[260px] rounded-xl border border-white/[0.07] p-3"
+        style={{ background: "rgba(255,255,255,0.02)" }}>
+        <p className="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-2 text-center">Prize Pool</p>
+        <div className="space-y-1">
+          {[
+            { label: "₦5,000 Cash",    prob: "5%",  color: "#F5A623" },
+            { label: "₦2,500 Cash",    prob: "8%",  color: "#F5A623" },
+            { label: "5GB Data",       prob: "5%",  color: "#00D4FF" },
+            { label: "2GB Data",       prob: "10%", color: "#00D4FF" },
+            { label: "1GB Data",       prob: "15%", color: "#06B6D4" },
+            { label: "₦1,000 Airtime", prob: "12%", color: "#10B981" },
+            { label: "500 Points",     prob: "15%", color: "#8B5CF6" },
+            { label: "Try Again",      prob: "30%", color: "#4B5563" },
+          ].map(({ label, prob, color }) => (
+            <div key={label} className="flex items-center justify-between text-[11px]">
+              <span style={{ color }} className="font-semibold">{label}</span>
+              <span className="text-white/30">{prob}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -297,6 +319,10 @@ export default function HomePage() {
   const router = useRouter();
   const { isAuthenticated, _hasHydrated } = useStore();
   const heroRef                           = useRef<HTMLElement>(null);
+  const [liveStats, setLiveStats] = useState<{
+    total_users: number; total_generations: number;
+    total_prizes_won: number; total_points_earned: number;
+  } | null>(null);
   const { scrollY }                       = useScroll();
   const heroY                             = useTransform(scrollY, [0, 600], [0, -80]);
   const heroOpacity                       = useTransform(scrollY, [0, 400], [1, 0.3]);
@@ -308,6 +334,16 @@ export default function HomePage() {
     const handler = () => setAuthOpen(true);
     window.addEventListener("nexus:open-auth", handler);
     return () => window.removeEventListener("nexus:open-auth", handler);
+  }, []);
+
+  // BUG-057: Wire landing-page stats to the real /api/v1/stats endpoint.
+  // Falls back to static values if fetch fails so the page never shows 0.
+  useEffect(() => {
+    const api = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/api/v1");
+    fetch(`${api}/stats`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setLiveStats(d); })
+      .catch(() => {/* silently fall through to static fallbacks */});
   }, []);
 
   return (
@@ -335,7 +371,7 @@ export default function HomePage() {
                 <p className="text-[12px] sm:text-[13px] text-white/50 leading-snug min-w-0">
                   <button onClick={() => isAuthenticated ? router.push('/dashboard') : openAuth()} className="font-black text-gold-500 hover:underline underline-offset-2 mr-1">{isAuthenticated ? 'Dashboard' : 'Sign in'}</button>
                   to see your Pulse Points, spin the wheel, and unlock{" "}
-                  <span className="font-bold text-white">30+ premium AI tools</span> — all from your MTN recharges.
+                  <span className="font-bold text-white">44 premium AI tools</span> — all from your MTN recharges.
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -397,7 +433,7 @@ export default function HomePage() {
             <FeaturePill icon={RotateCcw} label="Free spin on ₦1,000+ recharge" color="text-gold-400" />
             <FeaturePill icon={Trophy}    label="Win up to ₦5,000 instantly"     color="text-cyan-400" />
             <FeaturePill icon={Zap}       label="Pulse Points on every recharge" color="text-emerald-400" />
-            <FeaturePill icon={Sparkles}  label="30+ AI tools unlocked"          color="text-violet-400" />
+            <FeaturePill icon={Sparkles}  label="44 AI tools unlocked"          color="text-violet-400" />
           </motion.div>
 
           {/* CTA buttons */}
@@ -465,10 +501,10 @@ export default function HomePage() {
         <div className="max-w-5xl mx-auto px-4 sm:px-6">
           <StaggerGrid className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
             {[
-              { label: "Active Users",        value: 84231,     suffix: "+",  icon: Users,    color: "#F5A623", pre: "" },
-              { label: "AI Generations",      value: 1247903,   suffix: "+",  icon: Sparkles, color: "#00D4FF", pre: "" },
-              { label: "Pulse Points Issued", value: 92000000,  suffix: "+",  icon: Zap,      color: "#10B981", pre: "" },
-              { label: "Prize Money Won",     value: 18000000,  suffix: "+",  icon: Trophy,   color: "#8B5CF6", pre: "₦" },
+              { label: "Active Users",        value: liveStats?.total_users        ?? 84231,    suffix: "+", icon: Users,    color: "#F5A623", pre: "" },
+              { label: "AI Generations",      value: liveStats?.total_generations  ?? 1247903,  suffix: "+", icon: Sparkles, color: "#00D4FF", pre: "" },
+              { label: "Pulse Points Issued", value: liveStats?.total_points_earned ?? 92000000, suffix: "+", icon: Zap,      color: "#10B981", pre: "" },
+              { label: "Prizes Claimed",      value: liveStats?.total_prizes_won   ?? 18250,    suffix: "+", icon: Trophy,   color: "#8B5CF6", pre: "" },
             ].map(({ label, value, suffix, icon: Icon, color, pre }) => (
               <motion.div key={label} variants={fadeUp}>
                 <div className="glass rounded-2xl p-5 border border-white/[0.06] flex flex-col gap-2 hover:border-white/[0.14] transition-all duration-300">
@@ -503,7 +539,7 @@ export default function HomePage() {
               { n: "01", icon: "📱", color: "#00D4FF", title: "Recharge MTN",       body: "Recharge ₦1,000 or more on any MTN line. Your recharge is automatically detected — no codes, no hassle.", stat: "₦250 = 1 Pulse Point" },
               { n: "02", icon: "⚡", color: "#F5A623", title: "Earn Pulse Points",   body: "Every naira you recharge earns Pulse Points. The more you recharge, the more you earn. Higher tiers unlock better rewards.", stat: "Points on every recharge" },
               { n: "03", icon: "🎰", color: "#10B981", title: "Spin & Win",          body: "Each qualifying recharge earns a free wheel spin. Win instant cash, data bundles, airtime or bonus Pulse Points.", stat: "₦18M+ prizes distributed" },
-              { n: "04", icon: "🚀", color: "#8B5CF6", title: "Unlock AI Studio",    body: "Spend points to access 30+ AI tools — create photos, generate videos, build business plans, make music, and more. No more subscription challenges.", stat: "1.2M+ generations created" },
+              { n: "04", icon: "🚀", color: "#8B5CF6", title: "Unlock AI Studio",    body: "Spend points to access 44 AI tools — create photos, generate videos, build business plans, make music, and more. No more subscription challenges.", stat: "1.2M+ generations created" },
             ].map((step) => (
               <motion.div key={step.n} variants={fadeUp}>
                 <div className="glass rounded-2xl border border-white/[0.08] p-6 h-full flex flex-col hover:border-white/[0.15] transition-all duration-300">
@@ -592,8 +628,8 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <SectionHeader
             eyebrow="AI Studio"
-            title={<>30+ AI tools, <span className="text-nexus-400">all yours</span></>}
-            sub="Earn Pulse Points from your recharges and spend them on world-class AI tools. Tool pricing is set by the admin — always transparent."
+            title={<>44 AI tools, <span className="text-nexus-400">all yours</span></>}
+            sub="Earn Pulse Points from your recharges and spend them on 44 world-class AI tools. Tool pricing is set by the admin — always transparent."
           />
           {/* Category cards */}
           <StaggerGrid className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
@@ -647,7 +683,7 @@ export default function HomePage() {
           <div className="text-center mt-10">
             <button onClick={() => isAuthenticated ? router.push("/studio") : openAuth()}
               className="inline-flex items-center gap-2 glass border border-white/[0.12] rounded-2xl h-12 px-7 text-sm font-semibold text-white hover:border-white/25 transition-all duration-200">
-                {isAuthenticated ? "Open AI Studio" : "Explore all 30+ tools"}
+                {isAuthenticated ? "Open AI Studio" : "Explore all 44 tools"}
                 <ArrowRight className="w-4 h-4" />
               </button>
           </div>

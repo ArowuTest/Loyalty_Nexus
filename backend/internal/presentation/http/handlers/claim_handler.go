@@ -71,16 +71,19 @@ func (h *ClaimHandler) GetMyWins(w http.ResponseWriter, r *http.Request) {
 }
 
 // prizeLabelFor returns a human-readable label for a prize.
-func prizeLabelFor(prizeType string, value float64) string {
+// value is in KOBO for monetary prizes; pulse_points are whole units.
+func prizeLabelFor(prizeType string, valueKobo float64) string {
+	naira := valueKobo / 100.0
 	switch prizeType {
 	case "airtime":
-		return fmt.Sprintf("₦%.0f Airtime", value)
+		return fmt.Sprintf("₦%.0f Airtime", naira)
 	case "data_bundle":
-		return fmt.Sprintf("%.0fMB Data Bundle", value)
+		// For data we show the Naira value since MB info is in the prize name.
+		return fmt.Sprintf("₦%.0f Data Bundle", naira)
 	case "pulse_points":
-		return fmt.Sprintf("+%.0f Pulse Points", value)
+		return fmt.Sprintf("+%.0f Pulse Points", valueKobo) // points are not kobo
 	case "momo_cash":
-		return fmt.Sprintf("₦%.0f MoMo Cash", value)
+		return fmt.Sprintf("₦%.0f MoMo Cash", naira)
 	default:
 		return "Prize"
 	}

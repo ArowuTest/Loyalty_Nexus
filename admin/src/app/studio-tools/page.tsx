@@ -552,6 +552,7 @@ function StatsPanel({ onClose }: { onClose: () => void }) {
 interface EditState {
   point_cost: string;
   is_active: boolean;
+  coming_soon: boolean;
   provider: string;
   description: string;
   icon: string;
@@ -601,7 +602,8 @@ export default function StudioToolsPage() {
   // ── Computed stats ─────────────────────────────────────────────────────────
   const totalTools    = tools.length;
   const activeTools   = tools.filter(t => t.is_active).length;
-  const disabledTools = tools.filter(t => !t.is_active).length;
+  const comingSoonTools = tools.filter(t => t.coming_soon).length;
+  const disabledTools = tools.filter(t => !t.is_active && !t.coming_soon).length;
   const categories    = [...new Set(tools.map(t => t.category))].length;
 
   const filtered = activeTab === "All" ? tools : tools.filter(t => t.category === activeTab);
@@ -612,6 +614,7 @@ export default function StudioToolsPage() {
     setEditState({
       point_cost: String(t.point_cost),
       is_active: t.is_active,
+      coming_soon: t.coming_soon ?? false,
       provider: t.provider || "",
       description: t.description || "",
       icon: t.icon || "",
@@ -634,7 +637,8 @@ export default function StudioToolsPage() {
     try {
       await adminAPI.updateStudioTool(tool.id, {
         point_cost: cost,
-        is_active: editState.is_active,
+        is_active: editState.coming_soon ? false : editState.is_active,
+        coming_soon: editState.coming_soon,
         provider: editState.provider,
         description: editState.description,
         icon: editState.icon,
@@ -714,10 +718,11 @@ export default function StudioToolsPage() {
 
         {/* ── Stats Bar ── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12, marginBottom: 24 }}>
-          <StatCard icon={<Package size={18} />}      label="Total Tools"     value={totalTools}    color={PRIMARY} />
-          <StatCard icon={<CheckCircle2 size={18} />} label="Active Tools"    value={activeTools}   color="#34d399" />
-          <StatCard icon={<XCircle size={18} />}      label="Disabled Tools"  value={disabledTools} color="#f87171" />
-          <StatCard icon={<Activity size={18} />}     label="Categories"      value={categories}    color="#f59e0b" />
+          <StatCard icon={<Package size={18} />}      label="Total Tools"     value={totalTools}      color={PRIMARY} />
+          <StatCard icon={<CheckCircle2 size={18} />} label="Active Tools"    value={activeTools}     color="#34d399" />
+          <StatCard icon={<XCircle size={18} />}      label="Disabled Tools"  value={disabledTools}   color="#f87171" />
+          <StatCard icon={<Zap size={18} />}          label="Coming Soon"     value={comingSoonTools} color="#f59e0b" />
+          <StatCard icon={<Activity size={18} />}     label="Categories"      value={categories}      color="#a78bfa" />
         </div>
 
         {/* ── Error Banner ── */}
@@ -905,26 +910,54 @@ export default function StudioToolsPage() {
                         {/* Status */}
                         <td style={{ padding: "13px 16px" }}>
                           {isEditing && editState ? (
-                            <button
-                              onClick={() => setEditState(prev => prev ? { ...prev, is_active: !prev.is_active } : prev)}
-                              style={{
-                                background: editState.is_active ? "rgba(52,211,153,0.12)" : "rgba(239,68,68,0.1)",
-                                border: `1px solid ${editState.is_active ? "rgba(52,211,153,0.3)" : "rgba(239,68,68,0.25)"}`,
-                                color: editState.is_active ? "#34d399" : "#f87171",
-                                borderRadius: 20, fontSize: 11, fontWeight: 600,
-                                padding: "3px 10px", cursor: "pointer",
-                                display: "flex", alignItems: "center", gap: 5,
-                              }}
-                            >
-                              <span style={{
-                                width: 7, height: 7, borderRadius: "50%",
-                                background: editState.is_active ? "#34d399" : "#f87171",
-                                display: "inline-block",
-                              }} />
-                              {editState.is_active ? "Active" : "Disabled"}
-                            </button>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                              {/* Active toggle — only relevant when not coming_soon */}
+                              {!editState.coming_soon && (
+                                <button
+                                  onClick={() => setEditState(prev => prev ? { ...prev, is_active: !prev.is_active } : prev)}
+                                  style={{
+                                    background: editState.is_active ? "rgba(52,211,153,0.12)" : "rgba(239,68,68,0.1)",
+                                    border: `1px solid ${editState.is_active ? "rgba(52,211,153,0.3)" : "rgba(239,68,68,0.25)"}`,
+                                    color: editState.is_active ? "#34d399" : "#f87171",
+                                    borderRadius: 20, fontSize: 11, fontWeight: 600,
+                                    padding: "3px 10px", cursor: "pointer",
+                                    display: "flex", alignItems: "center", gap: 5,
+                                  }}
+                                >
+                                  <span style={{
+                                    width: 7, height: 7, borderRadius: "50%",
+                                    background: editState.is_active ? "#34d399" : "#f87171",
+                                    display: "inline-block",
+                                  }} />
+                                  {editState.is_active ? "Active" : "Disabled"}
+                                </button>
+                              )}
+                              {/* Coming Soon toggle */}
+                              <label style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                                <input type="checkbox" checked={editState.coming_soon}
+                                  onChange={e => setEditState(prev => prev ? {
+                                    ...prev,
+                                    coming_soon: e.target.checked,
+                                    is_active: e.target.checked ? false : prev.is_active,
+                                  } : prev)}
+                                  style={{ accentColor: "#f59e0b", width: 13, height: 13 }}
+                                />
+                                <span style={{ color: "#f59e0b", fontSize: 10, fontWeight: 700 }}>🚧 Coming Soon</span>
+                              </label>
+                            </div>
                           ) : (
-                            <StatusPill active={t.is_active} />
+                            t.coming_soon ? (
+                              <span style={{
+                                display: "inline-flex", alignItems: "center", gap: 5,
+                                background: "rgba(245,158,11,0.1)", color: "#f59e0b",
+                                border: "1px solid rgba(245,158,11,0.3)",
+                                borderRadius: 20, fontSize: 11, fontWeight: 600, padding: "3px 9px",
+                              }}>
+                                🚧 Coming Soon
+                              </span>
+                            ) : (
+                              <StatusPill active={t.is_active} />
+                            )
                           )}
                         </td>
 

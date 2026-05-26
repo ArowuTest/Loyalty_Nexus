@@ -178,3 +178,16 @@ func userIDFromContext(r *http.Request) *uuid.UUID {
 	}
 	return &uid
 }
+
+// GET /api/v1/recharge/networks/detect?msisdn=2348XXXXXXXXX&network=MTN
+// 3-tier smart network detection: cached history → VTPass verify → user selection.
+func (h *VTURechargeHandler) DetectNetwork(w http.ResponseWriter, r *http.Request) {
+	msisdn := strings.TrimSpace(r.URL.Query().Get("msisdn"))
+	userNetwork := strings.TrimSpace(r.URL.Query().Get("network"))
+	if msisdn == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "msisdn is required"})
+		return
+	}
+	result := h.svc.DetectNetworkSmart(r.Context(), msisdn, userNetwork)
+	writeJSON(w, http.StatusOK, result)
+}

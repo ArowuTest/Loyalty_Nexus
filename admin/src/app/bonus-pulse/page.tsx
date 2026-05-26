@@ -4,26 +4,16 @@ import { useState, useEffect, useCallback } from "react";
 import AdminShell from "@/components/layout/AdminShell";
 import adminAPI, { BonusPulseAwardRecord, BonusPulseAwardResult } from "@/lib/api";
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Normalise a Nigerian phone number to the bare 13-digit 234XXXXXXXXXX format
- * that is stored in the database (no leading +).
- * Accepts: 2348027000003 | +2348027000003 | 08027000003 | 8027000003
- */
 function normalisePhone(raw: string): string {
-  const digits = raw.replace(/\D/g, ""); // strip everything except digits
-  if (digits.startsWith("234") && digits.length === 13) return digits;          // already correct
-  if (digits.startsWith("0") && digits.length === 11) return "234" + digits.slice(1); // 0XX → 234XX
-  if (digits.length === 10) return "234" + digits;                               // 8XX → 234XX
-  return digits; // return as-is (may already be 234...)
+  const digits = raw.replace(/\D/g, "");
+  if (digits.startsWith("234") && digits.length === 13) return digits;
+  if (digits.startsWith("0") && digits.length === 11) return "234" + digits.slice(1);
+  if (digits.length === 10) return "234" + digits;
+  return digits;
 }
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString("en-NG", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  return new Date(iso).toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" });
 }
 
 function pts(n: number) {
@@ -42,18 +32,30 @@ function AwardForm({ onSuccess }: { onSuccess: (r: BonusPulseAwardResult) => voi
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const pts = parseInt(points, 10);
-    if (!phone.trim() || isNaN(pts) || pts <= 0) {
+
+    // ── BUG-027: required campaign + note (min 10 chars) ─────────────────────
+    if (!campaign.trim()) {
+      setError("Campaign and note are required for audit trail (note min 10 chars)");
+      return;
+    }
+    if (!note.trim() || note.trim().length < 10) {
+      setError("Campaign and note are required for audit trail (note min 10 chars)");
+      return;
+    }
+
+    const ptsVal = parseInt(points, 10);
+    if (!phone.trim() || isNaN(ptsVal) || ptsVal <= 0) {
       setError("Phone number and a positive point value are required.");
       return;
     }
+
     setLoading(true);
     try {
       const result = await adminAPI.awardBonusPulse({
         phone_number: normalisePhone(phone.trim()),
-        points: pts,
-        campaign: campaign.trim() || undefined,
-        note: note.trim() || undefined,
+        points: ptsVal,
+        campaign: campaign.trim(),
+        note: note.trim(),
       });
       onSuccess(result);
       setPhone(""); setPoints(""); setCampaign(""); setNote("");
@@ -98,22 +100,31 @@ function AwardForm({ onSuccess }: { onSuccess: (r: BonusPulseAwardResult) => voi
           />
         </label>
         <label style={labelStyle}>
-          Campaign name <span style={{ color: "#9ca3af", fontWeight: 400 }}>(optional)</span>
+          Campaign name <span style={{ color: "#ef4444" }}>*</span>
           <input
             value={campaign}
             onChange={e => setCampaign(e.target.value)}
             placeholder="e.g. Ramadan 2025"
-            style={inputStyle}
+            required
+            style={campaign.trim() === "" && error ? { ...inputStyle, borderColor: "#ef4444" } : inputStyle}
           />
         </label>
         <label style={labelStyle}>
-          Note <span style={{ color: "#9ca3af", fontWeight: 400 }}>(optional)</span>
+          Note <span style={{ color: "#ef4444" }}>*</span>{" "}
+          <span style={{ color: "#9ca3af", fontWeight: 400, fontSize: 11 }}>(min 10 chars)</span>
           <input
             value={note}
             onChange={e => setNote(e.target.value)}
-            placeholder="e.g. VIP incentive"
-            style={inputStyle}
+            placeholder="e.g. VIP incentive for loyalty"
+            required
+            minLength={10}
+            style={(!note.trim() || note.trim().length < 10) && error ? { ...inputStyle, borderColor: "#ef4444" } : inputStyle}
           />
+          {note.trim().length > 0 && note.trim().length < 10 && (
+            <span style={{ fontSize: 11, color: "#ef4444", marginTop: 2 }}>
+              {10 - note.trim().length} more character{10 - note.trim().length !== 1 ? "s" : ""} needed
+            </span>
+          )}
         </label>
       </div>
 
@@ -246,7 +257,6 @@ function AuditLog({ refresh }: { refresh: number }) {
         </div>
       )}
 
-      {/* Pagination */}
       {pages > 1 && (
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
           <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} style={pageBtnStyle}>← Prev</button>
@@ -265,7 +275,7 @@ export default function BonusPulsePage() {
 
   function handleSuccess(r: BonusPulseAwardResult) {
     setLastResult(r);
-    setRefreshKey(k => k + 1); // trigger audit log reload
+    setRefreshKey(k => k + 1);
   }
 
   return (

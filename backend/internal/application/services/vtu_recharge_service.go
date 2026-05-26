@@ -119,6 +119,117 @@ func NewVTURechargeService(
 	}
 }
 
+
+// NetworkDetectionResult holds the result of 3-tier smart network detection.
+type NetworkDetectionResult struct {
+	Network    string `json:"network"`
+	Confidence string `json:"confidence"` // cached | verified | user_selected
+	TierUsed   int    `json:"tier_used"`  // 1, 2, or 3
+	Message    string `json:"message"`
+}
+
+// DetectNetworkSmart resolves the network for an MSISDN using a 3-tier approach:
+//  1. Recent successful recharge history (most accurate for returning users)
+//  2. VTPass subscriber verify (authoritative for ported numbers)
+//  3. User's selected network (fallback — platform will attempt and handle failure)
+func (s *VTURechargeService) DetectNetworkSmart(ctx context.Context, msisdn, userSelectedNetwork string) NetworkDetectionResult {
+	norm := normaliseMSISDN(msisdn)
+
+	// Tier 1: recent successful recharge in the past 90 days
+	var lastNetwork string
+	err := s.db.WithContext(ctx).
+		Table("recharges").
+		Select("network").
+		Where("msisdn = ? AND status = 'SUCCESS' AND created_at > NOW() - INTERVAL '90 days'", norm).
+		Order("created_at DESC").
+		Limit(1).
+		Scan(&lastNetwork).Error
+	if err == nil && lastNetwork != "" {
+		log.Printf("[DetectNetwork] Tier1 cache hit: msisdn=%s network=%s", norm, lastNetwork)
+		return NetworkDetectionResult{
+			Network:    strings.ToUpper(lastNetwork),
+			Confidence: "cached",
+			TierUsed:   1,
+			Message:    "Network identified from your recent recharge history",
+		}
+	}
+
+	// Tier 2: VTPass subscriber verify (2-second timeout)
+	if s.vtpass != nil {
+		vtCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if network, ok := s.vtpassVerifyNetwork(vtCtx, norm); ok && network != "" {
+			log.Printf("[DetectNetwork] Tier2 verified: msisdn=%s network=%s", norm, network)
+			return NetworkDetectionResult{
+				Network:    strings.ToUpper(network),
+				Confidence: "verified",
+				TierUsed:   2,
+				Message:    "Network verified",
+			}
+		}
+	}
+
+	// Tier 3: accept user selection
+	selected := strings.ToUpper(strings.TrimSpace(userSelectedNetwork))
+	if selected == "" {
+		selected = "MTN"
+	}
+	log.Printf("[DetectNetwork] Tier3 user-selected: msisdn=%s network=%s", norm, selected)
+	return NetworkDetectionResult{
+		Network:    selected,
+		Confidence: "user_selected",
+		TierUsed:   3,
+		Message:    "Using your selected network — we'll attempt the recharge",
+	}
+}
+
+// vtpassVerifyNetwork calls VTPass verify to determine the real network for an MSISDN.
+// Returns the network name and true on success, empty string and false on any error.
+func (s *VTURechargeService) vtpassVerifyNetwork(ctx context.Context, msisdn string) (string, bool) {
+	baseURL := os.Getenv("VTPASS_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://sandbox.vtpass.com"
+	}
+	payload := map[string]string{
+		"billersCode": msisdn,
+		"serviceID":   "mtn-data",
+		"type":        "prepaid",
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/merchant-verify", bytes.NewReader(body))
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", os.Getenv("VTPASS_API_KEY"))
+	req.Header.Set("secret-key", os.Getenv("VTPASS_SECRET_KEY"))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+	var result struct {
+		Content struct {
+			Network      string `json:"Network"`
+			CustomerName string `json:"Customer_Name"`
+			Status       string `json:"Status"`
+		} `json:"content"`
+		ResponseDescription string `json:"response_description"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", false
+	}
+	net := strings.ToUpper(strings.TrimSpace(result.Content.Network))
+	if net == "" || result.ResponseDescription == "TRANSACTION FAILED" {
+		return "", false
+	}
+	return net, true
+}
+
 // ── GetActiveNetworks ─────────────────────────────────────────────────────────
 
 func (s *VTURechargeService) GetActiveNetworks(ctx context.Context) ([]external.NetworkResponse, error) {
@@ -210,8 +321,13 @@ func (s *VTURechargeService) InitiateRecharge(ctx context.Context, req InitiateR
 	if activeCount == 0 {
 		return nil, fmt.Errorf("network %s is not currently available", req.Network)
 	}
+	if req.AmountKobo == 0 {
+		// Likely a field name mistake: frontend may have sent "amount" instead of "amount_kobo".
+		// Return a descriptive error rather than the generic ₦100 minimum message.
+		return nil, fmt.Errorf("amount_kobo is required and must be in kobo (e.g. 100000 = ₦1,000); received 0 — did you send \"amount\" instead of \"amount_kobo\"?")
+	}
 	if req.AmountKobo < 10000 {
-		return nil, fmt.Errorf("minimum recharge amount is ₦100")
+		return nil, fmt.Errorf("minimum recharge amount is ₦100 (10000 kobo)")
 	}
 	if req.RechargeType == "DATA" && req.VariationCode == "" {
 		return nil, fmt.Errorf("variation_code is required for data recharges")
@@ -501,10 +617,14 @@ func (s *VTURechargeService) markSuccess(ctx context.Context, recharge *VTURecha
 	if s.rechargeSvc == nil {
 		log.Printf("[VTU] markSuccess: rechargeSvc is nil — skipping wallet award for ref=%s", recharge.PaymentReference)
 	} else {
-		user, findErr := s.rechargeSvc.userRepo.FindByPhoneNumber(ctx, recharge.MSISDN)
+		msisdnNorm := normaliseMSISDN(recharge.MSISDN)
+		user, findErr := s.rechargeSvc.userRepo.FindByPhoneNumber(ctx, msisdnNorm)
+		if findErr != nil && msisdnNorm != recharge.MSISDN {
+			user, findErr = s.rechargeSvc.userRepo.FindByPhoneNumber(ctx, recharge.MSISDN)
+		}
 		if findErr != nil {
-			log.Printf("[VTU] markSuccess: user not found for msisdn=%s (err=%v) — no wallet award for ref=%s",
-				recharge.MSISDN, findErr, recharge.PaymentReference)
+			log.Printf("[VTU] markSuccess: user not found for msisdn=%s (normalised=%s, err=%v) — no wallet award for ref=%s",
+				recharge.MSISDN, msisdnNorm, findErr, recharge.PaymentReference)
 		} else {
 			log.Printf("[VTU] markSuccess: found user id=%s for msisdn=%s — awarding %d pts",
 				user.ID, recharge.MSISDN, pointsEarned)
