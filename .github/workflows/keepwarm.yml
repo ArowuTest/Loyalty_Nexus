@@ -1,0 +1,47 @@
+name: Keep Render Warm
+
+# Pings the Vercel keep-warm endpoint every 10 minutes.
+# That endpoint in turn pings the Render backend /health, preventing
+# the free-tier instance from spinning down after 15 minutes of inactivity.
+#
+# Cost: zero — public repos have unlimited free GitHub Actions minutes.
+# Render: no cost impact — /health is a read-only ping, no compute beyond wake-up.
+# Vercel: no cost impact — the Edge function is invoked, counts against Edge invocations
+#         (Hobby plan: 1,000,000 free/month; this adds ~4,400/month, well within limit).
+
+on:
+  schedule:
+    # Every 10 minutes. GitHub may delay by a few minutes under load —
+    # that's fine; the goal is to stay under Render's 15-minute idle threshold.
+    - cron: "*/10 * * * *"
+  workflow_dispatch: # Allow manual trigger from GitHub Actions UI
+
+jobs:
+  ping:
+    name: Ping keep-warm endpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Ping /api/keepwarm
+        run: |
+          echo "Pinging keep-warm endpoint..."
+          RESPONSE=$(curl -s -o /tmp/keepwarm_response.json -w "%{http_code}" \
+            --max-time 30 \
+            "https://loyalty-nexus.vercel.app/api/keepwarm")
+
+          echo "HTTP status: $RESPONSE"
+          echo "Response body:"
+          cat /tmp/keepwarm_response.json
+
+          if [ "$RESPONSE" != "200" ]; then
+            echo "WARNING: Unexpected HTTP status $RESPONSE — backend may be down"
+            exit 1
+          fi
+
+          # Check if backend responded ok
+          OK=$(cat /tmp/keepwarm_response.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ok',''))")
+          echo "Backend ok: $OK"
+          if [ "$OK" != "True" ]; then
+            echo "WARNING: Backend reported ok=false — Render may still be cold-starting"
+          fi
