@@ -197,7 +197,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 const Text('⚡', style: TextStyle(fontSize: 20)),
                 const SizedBox(width: 8),
                 Text(
-                  profileAsync.valueOrNull?['full_name']?.toString().split(' ').first
+                  profileAsync.valueOrNull?['display_name']?.toString().split(' ').first
                       ?? 'Loyalty Nexus',
                   style: const TextStyle(color: NexusColors.textPrimary, fontWeight: FontWeight.w700),
                 ),

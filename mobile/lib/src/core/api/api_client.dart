@@ -110,7 +110,12 @@ class UserApi {
 
   Future<Map<String, dynamic>> getProfile() async {
     final r = await _dio.apiGet<Map>('/user/profile');
-    return Map<String, dynamic>.from(r as Map);
+    final raw = Map<String, dynamic>.from(r as Map);
+    // Backend returns { "user": {...}, "lifetime_points": N } — unwrap the nested user object
+    // so callers can read fields (phone_number, tier, display_name, etc.) directly.
+    final nested = raw['user'];
+    if (nested is Map) return Map<String, dynamic>.from(nested);
+    return raw;
   }
 
   Future<Map<String, dynamic>> getWallet() async {
@@ -149,10 +154,10 @@ class UserApi {
   }
 
   /// Update profile fields — only non-null fields are sent
-  Future<Map<String, dynamic>> updateProfile({String? fullName, String? state}) async {
+  Future<Map<String, dynamic>> updateProfile({String? displayName, String? state}) async {
     final payload = <String, dynamic>{};
-    if (fullName != null) payload['full_name'] = fullName;
-    if (state != null)    payload['state'] = state;
+    if (displayName != null) payload['display_name'] = displayName;
+    if (state != null)       payload['state'] = state;
     final r = await _dio.apiPatch<Map>('/user/profile', data: payload);
     return Map<String, dynamic>.from(r as Map);
   }

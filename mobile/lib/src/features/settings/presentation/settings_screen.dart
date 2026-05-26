@@ -163,7 +163,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   trailing: null),
               data: (p) => _Tile(
                 icon: Icons.person_outline_rounded,
-                title: p['full_name'] as String? ?? 'Your Profile',
+                title: p['display_name'] as String? ?? 'Your Profile',
                 subtitle: p['state'] as String? ?? 'Update your profile',
                 onTap: () => _showEditProfileSheet(p),
                 trailing: const Icon(Icons.chevron_right_rounded,
@@ -428,7 +428,7 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   @override
   void initState() {
     super.initState();
-    _nameCtrl = TextEditingController(text: widget.profile['full_name'] as String? ?? '');
+    _nameCtrl = TextEditingController(text: widget.profile['display_name'] as String? ?? '');
     _selectedState = widget.profile['state'] as String?;
   }
   @override void dispose() { _nameCtrl.dispose(); super.dispose(); }
@@ -437,8 +437,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     setState(() { _saving = true; _err = null; });
     try {
       await widget.ref.read(userApiProvider).updateProfile(
-        fullName: _nameCtrl.text.trim().isNotEmpty ? _nameCtrl.text.trim() : null,
-        state:    _selectedState,
+        displayName: _nameCtrl.text.trim().isNotEmpty ? _nameCtrl.text.trim() : null,
+        state:       _selectedState,
       );
       widget.ref.invalidate(_profileProvider);
       if (mounted) Navigator.pop(context);

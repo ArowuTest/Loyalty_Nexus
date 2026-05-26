@@ -126,7 +126,7 @@ class _HeroBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tier       = (profile['tier'] as String? ?? 'BRONZE').toUpperCase();
-    final name       = profile['full_name'] as String? ?? phone;
+    final name       = profile['display_name'] as String? ?? phone;
     final joinDate   = profile['created_at'] as String? ?? '';
     final tierColor  = NexusColors.forTier(tier);
     final tierEmoji  = NexusColors.emojiForTier(tier);
