@@ -549,13 +549,38 @@ function renderInline(text: string) {
 
 // ─── Streaming message wrapper ────────────────────────────────────────────────
 
+/**
+ * During the typewriter animation, a partially-received markdown token
+ * (e.g. "**Hello wor" without its closing **) shows as raw punctuation.
+ * Strip the leading token marker from any unclosed inline-token at the end
+ * of the string so the user sees "Hello wor" instead of "**Hello wor".
+ *
+ * Handles: **bold**, *italic*, `code`, and opening ``` fences.
+ * Only applied while actively streaming (isStreaming=true).
+ */
+function sanitizeStreamingMarkdown(text: string): string {
+  return text
+    // Unclosed bold: ** followed by non-** text at end of string
+    .replace(/\*\*([^*]*)$/, "$1")
+    // Unclosed italic: single * followed by non-* text at end (only if no bold ahead)
+    .replace(/(?<!\*)\*(?!\*)([^*]*)$/, "$1")
+    // Unclosed inline code: ` followed by non-` text at end
+    .replace(/`([^`]*)$/, "$1")
+    // Unclosed fenced code block: trailing ``` … without closing ``` — trim the fence
+    .replace(/```[a-z]*\n?([^`]*)$/, "$1");
+}
+
 function StreamingMessage({
   content, isStreaming, onStreamDone,
 }: {
   content: string; isStreaming: boolean; onStreamDone: () => void;
 }) {
   const displayed = useStreamText(content, isStreaming, onStreamDone);
-  return <RichMessage content={displayed} />;
+  // Hide raw markdown punctuation for incomplete tokens at the stream cursor
+  const safeDisplayed = isStreaming
+    ? sanitizeStreamingMarkdown(displayed)
+    : displayed;
+  return <RichMessage content={safeDisplayed} />;
 }
 
 // ─── Typing indicator ─────────────────────────────────────────────────────────
