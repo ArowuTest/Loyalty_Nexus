@@ -3380,6 +3380,68 @@ func (o *AIStudioOrchestrator) callPollinationsImageWithSeed(ctx context.Context
 	return publicURL, nil
 }
 
+// detectAndFixAudioFormat inspects the magic bytes of raw audio data and returns the
+// correct MIME type and file extension. It also repairs malformed WAV headers that
+// Qwen-TTS emits for streaming responses: the RIFF file-size field and the "data"
+// sub-chunk size are both set to 0x7FFFFFFF as placeholders, which prevents browsers
+// from determining duration or seeking. We fix them in-place before uploading.
+func detectAndFixAudioFormat(audio []byte, requestedFormat string) (mimeType, ext string) {
+	// Default: honour the requested format.
+	mimeType, ext = "audio/mpeg", "mp3"
+	switch requestedFormat {
+	case "wav":
+		mimeType, ext = "audio/wav", "wav"
+	case "opus":
+		mimeType, ext = "audio/ogg", "opus"
+	case "aac":
+		mimeType, ext = "audio/aac", "aac"
+	case "flac":
+		mimeType, ext = "audio/flac", "flac"
+	}
+
+	// Detect RIFF/WAV regardless of what the caller requested.
+	// Qwen-TTS ignores response_format and always returns WAV.
+	if len(audio) >= 12 && string(audio[0:4]) == "RIFF" && string(audio[8:12]) == "WAVE" {
+		mimeType, ext = "audio/wav", "wav"
+
+		// ── Fix RIFF file-size field (bytes 4-7, little-endian uint32) ──────────
+		// Streaming TTS APIs write 0x7FFFFFFF here because the total size is
+		// unknown at stream-start. Overwrite it with the real value.
+		fileSize := uint32(len(audio) - 8)
+		audio[4] = byte(fileSize)
+		audio[5] = byte(fileSize >> 8)
+		audio[6] = byte(fileSize >> 16)
+		audio[7] = byte(fileSize >> 24)
+
+		// ── Walk the WAV chunk list and fix the "data" sub-chunk size ────────────
+		// Each chunk: 4-byte ID + 4-byte LE size + <size> bytes of data.
+		for i := 12; i+8 <= len(audio); {
+			id := string(audio[i : i+4])
+			chunkSz := uint32(audio[i+4]) | uint32(audio[i+5])<<8 |
+				uint32(audio[i+6])<<16 | uint32(audio[i+7])<<24
+			if id == "data" {
+				dataPayload := uint32(len(audio) - i - 8)
+				audio[i+4] = byte(dataPayload)
+				audio[i+5] = byte(dataPayload >> 8)
+				audio[i+6] = byte(dataPayload >> 16)
+				audio[i+7] = byte(dataPayload >> 24)
+				break
+			}
+			// Advance to next chunk (WAV chunks are even-byte-padded).
+			advance := 8 + int(chunkSz)
+			if advance <= 8 || i+advance > len(audio) {
+				break // corrupted size — stop scanning
+			}
+			if chunkSz%2 != 0 {
+				advance++
+			}
+			i += advance
+		}
+		log.Printf("[TTS] Qwen-TTS returned WAV (requested %s) — corrected RIFF headers, stored as audio/wav", requestedFormat)
+	}
+	return mimeType, ext
+}
+
 // callPollinationsTTS generates speech using Pollinations Qwen-TTS (UP as of May 2026).
 // ElevenLabs-backed models (tts-1 with nova/alloy/echo) are OFF — use qwen-tts instead.
 // Qwen-TTS voice options: Cherry (female), Ethan (male), Serena (female), Default.
@@ -3422,11 +3484,12 @@ func (o *AIStudioOrchestrator) callPollinationsTTS(ctx context.Context, text, vo
 		return "", fmt.Errorf("pollinations TTS: response too small")
 	}
 
-	fileName := fmt.Sprintf("studio/narrate/pollinations_%d.mp3", time.Now().UnixNano())
-	publicURL, err := o.storage.Upload(ctx, fileName, audioBytes, "audio/mpeg")
+	mimeType, ext := detectAndFixAudioFormat(audioBytes, "mp3")
+	fileName := fmt.Sprintf("studio/narrate/pollinations_%d.%s", time.Now().UnixNano(), ext)
+	publicURL, err := o.storage.Upload(ctx, fileName, audioBytes, mimeType)
 	if err != nil {
 		encoded64 := base64.StdEncoding.EncodeToString(audioBytes)
-		return "data:audio/mpeg;base64," + encoded64, nil
+		return "data:" + mimeType + ";base64," + encoded64, nil
 	}
 	return publicURL, nil
 }
@@ -3478,18 +3541,10 @@ func (o *AIStudioOrchestrator) callPollinationsTTSFull(ctx context.Context, text
 	if err != nil || len(audioBytes) < 500 {
 		return "", fmt.Errorf("pollinations TTS: response too small")
 	}
-	mimeType := "audio/mpeg"
-	ext := "mp3"
-	switch format {
-	case "wav":
-		mimeType, ext = "audio/wav", "wav"
-	case "opus":
-		mimeType, ext = "audio/ogg", "opus"
-	case "aac":
-		mimeType, ext = "audio/aac", "aac"
-	case "flac":
-		mimeType, ext = "audio/flac", "flac"
-	}
+	// detectAndFixAudioFormat detects WAV magic bytes and corrects streaming WAV
+	// headers so browsers can determine duration and seek.  Qwen-TTS ignores the
+	// response_format field and always returns WAV.
+	mimeType, ext := detectAndFixAudioFormat(audioBytes, format)
 	fileName := fmt.Sprintf("studio/narrate/pollinations_%d.%s", time.Now().UnixNano(), ext)
 	publicURL, err := o.storage.Upload(ctx, fileName, audioBytes, mimeType)
 	if err != nil {
