@@ -1054,6 +1054,23 @@ export default function DashboardPage() {
                 </div>
               </div>
             )}
+
+            {/* ── Recharge CTA ── */}
+            {/* RECHARGE_RATE: update this constant if the points-per-naira rate changes in the admin panel */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 pt-4"
+              style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+              <p className="text-white/55 text-[12px] leading-snug">
+                Every <span className="text-white font-black">₦250</span> recharge earns you{" "}
+                <span className="font-black" style={{ color: "var(--gold)" }}>1 FREE Pulse Point.</span>{" "}
+                Keep earning, keep climbing.
+              </p>
+              <Link href="/recharge"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-black text-[12px] whitespace-nowrap flex-shrink-0 transition-opacity hover:opacity-90"
+                style={{ background: "linear-gradient(135deg, #F5A623, #e8940f)", color: "#000" }}>
+                <Zap size={13} />
+                Recharge Now
+              </Link>
+            </div>
           </div>
         </motion.div>
 
