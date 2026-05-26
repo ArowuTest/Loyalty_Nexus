@@ -103,7 +103,7 @@ const TOOL_META: Record<string, { time: string; output: string; tip: string }> =
   "video-premium":      { time: "~45 sec",  output: "HD video clip",                 tip: "Upload your photo, then describe the animation — Nexus AI brings it to life" },
   "video-veo":          { time: "~3 min",   output: "Cinematic AI video",             tip: "Describe the scene like a film director would" },
   "narrate":            { time: "~4 sec",   output: "MP3 audio file",                tip: "Keep text under 500 words for best quality" },
-  "narrate-pro":        { time: "~5 sec",   output: "MP3 with premium voice",        tip: "Try 'coral' for warm tone, 'onyx' for deep voice" },
+  "narrate-pro":        { time: "~5 sec",   output: "WAV audio with premium voice",  tip: "Try 'Cherry' for warm tone, 'Ethan' for deep voice" },
   "transcribe":         { time: "~6 sec",   output: "Text transcript",               tip: "Paste a direct link to an MP3 or WAV file" },
   "transcribe-african": { time: "~8 sec",   output: "African language transcript",   tip: "Select language BEFORE submitting for accuracy" },
   "translate":          { time: "~3 sec",   output: "Translated text",               tip: "Format: type your text, select target language" },
@@ -162,6 +162,7 @@ const DOC_EXPORT_SLUGS = new Set([
 function getOutputType(slug: string): { label: string; emoji: string; noun: string } {
   if (VIDEO_SLUGS.has(slug))  return { label: "Video MP4",  emoji: "🎬", noun: "video" };
   if (slug === 'instrumental') return { label: "Audio MP3",  emoji: "🎵", noun: "audio-instrumental" };
+  if (slug === 'narrate-pro') return { label: "Audio WAV",  emoji: "🎙️", noun: "audio" };
   if (AUDIO_SLUGS.has(slug))  return { label: "Audio MP3",  emoji: "🎵", noun: "audio" };
   if (IMAGE_SLUGS.has(slug))  return { label: "Image file", emoji: "🖼️", noun: "image" };
   if (CODE_SLUGS.has(slug))   return { label: "Code output",emoji: "💻", noun: "code" };

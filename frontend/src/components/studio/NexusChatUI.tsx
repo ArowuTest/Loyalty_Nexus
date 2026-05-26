@@ -579,9 +579,9 @@ function TypingDots({ color }: { color: string }) {
 // ─── Suggestion cards ─────────────────────────────────────────────────────────
 
 function SuggestionCards({
-  suggestions, onSelect, color,
+  suggestions, onSelect, color, disabled = false,
 }: {
-  suggestions: string[]; onSelect: (s: string) => void; color: string;
+  suggestions: string[]; onSelect: (s: string) => void; color: string; disabled?: boolean;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2 px-4 pb-2">
@@ -591,7 +591,8 @@ function SuggestionCards({
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: i * 0.07 }}
-          onClick={() => onSelect(s)}
+          disabled={disabled}
+          onClick={() => !disabled && onSelect(s)}
           className="text-left p-3 rounded-2xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.07] hover:border-white/20 transition-all duration-150 active:scale-[0.97] group"
         >
           <p className="text-[12px] leading-snug text-white/55 group-hover:text-white/80 transition-colors line-clamp-3">{s}</p>
@@ -637,6 +638,14 @@ export default function NexusChatUI({
   const [isLoading, setIsLoading]   = useState(false);
   const [msgCount, setMsgCount]     = useState(0);
   const [msgLimit, setMsgLimit]     = useState(20);
+  // Guard against click-through: when NexusChatUI slides in over the "Open Chat"
+  // button, the pointer-up event from that click can land on a suggestion chip.
+  // Block chip clicks for 350ms after mount to prevent accidental auto-send.
+  const [chipsReady, setChipsReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setChipsReady(true), 350);
+    return () => clearTimeout(t);
+  }, []);
   const [copiedId, setCopiedId]     = useState<string | null>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
@@ -880,7 +889,7 @@ export default function NexusChatUI({
               className="pt-2"
             >
               <p className="text-center text-[11px] text-white/20 font-medium uppercase tracking-widest mb-3">Try asking</p>
-              <SuggestionCards suggestions={cfg.suggestions} onSelect={handleSend} color={cfg.color} />
+              <SuggestionCards suggestions={cfg.suggestions} onSelect={handleSend} color={cfg.color} disabled={!chipsReady} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -963,9 +972,10 @@ export default function NexusChatUI({
           </motion.div>
         ))}
 
-        {/* Typing indicator */}
+        {/* Typing indicator — hidden as soon as a streaming message has been assigned,
+            so we never show both the TypingDots and the streaming bubble together */}
         <AnimatePresence>
-          {isLoading && (
+          {isLoading && !streamingId && (
             <motion.div
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
