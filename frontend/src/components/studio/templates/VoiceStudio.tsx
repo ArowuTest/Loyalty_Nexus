@@ -76,10 +76,32 @@ const AVATAR_GRADIENTS: Record<string, string> = {
 
 interface VoiceEntry {
   id: string;
-  name: string;
-  tone: string;
-  category: string;
+  name?: string;
+  label?: string; // backend may use "label" instead of "name"
+  tone?: string;
+  category?: string;
   gender?: string;
+}
+
+/** Extract display name from a VoiceEntry that may use name or label field */
+function voiceName(v: VoiceEntry): string {
+  if (v.name) return v.name;
+  if (v.label) {
+    // label may be "Cherry (Female, Friendly)" — extract text before "("
+    return v.label.split('(')[0].trim() || v.label;
+  }
+  return v.id;
+}
+
+/** Extract tone/description from a VoiceEntry */
+function voiceTone(v: VoiceEntry): string {
+  if (v.tone) return v.tone;
+  if (v.label) {
+    // extract text inside parentheses: "Cherry (Female, Friendly)" → "Female, Friendly"
+    const m = v.label.match(/\(([^)]+)\)/);
+    return m ? m[1] : '';
+  }
+  return '';
 }
 
 function estimateDuration(text: string, speed: number): string {
@@ -202,7 +224,10 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
   const showFormat = cfg.show_format_selector   ?? true;
 
   const [text,        setText]        = useState('');
-  const [voiceId,     setVoiceId]     = useState<string>(cfg.default_voice ?? 'nova');
+  // Default to cfg.default_voice if specified, else first available voice, else 'nova'
+  const [voiceId,     setVoiceId]     = useState<string>(
+    cfg.default_voice ?? voices[0]?.id ?? 'nova'
+  );
   const [language,    setLanguage]    = useState<string>(cfg.default_language ?? 'en');
   const [speed,       setSpeed]       = useState<number>(1.0);
   const [format,      setFormat]      = useState<string>('mp3');
@@ -226,9 +251,9 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
 
   const filteredVoices = voiceFilter
     ? voices.filter((v) =>
-        v.name.toLowerCase().includes(voiceFilter.toLowerCase()) ||
-        v.category.toLowerCase().includes(voiceFilter.toLowerCase()) ||
-        v.tone.toLowerCase().includes(voiceFilter.toLowerCase()),
+        voiceName(v).toLowerCase().includes(voiceFilter.toLowerCase()) ||
+        (v.category ?? '').toLowerCase().includes(voiceFilter.toLowerCase()) ||
+        voiceTone(v).toLowerCase().includes(voiceFilter.toLowerCase()),
       )
     : voices;
 
@@ -256,16 +281,18 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
             'w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 bg-gradient-to-br',
             AVATAR_GRADIENTS[selectedVoice.id] ?? 'from-green-600 to-teal-700',
           )}>
-            {selectedVoice.name?.[0] ?? '?'}
+            {voiceName(selectedVoice)[0] ?? '?'}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <p className="text-white font-semibold text-sm">{selectedVoice.name}</p>
-              <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full border', CAT_COLORS[selectedVoice.category] ?? 'bg-white/10 border-white/20 text-white/50')}>
-                {selectedVoice.category}
-              </span>
+              <p className="text-white font-semibold text-sm">{voiceName(selectedVoice)}</p>
+              {selectedVoice.category && (
+                <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full border', CAT_COLORS[selectedVoice.category] ?? 'bg-white/10 border-white/20 text-white/50')}>
+                  {selectedVoice.category}
+                </span>
+              )}
             </div>
-            <p className="text-white/40 text-[11px] truncate">{selectedVoice.tone}</p>
+            <p className="text-white/40 text-[11px] truncate">{voiceTone(selectedVoice)}</p>
           </div>
           {text.trim() && (
             <div className="flex items-center gap-1 text-white/35 text-[11px] flex-shrink-0">
@@ -319,16 +346,16 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
                       : 'from-white/10 to-white/5',
                   )}>
                     <span className={isSelected ? 'text-white' : 'text-white/50'}>
-                      {v.name?.[0] ?? '?'}
+                      {voiceName(v)[0] ?? '?'}
                     </span>
                   </div>
 
                   {/* Name + tone */}
                   <div className="min-w-0 flex-1">
                     <p className={cn('text-xs font-semibold truncate', isSelected ? 'text-green-200' : 'text-white/70')}>
-                      {v.name}
+                      {voiceName(v)}
                     </p>
-                    <p className="text-[9px] text-white/30 truncate">{v.tone}</p>
+                    <p className="text-[9px] text-white/30 truncate">{voiceTone(v)}</p>
                   </div>
 
                   {/* Preview button — ElevenLabs style: small play/stop icon on the right */}
@@ -338,7 +365,7 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
                       e.stopPropagation(); // don't also select the voice
                       previewVoice(v.id);
                     }}
-                    title={isPreviewing ? 'Stop preview' : `Preview ${v.name}'s voice`}
+                    title={isPreviewing ? 'Stop preview' : `Preview ${voiceName(v)}'s voice`}
                     className={cn(
                       'flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-all',
                       isPreviewing
@@ -514,7 +541,7 @@ export default function VoiceStudio({ tool, onSubmit, isLoading, userPoints }: T
         {selectedVoice && text.trim() && (
           <p className="text-white/25 text-[11px] mt-1 flex items-center gap-1.5">
             <Mic size={9} />
-            <span>Narrated by <strong className="text-white/40">{selectedVoice.name}</strong></span>
+            <span>Narrated by <strong className="text-white/40">{voiceName(selectedVoice)}</strong></span>
             <span className="text-white/15">·</span>
             <Clock size={9} />
             <span>{estDuration}</span>
