@@ -126,7 +126,8 @@ class RechargeFormState {
 // ─── ViewModel ────────────────────────────────────────────────────────────────
 
 class RechargeFormNotifier extends StateNotifier<RechargeFormState> {
-  RechargeFormNotifier() : super(const RechargeFormState());
+  RechargeFormNotifier({String? initialPhone})
+      : super(RechargeFormState(phone: initialPhone ?? ''));
 
   void setType(RechargeType t) => state = state.copyWith(
         type: t,
@@ -238,7 +239,13 @@ class RechargeFormNotifier extends StateNotifier<RechargeFormState> {
 
 final rechargeFormProvider =
     StateNotifierProvider.autoDispose<RechargeFormNotifier, RechargeFormState>(
-  (_) => RechargeFormNotifier(),
+  (ref) {
+    // Initialise with the logged-in user's phone so no state mutation is
+    // needed inside build(). autoDispose ensures a fresh instance (and fresh
+    // phone value) each time the screen is opened.
+    final phone = ref.read(authStateProvider).phoneNumber;
+    return RechargeFormNotifier(initialPhone: phone);
+  },
 );
 
 final rechargeNetworksProvider =
@@ -272,10 +279,8 @@ class RechargeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Pre-fill phone for logged-in users — use ref.select to minimise rebuilds
-    final phone = ref.watch(authStateProvider.select((s) => s.phoneNumber));
-    ref.read(rechargeFormProvider.notifier).prefillPhone(phone);
-
+    // Phone is pre-filled via rechargeFormProvider initialiser — no mutation
+    // inside build() needed (which would throw a Riverpod build-phase error).
     final networksAsync = ref.watch(rechargeNetworksProvider);
     final form          = ref.watch(rechargeFormProvider);
 
