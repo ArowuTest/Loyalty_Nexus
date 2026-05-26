@@ -119,11 +119,12 @@ export default function AuthModal({ open, onClose }: AuthModalProps) {
       setToken(res.token);
       // Pre-fetch both profile AND wallet in parallel so the dashboard shows
       // real data immediately without a flash-to-zero on first load.
-      const [profile, wallet] = await Promise.all([
-        api.getProfile() as Promise<{ id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean }>,
+      const [profileRaw, wallet] = await Promise.all([
+        api.getProfile() as Promise<{ user: { id: string; phone_number: string; tier: string; streak_count: number; is_active: boolean } }>,
         api.getWallet() as Promise<{ pulse_points: number; spin_credits: number; lifetime_points: number }>,
       ]);
-      setUser(profile);
+      // Backend /user/profile returns { user: {...}, lifetime_points: number } — unwrap before storing.
+      setUser(profileRaw.user);
       setWallet(wallet);
       setStep("success");
       setTimeout(() => {

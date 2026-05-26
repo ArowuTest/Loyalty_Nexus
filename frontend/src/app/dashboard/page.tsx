@@ -917,10 +917,17 @@ export default function DashboardPage() {
     if (key === "/user/bonus-pulse") return api.getBonusPulseAwards();
     return Promise.resolve(null);
   };
-  const { data: profile }   = useSWR("/user/profile",     fetcher, { onSuccess: (d: unknown) => setUser(d as Parameters<typeof setUser>[0]) });
+  // Backend /user/profile returns { user: {...}, lifetime_points: number } — unwrap the nested user object.
+  const { data: profileRaw } = useSWR("/user/profile", fetcher, {
+    onSuccess: (d: unknown) => {
+      const nested = d as { user?: Parameters<typeof setUser>[0] };
+      if (nested?.user) setUser(nested.user);
+    },
+  });
   const { data: wallet }    = useSWR("/user/wallet",      fetcher, { onSuccess: (d: unknown) => setWallet(d as Parameters<typeof setWallet>[0]) });
   const { data: bonusData } = useSWR("/user/bonus-pulse", fetcher);
-  const p = profile as { phone_number?: string; tier?: string; streak_count?: number; total_spins?: number; studio_use_count?: number } | undefined;
+  // Unwrap the nested user object from the profile response.
+  const p = (profileRaw as { user?: { phone_number?: string; tier?: string; streak_count?: number; total_spins?: number; studio_use_count?: number } } | undefined)?.user;
   
   const w = wallet as { pulse_points?: number; spin_credits?: number; lifetime_points?: number; draw_entries_today?: number } | undefined;
   const b = bonusData as { total_bonus?: number } | undefined;
