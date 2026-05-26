@@ -560,14 +560,15 @@ function renderInline(text: string) {
  */
 function sanitizeStreamingMarkdown(text: string): string {
   return text
+    // Unclosed fenced code block FIRST — must precede the single-backtick rule so the
+    // full ``` fence is matched before the ` rule eats one backtick and breaks the match.
+    .replace(/```[a-z]*\n?([^`]*)$/, "$1")
     // Unclosed bold: ** followed by non-** text at end of string
     .replace(/\*\*([^*]*)$/, "$1")
     // Unclosed italic: single * followed by non-* text at end (only if no bold ahead)
     .replace(/(?<!\*)\*(?!\*)([^*]*)$/, "$1")
     // Unclosed inline code: ` followed by non-` text at end
-    .replace(/`([^`]*)$/, "$1")
-    // Unclosed fenced code block: trailing ``` … without closing ``` — trim the fence
-    .replace(/```[a-z]*\n?([^`]*)$/, "$1");
+    .replace(/`([^`]*)$/, "$1");
 }
 
 function StreamingMessage({
