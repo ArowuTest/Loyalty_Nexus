@@ -3966,7 +3966,7 @@ function StudioPageInner() {
             </div>
             <div>
               <p className="text-white font-bold text-sm leading-tight">Nexus AI Studio</p>
-              <p className="text-white/30 text-[10px]">{canonicalTools.length} tools available</p>
+              <p className="text-white/30 text-[10px]">{(toolsLoading || !hasHydrated) ? '…' : `${canonicalTools.length} tools available`}</p>
             </div>
           </div>
 
@@ -3990,7 +3990,7 @@ function StudioPageInner() {
           <nav className="px-2 space-y-0.5 flex-1">
             {([
               { key: "chat",    label: "Chat",    icon: <MessageSquare size={15} />, badge: undefined as number | undefined },
-              { key: "tools",   label: "AI Tools", icon: <LayoutGrid size={15} />,   badge: canonicalTools.length as number | undefined },
+              { key: "tools",   label: "AI Tools", icon: <LayoutGrid size={15} />,   badge: (toolsLoading || !hasHydrated) ? undefined : canonicalTools.length as number | undefined },
               { key: "gallery", label: "Gallery",  icon: <History size={15} />,      badge: (pendingCount || undefined) as number | undefined },
             ]).map(({ key, label, icon, badge }) => (
               <button
@@ -4437,11 +4437,11 @@ function StudioPageInner() {
                     <input
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder={`Search ${canonicalTools.length} AI tools…`}
+                      placeholder={(toolsLoading || !hasHydrated) ? 'Loading tools…' : `Search ${canonicalTools.length} AI tools…`}
                       className="w-full glass border border-white/[0.10] rounded-xl pl-9 pr-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-gold-500/40 text-sm"
                     />
                   </div>
-                  <span className="text-white/25 text-xs whitespace-nowrap">{canonicalTools.length} tools</span>
+                  <span className="text-white/25 text-xs whitespace-nowrap">{(toolsLoading || !hasHydrated) ? '…' : `${canonicalTools.length} tools`}</span>
                 </div>
                 <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
                   <button
