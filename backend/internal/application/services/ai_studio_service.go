@@ -4758,9 +4758,6 @@ func (o *AIStudioOrchestrator) callPollinationsGPTImage(ctx context.Context, pro
 		return "", fmt.Errorf("pollinations GPTImage parse: empty data")
 	}
 	item := parsed.Data[0]
-	if item.URL != "" {
-		return item.URL, nil
-	}
 	if item.B64JSON != "" {
 		imgBytes, err := base64.StdEncoding.DecodeString(item.B64JSON)
 		if err != nil {
@@ -4768,6 +4765,41 @@ func (o *AIStudioOrchestrator) callPollinationsGPTImage(ctx context.Context, pro
 		}
 		key := fmt.Sprintf("studio/ai-photo/%s_%d.png", model, time.Now().UnixNano())
 		return o.uploadOrDataURI(ctx, imgBytes, "image/png", key), nil
+	}
+	if item.URL != "" {
+		// Download the image from the Pollinations CDN URL and store it in our own
+		// storage so the frontend never depends on Pollinations CDN availability.
+		dlCtx, dlCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer dlCancel()
+		dlReq, dlErr := http.NewRequestWithContext(dlCtx, http.MethodGet, item.URL, nil)
+		if dlErr == nil {
+			dlReq.Header.Set("Authorization", "Bearer "+sk)
+			dlResp, dlErr := o.httpClient.Do(dlReq)
+			if dlErr == nil {
+				defer func() { _ = dlResp.Body.Close() }()
+				if dlResp.StatusCode == http.StatusOK {
+					imgBytes, dlErr := io.ReadAll(dlResp.Body)
+					if dlErr == nil && len(imgBytes) > 1000 {
+						ct := dlResp.Header.Get("Content-Type")
+						ext := "jpg"
+						if strings.Contains(ct, "png") {
+							ext = "png"
+						}
+						if ct == "" {
+							ct = "image/jpeg"
+						}
+						key := fmt.Sprintf("studio/ai-photo/%s_%d.%s", model, time.Now().UnixNano(), ext)
+						if publicURL, upErr := o.storage.Upload(ctx, key, imgBytes, ct); upErr == nil {
+							return publicURL, nil
+						}
+						// Storage upload failed — fall through to return direct URL
+						log.Printf("[AIStudio] GPTImage storage upload failed — returning Pollinations URL directly")
+					}
+				}
+			}
+		}
+		// Fallback: return the Pollinations URL directly (may be unstable, but best we can do)
+		return item.URL, nil
 	}
 	return "", fmt.Errorf("pollinations GPTImage: no url or b64_json in response")
 }

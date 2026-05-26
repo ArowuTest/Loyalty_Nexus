@@ -2246,6 +2246,8 @@ function ToolDrawer({
   const [showConfirm,    setShowConfirm]    = useState(false);
   const [generating,     setGenerating]     = useState(false);
   const [genStartedAt,   setGenStartedAt]   = useState<number | null>(null);
+  // Image result load state — tracks whether the <img> loaded successfully or errored
+  const [imgLoadError,   setImgLoadError]   = useState(false);
   // Inline result — set when polling returns completed, shown directly in drawer
   const [inlineResult,   setInlineResult]   = useState<{ output_url?: string; output_url_2?: string; output_text?: string; output_type?: string } | null>(null);
   // A/B compare: second generation for side-by-side comparison
@@ -2365,6 +2367,7 @@ function ToolDrawer({
                 setCompareResult(resultPayload);
                 setCompareMode(true);
               } else {
+                setImgLoadError(false); // reset any previous image error
                 setInlineResult(resultPayload);
               }
               onGenerated?.();
@@ -2826,12 +2829,30 @@ function ToolDrawer({
                           </button>
                         </div>
                       )}
-                      <div className="rounded-xl overflow-hidden border border-white/10">
-                        <img
-                          src={inlineResult.output_url}
-                          alt={confirmPrompt || tool.name}
-                          className="w-full object-cover"
-                        />
+                      <div className="rounded-xl overflow-hidden border border-white/10 min-h-[280px] bg-black/20 flex items-center justify-center">
+                        {imgLoadError ? (
+                          <div className="flex flex-col items-center gap-3 px-6 py-8 text-center">
+                            <span className="text-4xl">⚠️</span>
+                            <p className="text-white/60 text-sm font-semibold">Image failed to load</p>
+                            <p className="text-white/30 text-xs leading-relaxed">
+                              The image was generated but the preview is temporarily unavailable.<br/>
+                              Try the Download button to save your result.
+                            </p>
+                            <button
+                              onClick={() => { setImgLoadError(false); }}
+                              className="mt-1 text-xs text-purple-300 hover:text-purple-200 border border-purple-500/30 rounded-lg px-3 py-1.5 hover:bg-purple-500/10 transition-all"
+                            >
+                              Retry Preview
+                            </button>
+                          </div>
+                        ) : (
+                          <img
+                            src={inlineResult.output_url}
+                            alt={confirmPrompt || tool.name}
+                            className="w-full object-cover"
+                            onError={() => setImgLoadError(true)}
+                          />
+                        )}
                       </div>
                       {/* Output quality metadata chip */}
                       <div className="flex items-center gap-2 px-1">
