@@ -989,10 +989,11 @@ export default function DashboardPage() {
             style={{ background: "radial-gradient(circle, rgba(245,166,35,0.07) 0%, transparent 70%)", transform: "translate(20%, -30%)" }} />
 
           <div className="relative">
-            {/* Top row */}
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-5">
+            {/* Top row — 3 columns: avatar/name | CTA (desktop center) | stats */}
+            <div className="flex flex-col md:flex-row md:items-center gap-4 mb-5">
+
               {/* Left: avatar + name */}
-              <div className="flex items-center gap-3.5">
+              <div className="flex items-center gap-3.5 flex-shrink-0">
                 <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 font-black text-lg"
                   style={{ background: `${tierColor}20`, border: `2px solid ${tierColor}40`, color: tierColor }}>
                   {tierEmoji}
@@ -1014,8 +1015,23 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              {/* Center: Recharge CTA — visible on desktop only; mobile version below progress bar */}
+              {/* RECHARGE_RATE: update ₦250 here if the rate changes in the admin panel */}
+              <div className="hidden md:flex flex-1 flex-col items-center justify-center text-center px-6">
+                <p className="text-white/70 text-[15px] leading-snug">
+                  Every <span className="text-white font-black">₦250</span> recharge earns you{" "}
+                  <span className="font-black text-[16px]" style={{ color: "var(--gold)" }}>1 FREE Pulse Point.</span>
+                </p>
+                <p className="text-white/40 text-[12px] mt-1">Keep earning, keep climbing.</p>
+                <Link href="/recharge"
+                  className="mt-3 inline-flex items-center gap-2 px-5 py-2 rounded-xl font-black text-[13px] transition-opacity hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg, #F5A623, #e8940f)", color: "#000" }}>
+                  <Zap size={14} /> Recharge Now
+                </Link>
+              </div>
+
               {/* Right: key stats */}
-              <div className="flex items-center gap-4 md:gap-6">
+              <div className="flex items-center gap-4 md:gap-6 flex-shrink-0">
                 <div className="text-center">
                   <p className="font-black text-xl md:text-2xl leading-none" style={{ color: "var(--gold)" }}>
                     {pulsePoints >= 1000 ? `${(pulsePoints / 1000).toFixed(1)}K` : pulsePoints.toLocaleString()}
@@ -1055,20 +1071,17 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* ── Recharge CTA ── */}
-            {/* RECHARGE_RATE: update this constant if the points-per-naira rate changes in the admin panel */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4 pt-4"
+            {/* Mobile CTA — shown only on small screens below the progress bar */}
+            <div className="flex md:hidden items-center justify-between gap-3 mt-4 pt-4"
               style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-              <p className="text-white/55 text-[12px] leading-snug">
-                Every <span className="text-white font-black">₦250</span> recharge earns you{" "}
-                <span className="font-black" style={{ color: "var(--gold)" }}>1 FREE Pulse Point.</span>{" "}
-                Keep earning, keep climbing.
+              <p className="text-white/60 text-[12px] leading-snug">
+                Every <span className="text-white font-black">₦250</span> =&nbsp;
+                <span className="font-black" style={{ color: "var(--gold)" }}>1 FREE Pulse Point</span>
               </p>
               <Link href="/recharge"
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-black text-[12px] whitespace-nowrap flex-shrink-0 transition-opacity hover:opacity-90"
                 style={{ background: "linear-gradient(135deg, #F5A623, #e8940f)", color: "#000" }}>
-                <Zap size={13} />
-                Recharge Now
+                <Zap size={13} /> Recharge Now
               </Link>
             </div>
           </div>
