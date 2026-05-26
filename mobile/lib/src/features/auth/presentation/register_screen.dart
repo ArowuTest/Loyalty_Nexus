@@ -51,8 +51,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     setState(() { _saving = true; _error = ''; });
     try {
       await ref.read(userApiProvider).updateProfile(
-        fullName: _nameCtrl.text.trim(),
-        state:    _state,
+        displayName: _nameCtrl.text.trim(),
+        state:       _state,
       );
       ref.read(authStateProvider.notifier).markOnboarded();
       if (mounted) context.go('/dashboard');
