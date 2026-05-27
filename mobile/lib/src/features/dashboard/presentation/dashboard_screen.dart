@@ -71,13 +71,15 @@ final warsLeaderboardProvider = FutureProvider.autoDispose<List<dynamic>>((ref) 
   if (cached != null) {
     Future.microtask(() async {
       try {
-        final fresh = await ref.read(warsApiProvider).getLeaderboard();
+        final resp  = await ref.read(warsApiProvider).getLeaderboardData();
+        final fresh = (resp['leaderboard'] as List?) ?? [];
         await cache.putList(CacheKeys.leaderboard, fresh);
       } catch (_) {}
     });
     return cached;
   }
-  final data = await ref.read(warsApiProvider).getLeaderboard();
+  final resp = await ref.read(warsApiProvider).getLeaderboardData();
+  final data = (resp['leaderboard'] as List?) ?? [];
   await cache.putList(CacheKeys.leaderboard, data);
   return data;
 });
