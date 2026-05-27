@@ -197,6 +197,9 @@ class _ActiveWarView extends StatelessWidget {
           change: change,
         ).animate().fadeIn(duration: 300.ms, delay: (i * 40).ms);
       }),
+
+      const Gap(24),
+      const _ArcadeTeaser(),
     ]),
   );
 }
@@ -629,6 +632,69 @@ class _StepCard extends StatelessWidget {
       ]),
     ),
   ));
+}
+
+// ── Arcade Teaser (Coming Soon) ───────────────────────────────────────────────
+
+class _ArcadeTeaser extends StatelessWidget {
+  const _ArcadeTeaser();
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: () => context.push('/arcade'),
+    child: Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1A0533), Color(0xFF0D1B4B)],
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+        ),
+        borderRadius: NexusRadius.lg,
+        border: Border.all(color: NexusColors.purple.withValues(alpha: 0.35)),
+      ),
+      child: Row(children: [
+        Container(
+          width: 44, height: 44,
+          decoration: BoxDecoration(
+            color: NexusColors.purple.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: NexusColors.purple.withValues(alpha: 0.3)),
+          ),
+          child: const Center(child: Text('🎮', style: TextStyle(fontSize: 22))),
+        ),
+        const Gap(12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Text('Nexus Games Arcade',
+              style: TextStyle(color: Colors.white,
+                fontSize: 13, fontWeight: FontWeight.w800)),
+            Gap(8),
+            _SoonPill(),
+          ]),
+          const Gap(3),
+          const Text('Play mini-games and earn bonus Pulse Points',
+            style: TextStyle(color: Color(0x99ffffff), fontSize: 11, height: 1.4)),
+        ])),
+        const Icon(Icons.chevron_right_rounded, color: Color(0x66ffffff), size: 18),
+      ]),
+    ),
+  );
+}
+
+class _SoonPill extends StatelessWidget {
+  const _SoonPill();
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: NexusColors.purple.withValues(alpha: 0.2),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: NexusColors.purple.withValues(alpha: 0.4)),
+    ),
+    child: const Text('SOON',
+      style: TextStyle(color: NexusColors.purple,
+        fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+  );
 }
 
 // ── Loading / Error ───────────────────────────────────────────────────────────

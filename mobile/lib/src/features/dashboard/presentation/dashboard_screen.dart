@@ -864,37 +864,40 @@ class _DrawsTeaser extends StatelessWidget {
        title: 'Weekly Jackpot', body: 'Bigger prizes for top rechargees.'),
     ];
     return Row(children: items.map((item) => Expanded(
-      child: Container(
-        margin: EdgeInsets.only(left: item.icon == Icons.access_time_rounded ? 0 : 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: NexusColors.surface, borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: NexusColors.border),
-        ),
-        child: Opacity(opacity: 0.75, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Container(
-              width: 32, height: 32,
-              decoration: BoxDecoration(
-                color: item.color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: item.color.withValues(alpha: 0.2))),
-              child: Icon(item.icon, size: 15, color: item.color)),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: item.color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: item.color.withValues(alpha: 0.2))),
-              child: Text('SOON', style: TextStyle(color: item.color,
-                fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 0.5))),
+      child: GestureDetector(
+        onTap: () => context.push('/draws'),
+        child: Container(
+          margin: EdgeInsets.only(left: item.icon == Icons.access_time_rounded ? 0 : 10),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: NexusColors.surface, borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: NexusColors.border),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  color: item.color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: item.color.withValues(alpha: 0.2))),
+                child: Icon(item.icon, size: 15, color: item.color)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: item.color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: item.color.withValues(alpha: 0.2))),
+                child: Text('SOON', style: TextStyle(color: item.color,
+                  fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 0.5))),
+            ]),
+            const SizedBox(height: 10),
+            Text(item.title,
+              style: const TextStyle(color: NexusColors.textPrimary,
+                fontSize: 12, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 3),
+            Text(item.body, style: const TextStyle(color: NexusColors.textSecondary,
+              fontSize: 10, height: 1.4)),
           ]),
-          const SizedBox(height: 10),
-          Text(item.title,
-            style: const TextStyle(color: NexusColors.textPrimary,
-              fontSize: 12, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 3),
-          Text(item.body, style: const TextStyle(color: NexusColors.textSecondary,
-            fontSize: 10, height: 1.4)),
-        ])),
+        ),
       ),
     )).toList());
   }
@@ -982,7 +985,40 @@ class _RecentTransactions extends ConsumerWidget {
       loading: () => const SizedBox.shrink(),
       error: (_, __) => const SizedBox.shrink(),
       data: (txns) {
-        if (txns.isEmpty) return const SizedBox.shrink();
+        if (txns.isEmpty) return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: NexusColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: NexusColors.border),
+          ),
+          child: Column(children: [
+            const Text('⚡', style: TextStyle(fontSize: 28)),
+            const SizedBox(height: 8),
+            const Text('No activity yet',
+              style: TextStyle(color: NexusColors.textPrimary,
+                fontSize: 13, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            const Text('Recharge your MTN to earn your first Pulse Points',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: NexusColors.textSecondary, fontSize: 11, height: 1.4)),
+            const SizedBox(height: 12),
+            GestureDetector(
+              onTap: () => context.push('/recharge'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                decoration: BoxDecoration(
+                  color: NexusColors.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: NexusColors.primary.withValues(alpha: 0.3)),
+                ),
+                child: const Text('Recharge Now →',
+                  style: TextStyle(color: NexusColors.primary,
+                    fontSize: 12, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ]),
+        );
         final recent = txns.take(4).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('Recent Activity',
