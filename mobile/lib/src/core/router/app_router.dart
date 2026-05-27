@@ -102,17 +102,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(routes: [
             GoRoute(path: '/studio', builder: (_, __) => const StudioScreen()),
           ]),
-          // 3 — Rewards (Spin + Prizes)
+          // 3 — Spin
           StatefulShellBranch(routes: [
-            GoRoute(
-              path: '/spin',
-              builder: (_, __) => const SpinScreen(),
-              routes: [
-                GoRoute(path: 'prizes', builder: (_, __) => const PrizesScreen()),
-              ],
-            ),
+            GoRoute(path: '/spin', builder: (_, __) => const SpinScreen()),
           ]),
-          // 4 — Profile
+          // 4 — Prizes
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/prizes', builder: (_, __) => const PrizesScreen()),
+          ]),
+          // 5 — Profile
           StatefulShellBranch(routes: [
             GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
           ]),
@@ -121,7 +119,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // ── Global push routes ────────────────────────────────────────────────
       GoRoute(path: '/passport',      builder: (_, __) => const PassportScreen()),
-      GoRoute(path: '/prizes',        builder: (_, __) => const PrizesScreen()),
       GoRoute(path: '/draws',         builder: (_, __) => const DrawsScreen()),
       GoRoute(path: '/pulse-awards',  builder: (_, __) => const PulseAwardsScreen()),
       GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),

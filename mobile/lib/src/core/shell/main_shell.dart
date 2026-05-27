@@ -30,7 +30,7 @@ class MainShell extends ConsumerWidget {
   final StatefulNavigationShell navigationShell;
   const MainShell({super.key, required this.navigationShell});
 
-  // 5 tabs: Home | Wars | AI Studio | Spin | Profile
+  // 6 tabs: Home | Wars | AI Studio | Spin | Prizes | Profile
   // Recharge is a gold ⚡ button between AI Studio and Spin (not a shell branch)
   // Names match the web app (AppShell.tsx)
   static const _tabs = [
@@ -38,6 +38,7 @@ class MainShell extends ConsumerWidget {
     _Tab(icon: Icons.emoji_events_outlined,      activeIcon: Icons.emoji_events_rounded,      label: 'Wars'),
     _Tab(icon: Icons.auto_awesome_outlined,      activeIcon: Icons.auto_awesome,              label: 'AI Studio'),
     _Tab(icon: Icons.casino_outlined,            activeIcon: Icons.casino_rounded,            label: 'Spin'),
+    _Tab(icon: Icons.card_giftcard_outlined,     activeIcon: Icons.card_giftcard_rounded,     label: 'Prizes'),
     _Tab(icon: Icons.person_outline,             activeIcon: Icons.person_rounded,            label: 'Profile'),
   ];
 
@@ -105,8 +106,8 @@ class _BottomBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Split tabs into left (0–2) and right (3–5) groups with a Recharge button in the middle
-    final leftTabs  = tabs.sublist(0, 3);  // Home, Earn, Studio
-    final rightTabs = tabs.sublist(3, 5);  // Rewards, Profile
+    final leftTabs  = tabs.sublist(0, 3);  // Home, Wars, AI Studio
+    final rightTabs = tabs.sublist(3, 6);  // Spin, Prizes, Profile
 
     return Container(
       decoration: BoxDecoration(
@@ -138,11 +139,11 @@ class _BottomBar extends StatelessWidget {
               // ── Centre Recharge button ──
               _RechargeNavButton(),
 
-              // Right tabs: Spin (3), Profile (4)
+              // Right tabs: Spin (3), Prizes (4), Profile (5)
               ...List.generate(rightTabs.length, (i) => _TabItem(
                 tab:    rightTabs[i],
                 active: (i + 3) == current,
-                badge:  (i + 3) == 4 ? unread : 0,
+                badge:  (i + 3) == 5 ? unread : 0,  // unread badge on Profile (index 5)
                 isNew:  false,
                 onTap:  () => onTap(i + 3),
               )),

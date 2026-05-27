@@ -145,6 +145,7 @@ class _PrizesScreenState extends ConsumerState<PrizesScreen>
       backgroundColor: NexusColors.background,
       appBar: AppBar(
         backgroundColor: NexusColors.surface,
+        automaticallyImplyLeading: false,
         title: const Text('My Prizes 🏆'),
         bottom: TabBar(
           controller: _tabs,
