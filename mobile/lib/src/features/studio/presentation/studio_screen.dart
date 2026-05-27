@@ -10,6 +10,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:chewie/chewie.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/nexus_theme.dart';
@@ -812,7 +813,7 @@ class _WalletBar extends StatelessWidget {
         const Spacer(),
         if (isLow)
           GestureDetector(
-            onTap: () {},
+            onTap: () => context.push('/recharge'),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(

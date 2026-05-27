@@ -464,7 +464,7 @@ class _WalletHeroCard extends ConsumerWidget {
                   fontWeight: FontWeight.w800, fontSize: 15)),
               const SizedBox(width: 6),
               GestureDetector(
-                onTap: () {},
+                onTap: () => context.push('/pulse-awards'),
                 child: const Text('History →',
                   style: TextStyle(color: Colors.white54, fontSize: 10)),
               ),
@@ -534,8 +534,9 @@ class _QuickActionsGrid extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final actions = [
-      _Action('🎡', 'Spin & Win',    'Use spin credits', '/spin',          NexusColors.primary),
-      _Action('🧠', 'AI Studio',     '17 free tools',   '/studio',        const Color(0xFF8B5CF6)),
+      _Action('⚡', 'Recharge',      'Earn double pts', '/recharge',      NexusColors.gold),
+      _Action('🎡', 'Spin & Win',    'Use spin credits', '/spin',         NexusColors.primary),
+      _Action('🧠', 'AI Studio',     'AI tools',        '/studio',        const Color(0xFF8B5CF6)),
       _Action('🌍', 'Regional Wars', 'State rank',      '/wars',          NexusColors.green),
       _Action('🏅', 'My Passport',   'Tier & badges',   '/passport',      NexusColors.gold),
       _Action('❓', 'How It Works',  'Platform guide',  '/how-it-works',  NexusColors.cyan),

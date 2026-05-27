@@ -137,12 +137,12 @@ class _BottomBar extends StatelessWidget {
               // ── Centre Recharge button ──
               _RechargeNavButton(),
 
-              // Right tabs: Wars (3), Arcade (4), Profile (5)
+              // Right tabs: Rewards (3), Profile (4)
               ...List.generate(rightTabs.length, (i) => _TabItem(
                 tab:    rightTabs[i],
                 active: (i + 3) == current,
                 badge:  (i + 3) == 4 ? unread : 0,
-                isNew:  (i + 3) == 4,
+                isNew:  false,
                 onTap:  () => onTap(i + 3),
               )),
             ],
