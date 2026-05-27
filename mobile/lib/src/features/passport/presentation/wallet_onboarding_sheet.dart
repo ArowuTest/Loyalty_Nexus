@@ -254,16 +254,16 @@ class _WalletOnboardingSheetState
             ),
             const SizedBox(height: 12),
 
-            // "Maybe Later" — records a dismissal
+            // "Maybe Later" — pop immediately then record dismissal in background.
+            // Previously awaited SharedPreferences before popping which could
+            // hang in emulated environments and make the sheet undismissable.
             SizedBox(
               width: double.infinity,
               height: 48,
               child: TextButton(
-                onPressed: () async {
-                  final nav = Navigator.of(context);
-                  await recordWalletDismissed();
-                  if (!mounted) return;
-                  nav.pop();
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  recordWalletDismissed(); // fire-and-forget — non-blocking
                 },
                 child: const Text(
                   'Maybe Later',

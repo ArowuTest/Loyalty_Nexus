@@ -426,10 +426,11 @@ class WarsApi {
   final Dio _dio;
   const WarsApi(this._dio);
 
-  /// Full state leaderboard for the active war period
-  Future<List<dynamic>> getLeaderboard() async {
+  /// Full wars leaderboard response — includes war_active, period, and entries.
+  /// Returns the raw API shape: {war_active, leaderboard, count, period}.
+  Future<Map<String, dynamic>> getLeaderboardData() async {
     final r = await _dio.apiGet<Map>('/wars/leaderboard');
-    return (r as Map)['leaderboard'] as List? ?? [];
+    return Map<String, dynamic>.from(r as Map);
   }
 
   /// Authenticated user's personal rank + entry in current war

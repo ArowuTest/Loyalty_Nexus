@@ -9,8 +9,14 @@ import '../../../core/theme/nexus_theme.dart';
 // ── Providers ──────────────────────────────────────────────────────────────────
 
 final _leaderboardProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  final raw = await ref.read(warsApiProvider).getLeaderboard();
-  return {'leaderboard': raw, 'period': '', 'count': raw.length};
+  // Returns full API shape: {war_active, leaderboard, count, period}
+  final data = await ref.read(warsApiProvider).getLeaderboardData();
+  return {
+    'leaderboard':  (data['leaderboard'] as List?) ?? [],
+    'period':       data['period']?.toString() ?? '',
+    'war_active':   data['war_active'] as bool? ?? false,
+    'count':        data['count'] as int? ?? 0,
+  };
 });
 
 final _myRankProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref) async {
@@ -82,11 +88,15 @@ class WarsScreen extends ConsumerWidget {
           loading: () => _LoadingView(),
           error: (e, _) => _ErrorView(onRetry: () => ref.invalidate(_leaderboardProvider)),
           data: (data) {
-            final lb = (data['leaderboard'] as List? ?? []);
-            final period = data['period']?.toString() ?? '';
+            final lb        = (data['leaderboard'] as List? ?? []);
+            final period    = data['period']?.toString() ?? '';
+            final warActive = data['war_active'] as bool? ?? false;
 
-            // No active war — show animated "coming soon" state
-            if (lb.isEmpty) return _NoActiveWarView();
+            // No war configured at all
+            if (!warActive && lb.isEmpty) return _NoActiveWarView();
+
+            // War is active but nobody has recharged yet
+            if (warActive && lb.isEmpty) return _ActiveWarEmptyView(period: period);
 
             final daysLeft = _daysUntilEnd(period);
             final top3Kobo = lb.take(3).fold<int>(
@@ -403,6 +413,81 @@ class _LeaderboardRow extends StatelessWidget {
   }
 
   String _fmt(int v) => v >= 1000 ? '${(v / 1000).toStringAsFixed(1)}k' : '$v';
+}
+
+// ── Active War — Empty Leaderboard ────────────────────────────────────────────
+// Shown when war_active:true but no state has recharged yet (BUG-M02 fix).
+
+class _ActiveWarEmptyView extends StatelessWidget {
+  final String period;
+  const _ActiveWarEmptyView({required this.period});
+
+  @override
+  Widget build(BuildContext context) => ListView(
+    padding: const EdgeInsets.fromLTRB(24, 40, 24, 100),
+    children: [
+      const Center(child: Text('⚔️', style: TextStyle(fontSize: 72))),
+      const Gap(20),
+      const Text('War is Active!',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: NexusColors.gold,
+              fontSize: 22, fontWeight: FontWeight.w900)),
+      const Gap(8),
+      Text(
+        period.isNotEmpty ? 'Period: $period' : '',
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: NexusColors.textSecondary, fontSize: 12),
+      ),
+      const Gap(4),
+      const Text(
+        'No state has recharged yet — be the first from your state to recharge and claim the top spot!',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: NexusColors.textSecondary, fontSize: 13, height: 1.5),
+      ),
+      const Gap(24),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        decoration: BoxDecoration(
+          color: NexusColors.surface,
+          borderRadius: NexusRadius.lg,
+          border: Border.all(color: NexusColors.gold.withValues(alpha: 0.2)),
+        ),
+        child: const Column(children: [
+          Text('🏆 TOP 3 STATES WIN PRIZES',
+              style: TextStyle(color: NexusColors.gold, fontSize: 10,
+                  fontWeight: FontWeight.w900, letterSpacing: 1)),
+          Gap(4),
+          Text('Recharge now to put your state on the board',
+              style: TextStyle(color: NexusColors.textSecondary, fontSize: 12)),
+        ]),
+      ),
+      const Gap(24),
+      FilledButton.icon(
+        onPressed: () => context.push('/recharge'),
+        icon: const Icon(Icons.bolt_rounded, size: 16),
+        label: const Text('Recharge Now'),
+        style: FilledButton.styleFrom(
+          backgroundColor: NexusColors.primary,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          minimumSize: const Size(double.infinity, 0),
+          shape: RoundedRectangleBorder(borderRadius: NexusRadius.md),
+        ),
+      ),
+      const Gap(12),
+      OutlinedButton.icon(
+        onPressed: () => context.push('/settings'),
+        icon: const Icon(Icons.flag_rounded, size: 16),
+        label: const Text('Set Your State'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: NexusColors.primary,
+          side: const BorderSide(color: NexusColors.primary),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          minimumSize: const Size(double.infinity, 0),
+          shape: RoundedRectangleBorder(borderRadius: NexusRadius.md),
+        ),
+      ),
+    ],
+  );
 }
 
 // ── No Active War ─────────────────────────────────────────────────────────────
