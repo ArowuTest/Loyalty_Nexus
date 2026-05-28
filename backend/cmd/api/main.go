@@ -288,9 +288,16 @@ func main() {
 			vtpassClient, _ = external.NewVTPassHTTPClientUnchecked()
 		}
 		bundleSvc := external.NewNetworkBundleService(vtpassClient)
+		bundleSvc.SetDB(db) // enables DB-first bundle reads (migration 124)
 		vtuSvc    := services.NewVTURechargeService(db, vtpassClient, bundleSvc, rechargeSvc, notifySvc)
 		vtuH      := handlers.NewVTURechargeHandler(vtuSvc)
-		log.Println("[VTU] ✓ VTU recharge service ready")
+
+		// DataBundleSyncJob: refreshes network_data_bundles from VTPass 5×/day so
+		// GetBundles reads from DB (fast, restart-safe) rather than calling VTPass live.
+		bundleSyncJob := services.NewDataBundleSyncJob(db, vtpassClient, bundleSvc)
+		bundleSyncJob.Start(context.Background())
+
+		log.Println("[VTU] ✓ VTU recharge service ready + bundle sync job started")
 		mtnPushSvc    := services.NewMTNPushService(db, userRepo, txRepo, drawSvc, drawWindowSvc, notifySvc, cfg)
 		spinSvc       := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
 		studioSvc     := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)

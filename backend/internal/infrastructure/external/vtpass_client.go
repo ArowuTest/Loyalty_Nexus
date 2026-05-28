@@ -10,10 +10,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ─── VTPass Client ───────────────────────────────────────────────────────────
@@ -362,9 +364,21 @@ func formatPhoneLocal(phone string) string {
 }
 
 // ─── NetworkBundleService ────────────────────────────────────────────────────
+//
+// DB-first bundle catalog (mirrors RechargeMax NetworkConfigService):
+//
+//  1. In-memory cache hit (TTL = 5 min)  → return immediately.
+//  2. DB read (network_data_bundles)      → populate cache → return.
+//     DataBundleSyncJob keeps the DB fresh 5× per day.
+//  3. First-deploy / DB empty            → fetch live from VTPass → return.
+//
+// This means bundles survive Render restarts (DB is persistent), VTPass is
+// only called by the background job (not per user page load), and the cache
+// stays consistent across multiple Render instances.
 
 type NetworkBundleService struct {
 	vtpass *VTPassHTTPClient
+	db     *gorm.DB // may be nil — falls back to VTPass-only path
 	mu     sync.RWMutex
 	cache  map[string]bundleCacheEntry
 }
@@ -393,21 +407,65 @@ type NetworkResponse struct {
 	SortOrder      int    `json:"sort_order"`
 }
 
+// networkDataBundle is the local GORM model — mirrors the DB table created by
+// migration 124. Defined here to avoid a circular import with the services package.
+type networkDataBundle struct {
+	NetworkCode   string  `gorm:"column:network_code"`
+	VariationCode string  `gorm:"column:variation_code"`
+	Name          string  `gorm:"column:name"`
+	Price         float64 `gorm:"column:price"`
+	DataSize      string  `gorm:"column:data_size"`
+}
+
+func (networkDataBundle) TableName() string { return "network_data_bundles" }
+
+// bundleCacheTTL: short TTL — DB is source of truth (DataBundleSyncJob refreshes 5×/day).
+const bundleCacheTTL = 5 * time.Minute
+
 func NewNetworkBundleService(vtpass *VTPassHTTPClient) *NetworkBundleService {
 	return &NetworkBundleService{vtpass: vtpass, cache: make(map[string]bundleCacheEntry)}
 }
 
-const bundleCacheTTL = 1 * time.Hour
+// SetDB wires the database after construction. Called in main.go so the service
+// uses the DB-first path without a circular dependency at init time.
+func (s *NetworkBundleService) SetDB(db *gorm.DB) { s.db = db }
 
+// InvalidateCache removes the cached bundles for a network (or all if empty).
+// Called by DataBundleSyncJob after each successful DB upsert.
+func (s *NetworkBundleService) InvalidateCache(networkCode string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if networkCode == "" {
+		s.cache = make(map[string]bundleCacheEntry)
+	} else {
+		delete(s.cache, strings.ToUpper(networkCode))
+	}
+}
+
+// GetBundles returns the data bundle catalog for networkCode using DB-first strategy.
 func (s *NetworkBundleService) GetBundles(ctx context.Context, networkCode string) ([]DataBundleResponse, error) {
+	key := strings.ToUpper(networkCode)
+
+	// ── 1. In-memory cache hit ──────────────────────────────────────────────
 	s.mu.RLock()
-	entry, ok := s.cache[networkCode]
+	entry, ok := s.cache[key]
 	s.mu.RUnlock()
 	if ok && time.Now().Before(entry.expiresAt) {
 		return entry.bundles, nil
 	}
 
-	variations, err := s.vtpass.GetVariations(ctx, networkCode)
+	// ── 2. DB read (primary source, kept fresh by DataBundleSyncJob) ────────
+	if s.db != nil {
+		if dbBundles, err := s.getBundlesFromDB(ctx, key); err == nil && len(dbBundles) > 0 {
+			s.mu.Lock()
+			s.cache[key] = bundleCacheEntry{bundles: dbBundles, expiresAt: time.Now().Add(bundleCacheTTL)}
+			s.mu.Unlock()
+			return dbBundles, nil
+		}
+	}
+
+	// ── 3. First-deploy / DB empty: fetch live from VTPass ──────────────────
+	variations, err := s.vtpass.GetVariations(ctx, key)
 	if err != nil {
 		if ok {
 			return entry.bundles, nil // serve stale on error
@@ -418,16 +476,39 @@ func (s *NetworkBundleService) GetBundles(ctx context.Context, networkCode strin
 	bundles := make([]DataBundleResponse, 0, len(variations))
 	for _, v := range variations {
 		bundles = append(bundles, DataBundleResponse{
-			ID: v.Code, Name: v.Name, Network: networkCode,
+			ID: v.Code, Name: v.Name, Network: key,
 			Price: v.Amount, DataSize: extractDataSize(v.Name),
 		})
 	}
 
 	s.mu.Lock()
-	s.cache[networkCode] = bundleCacheEntry{bundles: bundles, expiresAt: time.Now().Add(bundleCacheTTL)}
+	s.cache[key] = bundleCacheEntry{bundles: bundles, expiresAt: time.Now().Add(bundleCacheTTL)}
 	s.mu.Unlock()
 	return bundles, nil
 }
+
+// getBundlesFromDB reads active bundles from network_data_bundles table.
+func (s *NetworkBundleService) getBundlesFromDB(ctx context.Context, networkCode string) ([]DataBundleResponse, error) {
+	var rows []networkDataBundle
+	if err := s.db.WithContext(ctx).
+		Where("network_code = ? AND is_active = true", networkCode).
+		Order("price ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]DataBundleResponse, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DataBundleResponse{
+			ID:       r.VariationCode,
+			Name:     r.Name,
+			Network:  networkCode,
+			Price:    r.Price,
+			DataSize: r.DataSize,
+		})
+	}
+	return out, nil
+}
+
 
 func extractDataSize(name string) string {
 	units := []string{"TB", "GB", "MB", "KB"}
