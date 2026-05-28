@@ -22,7 +22,8 @@ import (
 	"loyalty-nexus/internal/infrastructure/external"
 )
 
-// DataBundleSyncInterval: 5 refreshes per day (≈ every 4h48m).
+// DataBundleSyncInterval is the time between VTPass bundle catalog refreshes
+// (5 times per day, ≈ every 4h48m).
 const DataBundleSyncInterval = (24 * time.Hour) / 5
 
 // activeSyncNetworks are the VTPass network codes synced on each interval.
