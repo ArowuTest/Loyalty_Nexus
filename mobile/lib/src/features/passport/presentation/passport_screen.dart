@@ -129,6 +129,10 @@ class _PassportScreenState extends ConsumerState<PassportScreen>
               _WalletCTAs(passport: passport),
               const SizedBox(height: 20),
 
+              // ── Badges ───────────────────────────────────────────────
+              _BadgesSection(passport: passport),
+              const SizedBox(height: 20),
+
               // ── Activity / Events ────────────────────────────────────
               _ActivitySection(),
             ],
@@ -1133,6 +1137,129 @@ class _ActivityItem extends StatelessWidget {
     } catch (_) {
       return '';
     }
+  }
+}
+
+// ─── Badges ───────────────────────────────────────────────────────────────────
+
+const _badgeMeta = {
+  'first_recharge': ('⚡', 'First Recharge',  'You recharged for the first time!',   'common'),
+  'streak_7':       ('🔥', '7-Day Streak',    'Recharged 7 days in a row',           'rare'),
+  'streak_30':      ('🌟', '30-Day Streak',   'Recharged 30 days in a row',          'epic'),
+  'streak_90':      ('💫', '90-Day Legend',   'Recharged 90 days in a row',          'legendary'),
+  'spin_first':     ('🎡', 'First Spin',      'Played your first Wheel Spin',        'common'),
+  'spin_100':       ('🎯', 'Spin Century',    'Played 100 Wheel Spins',              'epic'),
+  'studio_first':   ('🤖', 'AI Explorer',     'Used AI Studio for the first time',   'common'),
+  'studio_50':      ('🧙', 'AI Wizard',       'Used AI Studio 50 times',             'rare'),
+  'wars_top3':      ('🏆', 'War Hero',        'Finished top 3 in a Regional War',   'legendary'),
+  'silver_tier':    ('🥈', 'Silver Member',   'Reached Silver tier',                 'rare'),
+  'gold_tier':      ('🥇', 'Gold Member',     'Reached Gold tier',                   'epic'),
+  'platinum_tier':  ('💎', 'Platinum Elite',  'Reached Platinum tier',               'legendary'),
+  'big_winner':     ('💰', 'Big Winner',      'Won a cash prize from the Wheel',     'epic'),
+};
+
+const _rarityColors = {
+  'common':    Color(0xFF64748b),
+  'rare':      Color(0xFF3b82f6),
+  'epic':      Color(0xFFa855f7),
+  'legendary': Color(0xFFf59e0b),
+};
+
+class _BadgesSection extends StatelessWidget {
+  final Map<String, dynamic> passport;
+  const _BadgesSection({required this.passport});
+
+  @override
+  Widget build(BuildContext context) {
+    final raw    = passport['badges'];
+    final earned = <String>{};
+    if (raw is List) {
+      for (final b in raw) {
+        if (b is Map) {
+          final key = b['badge_key']?.toString() ?? b['key']?.toString() ?? '';
+          if (key.isNotEmpty) earned.add(key);
+        } else if (b is String) {
+          earned.add(b);
+        }
+      }
+    }
+
+    return NexusCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const SectionHeader(title: 'Badges'),
+        const SizedBox(height: 4),
+        Text(
+          '${earned.length} of ${_badgeMeta.length} earned',
+          style: const TextStyle(color: NexusColors.textSecondary, fontSize: 12, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        if (earned.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('🏅', style: TextStyle(fontSize: 36)),
+              SizedBox(height: 8),
+              Text('No badges yet', style: TextStyle(
+                  color: NexusColors.textSecondary, fontWeight: FontWeight.w600)),
+              SizedBox(height: 4),
+              Text('Recharge, spin and compete to earn badges',
+                style: TextStyle(color: NexusColors.textSecondary, fontSize: 12),
+                textAlign: TextAlign.center),
+            ])),
+          )
+        else
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: _badgeMeta.entries.map((e) {
+              final isEarned = earned.contains(e.key);
+              final (emoji, label, _, rarity) = e.value;
+              final color = isEarned
+                  ? (_rarityColors[rarity] ?? NexusColors.primary)
+                  : NexusColors.border;
+              return Opacity(
+                opacity: isEarned ? 1.0 : 0.35,
+                child: Tooltip(
+                  message: e.value.$3,
+                  child: Container(
+                    width: 68,
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: isEarned
+                          ? color.withValues(alpha: 0.10)
+                          : NexusColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: color.withValues(alpha: isEarned ? 0.35 : 0.15)),
+                    ),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Text(emoji, style: const TextStyle(fontSize: 24)),
+                      const SizedBox(height: 4),
+                      Text(label,
+                        style: TextStyle(
+                          color: isEarned ? NexusColors.textPrimary : NexusColors.textSecondary,
+                          fontSize: 9, fontWeight: FontWeight.w600),
+                        textAlign: TextAlign.center,
+                        maxLines: 2, overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        child: Text(rarity[0].toUpperCase() + rarity.substring(1),
+                          style: TextStyle(color: color, fontSize: 7, fontWeight: FontWeight.w700)),
+                      ),
+                    ]),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+      ]),
+    );
   }
 }
 

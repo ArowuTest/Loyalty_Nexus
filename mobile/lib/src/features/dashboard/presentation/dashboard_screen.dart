@@ -115,6 +115,10 @@ final myWarRankProvider = FutureProvider.autoDispose<Map<String, dynamic>?>((ref
   } catch (_) {}
   return null;
 });
+final _statsProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  try { return await ref.read(userApiProvider).getStats(); } catch (_) { return {}; }
+});
+
 final _dashUnreadProvider = FutureProvider.autoDispose<int>((ref) async {
   try {
     final r = await ref.read(notificationsApiProvider).list(limit: 1);
@@ -268,6 +272,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 ),
                 const SizedBox(height: 16),
 
+                // ── Stats row ────────────────────────────────────────────────
+                _StatsRow(),
+                const SizedBox(height: 20),
+
                 // ── Quick actions ────────────────────────────────────────────
                 _QuickActionsGrid(),
                 const SizedBox(height: 20),
@@ -287,6 +295,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 // ── Recharge CTA ─────────────────────────────────────────────
                 _RechargeCTA(),
                 const SizedBox(height: 20),
+
+                // ── Quick AI tools ───────────────────────────────────────────
+                _QuickAiTools(),
+                const SizedBox(height: 16),
 
                 // ── Recent transactions ──────────────────────────────────────
                 _RecentTransactions(),
@@ -1028,7 +1040,7 @@ class _RecentTransactions extends ConsumerWidget {
           ...recent.map((t) => _TxRow(tx: t as Map)),
           const SizedBox(height: 6),
           Center(child: TextButton(
-            onPressed: () => context.push('/profile'),
+            onPressed: () => context.push('/transactions'),
             style: TextButton.styleFrom(foregroundColor: NexusColors.primary),
             child: const Text('View all transactions →', style: TextStyle(fontSize: 12)),
           )),
@@ -1151,4 +1163,145 @@ class _StreakAndProgressRow extends StatelessWidget {
       TierProgressSection(lifetimePoints: life, tier: tier),
     ]);
   }
+}
+
+// ── Stats Row ─────────────────────────────────────────────────────────────────
+
+class _StatsRow extends ConsumerWidget {
+  const _StatsRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final statsAsync   = ref.watch(_statsProvider);
+    final walletAsync  = ref.watch(walletProvider);
+    final bonusAsync   = ref.watch(bonusPulseProvider);
+
+    // Derive spin count from wallet if stats API not available
+    final spinTotal = walletAsync.valueOrNull?['total_spins'] as int?;
+    final stats = statsAsync.valueOrNull ?? {};
+
+    final totalRecharges  = stats['total_recharges']   as int? ?? 0;
+    final totalSpins      = stats['total_spins']       as int? ?? spinTotal ?? 0;
+    final studioUses      = stats['studio_uses']       as int? ?? 0;
+    final bonusTotal      = bonusAsync.valueOrNull     ?? 0;
+
+    if (walletAsync.isLoading) {
+      return Row(children: List.generate(4, (_) => Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Container(
+            height: 72, decoration: BoxDecoration(
+              color: NexusColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: NexusColors.border),
+            ),
+          ),
+        ),
+      )));
+    }
+
+    final items = [
+      ('Recharges',   '$totalRecharges', Icons.bolt_rounded,           NexusColors.primary),
+      ('Spins',       '$totalSpins',     Icons.casino_outlined,         NexusColors.gold),
+      ('AI Uses',     '$studioUses',     Icons.auto_awesome_outlined,   const Color(0xFFa78bfa)),
+      ('Bonuses',     '$bonusTotal pts', Icons.card_giftcard_outlined,  NexusColors.green),
+    ];
+
+    return Row(children: items.map((item) {
+      final (label, value, icon, color) = item;
+      return Expanded(child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration: BoxDecoration(
+            color: NexusColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: NexusColors.border),
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, color: color, size: 16),
+            const SizedBox(height: 4),
+            Text(value, style: TextStyle(
+              color: color, fontSize: 13, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 2),
+            Text(label, style: const TextStyle(
+              color: NexusColors.textSecondary, fontSize: 9,
+              fontWeight: FontWeight.w600, letterSpacing: 0.2),
+              textAlign: TextAlign.center,
+            ),
+          ]),
+        ),
+      ));
+    }).toList());
+  }
+}
+
+// ── Quick AI Tools section ────────────────────────────────────────────────────
+
+const _quickTools = [
+  _AiTool('Chat AI',       Icons.chat_bubble_outline_rounded, Color(0xFF5f72f9), '/studio'),
+  _AiTool('Web Search',    Icons.travel_explore_rounded,      Color(0xFF10b981), '/studio'),
+  _AiTool('Image Create',  Icons.image_outlined,              Color(0xFFa78bfa), '/studio'),
+  _AiTool('Code Helper',   Icons.code_rounded,                Color(0xFFf59e0b), '/studio'),
+];
+
+class _AiTool {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final String route;
+  const _AiTool(this.label, this.icon, this.color, this.route);
+}
+
+class _QuickAiTools extends StatelessWidget {
+  const _QuickAiTools();
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        const Text('Quick AI Tools',
+          style: TextStyle(color: NexusColors.textSecondary, fontSize: 12,
+            fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+        GestureDetector(
+          onTap: () => context.push('/studio'),
+          child: const Text('All tools →',
+            style: TextStyle(color: NexusColors.primary, fontSize: 11, fontWeight: FontWeight.w600)),
+        ),
+      ]),
+      const SizedBox(height: 10),
+      Row(children: _quickTools.map((t) => Expanded(child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: GestureDetector(
+          onTap: () => context.push(t.route),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+            decoration: BoxDecoration(
+              color: NexusColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: t.color.withValues(alpha: 0.2)),
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 32, height: 32,
+                decoration: BoxDecoration(
+                  color: t.color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(t.icon, color: t.color, size: 16),
+              ),
+              const SizedBox(height: 6),
+              Text(t.label,
+                style: const TextStyle(color: NexusColors.textPrimary,
+                  fontSize: 9, fontWeight: FontWeight.w600),
+                textAlign: TextAlign.center,
+                maxLines: 2, overflow: TextOverflow.ellipsis,
+              ),
+            ]),
+          ),
+        ),
+      ))).toList()),
+    ],
+  );
 }

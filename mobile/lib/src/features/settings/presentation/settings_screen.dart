@@ -421,24 +421,72 @@ class _EditProfileSheet extends StatefulWidget {
 
 class _EditProfileSheetState extends State<_EditProfileSheet> {
   late final TextEditingController _nameCtrl;
+  late final TextEditingController _emailCtrl;
   String? _selectedState;
+  DateTime? _dob;
   bool _saving = false;
   String? _err;
+
+  static final _emailRx = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
   @override
   void initState() {
     super.initState();
-    _nameCtrl = TextEditingController(text: widget.profile['display_name'] as String? ?? '');
+    _nameCtrl  = TextEditingController(text: widget.profile['display_name'] as String? ?? '');
+    _emailCtrl = TextEditingController(text: widget.profile['email'] as String? ?? '');
     _selectedState = widget.profile['state'] as String?;
+    final dobStr = widget.profile['date_of_birth'] as String?;
+    if (dobStr != null && dobStr.isNotEmpty) {
+      _dob = DateTime.tryParse(dobStr);
+    }
   }
-  @override void dispose() { _nameCtrl.dispose(); super.dispose(); }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDob() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dob ?? DateTime(now.year - 18, now.month, now.day),
+      firstDate: DateTime(1920),
+      lastDate: now,
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.dark(
+            primary: NexusColors.primary,
+            onPrimary: Colors.white,
+            surface: NexusColors.surface,
+            onSurface: NexusColors.textPrimary,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) setState(() => _dob = picked);
+  }
 
   Future<void> _save() async {
+    final email = _emailCtrl.text.trim();
+    if (email.isNotEmpty && !_emailRx.hasMatch(email)) {
+      setState(() => _err = 'Enter a valid email address');
+      return;
+    }
     setState(() { _saving = true; _err = null; });
     try {
       await widget.ref.read(userApiProvider).updateProfile(
         displayName: _nameCtrl.text.trim().isNotEmpty ? _nameCtrl.text.trim() : null,
         state:       _selectedState,
+        email:       email.isNotEmpty ? email : null,
+        dateOfBirth: _dob != null
+            ? '${_dob!.year.toString().padLeft(4, '0')}-'
+              '${_dob!.month.toString().padLeft(2, '0')}-'
+              '${_dob!.day.toString().padLeft(2, '0')}'
+            : null,
       );
       widget.ref.invalidate(_profileProvider);
       if (mounted) Navigator.pop(context);
@@ -449,74 +497,137 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     }
   }
 
+  InputDecoration _inputDec(String hint) => InputDecoration(
+    hintText: hint,
+    hintStyle: const TextStyle(color: NexusColors.textSecondary),
+    filled: true, fillColor: NexusColors.background,
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: NexusColors.border)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: NexusColors.border)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: NexusColors.primary)),
+  );
+
   @override
   Widget build(BuildContext context) => Padding(
     padding: EdgeInsets.only(
       left: 24, right: 24, top: 24,
       bottom: MediaQuery.of(context).viewInsets.bottom + 24,
     ),
-    child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Edit Profile', style: TextStyle(
-          color: NexusColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w800)),
-      const SizedBox(height: 20),
+    child: SingleChildScrollView(
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Edit Profile', style: TextStyle(
+            color: NexusColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 20),
 
-      const Text('FULL NAME', style: TextStyle(color: NexusColors.textSecondary,
-          fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
-      const SizedBox(height: 8),
-      TextField(
-        controller: _nameCtrl,
-        style: const TextStyle(color: NexusColors.textPrimary),
-        decoration: InputDecoration(
-          hintText: 'Enter your full name',
-          hintStyle: const TextStyle(color: NexusColors.textSecondary),
-          filled: true, fillColor: NexusColors.background,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: NexusColors.border)),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: NexusColors.border)),
+        // ── Full Name ──────────────────────────────────────────────────
+        const Text('FULL NAME', style: TextStyle(color: NexusColors.textSecondary,
+            fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _nameCtrl,
+          style: const TextStyle(color: NexusColors.textPrimary),
+          decoration: _inputDec('Enter your full name'),
         ),
-      ),
-      const SizedBox(height: 16),
+        const SizedBox(height: 16),
 
-      const Text('STATE', style: TextStyle(color: NexusColors.textSecondary,
-          fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
-      const SizedBox(height: 8),
-      DropdownButtonFormField<String>(
-        value: _selectedState,
-        hint: const Text('Select your state', style: TextStyle(color: NexusColors.textSecondary)),
-        onChanged: (v) => setState(() => _selectedState = v),
-        dropdownColor: NexusColors.surface,
-        style: const TextStyle(color: NexusColors.textPrimary, fontSize: 14),
-        items: _nigerianStates.map((s) =>
-            DropdownMenuItem(value: s, child: Text(s))).toList(),
-        decoration: InputDecoration(
-          filled: true, fillColor: NexusColors.background,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: NexusColors.border)),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: NexusColors.border)),
+        // ── Email ──────────────────────────────────────────────────────
+        const Text('EMAIL ADDRESS', style: TextStyle(color: NexusColors.textSecondary,
+            fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _emailCtrl,
+          keyboardType: TextInputType.emailAddress,
+          autocorrect: false,
+          style: const TextStyle(color: NexusColors.textPrimary),
+          decoration: _inputDec('you@example.com'),
         ),
-      ),
+        const SizedBox(height: 4),
+        const Text('Used for prize notifications and account recovery.',
+          style: TextStyle(color: NexusColors.textSecondary, fontSize: 10)),
+        const SizedBox(height: 16),
 
-      if (_err != null) ...[
-        const SizedBox(height: 12),
-        Text(_err!, style: const TextStyle(color: NexusColors.red, fontSize: 12)),
-      ],
-
-      const SizedBox(height: 20),
-      ElevatedButton(
-        onPressed: _saving ? null : _save,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: NexusColors.primary,
-          minimumSize: const Size(double.infinity, 50),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        // ── State ──────────────────────────────────────────────────────
+        const Text('STATE', style: TextStyle(color: NexusColors.textSecondary,
+            fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          value: _selectedState,
+          hint: const Text('Select your state', style: TextStyle(color: NexusColors.textSecondary)),
+          onChanged: (v) => setState(() => _selectedState = v),
+          dropdownColor: NexusColors.surface,
+          style: const TextStyle(color: NexusColors.textPrimary, fontSize: 14),
+          items: _nigerianStates.map((s) =>
+              DropdownMenuItem(value: s, child: Text(s))).toList(),
+          decoration: InputDecoration(
+            filled: true, fillColor: NexusColors.background,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: NexusColors.border)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: NexusColors.border)),
+          ),
         ),
-        child: _saving
-            ? const SizedBox(width: 20, height: 20,
-                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-            : const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w800)),
-      ),
-    ]),
+        const SizedBox(height: 4),
+        const Text('Affects your Regional Wars ranking.',
+          style: TextStyle(color: NexusColors.textSecondary, fontSize: 10)),
+        const SizedBox(height: 16),
+
+        // ── Date of Birth ──────────────────────────────────────────────
+        const Text('DATE OF BIRTH', style: TextStyle(color: NexusColors.textSecondary,
+            fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8)),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: _pickDob,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            decoration: BoxDecoration(
+              color: NexusColors.background,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: NexusColors.border),
+            ),
+            child: Row(children: [
+              const Icon(Icons.calendar_today_outlined,
+                  color: NexusColors.textSecondary, size: 16),
+              const SizedBox(width: 10),
+              Text(
+                _dob != null
+                    ? '${_dob!.day.toString().padLeft(2, '0')}/'
+                      '${_dob!.month.toString().padLeft(2, '0')}/'
+                      '${_dob!.year}'
+                    : 'Select date of birth',
+                style: TextStyle(
+                  color: _dob != null ? NexusColors.textPrimary : NexusColors.textSecondary,
+                  fontSize: 14,
+                ),
+              ),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 4),
+        const Text('Optional — used for birthday bonus Pulse Points.',
+          style: TextStyle(color: NexusColors.textSecondary, fontSize: 10)),
+
+        if (_err != null) ...[
+          const SizedBox(height: 12),
+          Text(_err!, style: const TextStyle(color: NexusColors.red, fontSize: 12)),
+        ],
+
+        const SizedBox(height: 20),
+        ElevatedButton(
+          onPressed: _saving ? null : _save,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: NexusColors.primary,
+            minimumSize: const Size(double.infinity, 50),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          child: _saving
+              ? const SizedBox(width: 20, height: 20,
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+              : const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w800)),
+        ),
+      ]),
+    ),
   );
 }
 

@@ -154,12 +154,34 @@ class UserApi {
   }
 
   /// Update profile fields — only non-null fields are sent
-  Future<Map<String, dynamic>> updateProfile({String? displayName, String? state}) async {
+  Future<Map<String, dynamic>> updateProfile({
+    String? displayName,
+    String? state,
+    String? email,
+    String? dateOfBirth,
+  }) async {
     final payload = <String, dynamic>{};
-    if (displayName != null) payload['display_name'] = displayName;
-    if (state != null)       payload['state'] = state;
+    if (displayName != null)  payload['display_name']    = displayName;
+    if (state != null)        payload['state']           = state;
+    if (email != null)        payload['email']           = email;
+    if (dateOfBirth != null)  payload['date_of_birth']  = dateOfBirth;
     final r = await _dio.apiPatch<Map>('/user/profile', data: payload);
     return Map<String, dynamic>.from(r as Map);
+  }
+
+  /// Paginated recharge history
+  Future<Map<String, dynamic>> getRecharges({int page = 1, int limit = 20}) async {
+    final r = await _dio.apiGet<Map>('/user/recharges',
+        query: {'page': page, 'limit': limit});
+    return Map<String, dynamic>.from(r as Map);
+  }
+
+  /// Aggregate stats for the dashboard stats row
+  Future<Map<String, dynamic>> getStats() async {
+    try {
+      final r = await _dio.apiGet<Map>('/user/stats');
+      return Map<String, dynamic>.from(r as Map);
+    } catch (_) { return {}; }
   }
 
   /// Link MoMo wallet (initiates verification)

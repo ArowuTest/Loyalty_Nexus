@@ -32,6 +32,10 @@ final _walletProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) a
   return ref.read(userApiProvider).getWallet();
 });
 
+final _eligibilityProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  return ref.read(spinApiProvider).getEligibility();
+});
+
 final _spinHistoryProvider = FutureProvider.autoDispose<List<SpinHistoryItem>>((ref) async {
   final res = await ref.read(spinApiProvider).getHistory();
   return (res as List).map((e) => SpinHistoryItem.fromMap(e as Map)).toList();
@@ -256,6 +260,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
 
     ref.invalidate(_walletProvider);
     ref.invalidate(_spinHistoryProvider);
+    ref.invalidate(_eligibilityProvider);
   }
 
   void _handleReset() {
@@ -274,9 +279,10 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
 
   @override
   Widget build(BuildContext context) {
-    final wheelAsync   = ref.watch(_wheelConfigProvider);
-    final walletAsync  = ref.watch(_walletProvider);
-    final historyAsync = ref.watch(_spinHistoryProvider);
+    final wheelAsync       = ref.watch(_wheelConfigProvider);
+    final walletAsync      = ref.watch(_walletProvider);
+    final historyAsync     = ref.watch(_spinHistoryProvider);
+    final eligibilityAsync = ref.watch(_eligibilityProvider);
 
     return Scaffold(
       backgroundColor: NexusColors.background,
@@ -310,6 +316,10 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
               child: Column(children: [
                 // Credits badge
                 _CreditsBadge(credits: credits, walletLoaded: walletAsync.hasValue),
+                const SizedBox(height: 12),
+
+                // Daily spin progress (tier-based quota tracker)
+                _SpinProgressCard(eligibility: eligibilityAsync.valueOrNull),
                 const SizedBox(height: 20),
 
                 // Wheel card
@@ -925,6 +935,139 @@ class _HistoryRow extends StatelessWidget {
   String _formatDate(DateTime d) {
     final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return '${d.day} ${months[d.month - 1]}';
+  }
+}
+
+// ── Daily spin progress card ──────────────────────────────────────────────────
+
+const _spinTiers = [
+  ('Bronze',   '🥉', Color(0xFFCD7F32), 1000,  1),
+  ('Silver',   '🥈', Color(0xFFC0C0C0), 5000,  2),
+  ('Gold',     '🥇', Color(0xFFFFD700), 10000, 3),
+  ('Platinum', '💎', Color(0xFFE5E4E2), 20000, 5),
+];
+
+class _SpinProgressCard extends StatelessWidget {
+  final Map<String, dynamic>? eligibility;
+  const _SpinProgressCard({required this.eligibility});
+
+  @override
+  Widget build(BuildContext context) {
+    final e = eligibility;
+    if (e == null || e.isEmpty) return const SizedBox.shrink();
+
+    final tierName      = e['current_tier_name']?.toString() ?? '';
+    final todayNaira    = (e['today_amount_naira'] as num?)?.toDouble() ?? 0;
+    final progressPct   = (e['progress_percent'] as num?)?.toDouble() ?? 0;
+    final usedToday     = e['spins_used_today'] as int? ?? 0;
+    final maxToday      = e['max_spins_today'] as int? ?? 0;
+    final nextTier      = e['next_tier_name']?.toString();
+    final nextMinKobo   = e['next_tier_min_amount'] as int? ?? 0;
+
+    // Resolve tier display
+    final tierRec = _spinTiers
+        .cast<(String, String, Color, int, int)?>()
+        .firstWhere(
+          (t) => t!.$1.toLowerCase() == tierName.toLowerCase(),
+          orElse: () => null,
+        );
+
+    final hasActiveTier = tierRec != null;
+    final emoji  = hasActiveTier ? tierRec!.$2 : '⚡';
+    final color  = hasActiveTier ? tierRec!.$3 : NexusColors.primary;
+    final label  = hasActiveTier ? tierRec!.$1 : 'No Tier';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: NexusColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: NexusColors.border),
+      ),
+      clipBehavior: Clip.hardEdge,
+      child: Column(children: [
+        // Tier accent bar
+        Container(height: 3, decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [
+            color.withValues(alpha: 0.5), color,
+          ]),
+        )),
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Header
+            Row(children: [
+              Text(emoji, style: const TextStyle(fontSize: 20)),
+              const SizedBox(width: 8),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  hasActiveTier ? '$label Tier' : 'No Spin Tier Yet',
+                  style: const TextStyle(color: NexusColors.textPrimary,
+                      fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  hasActiveTier
+                      ? '$usedToday/$maxToday spins used today'
+                      : 'Recharge ₦1,000+ to unlock spins',
+                  style: const TextStyle(color: NexusColors.textSecondary, fontSize: 11),
+                ),
+              ])),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text(
+                  '₦${todayNaira.toInt().toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},')}',
+                  style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w800),
+                ),
+                const Text("today's recharge",
+                  style: TextStyle(color: NexusColors.textSecondary, fontSize: 10)),
+              ]),
+            ]),
+
+            const SizedBox(height: 10),
+
+            // Progress bar
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text(hasActiveTier ? label : '₦0',
+                style: const TextStyle(color: NexusColors.textSecondary, fontSize: 10)),
+              Text(
+                nextTier != null
+                    ? '$nextTier (₦${(nextMinKobo / 100).toInt().toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+$)'), (m) => '${m[1]},')})'
+                    : '🏆 Max Tier',
+                style: const TextStyle(color: NexusColors.textSecondary, fontSize: 10)),
+            ]),
+            const SizedBox(height: 4),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: (progressPct / 100).clamp(0.0, 1.0),
+                minHeight: 6,
+                backgroundColor: NexusColors.border,
+                valueColor: AlwaysStoppedAnimation<Color>(color),
+              ),
+            ),
+
+            // Nudge when cap reached
+            if (maxToday > 0 && usedToday >= maxToday && nextTier != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: NexusColors.gold.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: NexusColors.gold.withValues(alpha: 0.2)),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.trending_up_rounded, color: NexusColors.gold, size: 14),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(
+                    'Recharge more today to reach $nextTier and get more spins!',
+                    style: const TextStyle(color: NexusColors.gold, fontSize: 11),
+                  )),
+                ]),
+              ),
+            ],
+          ]),
+        ),
+      ]),
+    );
   }
 }
 

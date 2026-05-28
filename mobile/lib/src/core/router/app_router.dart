@@ -18,6 +18,7 @@ import '../../features/prizes/presentation/pulse_awards_screen.dart';
 import '../../features/settings/presentation/settings_screen.dart';
 import '../../features/how_it_works/presentation/how_it_works_screen.dart';
 import '../../features/recharge/presentation/recharge_screen.dart';
+import '../../features/transactions/presentation/transactions_screen.dart';
 import '../../features/recharge/presentation/recharge_success_screen.dart';
 import '../auth/auth_provider.dart';
 import '../shell/main_shell.dart';
@@ -41,7 +42,8 @@ class AppRoutes {
   static const settings      = '/settings';
   static const howItWorks    = '/how-it-works';
   static const recharge       = '/recharge';
-  static const rechargeSuccess = '/recharge/success';
+  static const rechargeSuccess  = '/recharge/success';
+  static const transactions    = '/transactions';
 }
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -123,7 +125,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/pulse-awards',  builder: (_, __) => const PulseAwardsScreen()),
       GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
       GoRoute(path: '/settings',      builder: (_, __) => const SettingsScreen()),
-      GoRoute(path: '/how-it-works',  builder: (_, __) => const HowItWorksScreen()),
+      GoRoute(path: '/how-it-works',   builder: (_, __) => const HowItWorksScreen()),
+      GoRoute(path: '/transactions',   builder: (_, __) => const TransactionsScreen()),
       // ── Public recharge ───────────────────────────────────────────────────
       GoRoute(path: '/recharge',         builder: (_, __) => const RechargeScreen()),
       GoRoute(
