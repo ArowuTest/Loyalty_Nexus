@@ -124,9 +124,21 @@ class UserApi {
   }
 
   Future<List<dynamic>> getTransactions({int page = 1, int limit = 20}) async {
-    final r = await _dio.apiGet<Map>('/user/transactions',
-        query: {'page': page, 'limit': limit});
-    return (r as Map)['transactions'] as List? ?? [];
+    // Backend may return a plain List or a Map with a 'transactions' key
+    try {
+      final resp = await _dio.get<dynamic>('/user/transactions',
+          queryParameters: {'page': page, 'limit': limit});
+      final data = resp.data;
+      if (data is List) return data;
+      if (data is Map) return (data['transactions'] as List?) ?? [];
+      return [];
+    } on DioException catch (e) {
+      final body = e.response?.data;
+      final msg = body is Map
+          ? (body['error'] ?? body['message'] ?? e.message ?? 'Request failed').toString()
+          : (e.message ?? 'Request failed');
+      throw ApiException(msg, statusCode: e.response?.statusCode);
+    }
   }
 
   Future<Map<String, dynamic>> getPassport() async {
