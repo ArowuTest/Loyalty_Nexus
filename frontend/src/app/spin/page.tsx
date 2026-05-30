@@ -205,9 +205,11 @@ function PrizeClaimModal({ item, onClose, onSuccess }: PrizeClaimModalProps) {
             {/* Prize value banner */}
             <div className={cn("rounded-xl px-4 py-3 text-center",
               isCash ? "bg-yellow-400/10 border border-yellow-400/20" : "bg-nexus-500/10 border border-nexus-500/20")}>
-              <p className="text-xs text-white/40 uppercase tracking-widest mb-0.5">Prize Value</p>
+              <p className="text-xs text-white/40 uppercase tracking-widest mb-0.5">
+                {isData ? "Prize" : "Prize Value"}
+              </p>
               <p className={cn("text-2xl font-bold font-display", isCash ? "text-yellow-400" : "text-nexus-300")}>
-                {valueNaira}
+                {isData ? "Data Bundle" : valueNaira}
               </p>
             </div>
 
@@ -406,11 +408,15 @@ export default function SpinPage() {
     setShowResult(false);
     try {
       const res = await api.playSpin() as SpinOutcome;
+      // Absolute rotation — mirrors RechargeMax fix so pointer always lands
+      // on the correct segment regardless of how many spins have accumulated.
       const targetIdx = res.slot_index ?? 0;
-      const targetAngle = targetIdx * segAngle + segAngle / 2;
-      const extraSpins = 6 + Math.random() * 2;
-      const finalRotation = extraSpins * 360 + (360 - targetAngle);
-      setRotation(prev => prev + finalRotation);
+      const segmentCentre = targetIdx * segAngle + segAngle / 2;
+      const landingAngle  = ((360 - (segmentCentre % 360)) + 360) % 360;
+      const nudge         = (Math.random() - 0.5) * (segAngle * 0.3);
+      const baseSpins     = Math.ceil(rotation / 360) * 360 + 5 * 360;
+      const finalRotation = baseSpins + landingAngle + nudge;
+      setRotation(finalRotation);
 
       setTimeout(() => {
         setSpinning(false);
@@ -431,7 +437,7 @@ export default function SpinPage() {
       const msg = e instanceof Error ? e.message : "Spin failed";
       toast.error(msg);
     }
-  }, [spinning, spun, spinCredits, segAngle, mutateWallet, mutateHistory]);
+  }, [spinning, spun, spinCredits, segAngle, rotation, mutateWallet, mutateHistory]);
 
   const handleReset = () => { setSpun(false); setOutcome(null); setShowResult(false); };
 

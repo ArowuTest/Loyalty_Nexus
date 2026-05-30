@@ -573,6 +573,19 @@ func (s *SpinService) CreatePrize(ctx context.Context, data map[string]interface
 		}
 	}
 
+	// Validate data_bundle base_value matches a real VTPass variation tier.
+	// Valid tiers (kobo): 10000=₦100, 20000=₦200, 50000=₦500, 100000=₦1000, 150000=₦1500, 200000=₦2000.
+	if entities.PrizeType(prizeTypeStr) == entities.PrizeDataBundle {
+		validDataKobo := map[int64]bool{10000: true, 20000: true, 50000: true, 100000: true, 150000: true, 200000: true}
+		if !validDataKobo[int64(baseValue)] {
+			return nil, fmt.Errorf(
+				"data_bundle base_value must match a supported VTPass tier in kobo "+
+					"(₦100=10000, ₦200=20000, ₦500=50000, ₦1000=100000, ₦1500=150000, ₦2000=200000) — got %d",
+				int64(baseValue),
+			)
+		}
+	}
+
 	prize := entities.PrizePoolEntry{
 		ID:         uuid.New(),
 		Name:       name,
@@ -705,6 +718,23 @@ func (s *SpinService) UpdatePrize(ctx context.Context, prizeID uuid.UUID, data m
 	if len(updates) == 0 {
 		return prize, nil
 	}
+
+	// Validate data_bundle base_value against VTPass tiers when either field changes.
+	finalPrizeType := prize.PrizeType
+	if pt, ok := updates["prize_type"].(string); ok && pt != "" {
+		finalPrizeType = entities.PrizeType(pt)
+	}
+	if finalPrizeType == entities.PrizeDataBundle {
+		validDataKobo := map[int64]bool{10000: true, 20000: true, 50000: true, 100000: true, 150000: true, 200000: true}
+		if !validDataKobo[int64(prize.BaseValue)] {
+			return nil, fmt.Errorf(
+				"data_bundle base_value must match a supported VTPass tier in kobo "+
+					"(₦100=10000, ₦200=20000, ₦500=50000, ₦1000=100000, ₦1500=150000, ₦2000=200000) — got %d",
+				int64(prize.BaseValue),
+			)
+		}
+	}
+
 	if err := s.db.WithContext(ctx).Table("prize_pool").Where("id = ?", prizeID).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update prize: %w", err)
 	}
