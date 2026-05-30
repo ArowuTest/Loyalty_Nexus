@@ -465,7 +465,7 @@ export default function SpinPage() {
                 >
                   {segments.map((seg, idx) => {
                     const angle = idx * segAngle + segAngle / 2;
-                    const rad = (angle * Math.PI) / 180;
+                    const rad = ((angle - 90) * Math.PI) / 180;
                     const r = 95;
                     return (
                       <div

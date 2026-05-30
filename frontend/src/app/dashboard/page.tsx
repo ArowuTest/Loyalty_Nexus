@@ -473,7 +473,7 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
               >
                 {segments.map((seg, idx) => {
                   const angle = idx * segAngle + segAngle / 2;
-                  const rad   = (angle * Math.PI) / 180;
+                  const rad   = ((angle - 90) * Math.PI) / 180;
                   const r     = 75;
                   return (
                     <div key={idx} className="absolute font-black text-center pointer-events-none"
