@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -509,6 +510,37 @@ func (s *NetworkBundleService) getBundlesFromDB(ctx context.Context, networkCode
 	return out, nil
 }
 
+
+// GetBestBundleForPrice returns the active bundle whose price is closest to
+// targetNaira for the given network (DB-first via GetBundles). It prefers an
+// exact price match; when none exists it returns the plan whose price is the
+// smallest absolute difference from targetNaira — rounding UP first (user gets
+// at least what the prize says), then falling back to the nearest plan overall.
+//
+// Used by VTPassAdapter.TopUpData so prize fulfillment uses real VTPass
+// variation codes from the synced catalog rather than the hardcoded fallback map.
+func (s *NetworkBundleService) GetBestBundleForPrice(ctx context.Context, networkCode string, targetNaira float64) (*DataBundleResponse, error) {
+	bundles, err := s.GetBundles(ctx, networkCode)
+	if err != nil {
+		return nil, fmt.Errorf("GetBestBundleForPrice: GetBundles(%s): %w", networkCode, err)
+	}
+	if len(bundles) == 0 {
+		return nil, fmt.Errorf("GetBestBundleForPrice: no active bundles for network %s", networkCode)
+	}
+
+	var best *DataBundleResponse
+	bestDiff := math.MaxFloat64
+
+	for i := range bundles {
+		b := &bundles[i]
+		diff := math.Abs(b.Price - targetNaira)
+		if diff < bestDiff {
+			bestDiff = diff
+			best = b
+		}
+	}
+	return best, nil
+}
 
 func extractDataSize(name string) string {
 	units := []string{"TB", "GB", "MB", "KB"}

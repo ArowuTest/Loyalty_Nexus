@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -19,10 +20,21 @@ import (
 //   - Credentials (api-key, public-key, secret-key) are read FRESH from env on
 //     every call so that credential rotation takes effect without a restart.
 //   - request_id is formatted as required by VTPass: YYYYMMDDHHIISS + truncated ref.
+//   - bundleSvc (optional) enables DB-first variation code lookup for data prizes.
+//     Set via SetBundleService after construction. Falls back to networkDataCode()
+//     when nil or when no matching bundle is found in the DB.
 type VTPassAdapter struct {
 	baseURL   string
 	isSandbox bool
 	client    *http.Client
+	bundleSvc *NetworkBundleService // optional; wired in main.go after both are constructed
+}
+
+// SetBundleService wires the NetworkBundleService into the adapter so that
+// TopUpData uses real variation codes from the synced DB catalog instead of
+// the hardcoded networkDataCode() fallback map.
+func (v *VTPassAdapter) SetBundleService(svc *NetworkBundleService) {
+	v.bundleSvc = svc
 }
 
 func NewVTPassAdapter() *VTPassAdapter {
@@ -74,10 +86,32 @@ func (v *VTPassAdapter) TopUpAirtime(ctx context.Context, phone, network string,
 
 func (v *VTPassAdapter) TopUpData(ctx context.Context, phone, network string, amountNaira float64, ref string) (string, error) {
 	serviceID := networkToVTPassDataID(network)
-	variationCode := networkDataCode(network, amountNaira)
-	if variationCode == "" {
-		return "", fmt.Errorf("vtpass: no data variation code for network=%s amount=₦%.0f", network, amountNaira)
+
+	// ── DB-first variation code lookup ─────────────────────────────────────────
+	// NetworkBundleService keeps network_data_bundles fresh (5×/day via DataBundleSyncJob).
+	// Using the real catalog is more reliable than the hardcoded networkDataCode() map,
+	// especially for networks where the ₦price→variation mapping changes frequently (MTN).
+	var variationCode string
+	if v.bundleSvc != nil {
+		if bundle, err := v.bundleSvc.GetBestBundleForPrice(ctx, network, amountNaira); err == nil && bundle != nil {
+			variationCode = bundle.ID // ID field holds variation_code from network_data_bundles
+			log.Printf("[VTPassAdapter] TopUpData: DB-first code=%q name=%q price=₦%.0f (prize=₦%.0f) network=%s",
+				variationCode, bundle.Name, bundle.Price, amountNaira, network)
+		} else {
+			log.Printf("[VTPassAdapter] TopUpData: DB lookup failed (%v) — falling back to hardcoded map", err)
+		}
 	}
+
+	// ── Hardcoded fallback ─────────────────────────────────────────────────────
+	// Used when: bundleSvc not wired, DB is empty (first deploy), or network_data_bundles
+	// hasn't been synced yet. networkDataCode() is a best-effort static map.
+	if variationCode == "" {
+		variationCode = networkDataCode(network, amountNaira)
+	}
+	if variationCode == "" {
+		return "", fmt.Errorf("vtpass: no data variation code for network=%s amount=₦%.0f (DB empty and no hardcoded fallback)", network, amountNaira)
+	}
+
 	reqID := vtpassRequestID(ref)
 	payload := map[string]interface{}{
 		"request_id":     reqID,

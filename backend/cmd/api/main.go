@@ -293,6 +293,11 @@ func main() {
 		vtuSvc    := services.NewVTURechargeService(db, vtpassClient, bundleSvc, rechargeSvc, notifySvc)
 		vtuH      := handlers.NewVTURechargeHandler(vtuSvc)
 
+		// Wire bundleSvc into the prize fulfillment VTPassAdapter so that data bundle
+		// prizes use real variation codes from the synced DB catalog (network_data_bundles)
+		// rather than the hardcoded networkDataCode() map — which has no exact MTN ₦500 plan.
+		vtpass.SetBundleService(bundleSvc)
+
 		// DataBundleSyncJob: refreshes network_data_bundles from VTPass 5×/day so
 		// GetBundles reads from DB (fast, restart-safe) rather than calling VTPass live.
 		bundleSyncJob := services.NewDataBundleSyncJob(db, vtpassClient, bundleSvc)
