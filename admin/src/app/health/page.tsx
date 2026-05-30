@@ -40,13 +40,19 @@ const OVERALL_BANNER = {
 };
 
 function Gauge({ value, label, unit = "%", max = 100, warn = 80, crit = 95 }:
-  { value: number; label: string; unit?: string; max?: number; warn?: number; crit?: number }) {
-  const pct = Math.min((value / max) * 100, 100);
+  { value: number | null | undefined; label: string; unit?: string; max?: number; warn?: number; crit?: number }) {
+  // Guard: null/undefined/NaN values render as "—" instead of crashing
+  const safeValue = (value != null && isFinite(value)) ? value : 0;
+  const safeMax   = (max != null && max > 0)           ? max  : 1;
+  const pct = Math.min((safeValue / safeMax) * 100, 100);
   const color = pct >= crit ? "text-red-600" : pct >= warn ? "text-yellow-600" : "text-green-600";
   const barColor = pct >= crit ? "bg-red-500" : pct >= warn ? "bg-yellow-500" : "bg-green-500";
+  const display = (value == null || !isFinite(value as number))
+    ? "—"
+    : safeValue.toFixed(unit === "ms" ? 0 : 1);
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-      <div className={`text-3xl font-bold ${color}`}>{value.toFixed(unit === "ms" ? 0 : 1)}<span className="text-base font-normal text-gray-400 ml-1">{unit}</span></div>
+      <div className={`text-3xl font-bold ${color}`}>{display}<span className="text-base font-normal text-gray-400 ml-1">{unit}</span></div>
       <div className="w-full bg-gray-100 rounded-full h-2 mt-2 mb-1">
         <div className={`h-2 rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }}/>
       </div>
@@ -121,18 +127,18 @@ export default function HealthPage() {
         <span className="text-2xl">{data.overall === "healthy" ? "✅" : data.overall === "degraded" ? "⚠️" : "🔴"}</span>
         <div>
           <p className="font-bold capitalize">{data.overall === "healthy" ? "All Systems Operational" : data.overall === "degraded" ? "Degraded Performance" : "Service Outage Detected"}</p>
-          <p className="text-xs opacity-70">Last checked: {new Date(data.checked_at).toLocaleString("en-NG")}</p>
+          <p className="text-xs opacity-70">Last checked: {data.checked_at ? new Date(data.checked_at).toLocaleString("en-NG") : "—"}</p>
         </div>
       </div>
 
       {/* Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-        <Gauge value={data.webhook_success_rate_24h}   label="Webhook Success (24h)"    unit="%" warn={95} crit={90}/>
-        <Gauge value={data.paystack_success_rate_24h}  label="Paystack Success (24h)"   unit="%" warn={95} crit={90}/>
-        <Gauge value={data.api_p99_ms}                 label="API p99 Latency"          unit="ms" max={1000} warn={50} crit={80}/>
-        <Gauge value={data.redis_hit_rate}             label="Redis Hit Rate"           unit="%" warn={80} crit={60}/>
-        <Gauge value={data.db_pool_used}               label="DB Connections Used"      unit="" max={data.db_pool_max} warn={70} crit={90}/>
-        <Gauge value={(data.db_pool_used / data.db_pool_max) * 100} label="DB Pool Utilisation" unit="%"warn={70} crit={90}/>
+        <Gauge value={data.webhook_success_rate_24h  ?? undefined} label="Webhook Success (24h)"  unit="%" warn={95} crit={90}/>
+        <Gauge value={data.paystack_success_rate_24h ?? undefined} label="Paystack Success (24h)" unit="%" warn={95} crit={90}/>
+        <Gauge value={data.api_p99_ms                ?? undefined} label="API p99 Latency"        unit="ms" max={1000} warn={50} crit={80}/>
+        <Gauge value={data.redis_hit_rate            ?? undefined} label="Redis Hit Rate"         unit="%" warn={80} crit={60}/>
+        <Gauge value={data.db_pool_used              ?? undefined} label="DB Connections Used"    unit="" max={data.db_pool_max || 1} warn={70} crit={90}/>
+        <Gauge value={data.db_pool_max > 0 ? (data.db_pool_used / data.db_pool_max) * 100 : undefined} label="DB Pool Utilisation" unit="%" warn={70} crit={90}/>
       </div>
 
       {/* Services table */}
@@ -162,12 +168,12 @@ export default function HealthPage() {
                   {s.latency_ms > 0 ? `${s.latency_ms}ms` : "—"}
                 </td>
                 <td className="px-4 py-3">
-                  <span className={s.uptime_pct >= 99.5 ? "text-green-600 font-semibold" : s.uptime_pct >= 99 ? "text-yellow-600" : "text-red-600"}>
-                    {s.uptime_pct.toFixed(2)}%
+                  <span className={(s.uptime_pct ?? 0) >= 99.5 ? "text-green-600 font-semibold" : (s.uptime_pct ?? 0) >= 99 ? "text-yellow-600" : "text-red-600"}>
+                    {s.uptime_pct != null ? s.uptime_pct.toFixed(2) + "%" : "—"}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-gray-400 text-xs">
-                  {new Date(s.last_checked).toLocaleTimeString("en-NG")}
+                  {s.last_checked ? new Date(s.last_checked).toLocaleTimeString("en-NG") : "—"}
                 </td>
                 <td className="px-4 py-3 text-gray-400 text-xs">{s.note ?? "—"}</td>
               </tr>

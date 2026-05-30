@@ -71,19 +71,41 @@ func (h *ClaimHandler) GetMyWins(w http.ResponseWriter, r *http.Request) {
 }
 
 // prizeLabelFor returns a human-readable label for a prize.
-// value is in KOBO for monetary prizes; pulse_points are whole units.
+// valueKobo is in KOBO for monetary prizes; pulse_points are whole units.
+// Guards against sub-₦1 values that round to "₦0" (can occur from
+// historically malformed prize entries or legacy data).
 func prizeLabelFor(prizeType string, valueKobo float64) string {
 	naira := valueKobo / 100.0
+	// fmtNaira formats a naira amount: integers drop the decimal,
+	// sub-₦1 values show two decimal places instead of rounding to ₦0.
+	fmtNaira := func(n float64) string {
+		if n >= 1 {
+			return fmt.Sprintf("₦%.0f", n)
+		}
+		if n > 0 {
+			return fmt.Sprintf("₦%.2f", n)
+		}
+		return "₦0"
+	}
 	switch prizeType {
 	case "airtime":
-		return fmt.Sprintf("₦%.0f Airtime", naira)
+		if naira <= 0 {
+			return "Airtime"
+		}
+		return fmtNaira(naira) + " Airtime"
 	case "data_bundle":
 		// For data we show the Naira value since MB info is in the prize name.
-		return fmt.Sprintf("₦%.0f Data Bundle", naira)
+		if naira <= 0 {
+			return "Data Bundle"
+		}
+		return fmtNaira(naira) + " Data Bundle"
 	case "pulse_points":
 		return fmt.Sprintf("+%.0f Pulse Points", valueKobo) // points are not kobo
 	case "momo_cash":
-		return fmt.Sprintf("₦%.0f MoMo Cash", naira)
+		if naira <= 0 {
+			return "MoMo Cash"
+		}
+		return fmtNaira(naira) + " MoMo Cash"
 	default:
 		return "Prize"
 	}
