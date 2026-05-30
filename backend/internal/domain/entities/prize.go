@@ -7,11 +7,17 @@ import (
 
 type PrizeType string
 const (
-	PrizeTryAgain      PrizeType = "try_again"
-	PrizePulsePoints   PrizeType = "pulse_points"
-	PrizeAirtime       PrizeType = "airtime"
-	PrizeDataBundle    PrizeType = "data_bundle"
-	PrizeMoMoCash      PrizeType = "momo_cash"
+	PrizeTryAgain    PrizeType = "try_again"
+	PrizePulsePoints PrizeType = "pulse_points"
+	PrizeAirtime     PrizeType = "airtime"
+	PrizeDataBundle  PrizeType = "data_bundle"
+	PrizeMoMoCash    PrizeType = "momo_cash"
+	// Physical prizes require admin fulfillment (shipping/logistics).
+	// When a user wins one, they submit delivery details (name + address).
+	// Admin sees the claim in the admin dashboard and manually dispatches.
+	// Enable via admin prize_pool when LN has physical prize partnerships.
+	PrizePhysical PrizeType = "physical"
+	PrizeGoods    PrizeType = "goods"
 )
 
 type FulfillmentStatus string
@@ -20,6 +26,9 @@ const (
 	FulfillPending         FulfillmentStatus = "pending"
 	FulfillPendingMoMo     FulfillmentStatus = "pending_momo_setup"
 	FulfillPendingClaim    FulfillmentStatus = "pending_claim"
+	// FulfillPendingDelivery: user submitted delivery details; admin must ship.
+	// Admin transitions this to FulfillCompleted once dispatched.
+	FulfillPendingDelivery FulfillmentStatus = "pending_delivery"
 	FulfillProcessing      FulfillmentStatus = "processing"
 	FulfillCompleted       FulfillmentStatus = "completed"
 	FulfillFailed          FulfillmentStatus = "failed"
@@ -59,6 +68,9 @@ type SpinResult struct {
 	BankAccountNumber string            `db:"bank_account_number" gorm:"column:bank_account_number;default:''"   json:"bank_account_number,omitempty"`
 	BankAccountName   string            `db:"bank_account_name"  gorm:"column:bank_account_name;default:''"      json:"bank_account_name,omitempty"`
 	BankName          string            `db:"bank_name"          gorm:"column:bank_name;default:''"              json:"bank_name,omitempty"`
+	// Delivery details — populated when user claims a physical/goods prize.
+	DeliveryName    string `db:"delivery_name"    gorm:"column:delivery_name;default:''"    json:"delivery_name,omitempty"`
+	DeliveryAddress string `db:"delivery_address" gorm:"column:delivery_address;default:''" json:"delivery_address,omitempty"`
 	ReviewedBy        *uuid.UUID        `db:"reviewed_by"        gorm:"column:reviewed_by"                       json:"reviewed_by,omitempty"`
 	ReviewedAt        *time.Time        `db:"reviewed_at"        gorm:"column:reviewed_at"                       json:"reviewed_at,omitempty"`
 	RejectionReason   string            `db:"rejection_reason"   gorm:"column:rejection_reason;default:''"       json:"rejection_reason,omitempty"`

@@ -52,6 +52,9 @@ type ClaimRequest struct {
 	BankAccountNumber string `json:"bank_account_number"`
 	BankAccountName   string `json:"bank_account_name"`
 	BankName          string `json:"bank_name"`
+	// Delivery details — required for physical / goods prizes
+	DeliveryName    string `json:"delivery_name"`
+	DeliveryAddress string `json:"delivery_address"`
 }
 
 // ClaimPrize processes a user's claim for a specific prize.
@@ -125,6 +128,25 @@ func (s *ClaimService) ClaimPrize(ctx context.Context, userID, claimID uuid.UUID
 			return nil, err
 		}
 		result.ClaimStatus = entities.ClaimClaimed
+
+	case entities.PrizePhysical, entities.PrizeGoods:
+		// Physical prizes: user submits delivery details → admin receives and ships.
+		if req.DeliveryName == "" || req.DeliveryAddress == "" {
+			return nil, fmt.Errorf("delivery_name and delivery_address are required for physical prizes")
+		}
+		deliveryDetails := map[string]string{
+			"delivery_name":    req.DeliveryName,
+			"delivery_address": req.DeliveryAddress,
+		}
+		// Move to pending admin review; admin dashboard surfaces all pending_delivery items.
+		err = s.prizeRepo.UpdateSpinClaimStatus(ctx, claimID, entities.ClaimPendingAdmin, deliveryDetails)
+		if err != nil {
+			return nil, err
+		}
+		// Mark fulfillment as pending_delivery so the lifecycle worker and admin dashboard
+		// can pick it up.
+		_ = s.prizeRepo.UpdateSpinFulfillment(ctx, claimID, entities.FulfillPendingDelivery, "", "")
+		result.ClaimStatus = entities.ClaimPendingAdmin
 
 	default:
 		return nil, fmt.Errorf("cannot claim prize type: %s", result.PrizeType)

@@ -56,6 +56,12 @@ func (s *PrizeFulfillmentService) Fulfill(ctx context.Context, result *entities.
 		return s.fulfillMoMo(ctx, result, ref)
 	case entities.PrizePulsePoints, entities.PrizeTryAgain:
 		return nil // Already handled in SpinService
+	case entities.PrizePhysical, entities.PrizeGoods:
+		// Physical prizes require admin fulfillment (shipping/logistics).
+		// The user submits delivery details via ClaimService; this Fulfill() path
+		// is a safety net — move to pending_delivery so admin dashboard surfaces it.
+		_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillPendingDelivery, "", "")
+		return nil
 	default:
 		return fmt.Errorf("unknown prize type: %s", result.PrizeType)
 	}

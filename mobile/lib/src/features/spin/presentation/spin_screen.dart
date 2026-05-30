@@ -108,6 +108,8 @@ class SpinHistoryItem {
       case 'airtime':      return '₦${(prizeValue / 100).toStringAsFixed(0)} Airtime';
       case 'data_bundle':  return 'Data Bundle';
       case 'momo_cash':    return '₦${(prizeValue / 100).toStringAsFixed(0)} Cash';
+      case 'physical':
+      case 'goods':        return 'Physical Prize';
       default:             return prizeType;
     }
   }
@@ -711,6 +713,8 @@ class _ResultCard extends StatelessWidget {
     'pulse_points': ('⚡', Color(0xFFf9c74f)),
     'momo_cash':    ('💰', Color(0xFF4ade80)),
     'try_again':    ('🔄', Color(0xFF6b7280)),
+    'physical':     ('📦', Color(0xFFf97316)),
+    'goods':        ('🎁', Color(0xFFf97316)),
   };
 
   @override
@@ -732,6 +736,8 @@ class _ResultCard extends StatelessWidget {
       subText = 'Airtime credited to your MTN line within 5–10 minutes.';
     } else if (prizeType == 'data_bundle') {
       subText = 'Data bundle activated on your MTN line within 5–10 minutes.';
+    } else if (prizeType == 'physical' || prizeType == 'goods') {
+      subText = '📦 Go to your prizes page to submit delivery details. Our team will arrange delivery.';
     } else {
       subText = 'Better luck next time! Recharge to earn another spin credit.';
     }
@@ -923,12 +929,16 @@ class _HistoryRow extends StatelessWidget {
 
   (Color, String) _statusConfig(String status) {
     switch (status) {
-      case 'completed':    return (NexusColors.green, 'Credited');
+      case 'completed':         return (NexusColors.green, 'Credited');
       case 'pending':
-      case 'pending_momo': return (NexusColors.gold,  'Pending');
-      case 'failed':       return (NexusColors.red,   'Failed');
+      case 'pending_momo_setup':return (NexusColors.gold,  'Pending');
+      case 'pending_claim':     return (const Color(0xFF818cf8), 'Claim Now');
+      case 'pending_delivery':  return (const Color(0xFFf97316), 'Dispatching');
+      case 'pending_admin_review': return (const Color(0xFF60a5fa), 'In Review');
+      case 'failed':            return (NexusColors.red,   'Failed');
+      case 'na':
       case 'n/a':
-      default:             return (NexusColors.textSecondary.withValues(alpha: 0.3), 'No Prize');
+      default:                  return (NexusColors.textSecondary.withValues(alpha: 0.3), 'No Prize');
     }
   }
 

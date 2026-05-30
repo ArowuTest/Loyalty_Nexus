@@ -124,6 +124,13 @@ func (r *postgresPrizeRepository) UpdateSpinClaimStatus(ctx context.Context, id 
 		if v, ok := bankDetails["bank_name"]; ok {
 			updates["bank_name"] = v
 		}
+		// Delivery details for physical / goods prizes
+		if v, ok := bankDetails["delivery_name"]; ok {
+			updates["delivery_name"] = v
+		}
+		if v, ok := bankDetails["delivery_address"]; ok {
+			updates["delivery_address"] = v
+		}
 	}
 	return r.db.WithContext(ctx).Table("spin_results").Where("id = ?", id).Updates(updates).Error
 }

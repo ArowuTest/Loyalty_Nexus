@@ -9,7 +9,7 @@ import toast, { Toaster } from "react-hot-toast";
 import Link from "next/link";
 import {
   Zap, Trophy, RotateCcw, Gift, X, Sparkles, Loader2,
-  History, Info, CheckCircle, ChevronDown, CreditCard, Smartphone
+  History, Info, CheckCircle, ChevronDown, CreditCard, Smartphone, Package
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DailySpinProgress from "@/components/spin/DailySpinProgress";
@@ -61,6 +61,7 @@ function prizeLabel(item: SpinHistoryItem): string {
   if (item.prize_type === "airtime") return `₦${(item.prize_value / 100).toLocaleString()} Airtime`;
   if (item.prize_type === "data_bundle") return `Data Bundle`;
   if (item.prize_type === "momo_cash") return `₦${(item.prize_value / 100).toLocaleString()} Cash`;
+  if (item.prize_type === "physical" || item.prize_type === "goods") return item.prize_type || "Physical Prize";
   return item.prize_type;
 }
 
@@ -71,6 +72,7 @@ function statusBadge(status: string) {
     "pending_claim":         { label: "Claim Now",  cls: "bg-nexus-400/20 text-nexus-300" },
     "pending_momo_setup":    { label: "Need MoMo",  cls: "bg-orange-400/15 text-orange-400" },
     "pending_admin_review":  { label: "In Review",  cls: "bg-blue-400/15 text-blue-400" },
+    "pending_delivery":      { label: "Dispatching", cls: "bg-orange-400/15 text-orange-400" },
     "approved":              { label: "Approved",   cls: "bg-emerald-400/15 text-emerald-400" },
     "failed":                { label: "Failed",     cls: "bg-red-400/15 text-red-400" },
     "na":                    { label: "No Prize",   cls: "bg-white/5 text-white/30" },
@@ -102,6 +104,8 @@ function PrizeClaimModal({ item, onClose, onSuccess }: PrizeClaimModalProps) {
   const [bankAccName, setBankAccName] = useState("");
   const [bankName, setBankName] = useState("");
   const [momoNumber, setMomoNumber] = useState("");
+  const [deliveryName, setDeliveryName] = useState("");
+  const [deliveryAddress, setDeliveryAddress] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -110,6 +114,7 @@ function PrizeClaimModal({ item, onClose, onSuccess }: PrizeClaimModalProps) {
   const isCash = item.prize_type === "momo_cash";
   const isAirtime = item.prize_type === "airtime";
   const isData = item.prize_type === "data_bundle";
+  const isDelivery = item.prize_type === "physical" || item.prize_type === "goods";
   const isAutoFulfill = isAirtime || isData;
 
   const valueNaira = item.prize_value ? (item.prize_value / 100).toLocaleString("en-NG", { style: "currency", currency: "NGN" }) : "";
@@ -121,6 +126,10 @@ function PrizeClaimModal({ item, onClose, onSuccess }: PrizeClaimModalProps) {
       toast.error("Please fill in all bank details");
       return;
     }
+    if (isDelivery && (!deliveryName.trim() || !deliveryAddress.trim())) {
+      toast.error("Please fill in your full name and delivery address");
+      return;
+    }
     setSubmitting(true);
     try {
       const payload: Record<string, string> = {};
@@ -130,9 +139,18 @@ function PrizeClaimModal({ item, onClose, onSuccess }: PrizeClaimModalProps) {
         payload.bank_name = bankName;
       }
       if (momoNumber) payload.momo_number = momoNumber.trim();
+      if (isDelivery) {
+        payload.delivery_name    = deliveryName.trim();
+        payload.delivery_address = deliveryAddress.trim();
+      }
       await api.claimPrize(item.id, payload);
       setDone(true);
-      toast.success(isCash ? "Bank details submitted! Our team will process your payment within 24h." : "Prize claimed! It will be credited within 10 minutes.");
+      const successMsg = isCash
+        ? "Bank details submitted! Our team will process your payment within 24h."
+        : isDelivery
+        ? "Delivery details received! Our team will contact you to arrange delivery."
+        : "Prize claimed! It will be credited within 10 minutes.";
+      toast.success(successMsg);
       setTimeout(() => { onSuccess(); onClose(); }, 2000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Claim failed. Try again.";
@@ -157,8 +175,8 @@ function PrizeClaimModal({ item, onClose, onSuccess }: PrizeClaimModalProps) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className={cn("w-8 h-8 rounded-full flex items-center justify-center",
-              isCash ? "bg-yellow-400/20" : "bg-nexus-500/20")}>
-              {isCash ? <CreditCard size={16} className="text-yellow-400" /> : <Smartphone size={16} className="text-nexus-400" />}
+              isCash ? "bg-yellow-400/20" : isDelivery ? "bg-orange-400/20" : "bg-nexus-500/20")}>
+              {isCash ? <CreditCard size={16} className="text-yellow-400" /> : isDelivery ? <Package size={16} className="text-orange-400" /> : <Smartphone size={16} className="text-nexus-400" />}
             </div>
             <div>
               <p className="text-white font-bold text-sm">Claim Your Prize</p>
@@ -175,7 +193,11 @@ function PrizeClaimModal({ item, onClose, onSuccess }: PrizeClaimModalProps) {
             <CheckCircle className="w-12 h-12 text-green-400 mx-auto" />
             <p className="text-white font-bold">Prize Claimed!</p>
             <p className="text-white/40 text-sm">
-              {isCash ? "Bank details received. Processing within 24 hours." : "Being credited to your phone now."}
+              {isCash
+                ? "Bank details received. Processing within 24 hours."
+                : isDelivery
+                ? "Delivery details received. Our team will contact you to arrange delivery."
+                : "Being credited to your phone now."}
             </p>
           </div>
         ) : (
@@ -270,6 +292,50 @@ function PrizeClaimModal({ item, onClose, onSuccess }: PrizeClaimModalProps) {
                 </button>
                 <p className="text-center text-[10px] text-white/25">
                   Payment processed manually within 24 hours of submission.
+                </p>
+              </div>
+            )}
+
+            {/* PHYSICAL / GOODS — delivery address form */}
+            {isDelivery && (
+              <div className="space-y-3">
+                <p className="text-xs text-white/40">
+                  Enter your delivery details. Our team will contact you and arrange delivery.
+                </p>
+
+                <div>
+                  <label className="block text-xs text-white/40 mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    value={deliveryName}
+                    onChange={e => setDeliveryName(e.target.value)}
+                    placeholder="Your full name"
+                    required
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400/40"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-white/40 mb-1">Delivery Address *</label>
+                  <textarea
+                    value={deliveryAddress}
+                    onChange={e => setDeliveryAddress(e.target.value)}
+                    placeholder="Street address, city, state"
+                    required
+                    rows={3}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/20 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400/40 resize-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={submitting || !deliveryName.trim() || !deliveryAddress.trim()}
+                  className="w-full py-3 rounded-xl font-bold text-white bg-orange-500 hover:bg-orange-400 disabled:opacity-40 flex items-center justify-center gap-2 transition-colors"
+                >
+                  {submitting ? <><Loader2 size={16} className="animate-spin" /> Submitting…</> : <><Package size={16} /> Submit Delivery Details</>}
+                </button>
+                <p className="text-center text-[10px] text-white/25">
+                  Our team will contact you within 48 hours to confirm delivery.
                 </p>
               </div>
             )}

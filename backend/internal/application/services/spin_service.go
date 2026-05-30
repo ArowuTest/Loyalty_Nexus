@@ -171,6 +171,10 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 				// Even if verified, they still need to claim it via the dashboard
 				fulfillStatus = entities.FulfillPendingClaim
 			}
+		case entities.PrizePhysical, entities.PrizeGoods:
+			// Physical prizes require the user to submit delivery details (name + address).
+			// Admin then manually fulfills (ships/delivers) and marks as completed.
+			fulfillStatus = entities.FulfillPendingClaim
 		}
 
 		spinResult = &entities.SpinResult{
@@ -388,6 +392,12 @@ func (s *SpinService) buildPrizeLabel(p *entities.PrizePoolEntry) string {
 		return fmt.Sprintf("₦%.0f Data Bundle", naira)
 	case entities.PrizeMoMoCash:
 		return fmt.Sprintf("₦%.0f MoMo Cash", naira)
+	case entities.PrizePhysical, entities.PrizeGoods:
+		// Use the admin-configured name (e.g. "Bag of Rice", "50-inch TV")
+		if p.Name != "" {
+			return p.Name
+		}
+		return "Physical Prize"
 	default:
 		return p.Name
 	}
