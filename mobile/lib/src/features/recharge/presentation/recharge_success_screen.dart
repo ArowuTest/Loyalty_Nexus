@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -94,6 +95,9 @@ class _RechargeSuccessScreenState extends ConsumerState<RechargeSuccessScreen>
   _RewardData? _rewardData;
   bool         _loadingReward = false;
 
+  // Auto-spin timer
+  Timer? _spinTimer;
+
   // ── Init ──────────────────────────────────────────────────────────────────
   @override
   void initState() {
@@ -149,6 +153,15 @@ class _RechargeSuccessScreenState extends ConsumerState<RechargeSuccessScreen>
         );
         _loadingReward = false;
       });
+      // Auto-navigate to spin wheel after 800 ms (mirrors RechargeMax pattern)
+      if (_rewardData!.spinEligible && mounted) {
+        final auth = ref.read(authStateProvider);
+        if (auth.isAuthenticated) {
+          _spinTimer = Timer(const Duration(milliseconds: 800), () {
+            if (mounted) context.go('/spin');
+          });
+        }
+      }
       // Start card animation 500 ms after data arrives
       await Future.delayed(const Duration(milliseconds: 500));
       if (mounted) _rewardCtrl.forward();
@@ -160,6 +173,7 @@ class _RechargeSuccessScreenState extends ConsumerState<RechargeSuccessScreen>
   // ── Dispose ───────────────────────────────────────────────────────────────
   @override
   void dispose() {
+    _spinTimer?.cancel();
     _confettiCtrl.dispose();
     _rewardCtrl.dispose();
     super.dispose();

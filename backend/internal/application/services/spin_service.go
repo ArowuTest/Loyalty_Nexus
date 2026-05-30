@@ -20,13 +20,15 @@ import (
 )
 
 type SpinService struct {
-	userRepo    repositories.UserRepository
-	txRepo      repositories.TransactionRepository
-	prizeRepo   repositories.PrizeRepository
-	fulfillSvc  *PrizeFulfillmentService
-	notifySvc   *NotificationService
-	cfg         *config.ConfigManager
-	db          *gorm.DB
+	userRepo       repositories.UserRepository
+	txRepo         repositories.TransactionRepository
+	prizeRepo      repositories.PrizeRepository
+	fulfillSvc     *PrizeFulfillmentService
+	notifySvc      *NotificationService
+	cfg            *config.ConfigManager
+	db             *gorm.DB
+	fulfillCfgRepo repositories.PrizeFulfillmentConfigRepository
+	provisionSem   chan struct{} // bounded semaphore — caps concurrent auto-provisions
 }
 
 func NewSpinService(
@@ -37,15 +39,24 @@ func NewSpinService(
 	ns *NotificationService,
 	cfg *config.ConfigManager,
 	db *gorm.DB,
+	fulfillCfgRepo repositories.PrizeFulfillmentConfigRepository,
 ) *SpinService {
+	// Bounded semaphore: at most 50 concurrent auto-provision goroutines.
+	// Matches the RechargeMax pattern (provisionSem capacity 50).
+	sem := make(chan struct{}, 50)
+	for i := 0; i < 50; i++ {
+		sem <- struct{}{}
+	}
 	return &SpinService{
-		userRepo:   ur,
-		txRepo:     tr,
-		prizeRepo:  pr,
-		fulfillSvc: fs,
-		notifySvc:  ns,
-		cfg:        cfg,
-		db:         db,
+		userRepo:       ur,
+		txRepo:         tr,
+		prizeRepo:      pr,
+		fulfillSvc:     fs,
+		notifySvc:      ns,
+		cfg:            cfg,
+		db:             db,
+		fulfillCfgRepo: fulfillCfgRepo,
+		provisionSem:   sem,
 	}
 }
 
@@ -247,8 +258,35 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 		return nil, err
 	}
 
-		// --- Step 6: Background fulfillment for physical prizes ---
-		if spinResult.FulfillmentStatus == entities.FulfillPending {
+		// --- Step 6: Background fulfillment dispatch ---
+		// Check admin-configured fulfillment mode for this prize type.
+		// Default: MANUAL (user must claim from dashboard — unchanged behaviour).
+		// AUTO: fire VTPass immediately in a bounded goroutine (airtime/data only).
+		cfg, _ := s.fulfillCfgRepo.GetByPrizeType(ctx, prize.PrizeType)
+		isAuto := cfg != nil && cfg.FulfillmentMode == entities.FulfillmentModeAuto && entities.IsAutoProvisionable(prize.PrizeType)
+
+		if isAuto {
+			// Flip status from pending_claim → pending so fulfillSvc.Fulfill() acts on it
+			s.db.WithContext(ctx).Table("spin_results").Where("id = ?", spinResult.ID).
+				Update("fulfillment_status", entities.FulfillPending)
+			spinResult.FulfillmentStatus = entities.FulfillPending
+			cfgCopy := *cfg
+			resultCopy := *spinResult
+			safe.Go(func() {
+				// Acquire a semaphore slot (up to 8 s wait before giving up)
+				acquireCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+				defer cancel()
+				select {
+				case <-s.provisionSem:
+					defer func() { s.provisionSem <- struct{}{} }()
+				case <-acquireCtx.Done():
+					log.Printf("[SPIN] auto-provision semaphore timeout prize=%s type=%s", resultCopy.ID, resultCopy.PrizeType)
+					return
+				}
+				s.autoProvisionWithRetry(context.Background(), resultCopy, cfgCopy)
+			})
+		} else if spinResult.FulfillmentStatus == entities.FulfillPending {
+			// Existing path: MoMo or other prizes already set to FulfillPending
 			safe.Go(func() {
 				if err := s.fulfillSvc.Fulfill(context.Background(), spinResult); err != nil {
 					log.Printf("[SPIN] Fulfillment failed for %s: %v", spinResult.ID, err)
@@ -1165,4 +1203,53 @@ func (s *SpinService) UpdateSpinTier(ctx context.Context, id uuid.UUID, data map
 
 func (s *SpinService) DeleteSpinTier(ctx context.Context, id uuid.UUID) error {
 	return s.db.WithContext(ctx).Model(&entities.SpinTier{}).Where("id = ?", id).Update("is_active", false).Error
+}
+
+// ─── Auto-Provision ───────────────────────────────────────────────────────────
+
+// autoProvisionWithRetry attempts to fulfill a prize automatically (AUTO mode).
+// Retries up to cfg.MaxRetryAttempts with cfg.RetryDelaySeconds between attempts.
+// If all attempts fail and cfg.FallbackToManual is true, the spin result is
+// rolled back to FulfillPendingClaim so the user can still claim from dashboard.
+func (s *SpinService) autoProvisionWithRetry(
+	ctx context.Context,
+	result entities.SpinResult,
+	cfg entities.PrizeFulfillmentConfig,
+) {
+	for attempt := 1; attempt <= cfg.MaxRetryAttempts; attempt++ {
+		err := s.fulfillSvc.Fulfill(ctx, &result)
+		if err == nil {
+			log.Printf("[SPIN] auto-provision succeeded: prize=%s type=%s attempt=%d/%d",
+				result.ID, result.PrizeType, attempt, cfg.MaxRetryAttempts)
+			return
+		}
+		log.Printf("[SPIN] auto-provision attempt %d/%d failed: prize=%s type=%s err=%v",
+			attempt, cfg.MaxRetryAttempts, result.ID, result.PrizeType, err)
+		if attempt < cfg.MaxRetryAttempts {
+			time.Sleep(time.Duration(cfg.RetryDelaySeconds) * time.Second)
+		}
+	}
+
+	// All attempts exhausted
+	if cfg.FallbackToManual {
+		s.db.WithContext(ctx).
+			Table("spin_results").
+			Where("id = ?", result.ID).
+			Updates(map[string]interface{}{
+				"fulfillment_status": entities.FulfillPendingClaim,
+				"error_message":      fmt.Sprintf("auto-provision failed after %d attempts; reverted to manual claim", cfg.MaxRetryAttempts),
+				"updated_at":         time.Now(),
+			})
+		log.Printf("[SPIN] auto-provision fell back to manual claim: prize=%s type=%s", result.ID, result.PrizeType)
+	} else {
+		s.db.WithContext(ctx).
+			Table("spin_results").
+			Where("id = ?", result.ID).
+			Updates(map[string]interface{}{
+				"fulfillment_status": entities.FulfillFailed,
+				"error_message":      fmt.Sprintf("auto-provision failed after %d attempts", cfg.MaxRetryAttempts),
+				"updated_at":         time.Now(),
+			})
+		log.Printf("[SPIN] auto-provision marked failed (no fallback): prize=%s type=%s", result.ID, result.PrizeType)
+	}
 }

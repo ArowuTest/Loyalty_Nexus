@@ -197,7 +197,8 @@ func newHandler(t *testing.T, db *gorm.DB) *handlers.USSDHandler {
 	studioSvc := services.NewStudioService(studioRepo, userRepo, nil, nil, nil, db)
 	knowledgeSvc := services.NewUSSDKnowledgeService(studioSvc, nil, nil, cfg)
 	passportSvc := services.NewPassportService(db, cfg)
-	spinSvc := services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db)
+	fulfillCfgRepo := persistence.NewPostgresPrizeFulfillmentConfigRepository(db)
+	spinSvc := services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db, fulfillCfgRepo)
 
 	h := handlers.NewUSSDHandler(spinSvc, nil, userRepo, sessionRepo, cfg)
 	h.SetKnowledgeService(knowledgeSvc)

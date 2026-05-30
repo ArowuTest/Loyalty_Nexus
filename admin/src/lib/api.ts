@@ -314,6 +314,14 @@ class AdminAPI {
     return this.req<string>("GET", `/admin/spin/claims/export?status=${status}`);
   }
 
+  // ─── Prize Fulfillment Config ─────────────────────────────────────────────
+  getFulfillmentConfig() {
+    return this.req<{ configs: FulfillmentConfig[] }>("GET", "/admin/fulfillment-config");
+  }
+  updateFulfillmentConfig(prizeType: string, data: Partial<FulfillmentConfig>) {
+    return this.req<{ config: FulfillmentConfig }>("PUT", `/admin/fulfillment-config/${prizeType}`, data);
+  }
+
   // ─── Spin Tiers ──────────────────────────────────────────────────────────
   getSpinTiers() {
     return this.req<SpinTier[]>("GET", "/admin/spin/tiers");
@@ -478,6 +486,16 @@ export interface PrizeSummary {
   remaining_budget: number;
   percent_used: number;
   is_valid: boolean;
+}
+
+export interface FulfillmentConfig {
+  id: string;
+  prize_type: string;
+  fulfillment_mode: "MANUAL" | "AUTO";
+  max_retry_attempts: number;
+  retry_delay_seconds: number;
+  fallback_to_manual: boolean;
+  updated_at: string;
 }
 
 export interface SpinTier {

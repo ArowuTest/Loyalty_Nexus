@@ -16,9 +16,10 @@ const NAV = [
   ]},
   { group: "Rewards Engine", items: [
     { href: "/points-config",   label: "💎 Points Engine" },
-    { href: "/spin-config",     label: "🎡 Spin Wheel" },
-    { href: "/prizes",          label: "🏆 Prize Pool" },
-    { href: "/spin-claims",     label: "💰 Spin Claims" },
+    { href: "/spin-config",          label: "🎡 Spin Wheel" },
+    { href: "/prizes",               label: "🏆 Prize Pool" },
+    { href: "/fulfillment-config",   label: "⚙️ Fulfillment Mode" },
+    { href: "/spin-claims",          label: "💰 Spin Claims" },
     { href: "/draws",           label: "🎟 Draws" },
     { href: "/mtn-push-upload",   label: "📤 MTN CSV Upload" },
     { href: "/bonus-pulse",       label: "🎁 Bonus Pulse Points" },

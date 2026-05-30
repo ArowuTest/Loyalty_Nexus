@@ -26,20 +26,21 @@ import (
 // Zero-hardcoding: every business parameter is read from network_configs,
 // editable live via PUT /api/v1/admin/config/:key.
 type AdminHandler struct {
-	db            *gorm.DB
-	cfg           *config.ConfigManager
-	spinSvc       *services.SpinService
-	drawSvc       *services.DrawService
-	drawWindowSvc *services.DrawWindowService
-	fraudSvc      *services.FraudService
-	warsSvc       *services.RegionalWarsService
-	studioSvc     *services.StudioService
-	claimSvc      *services.AdminClaimService
-	csvSvc        *services.MTNPushCSVService  // nil-safe; set via WithCSVService
-	bonusPulseSvc *services.BonusPulseService  // nil-safe; set via WithBonusPulseService
-	notifySvc     *services.NotificationService // for winner SMS notifications
-	settingsSvc   *services.SettingsService     // nil-safe; set via WithSettingsService
-	rdb           *redis.Client
+	db              *gorm.DB
+	cfg             *config.ConfigManager
+	spinSvc         *services.SpinService
+	drawSvc         *services.DrawService
+	drawWindowSvc   *services.DrawWindowService
+	fraudSvc        *services.FraudService
+	warsSvc         *services.RegionalWarsService
+	studioSvc       *services.StudioService
+	claimSvc        *services.AdminClaimService
+	csvSvc          *services.MTNPushCSVService   // nil-safe; set via WithCSVService
+	bonusPulseSvc   *services.BonusPulseService   // nil-safe; set via WithBonusPulseService
+	notifySvc       *services.NotificationService  // for winner SMS notifications
+	settingsSvc     *services.SettingsService      // nil-safe; set via WithSettingsService
+	fulfillCfgRepo  repositories.PrizeFulfillmentConfigRepository
+	rdb             *redis.Client
 }
 
 func NewAdminHandler(
@@ -2308,4 +2309,103 @@ func (h *AdminHandler) AdjustSpinCredits(w http.ResponseWriter, r *http.Request)
 		"delta":   body.Delta,
 		"reason":  body.Reason,
 	})
+}
+
+// ─── Prize Fulfillment Config ─────────────────────────────────────────────────
+
+// WithFulfillmentConfigRepo injects the PrizeFulfillmentConfigRepository.
+// Called in main.go after handler construction.
+func (h *AdminHandler) WithFulfillmentConfigRepo(repo repositories.PrizeFulfillmentConfigRepository) *AdminHandler {
+	h.fulfillCfgRepo = repo
+	return h
+}
+
+// GetFulfillmentConfig returns fulfillment mode config for all prize types.
+// GET /api/v1/admin/fulfillment-config
+func (h *AdminHandler) GetFulfillmentConfig(w http.ResponseWriter, r *http.Request) {
+	if h.fulfillCfgRepo == nil {
+		jsonError(w, "fulfillment config not available", http.StatusServiceUnavailable)
+		return
+	}
+	cfgs, err := h.fulfillCfgRepo.GetAll(r.Context())
+	if err != nil {
+		jsonError(w, "failed to load fulfillment config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]interface{}{"configs": cfgs})
+}
+
+// UpdateFulfillmentConfig updates the fulfillment policy for a single prize type.
+// PUT /api/v1/admin/fulfillment-config/{prize_type}
+// Body: { "fulfillment_mode": "MANUAL"|"AUTO", "max_retry_attempts": 3,
+//         "retry_delay_seconds": 30, "fallback_to_manual": true }
+func (h *AdminHandler) UpdateFulfillmentConfig(w http.ResponseWriter, r *http.Request) {
+	if h.fulfillCfgRepo == nil {
+		jsonError(w, "fulfillment config not available", http.StatusServiceUnavailable)
+		return
+	}
+	prizeTypeStr := r.PathValue("prize_type")
+	if prizeTypeStr == "" {
+		jsonError(w, "prize_type path param required", http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		FulfillmentMode   *string `json:"fulfillment_mode"`
+		MaxRetryAttempts  *int    `json:"max_retry_attempts"`
+		RetryDelaySeconds *int    `json:"retry_delay_seconds"`
+		FallbackToManual  *bool   `json:"fallback_to_manual"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Fetch current config so we can apply partial updates
+	prizeType := entities.PrizeType(prizeTypeStr)
+	cfg, err := h.fulfillCfgRepo.GetByPrizeType(r.Context(), prizeType)
+	if err != nil || cfg == nil {
+		jsonError(w, "unknown prize_type: "+prizeTypeStr, http.StatusNotFound)
+		return
+	}
+
+	// Apply provided fields
+	if body.FulfillmentMode != nil {
+		m := entities.FulfillmentMode(*body.FulfillmentMode)
+		if m != entities.FulfillmentModeManual && m != entities.FulfillmentModeAuto {
+			jsonError(w, "fulfillment_mode must be MANUAL or AUTO", http.StatusBadRequest)
+			return
+		}
+		// Guard: only airtime and data_bundle can run in AUTO mode
+		if m == entities.FulfillmentModeAuto && !entities.IsAutoProvisionable(prizeType) {
+			jsonError(w, "AUTO mode is only supported for airtime and data_bundle prize types", http.StatusBadRequest)
+			return
+		}
+		cfg.FulfillmentMode = m
+	}
+	if body.MaxRetryAttempts != nil {
+		if *body.MaxRetryAttempts < 1 || *body.MaxRetryAttempts > 10 {
+			jsonError(w, "max_retry_attempts must be between 1 and 10", http.StatusBadRequest)
+			return
+		}
+		cfg.MaxRetryAttempts = *body.MaxRetryAttempts
+	}
+	if body.RetryDelaySeconds != nil {
+		if *body.RetryDelaySeconds < 5 {
+			jsonError(w, "retry_delay_seconds must be at least 5", http.StatusBadRequest)
+			return
+		}
+		cfg.RetryDelaySeconds = *body.RetryDelaySeconds
+	}
+	if body.FallbackToManual != nil {
+		cfg.FallbackToManual = *body.FallbackToManual
+	}
+
+	if err := h.fulfillCfgRepo.Update(r.Context(), cfg); err != nil {
+		jsonError(w, "update failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[ADMIN] fulfillment config updated: prize_type=%s mode=%s retries=%d delay=%ds fallback=%v",
+		prizeTypeStr, cfg.FulfillmentMode, cfg.MaxRetryAttempts, cfg.RetryDelaySeconds, cfg.FallbackToManual)
+	jsonOK(w, map[string]interface{}{"config": cfg})
 }

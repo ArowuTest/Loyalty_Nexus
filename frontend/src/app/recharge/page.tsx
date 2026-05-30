@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Zap, ChevronRight, Loader2, AlertCircle,
@@ -101,10 +102,12 @@ export default function RechargePage() {
   const [error, setError]                = useState("");
   const [email, setEmail]                = useState("");
   const detectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const router = useRouter();
 
   // ── Payment result state (in-page banner) ────────────────────────────────
   const [rechargeSuccess, setRechargeSuccess] = useState<RechargeSuccess | null>(null);
-  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const spinTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Pre-fill from auth user ───────────────────────────────────────────────
   useEffect(() => {
@@ -143,6 +146,7 @@ export default function RechargePage() {
 
     if (txnStatus === "SUCCESS" && preAmount) {
       // Fast path — show success immediately, no polling needed
+      const eligible = preSpin === "true";
       setRechargeSuccess({
         amount:      Number(preAmount),
         phone:       preMsisdn || "",
@@ -150,10 +154,16 @@ export default function RechargePage() {
         type:        "AIRTIME",
         points:      Number(prePoints || "0"),
         drawEntries: Number(preEntries || "0"),
-        spinEligible: preSpin === "true",
+        spinEligible: eligible,
         reference,
         pending:     false,
       });
+      // Auto-redirect to spin wheel after 800ms so the user sees the success
+      // banner briefly before being taken to the spin page.
+      if (eligible) {
+        if (spinTimerRef.current) clearTimeout(spinTimerRef.current);
+        spinTimerRef.current = setTimeout(() => router.push("/spin"), 800);
+      }
       return;
     }
 
@@ -178,6 +188,7 @@ export default function RechargePage() {
           const data: RechargeStatusResult = await res.json();
 
           if (data.status === "SUCCESS") {
+            const eligible = data.spin_eligible || false;
             setRechargeSuccess({
               amount:      data.amount_kobo / 100,
               phone:       data.msisdn,
@@ -185,10 +196,15 @@ export default function RechargePage() {
               type:        data.type,
               points:      data.points_earned || 0,
               drawEntries: data.draw_entries || 0,
-              spinEligible: data.spin_eligible || false,
+              spinEligible: eligible,
               reference,
               pending:     false,
             });
+            // Auto-redirect to spin wheel after 800ms
+            if (eligible) {
+              if (spinTimerRef.current) clearTimeout(spinTimerRef.current);
+              spinTimerRef.current = setTimeout(() => router.push("/spin"), 800);
+            }
             return; // done
           }
 
@@ -219,7 +235,10 @@ export default function RechargePage() {
   }, []);
 
   // Cleanup polling on unmount
-  useEffect(() => () => { if (pollTimerRef.current) clearTimeout(pollTimerRef.current); }, []);
+  useEffect(() => () => {
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    if (spinTimerRef.current) clearTimeout(spinTimerRef.current);
+  }, []);
 
   // ── Fetch networks ────────────────────────────────────────────────────────
   const fetchNetworks = useCallback(() => {
@@ -422,6 +441,7 @@ export default function RechargePage() {
                       <p className="text-[12px] text-yellow-300/60 leading-snug">
                         Your recharge earned a free spin. Spin now to win airtime, data, cash, or points!
                       </p>
+                      <p className="text-[11px] text-yellow-400/50 mt-0.5">Redirecting to spin wheel…</p>
                     </div>
                   </div>
                   <Link

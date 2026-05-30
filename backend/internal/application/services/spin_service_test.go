@@ -179,11 +179,12 @@ func seedWalletUser(db *gorm.DB, credits int) uuid.UUID {
 }
 
 func newSpinSvc(db *gorm.DB) *services.SpinService {
-	userRepo := persistence.NewPostgresUserRepository(db)
-	txRepo := persistence.NewPostgresTransactionRepository(db)
-	prizeRepo := persistence.NewPostgresPrizeRepository(db)
-	cfg := config.NewConfigManager(db)
-	return services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db)
+	userRepo      := persistence.NewPostgresUserRepository(db)
+	txRepo        := persistence.NewPostgresTransactionRepository(db)
+	prizeRepo     := persistence.NewPostgresPrizeRepository(db)
+	fulfillCfgRepo := persistence.NewPostgresPrizeFulfillmentConfigRepository(db)
+	cfg           := config.NewConfigManager(db)
+	return services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db, fulfillCfgRepo)
 }
 
 // ─── Spin Tests ───────────────────────────────────────────────────────────────

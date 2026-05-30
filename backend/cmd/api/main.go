@@ -241,15 +241,16 @@ func main() {
 		cfg := config.NewConfigManager(db)
 
 		// ─── Repositories ─────────────────────────────────────────
-		userRepo        := persistence.NewPostgresUserRepository(db)
-		txRepo          := persistence.NewPostgresTransactionRepository(db)
-		studioRepo      := persistence.NewPostgresStudioRepository(db)
-		hlrRepo         := persistence.NewPostgresHLRRepository(db)
-		chatRepo        := persistence.NewPostgresChatRepository(db)
-		authRepo        := persistence.NewPostgresAuthRepository(db)
-		prizeRepo       := persistence.NewPostgresPrizeRepository(db)
-		warsRepo        := persistence.NewPostgresWarsRepository(db)
-		ussdSessionRepo := persistence.NewPostgresUSSDSessionRepository(db)
+		userRepo             := persistence.NewPostgresUserRepository(db)
+		txRepo               := persistence.NewPostgresTransactionRepository(db)
+		studioRepo           := persistence.NewPostgresStudioRepository(db)
+		hlrRepo              := persistence.NewPostgresHLRRepository(db)
+		chatRepo             := persistence.NewPostgresChatRepository(db)
+		authRepo             := persistence.NewPostgresAuthRepository(db)
+		prizeRepo            := persistence.NewPostgresPrizeRepository(db)
+		warsRepo             := persistence.NewPostgresWarsRepository(db)
+		ussdSessionRepo      := persistence.NewPostgresUSSDSessionRepository(db)
+		fulfillCfgRepo       := persistence.NewPostgresPrizeFulfillmentConfigRepository(db)
 
 		// ─── External Adapters ────────────────────────────────────
 		vtpass       := external.NewVTPassAdapter()
@@ -299,7 +300,7 @@ func main() {
 
 		log.Println("[VTU] ✓ VTU recharge service ready + bundle sync job started")
 		mtnPushSvc    := services.NewMTNPushService(db, userRepo, txRepo, drawSvc, drawWindowSvc, notifySvc, cfg)
-		spinSvc       := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db)
+		spinSvc       := services.NewSpinService(userRepo, txRepo, prizeRepo, fulfillSvc, notifySvc, cfg, db, fulfillCfgRepo)
 		studioSvc     := services.NewStudioService(studioRepo, userRepo, txRepo, notifySvc, nil, db)
 		studioSvc.SetSettingsService(settingsSvc)
 		hlrSvc        := services.NewHLRService(hlrRepo)
@@ -401,7 +402,8 @@ func main() {
 				WithNotificationService(notifySvc).
 					WithCSVService(services.NewMTNPushCSVService(db, mtnPushSvc)).
 					WithBonusPulseService(bonusPulseSvc).
-					WithSettingsService(settingsSvc)
+					WithSettingsService(settingsSvc).
+					WithFulfillmentConfigRepo(fulfillCfgRepo)
 		claimH   := handlers.NewClaimHandler(claimSvc)
 		notifyH  := handlers.NewNotificationHandler(db)
 
@@ -613,6 +615,9 @@ func main() {
 		mux.Handle("PUT    /api/v1/admin/prizes/{id}",                 adminAuth(http.HandlerFunc(adminH.UpdatePrize)))
 		mux.Handle("DELETE /api/v1/admin/prizes/{id}",                 adminAuth(http.HandlerFunc(adminH.DeletePrize)))
 		mux.Handle("POST   /api/v1/admin/prizes/reorder",              adminAuth(http.HandlerFunc(adminH.ReorderPrizes)))
+		// Prize fulfillment config (AUTO vs MANUAL mode per prize type)
+		mux.Handle("GET    /api/v1/admin/fulfillment-config",              adminAuth(http.HandlerFunc(adminH.GetFulfillmentConfig)))
+		mux.Handle("PUT    /api/v1/admin/fulfillment-config/{prize_type}", adminAuth(http.HandlerFunc(adminH.UpdateFulfillmentConfig)))
 		// Spin configuration + tiers
 		mux.Handle("GET    /api/v1/admin/spin/config",                 adminAuth(http.HandlerFunc(adminH.GetSpinConfig)))
 		mux.Handle("PUT    /api/v1/admin/spin/config",                 adminAuth(http.HandlerFunc(adminH.UpdateSpinConfig)))

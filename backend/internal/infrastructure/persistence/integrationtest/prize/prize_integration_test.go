@@ -97,20 +97,22 @@ func withTx(t *testing.T, db *gorm.DB, fn func(tx *gorm.DB)) {
 // ─── Service + Handler factory ────────────────────────────────────────────────
 
 func newSvc(db *gorm.DB) *services.SpinService {
-	userRepo  := persistence.NewPostgresUserRepository(db)
-	txRepo    := persistence.NewPostgresTransactionRepository(db)
-	prizeRepo := persistence.NewPostgresPrizeRepository(db)
-	cfg       := config.NewConfigManagerNoRefresh(db)
-	return services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db)
+	userRepo       := persistence.NewPostgresUserRepository(db)
+	txRepo         := persistence.NewPostgresTransactionRepository(db)
+	prizeRepo      := persistence.NewPostgresPrizeRepository(db)
+	fulfillCfgRepo := persistence.NewPostgresPrizeFulfillmentConfigRepository(db)
+	cfg            := config.NewConfigManagerNoRefresh(db)
+	return services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db, fulfillCfgRepo)
 }
 
 // newAdminHandler builds the full AdminHandler wired to the given DB.
 func newAdminHandler(db *gorm.DB) *handlers.AdminHandler {
-	userRepo  := persistence.NewPostgresUserRepository(db)
-	txRepo    := persistence.NewPostgresTransactionRepository(db)
-	prizeRepo := persistence.NewPostgresPrizeRepository(db)
-	cfg       := config.NewConfigManagerNoRefresh(db)
-	spinSvc   := services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db)
+	userRepo       := persistence.NewPostgresUserRepository(db)
+	txRepo         := persistence.NewPostgresTransactionRepository(db)
+	prizeRepo      := persistence.NewPostgresPrizeRepository(db)
+	fulfillCfgRepo := persistence.NewPostgresPrizeFulfillmentConfigRepository(db)
+	cfg            := config.NewConfigManagerNoRefresh(db)
+	spinSvc        := services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db, fulfillCfgRepo)
 	drawSvc   := services.NewDrawService(db)
 	fraudSvc      := services.NewFraudService(db)
 	claimSvc      := services.NewAdminClaimService(prizeRepo, nil)
