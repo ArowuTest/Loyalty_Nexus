@@ -726,11 +726,16 @@ func (s *SpinService) UpdatePrize(ctx context.Context, prizeID uuid.UUID, data m
 	}
 	if finalPrizeType == entities.PrizeDataBundle {
 		validDataKobo := map[int64]bool{10000: true, 20000: true, 50000: true, 100000: true, 150000: true, 200000: true}
-		if !validDataKobo[int64(prize.BaseValue)] {
+		// Use the incoming new value when provided; fall back to the existing DB value.
+		newBaseValue := prize.BaseValue
+		if v, ok := updates["base_value"].(float64); ok {
+			newBaseValue = v
+		}
+		if !validDataKobo[int64(newBaseValue)] {
 			return nil, fmt.Errorf(
 				"data_bundle base_value must match a supported VTPass tier in kobo "+
 					"(₦100=10000, ₦200=20000, ₦500=50000, ₦1000=100000, ₦1500=150000, ₦2000=200000) — got %d",
-				int64(prize.BaseValue),
+				int64(newBaseValue),
 			)
 		}
 	}

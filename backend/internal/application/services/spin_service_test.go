@@ -159,6 +159,27 @@ func setupSpinDB(t *testing.T) *gorm.DB {
 	// Seed a TRY_AGAIN prize (always safe — no fulfillment needed)
 	db.Exec(`INSERT INTO prize_pool (id, name, prize_type, base_value, win_probability_weight, is_active, is_no_win, no_win_message) VALUES (?,?,?,?,?,1,1,?)`,
 		uuid.New().String(), "Try Again", "try_again", 0.0, 10, "Better luck next time!")
+
+	// prize_fulfillment_config — required by SpinService.PlaySpin (GetByPrizeType lookup)
+	db.Exec(`CREATE TABLE IF NOT EXISTS prize_fulfillment_config (
+		id TEXT PRIMARY KEY,
+		prize_type TEXT NOT NULL UNIQUE,
+		fulfillment_mode TEXT NOT NULL DEFAULT 'MANUAL',
+		max_retry_attempts INTEGER NOT NULL DEFAULT 3,
+		retry_delay_seconds INTEGER NOT NULL DEFAULT 30,
+		fallback_to_manual INTEGER NOT NULL DEFAULT 1,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	db.Exec(`INSERT OR IGNORE INTO prize_fulfillment_config (id, prize_type, fulfillment_mode) VALUES
+		(?,?,?),(?,?,?),(?,?,?),(?,?,?),(?,?,?),(?,?,?),(?,?,?)`,
+		uuid.New().String(), "try_again", "MANUAL",
+		uuid.New().String(), "pulse_points", "MANUAL",
+		uuid.New().String(), "airtime", "MANUAL",
+		uuid.New().String(), "data_bundle", "MANUAL",
+		uuid.New().String(), "momo_cash", "MANUAL",
+		uuid.New().String(), "physical", "MANUAL",
+		uuid.New().String(), "goods", "MANUAL")
+
 	return db
 }
 

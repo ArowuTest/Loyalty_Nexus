@@ -182,6 +182,26 @@ func newTestDB(t *testing.T) *gorm.DB {
 	db.Exec(`INSERT OR IGNORE INTO spin_tiers (id, tier_name, tier_display_name, min_daily_amount, max_daily_amount, spins_per_day, sort_order) VALUES (?,?,?,?,?,?,?)`,
 		uuid.New().String(), "Gold", "Gold", 1000000, 9999999999, 5, 4)
 
+	// prize_fulfillment_config — required by SpinService (GetByPrizeType lookup during PlaySpin)
+	db.Exec(`CREATE TABLE IF NOT EXISTS prize_fulfillment_config (
+		id TEXT PRIMARY KEY,
+		prize_type TEXT NOT NULL UNIQUE,
+		fulfillment_mode TEXT NOT NULL DEFAULT 'MANUAL',
+		max_retry_attempts INTEGER NOT NULL DEFAULT 3,
+		retry_delay_seconds INTEGER NOT NULL DEFAULT 30,
+		fallback_to_manual INTEGER NOT NULL DEFAULT 1,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	db.Exec(`INSERT OR IGNORE INTO prize_fulfillment_config (id, prize_type, fulfillment_mode) VALUES
+		(?,?,?),(?,?,?),(?,?,?),(?,?,?),(?,?,?),(?,?,?),(?,?,?)`,
+		uuid.New().String(), "try_again", "MANUAL",
+		uuid.New().String(), "pulse_points", "MANUAL",
+		uuid.New().String(), "airtime", "MANUAL",
+		uuid.New().String(), "data_bundle", "MANUAL",
+		uuid.New().String(), "momo_cash", "MANUAL",
+		uuid.New().String(), "physical", "MANUAL",
+		uuid.New().String(), "goods", "MANUAL")
+
 	return db
 }
 
