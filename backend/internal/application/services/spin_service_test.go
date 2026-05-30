@@ -94,6 +94,8 @@ func setupSpinDB(t *testing.T) *gorm.DB {
 		bank_account_number TEXT NOT NULL DEFAULT '',
 		bank_account_name TEXT NOT NULL DEFAULT '',
 		bank_name TEXT NOT NULL DEFAULT '',
+		delivery_name TEXT NOT NULL DEFAULT '',
+		delivery_address TEXT NOT NULL DEFAULT '',
 		admin_notes TEXT NOT NULL DEFAULT '',
 		rejection_reason TEXT NOT NULL DEFAULT '',
 		payment_reference TEXT NOT NULL DEFAULT '',
