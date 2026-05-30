@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -71,16 +72,19 @@ func (v *VTPassAdapter) TopUpAirtime(ctx context.Context, phone, network string,
 	return v.post(ctx, "/pay", payload)
 }
 
-func (v *VTPassAdapter) TopUpData(ctx context.Context, phone, network string, dataMB float64, ref string) (string, error) {
+func (v *VTPassAdapter) TopUpData(ctx context.Context, phone, network string, amountNaira float64, ref string) (string, error) {
 	serviceID := networkToVTPassDataID(network)
-	billersCode := networkDataCode(network, dataMB)
+	variationCode := networkDataCode(network, amountNaira)
+	if variationCode == "" {
+		return "", fmt.Errorf("vtpass: no data variation code for network=%s amount=₦%.0f", network, amountNaira)
+	}
 	reqID := vtpassRequestID(ref)
 	payload := map[string]interface{}{
 		"request_id":     reqID,
 		"serviceID":      serviceID,
 		"billersCode":    phone, // VTPass data: billersCode = phone number
-		"variation_code": billersCode,
-		"amount":         0, // Determined by variation
+		"variation_code": variationCode,
+		"amount":         0, // VTPass ignores amount for data; variation_code determines the plan
 		"phone":          phone,
 	}
 	return v.post(ctx, "/pay", payload)
@@ -149,16 +153,98 @@ func networkToVTPassDataID(network string) string {
 	return "mtn-data"
 }
 
-func networkDataCode(network string, dataMB float64) string {
-	// MTN data variation codes
-	switch {
-	case dataMB <= 100:
-		return "mtn-10mb-200"
-	case dataMB <= 500:
-		return "mtn-100mb-200"
-	case dataMB <= 1024:
-		return "mtn-1gb-300"
-	default:
-		return "mtn-2gb-500"
+// networkDataCode returns the VTPass variation code for a data prize.
+// amountNaira is the prize value in Naira (prize_value_kobo / 100).
+// Codes verified against VTPass sandbox API (GET /api/service-variations?serviceID=<network>-data).
+// NOTE: VTPass ignores the amount field for data — variation_code determines the plan and price.
+func networkDataCode(network string, amountNaira float64) string {
+	kobo := int64(amountNaira * 100) // convert back to kobo for exact matching
+	switch strings.ToUpper(network) {
+	case "MTN":
+		switch kobo {
+		case 10000: // ₦100 → 100MB (1 day)
+			return "mtn-10mb-100"
+		case 20000: // ₦200 → 200MB (2 days)
+			return "mtn-50mb-200"
+		case 50000: // ₦500 → no exact MTN plan; closest is ₦600 2.5GB (2 days)
+			return "mtn-2-5gb-600"
+		case 100000: // ₦1000 → 1.5GB (30 days)
+			return "mtn-100mb-1000"
+		case 150000: // ₦1500 → 3GB (30 days)
+			return "mtn-3gb-1500"
+		case 200000: // ₦2000 → 4.5GB (30 days)
+			return "mtn-500mb-2000"
+		}
+	case "GLO":
+		switch kobo {
+		case 10000: // ₦100 → 105MB (2 days)
+			return "glo100"
+		case 20000: // ₦200 → 350MB (4 days)
+			return "glo200"
+		case 50000: // ₦500 → 1.05GB (14 days)
+			return "glo500"
+		case 100000: // ₦1000 → 2.5GB (30 days)
+			return "glo1000"
+		case 200000: // ₦2000 → 5.8GB (30 days)
+			return "glo2000"
+		}
+	case "AIRTEL":
+		switch kobo {
+		case 10000: // ₦100 → 75MB (1 day)
+			return "airt-100"
+		case 20000: // ₦200 → 200MB (3 days)
+			return "airt-200"
+		case 50000: // ₦500 → 750MB (14 days)
+			return "airt-500"
+		case 100000: // ₦1000 → 1.5GB (30 days)
+			return "airt-1000"
+		case 200000: // ₦2000 → 4.5GB (30 days)
+			return "airt-2000"
+		}
+	case "9MOBILE":
+		switch kobo {
+		case 10000: // ₦100 → 100MB (1 day)
+			return "eti-100"
+		case 50000: // ₦500 → 500MB (30 days)
+			return "eti-500"
+		case 100000: // ₦1000 → 1.5GB (30 days)
+			return "eti-1000"
+		case 200000: // ₦2000 → 4.5GB (30 days)
+			return "eti-2000"
+		}
 	}
+	return "" // no matching plan; caller should log and fall back to retry
+}
+
+// NetworkFromPhone returns the most likely Nigerian carrier for a given MSISDN using
+// NCC prefix allocations. Returns "MTN" as a safe fallback for unrecognised prefixes.
+// This is used for spin-wheel prize fulfillment where we need to route to the right
+// VTPass serviceID — accuracy is best-effort (does not account for number portability).
+func NetworkFromPhone(phone string) string {
+	p := strings.TrimSpace(phone)
+	// Normalise +234 → 0
+	if strings.HasPrefix(p, "+234") {
+		p = "0" + p[4:]
+	} else if strings.HasPrefix(p, "234") && len(p) == 13 {
+		p = "0" + p[3:]
+	}
+	if len(p) < 4 {
+		return "MTN"
+	}
+	prefix4 := p[:4]
+	switch prefix4 {
+	// MTN prefixes
+	case "0703", "0706", "0803", "0806", "0810", "0813", "0814", "0816", "0903", "0906", "0913", "0916":
+		return "MTN"
+	// Airtel prefixes
+	case "0701", "0708", "0802", "0808", "0812", "0901", "0902", "0904", "0907", "0912":
+		return "AIRTEL"
+	// GLO prefixes
+	case "0805", "0807", "0811", "0815", "0905", "0915":
+		return "GLO"
+	// 9Mobile (etisalat) prefixes
+	case "0809", "0817", "0818", "0908", "0909":
+		return "9MOBILE"
+	}
+	return "MTN" // safe fallback — most Nigerian users are on MTN
 }

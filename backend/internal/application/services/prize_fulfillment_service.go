@@ -71,9 +71,13 @@ func (s *PrizeFulfillmentService) fulfillAirtime(ctx context.Context, result *en
 		return err
 	}
 
+	// LN is MTN-only; other networks can be enabled via admin when partnerships are live.
+	// When multi-network support is needed, replace "MTN" with external.NetworkFromPhone(user.PhoneNumber).
+	const activeNetwork = "MTN"
+
 	// base_value (PrizeValue) is stored in KOBO — divide by 100 for Naira
 	amountNaira := result.PrizeValue / 100.0
-	vtRef, err := s.vtpass.TopUpAirtime(ctx, user.PhoneNumber, "MTN", amountNaira, ref)
+	vtRef, err := s.vtpass.TopUpAirtime(ctx, user.PhoneNumber, activeNetwork, amountNaira, ref)
 	if err != nil {
 		log.Printf("[FULFILL] VTPass airtime failed (will retry): %v", err)
 		return s.markFailed(ctx, result.ID, err.Error())
@@ -96,9 +100,12 @@ func (s *PrizeFulfillmentService) fulfillData(ctx context.Context, result *entit
 
 	_ = s.prizeRepo.UpdateSpinFulfillment(ctx, result.ID, entities.FulfillProcessing, ref, "")
 
+	// LN is MTN-only; when multi-network is enabled replace "MTN" with external.NetworkFromPhone(user.PhoneNumber).
+	const activeNetwork = "MTN"
+
 	// base_value (PrizeValue) is in KOBO — pass Naira-equivalent to VTPass
 	dataValueNaira := result.PrizeValue / 100.0
-	vtRef, err := s.vtpass.TopUpData(ctx, user.PhoneNumber, "MTN", dataValueNaira, ref)
+	vtRef, err := s.vtpass.TopUpData(ctx, user.PhoneNumber, activeNetwork, dataValueNaira, ref)
 	if err != nil {
 		return s.markFailed(ctx, result.ID, err.Error())
 	}
