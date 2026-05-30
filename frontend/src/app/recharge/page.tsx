@@ -6,7 +6,7 @@ import {
   Zap, ChevronRight, Loader2, AlertCircle,
   Gift, Star, Shield, CheckCircle2, ArrowLeft,
   Wifi, Phone as PhoneIcon, ChevronDown, Info,
-  Clock, X,
+  Clock, X, Dices,
 } from "lucide-react";
 import NavBar from "@/components/landing/NavBar";
 import AuthModal from "@/components/landing/AuthModal";
@@ -378,30 +378,60 @@ export default function RechargePage() {
           {rechargeSuccess && !rechargeSuccess.pending && (
             <motion.div key="success"
               initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
-              className="mb-5 rounded-xl border border-green-500/30 bg-green-500/10 p-4 flex items-start gap-3"
+              className="mb-5 space-y-2"
             >
-              <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p className="text-[14px] font-bold text-green-300 mb-0.5">
-                  🎉 Recharge Successful!
-                </p>
-                <p className="text-[13px] text-green-300/80 leading-relaxed">
-                  ₦{rechargeSuccess.amount.toLocaleString()} recharged to{" "}
-                  <strong>{rechargeSuccess.phone}</strong>.
-                  {(rechargeSuccess.points > 0 || rechargeSuccess.drawEntries > 0) && (
-                    <> You earned{" "}
-                      {rechargeSuccess.points > 0 && <strong>{rechargeSuccess.points} Pulse Point{rechargeSuccess.points !== 1 ? "s" : ""}</strong>}
-                      {rechargeSuccess.points > 0 && rechargeSuccess.drawEntries > 0 && " and "}
-                      {rechargeSuccess.drawEntries > 0 && <strong>{rechargeSuccess.drawEntries} draw entr{rechargeSuccess.drawEntries !== 1 ? "ies" : "y"}</strong>}
-                      !
-                    </>
-                  )}
-                  {rechargeSuccess.spinEligible && " 🎰 Spin wheel unlocked!"}
-                </p>
+              {/* Success banner */}
+              <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4 flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-[14px] font-bold text-green-300 mb-0.5">
+                    🎉 Recharge Successful!
+                  </p>
+                  <p className="text-[13px] text-green-300/80 leading-relaxed">
+                    ₦{rechargeSuccess.amount.toLocaleString()} recharged to{" "}
+                    <strong>{rechargeSuccess.phone}</strong>.
+                    {(rechargeSuccess.points > 0 || rechargeSuccess.drawEntries > 0) && (
+                      <> You earned{" "}
+                        {rechargeSuccess.points > 0 && <strong>{rechargeSuccess.points} Pulse Point{rechargeSuccess.points !== 1 ? "s" : ""}</strong>}
+                        {rechargeSuccess.points > 0 && rechargeSuccess.drawEntries > 0 && " and "}
+                        {rechargeSuccess.drawEntries > 0 && <strong>{rechargeSuccess.drawEntries} draw entr{rechargeSuccess.drawEntries !== 1 ? "ies" : "y"}</strong>}
+                        !
+                      </>
+                    )}
+                  </p>
+                </div>
+                <button onClick={() => setRechargeSuccess(null)} className="text-green-400/50 hover:text-green-300 transition-colors flex-shrink-0">
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button onClick={() => setRechargeSuccess(null)} className="text-green-400/50 hover:text-green-300 transition-colors flex-shrink-0">
-                <X className="w-4 h-4" />
-              </button>
+
+              {/* Spin CTA — shown immediately when this recharge earned a spin credit */}
+              {rechargeSuccess.spinEligible && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ delay: 0.25, type: "spring", stiffness: 280, damping: 22 }}
+                  className="rounded-xl border border-yellow-400/40 bg-gradient-to-r from-yellow-500/15 to-orange-500/10 p-4"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-yellow-400/20 flex items-center justify-center flex-shrink-0">
+                      <Dices className="w-5 h-5 text-yellow-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[14px] font-black text-yellow-300">🎰 Free Spin Unlocked!</p>
+                      <p className="text-[12px] text-yellow-300/60 leading-snug">
+                        Your recharge earned a free spin. Spin now to win airtime, data, cash, or points!
+                      </p>
+                    </div>
+                  </div>
+                  <Link
+                    href="/spin"
+                    className="mt-3 w-full h-11 rounded-xl font-bold text-[14px] bg-yellow-500 hover:bg-yellow-400 text-black flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Dices className="w-4 h-4" /> Spin Now →
+                  </Link>
+                </motion.div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

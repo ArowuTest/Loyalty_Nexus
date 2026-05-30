@@ -325,6 +325,33 @@ class _RechargeSuccessScreenState extends ConsumerState<RechargeSuccessScreen>
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      // ── SPIN NOW — primary CTA when spin is available ──────
+                      if (_rewardData?.spinEligible == true && auth.isAuthenticated) ...[
+                        ElevatedButton.icon(
+                          onPressed: () => context.go('/spin'),
+                          icon: const Text('🎰',
+                              style: TextStyle(fontSize: 18)),
+                          label: const Text(
+                            'Spin Now — Free Spin Waiting!',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize:   16,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFF5A623), // gold
+                            foregroundColor: Colors.black,
+                            minimumSize:     const Size.fromHeight(56),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            elevation: 0,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+
+                      // ── Standard CTA ──────────────────────────────────────
                       if (auth.isAuthenticated)
                         ElevatedButton(
                           onPressed: () => context.go('/dashboard'),
@@ -462,7 +489,7 @@ class _RechargeSuccessScreenState extends ConsumerState<RechargeSuccessScreen>
           ],
 
           if (data.spinEligible)
-            _rewardChip(Icons.casino_outlined, _gold, 'Spin Eligible!'),
+            _rewardChip(Icons.casino_outlined, _gold, '🎰 Free Spin Unlocked!'),
         ],
       ),
     );
