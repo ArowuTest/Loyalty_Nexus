@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"loyalty-nexus/internal/domain/entities"
@@ -132,7 +133,29 @@ func (r *postgresPrizeRepository) UpdateSpinClaimStatus(ctx context.Context, id 
 			updates["delivery_address"] = v
 		}
 	}
-	return r.db.WithContext(ctx).Table("spin_results").Where("id = ?", id).Updates(updates).Error
+
+	// SECURITY: CAS (Compare-And-Swap) guard — only update rows whose claim_status
+	// is currently PENDING. This prevents a double-payout race condition where two
+	// concurrent HTTP claim requests both read PENDING in application-layer code,
+	// both pass the check, and both trigger prize fulfillment.
+	// RowsAffected == 0 means another goroutine already claimed it; return an error
+	// so the second caller's fulfillment dispatch is skipped.
+	switch status {
+	case entities.ClaimClaimed, entities.ClaimPendingAdmin, entities.ClaimExpired:
+		result := r.db.WithContext(ctx).Table("spin_results").
+			Where("id = ? AND claim_status = ?", id, entities.ClaimPending).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("prize already claimed or no longer pending")
+		}
+		return nil
+	default:
+		// Admin approvals and other status transitions use a plain update
+		return r.db.WithContext(ctx).Table("spin_results").Where("id = ?", id).Updates(updates).Error
+	}
 }
 
 func (r *postgresPrizeRepository) ListUserWins(ctx context.Context, userID uuid.UUID) ([]entities.SpinResult, error) {

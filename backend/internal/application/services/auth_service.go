@@ -113,16 +113,25 @@ func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) (strin
 	if len(phone) > 4 {
 		suffix = "..." + phone[len(phone)-4:]
 	}
-	log.Printf("[OTP] phone=%s purpose=%s code=%s expires=5m", suffix, purpose, code)
+	// SECURITY: never log the OTP code — logs are accessible to ops/infra teams
+	// and visible in cloud-provider dashboards. The code is delivered only via SMS.
+	log.Printf("[OTP] sent: phone=%s purpose=%s expires=5m", suffix, purpose)
 
 	devCode := ""
 	if os.Getenv("ENVIRONMENT") != "production" {
 		devCode = code
 	} else {
-		// In production, allow whitelisted test phones to receive dev_otp
+		// In production, allow explicitly whitelisted test phones to receive dev_otp.
+		// SECURITY: use exact comma-separated match (not strings.Contains) to prevent
+		// a short number like "+23480" from matching "+2348012345678".
 		whitelist := os.Getenv("TEST_PHONE_WHITELIST")
-		if whitelist != "" && strings.Contains(whitelist, phone) {
-			devCode = code
+		if whitelist != "" {
+			for _, entry := range strings.Split(whitelist, ",") {
+				if strings.TrimSpace(entry) == phone {
+					devCode = code
+					break
+				}
+			}
 		}
 	}
 

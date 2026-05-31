@@ -28,6 +28,8 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,9 +123,25 @@ func (h *WarsHandler) LiveLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{ //nolint:staticcheck
-		// Allow any origin in dev; tighten in production via CORS middleware
-		InsecureSkipVerify: true,
+	// SECURITY: restrict WebSocket connections to known origins.
+	// InsecureSkipVerify was a dev placeholder that was never tightened.
+	// OriginPatterns follow the nhooyr.io/websocket glob format: "*" = any subdomain,
+	// plain hostname = exact match. Add more origins if the app is served from
+	// additional domains (e.g., custom sub-domains, preview deployments).
+	allowedOrigins := []string{
+		"loyalty-nexus.vercel.app",
+		"loyaltynexus.com",
+		"*.loyaltynexus.com",
+		"localhost:3000",
+		"localhost:3001",
+	}
+	if envOrigins := os.Getenv("WEBSOCKET_ALLOWED_ORIGINS"); envOrigins != "" {
+		// Allow override via env var for staging / custom domain deployments.
+		// Comma-separated list: "staging.example.com,*.preview.example.com"
+		allowedOrigins = strings.Split(envOrigins, ",")
+	}
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		OriginPatterns: allowedOrigins,
 	})
 	if err != nil {
 		log.Printf("[WarsWS] upgrade failed: %v", err)

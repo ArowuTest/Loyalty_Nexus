@@ -3,13 +3,23 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"loyalty-nexus/internal/application/services"
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/presentation/http/middleware"
 )
+
+// adminLoginLimiter enforces a per-IP rate limit on admin login attempts.
+// 5 attempts per 60 seconds, with a 5-minute ban after exceeding the limit.
+// This prevents brute-force attacks against admin credentials.
+// Note: in-process only — effective on single-instance deployments.
+// For multi-replica, replace with Redis INCR + EXPIRE using the existing Redis client.
+var adminLoginLimiter = middleware.NewRateLimiter(60*time.Second, 5, 5*time.Minute)
 
 // AdminAuthHandler handles admin login, token refresh, logout, and admin user management.
 type AdminAuthHandler struct {
@@ -22,6 +32,17 @@ func NewAdminAuthHandler(adminAuthSvc *services.AdminAuthService) *AdminAuthHand
 
 // POST /api/v1/admin/auth/login — email + password → access_token + refresh_token
 func (h *AdminAuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	// SECURITY: brute-force protection — 5 attempts per IP per minute, 5-min ban
+	ip := middleware.IPKey(r)
+	if !adminLoginLimiter.Allow(ip) {
+		log.Printf("[admin-login] rate-limit triggered: ip=%s", ip)
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", int((5 * time.Minute).Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "too many login attempts — try again in 5 minutes",
+		})
+		return
+	}
+
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`

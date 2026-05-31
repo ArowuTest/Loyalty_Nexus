@@ -25,10 +25,15 @@ package handlers
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -85,11 +90,52 @@ func (h *USSDHandler) SetKnowledgeService(ks *services.USSDKnowledgeService) {
 	h.knowledgeSvc = ks
 }
 
+// verifyATSignature checks the Africa's Talking HMAC-SHA256 request signature.
+// AT signs requests with: HMAC-SHA256(secret, requestBody) → hex → X-AT-Signature header.
+// Returns true when: (a) AT_WEBHOOK_SECRET is not configured (dev/test bypass), or
+//                    (b) the signature is present and valid.
+// Returns false (reject) when: secret is set but signature is missing or invalid.
+func verifyATSignature(r *http.Request, body []byte) bool {
+	secret := os.Getenv("AT_WEBHOOK_SECRET")
+	if secret == "" {
+		// Secret not configured — allow through (dev / sandbox mode).
+		// Set AT_WEBHOOK_SECRET in production to enforce signature verification.
+		return true
+	}
+	sig := r.Header.Get("X-AT-Signature")
+	if sig == "" {
+		log.Printf("[USSD] SECURITY: missing X-AT-Signature header — rejecting request")
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body) //nolint:errcheck // hash.Hash.Write never returns an error
+	expected := hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(expected), []byte(sig)) {
+		log.Printf("[USSD] SECURITY: signature mismatch — rejecting request")
+		return false
+	}
+	return true
+}
+
 // Handle is the HTTP entry-point for Africa's Talking USSD gateway POST requests.
 // Accepts both:
 //   - application/x-www-form-urlencoded (Africa's Talking production gateway)
 //   - application/json (API testing and dev tooling)
 func (h *USSDHandler) Handle(w http.ResponseWriter, r *http.Request) {
+	// SECURITY: read body first so we can verify the AT signature before processing.
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16)) // 64KB max
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	// Replace r.Body so downstream parsing still works
+	r.Body = io.NopCloser(strings.NewReader(string(body)))
+
+	if !verifyATSignature(r, body) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
 	var sessionID, phone, text, serviceCode string
 
 	ct := r.Header.Get("Content-Type")

@@ -44,21 +44,34 @@ func (h *RechargeHandler) PaystackWebhook(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// HMAC-SHA256 signature verification (Paystack uses SHA512 but accept both)
+	// SECURITY: HMAC-SHA256 signature verification is MANDATORY.
+	// Two bypass paths that existed before are now closed:
+	//   (1) Missing secret env var no longer skips verification — it rejects all requests.
+	//   (2) Missing signature header is treated as a failed verification, not a pass.
 	secret := os.Getenv("PAYSTACK_WEBHOOK_SECRET")
 	if secret == "" {
 		secret = os.Getenv("PAYSTACK_SECRET_KEY")
 	}
-	if secret != "" {
-		mac := hmac.New(sha256.New, []byte(secret))
-		mac.Write(body) //nolint:errcheck // hash.Hash.Write never returns an error
-		expected := hex.EncodeToString(mac.Sum(nil))
-		got := r.Header.Get("X-Paystack-Signature")
-		if got != "" && !hmac.Equal([]byte(expected), []byte(got)) {
-			log.Printf("[paystack] signature mismatch — rejecting webhook")
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
+	if secret == "" {
+		// Secret is not configured — reject all webhook calls rather than accept blindly.
+		// This prevents fraudulent spin credits from being issued in misconfigured deployments.
+		log.Printf("[paystack] SECURITY: PAYSTACK_WEBHOOK_SECRET not set — rejecting webhook (configure the secret to enable webhooks)")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body) //nolint:errcheck // hash.Hash.Write never returns an error
+	expected := hex.EncodeToString(mac.Sum(nil))
+	got := r.Header.Get("X-Paystack-Signature")
+	if got == "" {
+		log.Printf("[paystack] SECURITY: missing X-Paystack-Signature header — rejecting webhook")
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	if !hmac.Equal([]byte(expected), []byte(got)) {
+		log.Printf("[paystack] SECURITY: signature mismatch — rejecting webhook")
+		w.WriteHeader(http.StatusUnauthorized)
+		return
 	}
 
 	// Acknowledge immediately

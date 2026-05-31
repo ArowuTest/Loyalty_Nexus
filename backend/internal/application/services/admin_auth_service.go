@@ -30,7 +30,12 @@ type AdminAuthService struct {
 func NewAdminAuthService(db *gorm.DB) *AdminAuthService {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		secret = "change-this-in-production"
+		// SECURITY: a missing JWT_SECRET would cause all admin tokens to be signed
+		// with a well-known fallback, allowing offline token forgery by anyone who
+		// knows the default value. Panic at startup so misconfiguration is caught
+		// immediately rather than silently degrading to an insecure state.
+		panic("FATAL: JWT_SECRET environment variable is not set. " +
+			"Set a strong random secret (≥32 bytes) before starting the server.")
 	}
 	svc := &AdminAuthService{db: db, jwtSecret: []byte(secret)}
 	svc.seedDefaultAdmin()
