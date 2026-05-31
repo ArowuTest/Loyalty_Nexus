@@ -149,10 +149,16 @@ func extractBearer(r *http.Request) string {
 	if strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
-	// EventSource (SSE) cannot send custom headers — accept ?token= query param
-	// as a fallback for GET /stream endpoints only.
-	if t := r.URL.Query().Get("token"); t != "" {
-		return t
+	// EventSource (SSE) cannot set the Authorization header, so accept ?token=
+	// as a fallback — but ONLY for GET requests that explicitly declare they want
+	// a server-sent event stream (Accept: text/event-stream).  This prevents
+	// tokens from leaking into server access logs on normal API calls where the
+	// caller simply forgot to set the Authorization header.
+	if r.Method == http.MethodGet &&
+		strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		if t := r.URL.Query().Get("token"); t != "" {
+			return t
+		}
 	}
 	return ""
 }

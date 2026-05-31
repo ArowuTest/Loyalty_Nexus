@@ -66,7 +66,7 @@ func main() {
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "1.1.0"}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
 			log.Printf("[health] encode error: %v", err)
 		}
 	})
@@ -78,7 +78,7 @@ func main() {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]string{"service": "Loyalty Nexus API", "status": "ok", "version": "1.1.0"}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]string{"service": "Loyalty Nexus API", "status": "ok"}); err != nil {
 			log.Printf("[root] encode error: %v", err)
 		}
 	})

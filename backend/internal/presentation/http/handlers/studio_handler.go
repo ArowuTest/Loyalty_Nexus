@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -85,6 +86,34 @@ func (h *StudioHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
+
+	// SECURITY: verify the actual file magic bytes match the claimed Content-Type.
+	// The multipart Content-Type header is entirely client-controlled — an attacker
+	// could upload a PHP/ELF/HTML file with contentType="audio/mpeg" to bypass the
+	// allowlist below.  We sniff the real type from the first 512 bytes and reject
+	// mismatches so only genuine audio/image/PDF/text payloads pass through.
+	sniffBuf := make([]byte, 512)
+	sniffN, _ := file.Read(sniffBuf)
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "file read error"})
+		return
+	}
+	detectedType := http.DetectContentType(sniffBuf[:sniffN])
+	// http.DetectContentType returns "application/octet-stream" for any binary it
+	// cannot identify (including audio formats Go doesn't sniff natively).  We only
+	// reject when it positively identifies a different major type (e.g. detecting
+	// "text/html" when the client claims "audio/mpeg").
+	if detectedType != "application/octet-stream" {
+		claimedMajor := strings.SplitN(contentType, "/", 2)[0]
+		detectedMajor := strings.SplitN(detectedType, "/", 2)[0]
+		if claimedMajor != detectedMajor {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "file content does not match declared type",
+			})
+			return
+		}
+	}
+
 	// Allow audio, image, PDF, and plain text uploads
 	allowedExts := map[string]string{
 		"audio/mpeg":      ".mp3",

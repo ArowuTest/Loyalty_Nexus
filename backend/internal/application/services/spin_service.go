@@ -133,10 +133,19 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 	// --- Step 5: Atomic DB transaction ---
 	var spinResult *entities.SpinResult
 	err = s.db.WithContext(ctx).Transaction(func(dbTx *gorm.DB) error {
-		// Deduct 1 spin credit (use dbTx directly to avoid nested transaction on SQLite)
-		if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).
-			UpdateColumn("spin_credits", gorm.Expr("spin_credits - 1")).Error; err != nil {
-			return fmt.Errorf("credit deduction failed: %w", err)
+		// Deduct 1 spin credit atomically with a floor guard.
+		// WHERE spin_credits > 0 prevents going negative when two concurrent
+		// requests both pass the wallet.SpinCredits < 1 check above before
+		// either transaction commits (classic TOCTOU / read-modify-write race).
+		// RowsAffected == 0 means another goroutine consumed the last credit first.
+		creditResult := dbTx.Table("wallets").
+			Where("user_id = ? AND spin_credits > 0", wallet.UserID).
+			UpdateColumn("spin_credits", gorm.Expr("spin_credits - 1"))
+		if creditResult.Error != nil {
+			return fmt.Errorf("credit deduction failed: %w", creditResult.Error)
+		}
+		if creditResult.RowsAffected == 0 {
+			return fmt.Errorf("no spin credits available — recharge ₦1,000 or more to earn a free spin")
 		}
 		wallet.SpinCredits--
 
