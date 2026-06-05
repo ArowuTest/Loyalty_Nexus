@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"loyalty-nexus/internal/domain/entities"
@@ -22,6 +23,23 @@ import (
 )
 
 var ErrDuplicateRecharge = errors.New("recharge already processed")
+
+// isDuplicateKeyError returns true when err is a PostgreSQL unique-violation
+// (SQLSTATE 23505).  This catches the race where two concurrent Paystack
+// webhook deliveries for the same reference both pass the FindByReference()
+// check and then race to insert — the second one hits the UNIQUE index
+// (migration 127) and gets this error.
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	// lib/pq and pgx both surface "ERROR: duplicate key" or "23505"
+	return strings.Contains(s, "23505") ||
+		strings.Contains(s, "duplicate key") ||
+		strings.Contains(s, "unique constraint") ||
+		strings.Contains(s, "idx_transactions_reference_unique")
+}
 
 // PaystackEvent is the incoming webhook payload from Paystack.
 type PaystackEvent struct {
@@ -269,6 +287,16 @@ func (s *RechargeService) processAwardTransaction(ctx context.Context, user *ent
 			CreatedAt:    time.Now(),
 		}
 		if err := s.txRepo.SaveTx(ctx, dbTx, rechargeTx); err != nil {
+			// RACE-01 guard: if two concurrent webhook deliveries for the same
+			// reference both pass the FindByReference() check above (race window),
+			// the second one hits the UNIQUE index on transactions.reference
+			// (migration 127) and returns a duplicate-key error.  Map it to
+			// ErrDuplicateRecharge so the caller handles it cleanly instead of
+			// returning a generic 500.
+			if isDuplicateKeyError(err) {
+				log.Printf("[RECHARGE] duplicate reference blocked by DB constraint: %s", reference)
+				return ErrDuplicateRecharge
+			}
 			return err
 		}
 
