@@ -284,8 +284,8 @@ func (h *StudioHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	// are serialised into a structured prefix so the provider can parse them.
 	enrichedPrompt := buildEnrichedPrompt(req)
 
-	// Atomic: deduct PulsePoints + create job
-	gen, err := h.studioSvc.RequestGeneration(r.Context(), userID, toolID, enrichedPrompt)
+	// Atomic: deduct PulsePoints + create job (dailyLimit enforced inside transaction)
+	gen, err := h.studioSvc.RequestGeneration(r.Context(), userID, toolID, enrichedPrompt, dailyLimit)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -444,7 +444,7 @@ func (h *StudioHandler) Chat(w http.ResponseWriter, r *http.Request) {
 			userID, _ := uuid.Parse(uid)
 			// RequestGeneration deducts points and records the job.
 			// We don't dispatch it to the async queue — the response comes inline below.
-			if _, deductErr := h.studioSvc.RequestGeneration(r.Context(), userID, tool.ID, req.Message); deductErr != nil {
+			if _, deductErr := h.studioSvc.RequestGeneration(r.Context(), userID, tool.ID, req.Message, 0); deductErr != nil {
 				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": deductErr.Error()})
 				return
 			}

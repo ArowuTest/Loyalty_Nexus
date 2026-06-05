@@ -94,7 +94,7 @@ func (h *StudioHandler) BuildWebsite(w http.ResponseWriter, r *http.Request) {
 	// Deduct points + create generation record
 	prompt := fmt.Sprintf("[website-builder] type=%s slug=%s fields=%d photos=%d",
 		req.SiteType, vanitySlug, len(req.Fields), len(req.Photos))
-	gen, err := h.studioSvc.RequestGeneration(r.Context(), userID, tool.ID, prompt)
+	gen, err := h.studioSvc.RequestGeneration(r.Context(), userID, tool.ID, prompt, 0)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

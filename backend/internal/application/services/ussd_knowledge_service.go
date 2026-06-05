@@ -118,7 +118,7 @@ func (s *USSDKnowledgeService) SubmitKnowledgeTool(
 	prompt := fmt.Sprintf("[USSD] %s", topic)
 
 	// Atomic: deduct PulsePoints + create generation job
-	gen, err := s.studioSvc.RequestGeneration(ctx, userID, tool.ID, prompt)
+	gen, err := s.studioSvc.RequestGeneration(ctx, userID, tool.ID, prompt, 0)
 	if err != nil {
 		return nil, err
 	}

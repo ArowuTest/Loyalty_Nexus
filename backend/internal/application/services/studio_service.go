@@ -110,11 +110,15 @@ func (s *StudioService) CountUserGenerationsToday(ctx context.Context, userID uu
 // RequestGeneration creates an AIGeneration job, deducts PulsePoints from the
 // user's wallet, and writes an immutable ledger transaction — all in one DB txn.
 // Returns the pending job; caller must dispatch it to AIStudioOrchestrator async.
+//
+// dailyLimit is the caller's configured cap (from network_configs). Pass 0 to
+// skip the in-transaction quota check (the handler-layer check still applies).
 func (s *StudioService) RequestGeneration(
 	ctx context.Context,
 	userID uuid.UUID,
 	toolID uuid.UUID,
 	prompt string,
+	dailyLimit int,
 ) (*entities.AIGeneration, error) {
 
 	// 1. Resolve tool (reads point_cost from DB — never hardcoded)
@@ -132,7 +136,7 @@ func (s *StudioService) RequestGeneration(
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 
-	// 3. Check IsFree — skip all wallet checks for free tools
+	// 3. Check IsFree — skip wallet checks for free tools but still enforce daily quota
 	if tool.IsFree {
 		// Build generation record with zero cost
 		now := time.Now()
@@ -149,6 +153,19 @@ func (s *StudioService) RequestGeneration(
 			ExpiresAt:      now.Add(s.storageTTL(ctx, user.Tier)), // admin-configurable per tier
 		}
 		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			// Enforce daily quota inside the transaction for free tools too
+			if dailyLimit > 0 {
+				var countNow int64
+				today := time.Now().UTC().Truncate(24 * time.Hour)
+				if cntErr := tx.Table("ai_generations").
+					Where("user_id = ? AND created_at >= ?", userID, today).
+					Count(&countNow).Error; cntErr != nil {
+					return fmt.Errorf("quota check failed: %w", cntErr)
+				}
+				if int(countNow) >= dailyLimit {
+					return fmt.Errorf("daily generation limit reached (%d/%d)", countNow, dailyLimit)
+				}
+			}
 			if err := s.studioRepo.CreateGenerationTx(ctx, tx, gen); err != nil {
 				return fmt.Errorf("create generation: %w", err)
 			}
@@ -200,10 +217,25 @@ func (s *StudioService) RequestGeneration(
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 
 		if tool.PointCost > 0 {
-			// Deduct PulsePoints
-			wallet.PulsePoints -= tool.PointCost
-			if err := tx.Save(wallet).Error; err != nil {
-				return fmt.Errorf("wallet update: %w", err)
+			// Deduct PulsePoints with a floor guard.
+			// IMPORTANT: we must NOT use tx.Save(wallet) here — that does a full-row
+			// overwrite using the in-memory snapshot, which is stale if another goroutine
+			// already deducted points between our GetWalletForUpdate call and now.
+			// Two concurrent Generate requests both read PulsePoints=100, both compute 50,
+			// and both Save(50) → user gets 2 generations for the price of 1 (Lost Update).
+			//
+			// The atomic UPDATE with WHERE pulse_points >= cost prevents this:
+			//   - Row is modified in-place inside the DB engine
+			//   - RowsAffected == 0 means another request already spent the balance
+			deductResult := tx.Table("wallets").
+				Where("user_id = ? AND pulse_points >= ?", userID, tool.PointCost).
+				UpdateColumn("pulse_points", gorm.Expr("pulse_points - ?", tool.PointCost))
+			if deductResult.Error != nil {
+				return fmt.Errorf("wallet update: %w", deductResult.Error)
+			}
+			if deductResult.RowsAffected == 0 {
+				return fmt.Errorf("insufficient PulsePoints: need %d (concurrent request may have spent them)",
+					tool.PointCost)
 			}
 
 			// Immutable ledger entry
@@ -227,6 +259,25 @@ func (s *StudioService) RequestGeneration(
 			}
 			if err := s.txRepo.SaveTx(ctx, tx, ledgerTx); err != nil {
 				return fmt.Errorf("ledger write: %w", err)
+			}
+		}
+
+		// Daily generation quota — enforced INSIDE the transaction so the count
+		// and the insert are atomic.  The handler-level check above is a fast
+		// pre-flight that avoids entering the transaction on the happy path;
+		// this check is the authoritative one that prevents the race where two
+		// concurrent requests both read count=9 (under a limit of 10) and both
+		// create a generation, taking the user to 11.
+		if dailyLimit > 0 {
+			var countNow int64
+			today := time.Now().UTC().Truncate(24 * time.Hour)
+			if cntErr := tx.Table("ai_generations").
+				Where("user_id = ? AND created_at >= ?", userID, today).
+				Count(&countNow).Error; cntErr != nil {
+				return fmt.Errorf("quota check failed: %w", cntErr)
+			}
+			if int(countNow) >= dailyLimit {
+				return fmt.Errorf("daily generation limit reached (%d/%d)", countNow, dailyLimit)
 			}
 		}
 
