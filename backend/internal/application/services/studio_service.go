@@ -351,13 +351,25 @@ func (s *StudioService) FailGeneration(ctx context.Context, genID uuid.UUID, rea
 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 
-		// Restore wallet
-		var wallet entities.Wallet
-		if err := tx.Where("user_id = ?", gen.UserID).First(&wallet).Error; err != nil {
-			return err
+		// Guard against double-refund: mark refund_granted atomically via CAS.
+		// If two goroutines both call FailGeneration for the same job (e.g. lifecycle
+		// worker + async worker timing conflict), only the first one sets this flag;
+		// the second sees RowsAffected == 0 and aborts without re-crediting the wallet.
+		guard := tx.Table("ai_generations").
+			Where("id = ? AND refund_granted = FALSE", gen.ID).
+			Updates(map[string]interface{}{"refund_granted": true, "refund_pts": gen.PointsDeducted})
+		if guard.Error != nil {
+			return guard.Error
 		}
-		wallet.PulsePoints += gen.PointsDeducted
-		if err := tx.Save(&wallet).Error; err != nil {
+		if guard.RowsAffected == 0 {
+			return nil // refund already issued by a concurrent call — safe to skip
+		}
+
+		// Restore wallet atomically (no read-modify-write — prevents Lost Update)
+		if err := tx.Table("wallets").
+			Where("user_id = ?", gen.UserID).
+			UpdateColumn("pulse_points", gorm.Expr("pulse_points + ?", gen.PointsDeducted)).
+			Error; err != nil {
 			return err
 		}
 
@@ -476,14 +488,31 @@ func (s *StudioService) DisputeGeneration(ctx context.Context, genID uuid.UUID, 
 
 	// Atomic: restore wallet + ledger + mark disputed
 	user, _ := s.userRepo.FindByID(ctx, userID)
+	now := time.Now()
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Restore wallet
-		var wallet entities.Wallet
-		if err := tx.Where("user_id = ?", userID).First(&wallet).Error; err != nil {
-			return err
+		// CAS: mark as disputed atomically so two concurrent dispute requests
+		// cannot both succeed.  The outer DisputedAt check (above) is a fast
+		// pre-flight; this UPDATE is the authoritative guard.
+		// If another goroutine already committed the dispute, RowsAffected == 0.
+		disputeGuard := tx.Table("ai_generations").
+			Where("id = ? AND disputed_at IS NULL AND refund_granted = FALSE", gen.ID).
+			Updates(map[string]interface{}{
+				"disputed_at":    now,
+				"refund_granted": true,
+				"refund_pts":     refundPts,
+			})
+		if disputeGuard.Error != nil {
+			return disputeGuard.Error
 		}
-		wallet.PulsePoints += refundPts
-		if err := tx.Save(&wallet).Error; err != nil {
+		if disputeGuard.RowsAffected == 0 {
+			return fmt.Errorf("refund already processed for this generation")
+		}
+
+		// Restore wallet atomically — no read-modify-write to prevent Lost Update
+		if err := tx.Table("wallets").
+			Where("user_id = ?", userID).
+			UpdateColumn("pulse_points", gorm.Expr("pulse_points + ?", refundPts)).
+			Error; err != nil {
 			return err
 		}
 
@@ -508,14 +537,9 @@ func (s *StudioService) DisputeGeneration(ctx context.Context, genID uuid.UUID, 
 				})
 				return b
 			}(),
-			CreatedAt: time.Now(),
+			CreatedAt: now,
 		}
-		if err := tx.Create(refundTx).Error; err != nil {
-			return err
-		}
-
-		// Mark generation as disputed
-		return s.studioRepo.DisputeGeneration(ctx, genID, refundPts)
+		return tx.Create(refundTx).Error
 	})
 }
 
