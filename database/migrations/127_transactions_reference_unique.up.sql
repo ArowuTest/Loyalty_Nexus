@@ -1,51 +1,48 @@
--- Migration 127: Enforce unique Paystack/MNO references at the DB level
+-- Migration 127: Ensure unique Paystack/MNO references at the DB level
 --
--- PROBLEM
--- -------
--- Migration 046 added a plain index on transactions.reference for lookup speed,
--- but NOT a UNIQUE constraint.  The application layer checks FindByReference()
--- before inserting, but that check is outside any transaction — two concurrent
--- Paystack webhook retries for the same reference can both find nil and both
--- commit, causing double point/spin-credit awards.
+-- NOTE: Migration 111 already creates idx_transactions_reference_unique on
+-- databases migrated past it.  This migration re-asserts the index
+-- idempotently (IF NOT EXISTS) so that:
+--   (a) environments that predate 111 gain the constraint, and
+--   (b) the constraint is documented at the point the application code
+--       (recharge_service.go isDuplicateKeyError) started depending on it.
 --
--- FIX
--- ---
--- A PARTIAL unique index enforces uniqueness only on non-empty references.
--- Empty-string references (non-Paystack ledger entries) are excluded so the
--- index doesn't interfere with existing rows that have no external reference.
+-- WHY A UNIQUE INDEX
+-- ------------------
+-- The application-layer FindByReference() idempotency check is not atomic
+-- with the insert: two concurrent Paystack webhook retries for the same
+-- reference can both read nil and both attempt to commit, double-awarding
+-- points and spin credits.  The partial unique index makes the second
+-- INSERT fail with SQLSTATE 23505, which recharge_service.go maps to
+-- ErrDuplicateRecharge.
 --
--- The plain index from 046 is dropped first to avoid index bloat; the unique
--- index replaces it for both uniqueness enforcement and lookup speed.
+-- TRANSACTION SAFETY
+-- ------------------
+-- CONCURRENTLY is deliberately NOT used: golang-migrate executes each
+-- migration file inside a transaction-safe context, and
+-- CREATE INDEX CONCURRENTLY cannot run inside a transaction block
+-- (same rule followed by migration 111).  A plain CREATE INDEX takes a
+-- brief write lock on transactions — acceptable at current table size.
+-- If this ever needs to run on a very large live table, run the
+-- CONCURRENTLY variant manually via psql instead.
 --
--- CONCURRENCY BEHAVIOUR
--- ---------------------
--- On a duplicate insert:
---   - PostgreSQL raises ERROR 23505 (unique_violation)
---   - GORM returns an error that wraps the PG error
---   - recharge_service.go returns ErrDuplicateRecharge (already handled)
--- No application-layer change is needed — the existing error path is correct.
---
--- SAFE TO RUN ON LIVE DB
--- ----------------------
--- CREATE UNIQUE INDEX CONCURRENTLY does not take an AccessExclusiveLock;
--- it builds the index without blocking reads or writes.
--- DROP INDEX CONCURRENTLY likewise avoids locking.
--- If duplicate reference values already exist in the table the command will
--- fail — run the dedup query below first in that case:
---
+-- If duplicate non-empty references already exist, this migration fails.
+-- Find them first with:
 --   SELECT reference, COUNT(*) FROM transactions
---   WHERE reference <> '' GROUP BY reference HAVING COUNT(*) > 1;
+--   WHERE reference IS NOT NULL AND reference != ''
+--   GROUP BY reference HAVING COUNT(*) > 1;
 
--- Remove the old plain index (replaced by the unique index below)
+-- Drop the old plain reference index from migration 046 if present
+-- (superseded by the unique index below; avoids duplicate-index bloat)
 DROP INDEX IF EXISTS idx_transactions_reference;
-DROP INDEX IF EXISTS idx_transactions_type_reference;
 
--- Enforce uniqueness on non-empty references — the real fix
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_transactions_reference_unique
+-- The real constraint — partial unique index on non-empty references.
+-- Predicate matches migration 111 exactly so IF NOT EXISTS is a clean no-op
+-- on databases where 111 already ran.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_reference_unique
     ON transactions (reference)
-    WHERE reference <> '';
+    WHERE reference IS NOT NULL AND reference != '';
 
--- Restore the type+reference composite lookup index (non-unique, for admin queries)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_transactions_type_reference
-    ON transactions (type, reference)
-    WHERE reference <> '';
+-- Composite lookup index for admin queries (also created by 111; idempotent)
+CREATE INDEX IF NOT EXISTS idx_transactions_type_reference
+    ON transactions (type, reference);

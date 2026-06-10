@@ -149,13 +149,17 @@ func extractBearer(r *http.Request) string {
 	if strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
-	// EventSource (SSE) cannot set the Authorization header, so accept ?token=
-	// as a fallback — but ONLY for GET requests that explicitly declare they want
-	// a server-sent event stream (Accept: text/event-stream).  This prevents
-	// tokens from leaking into server access logs on normal API calls where the
-	// caller simply forgot to set the Authorization header.
+	// ?token= query-param fallback is restricted to the two GET flows whose
+	// clients physically cannot set the Authorization header:
+	//   1. EventSource (SSE) — browsers send Accept: text/event-stream and
+	//      provide no way to attach custom headers.
+	//   2. Apple Wallet .pkpass download — iOS Wallet fetches the pass URL
+	//      directly and strips custom headers (see mobile api_client.dart).
+	// Everything else must use the Authorization header, so tokens don't leak
+	// into server access logs on ordinary API calls.
 	if r.Method == http.MethodGet &&
-		strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		(strings.Contains(r.Header.Get("Accept"), "text/event-stream") ||
+			strings.HasSuffix(r.URL.Path, "/passport/pkpass")) {
 		if t := r.URL.Query().Get("token"); t != "" {
 			return t
 		}

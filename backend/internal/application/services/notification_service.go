@@ -74,6 +74,18 @@ func (n *NotificationService) NotifyPrizeWon(ctx context.Context, phone, prizeDe
 // logs the message to stdout and returns nil — SMS delivery is non-fatal in staging.
 func (n *NotificationService) SendSMS(ctx context.Context, phone, message string) error {
 	if n.termiiKey == "" {
+		// SECURITY: only echo full message content (which includes OTP codes for
+		// SendOTP callers) outside production.  If TERMII_API_KEY is accidentally
+		// unset in production we must not leak OTPs into log aggregators — log a
+		// content-free failure instead so the misconfiguration is still visible.
+		if os.Getenv("ENVIRONMENT") == "production" {
+			suffix := phone
+			if len(phone) > 4 {
+				suffix = "..." + phone[len(phone)-4:]
+			}
+			log.Printf("[SMS] no SMS provider configured — message to %s NOT delivered", suffix)
+			return fmt.Errorf("no SMS provider configured")
+		}
 		log.Printf("[SMS-DEV] To: %s | %s", phone, message)
 		return nil
 	}
