@@ -20,9 +20,12 @@ package services
 //   Zero regressions possible.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 
@@ -51,6 +54,11 @@ type providerInput struct {
 	Prompt      string
 	Instrumental bool
 	DurationSecs int
+
+	// Image / video generation controls — threaded through so DB-configured
+	// providers honour the same user settings as the hardcoded chains.
+	AspectRatio string
+	Seed        int64
 }
 
 // ── callByTemplate routes a provider config to the matching callXxx() func ───
@@ -120,7 +128,9 @@ func (o *AIStudioOrchestrator) callByTemplate(
 		outputURL, err = o.callHFFluxSchnell(ctx, key, in.Prompt)
 
 	case entities.TemplatePollImage:
-		outputURL, err = o.callPollinationsImage(ctx, in.Prompt)
+		// Pass seed + aspect ratio so DB-configured providers don't silently
+		// drop the controls the tool form offers (parity with hardcoded chain).
+		outputURL, err = o.callPollinationsImageWithSeed(ctx, in.Prompt, in.Seed, in.AspectRatio)
 
 	case entities.TemplateFALImage:
 		outputURL, err = o.callFALFlux(ctx, key, in.Prompt)
@@ -140,7 +150,8 @@ func (o *AIStudioOrchestrator) callByTemplate(
 			// ltx-2 was also removed (OFF, 5.3% success)
 			model = "wan-fast"
 		}
-		outputURL, err = o.callPollinationsVideoModel(ctx, model, in.ImageURL, in.Prompt, 180)
+		// 300s (matches hardcoded chain) + aspect ratio pass-through
+		outputURL, err = o.callPollinationsVideoModel(ctx, model, in.ImageURL, in.Prompt, 300, in.AspectRatio)
 
 	// ── TTS ──────────────────────────────────────────────────────────────────
 	case entities.TemplateGoogleTTS:
@@ -282,18 +293,85 @@ func resolveBaseURLForProvider(p entities.AIProviderConfig) string {
 // own env reads. These let callByTemplate pass the DB-resolved key explicitly.
 
 // callGeminiFlashWithModel calls Gemini with an explicit model and API key.
+// Unlike callGeminiFlash (which hardcodes gemini-2.5-flash + env key), this
+// honours the admin-configured model ID and DB-stored key so the provider
+// registry can actually switch Gemini variants without a code deploy.
 func (o *AIStudioOrchestrator) callGeminiFlashWithModel(
 	ctx context.Context, model, apiKey, systemPrompt, userPrompt string,
 ) (string, error) {
 	if model == "" {
 		model = "gemini-2.5-flash"
 	}
-	_ = model  // model selection deferred to callGeminiFlash env routing
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
-	_ = apiKey // future: patch Gemini call to accept explicit key param
-	return o.callGeminiFlash(ctx, systemPrompt, userPrompt)
+	if apiKey == "" {
+		return "", fmt.Errorf("gemini: no API key configured (DB or GEMINI_API_KEY)")
+	}
+
+	endpoint := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
+		model, apiKey,
+	)
+	payload := map[string]interface{}{
+		"system_instruction": map[string]interface{}{
+			"parts": []map[string]string{{"text": systemPrompt}},
+		},
+		"contents": []map[string]interface{}{
+			{"parts": []map[string]string{{"text": userPrompt}}},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature":     0.7,
+			"maxOutputTokens": 8192,
+		},
+	}
+	return o.callGeminiEndpoint(ctx, endpoint, payload)
+}
+
+// callGeminiEndpoint POSTs a generateContent payload to any Gemini model
+// endpoint and extracts the first candidate's text.
+func (o *AIStudioOrchestrator) callGeminiEndpoint(
+	ctx context.Context, endpoint string, payload map[string]interface{},
+) (string, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("gemini marshal: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("gemini request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("gemini http: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+		Error *struct {
+			Message string `json:"message"`
+			Code    int    `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("gemini decode: %w", err)
+	}
+	if result.Error != nil {
+		return "", fmt.Errorf("gemini API error %d: %s", result.Error.Code, result.Error.Message)
+	}
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("gemini: no content returned")
+	}
+	return result.Candidates[0].Content.Parts[0].Text, nil
 }
 
 // callDeepSeekWithKey calls DeepSeek with an explicit API key.

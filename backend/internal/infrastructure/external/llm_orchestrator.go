@@ -186,13 +186,28 @@ func (o *LLMOrchestrator) buildMemoryBlock(ctx context.Context, uid uuid.UUID, s
 	if len(recentMsgs) > 0 {
 		sb.WriteString("Last messages:\n")
 		for _, m := range recentMsgs {
+			// COST CONTROL: raw messages are injected into the system prompt of
+			// EVERY subsequent request in the session.  A single long assistant
+			// reply (a full business plan is 8k+ chars) would silently add
+			// thousands of tokens per message.  Truncate: user messages keep
+			// 500 chars (intent is usually at the start), assistant replies keep
+			// 400 chars (the direct answer leads).  Full context lives in the
+			// session summaries above, which the Summarize() pass compresses.
+			content := m.Content
+			limit := 400
+			if strings.EqualFold(m.Role, "user") {
+				limit = 500
+			}
+			if len(content) > limit {
+				content = content[:limit] + "… [truncated]"
+			}
 			switch strings.ToLower(m.Role) {
 			case "user":
-				sb.WriteString(fmt.Sprintf("User: %q\n", m.Content))
+				sb.WriteString(fmt.Sprintf("User: %q\n", content))
 			case "assistant":
-				sb.WriteString(fmt.Sprintf("Nexus: %q\n", m.Content))
+				sb.WriteString(fmt.Sprintf("Nexus: %q\n", content))
 			default:
-				sb.WriteString(fmt.Sprintf("%s: %q\n", m.Role, m.Content))
+				sb.WriteString(fmt.Sprintf("%s: %q\n", m.Role, content))
 			}
 		}
 	}
@@ -223,6 +238,10 @@ func (o *LLMOrchestrator) recordProviderUse(ctx context.Context, provider LLMPro
 		}
 	}
 
+	// Read the previous active provider BEFORE overwriting it — otherwise the
+	// switch-log comparison below always sees prev == current and never fires.
+	prev, prevErr := o.rdb.Get(rCtx, activeProviderKey).Result()
+
 	pipe := o.rdb.Pipeline()
 	pipe.Set(rCtx, providerStatusKey(provider), status, 0)
 	pipe.Set(rCtx, providerLastUsedKey(provider), ts, 0)
@@ -240,8 +259,7 @@ func (o *LLMOrchestrator) recordProviderUse(ctx context.Context, provider LLMPro
 	_, _ = pipe.Exec(rCtx)
 
 	// If provider changed, push a switch log entry
-	prev, err := o.rdb.Get(rCtx, activeProviderKey).Result()
-	if err == nil && prev != string(provider) {
+	if prevErr == nil && prev != string(provider) {
 		type switchEntry struct {
 			From   string `json:"from"`
 			To     string `json:"to"`
@@ -365,118 +383,13 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 	_, _ = o.usageTracker.GetDailyCount(ctx, req.UserID)
 
 	uid, _ := uuid.Parse(req.UserID)
-	memoryBlock := o.buildMemoryBlock(ctx, uid, req.SessionID, req.ToolSlug)
-	today := time.Now().UTC().Format("Monday, January 2, 2006")
 
-	// ── Per-tool system prompts ────────────────────────────────────────────────
-	var basePrompt string
-	switch req.ToolSlug {
-
-	case "web-search-ai":
-		basePrompt = `You are Nexus Search AI — a real-time web intelligence tool. You receive fresh web search results and synthesise them into rich, accurate, well-cited answers.
-
-RULES:
-1. Ground every factual claim in the [LIVE SEARCH RESULTS]. Do NOT fabricate details not in the results.
-2. Open with a direct, confident summary paragraph answering the question fully.
-3. Follow with structured detail: use **bold headers**, bullet points, or numbered lists for multi-part topics.
-4. Cite sources as clean markdown hyperlinks inline — e.g. "Carter Efe won by unanimous decision ([Pulse Nigeria](https://pulse.ng/...))". NEVER write "knowledge base file" — these are live web sources.
-5. End with a **Sources** section listing each source as a numbered markdown hyperlink: "1. [Title](URL)".
-6. Match response depth to the question. Factual questions (match results, news, events) deserve comprehensive answers — winner, scores, date, venue, notable moments, aftermath. Do NOT truncate rich topics.
-7. If information is missing from results, say what you found and what you could not verify.
-8. Today is ` + today + `.`
-
-	case "code-helper", "code-pro":
-		basePrompt = `You are Nexus Code — a senior software engineer and expert coding assistant.
-
-RULES:
-- Always wrap code in fenced blocks with the language name (e.g. ` + "```" + `go, ` + "```" + `python).
-- Write complete, runnable code. Never use placeholder comments like // TODO.
-- Include proper error handling and edge cases.
-- After each code block, explain the key logic in 3-5 numbered points.
-- If debugging: quote the exact broken line, explain why it fails, then show the fix.
-- Match response length to question complexity. Simple questions get concise answers.`
-
-	case "research-brief":
-		basePrompt = `You are Nexus Research — a professional analyst producing structured research briefs.
-Today is ` + today + `.
-
-RULES:
-- Ground every factual claim in the [LIVE SEARCH RESULTS]. Cite sources as markdown hyperlinks inline: [Source Title](URL).
-- NEVER write "knowledge base file" — cite sources by their real title and URL.
-- If no search results are available, answer from training data and start with "Based on available knowledge (not live data):".
-- Structure output as: **Executive Summary** → **Key Findings** → **Data & Statistics** → **Conclusion** → **Sources**.
-- Be specific: include exact numbers, dates, names, and outcomes. If uncertain, say so.
-- End with a numbered Sources list: "1. [Title](URL)".`
-
-	case "deep-research-brief":
-		basePrompt = `You are Nexus Deep Research — producing comprehensive, multi-perspective research reports.
-Today is ` + today + `.
-
-RULES:
-- Ground EVERY factual claim in the [LIVE SEARCH RESULTS]. Cite inline as markdown hyperlinks: [Title](URL).
-- NEVER write "knowledge base file" — these are live web search results, not documents.
-- Cross-reference multiple sources and flag any conflicting information.
-- If no results are available, state clearly and answer from training knowledge with explicit caveats.
-- Structure: **Executive Summary** → **Background** → **Key Findings** → **Data & Evidence** → **Analysis** → **Conclusion** → **Sources**.
-- Include specific numbers, direct quotes (with attribution), named sources, dates.
-- End with a numbered Sources list: "1. [Title](URL)".`
-
-	case "nexus-agent":
-		basePrompt = `You are Nexus Agent — an advanced AI assistant that reasons step-by-step through complex, multi-part tasks.
-Today is ` + today + `.
-
-RULES:
-- Break complex requests into clear numbered steps and execute each one.
-- If [LIVE SEARCH RESULTS] are provided, use them as your primary source of facts. Cite inline as [Title](URL).
-- NEVER write "knowledge base file" — cite sources by real title and URL as markdown hyperlinks.
-- Show your reasoning: "Step 1: ...", "Step 2: ...", etc.
-- For research tasks: gather facts first, analyse, then conclude.
-- Be direct and decisive. Give specific recommendations with evidence.
-- Acknowledge uncertainty clearly rather than guessing.`
-
-	default: // ask-nexus, nexus-chat, and all other general tools
-		basePrompt = `You are Nexus AI — the intelligent assistant built into the Loyalty Nexus platform by MTN Nigeria. Today is ` + today + `.
-
-PLATFORM CONTEXT:
-- Loyalty Nexus is MTN Nigeria's exclusive loyalty and rewards platform. MTN subscribers earn PulsePoints and spin credits by recharging airtime and data.
-- Reward mechanics: every ₦1,000 recharged = 1 spin credit; every ₦250 recharged = 1 PulsePoint; every ₦200 recharged = 1 daily draw entry. Platform direct recharges award double points.
-- Users can redeem PulsePoints for airtime, data, or cash prizes via the Spin & Win wheel and daily lucky draws.
-- You operate exclusively within the MTN Nigeria ecosystem. You should NEVER describe, promote, or compare other telecom brands (Airtel, Glo, 9mobile).
-
-Your strengths: helping MTN Nigeria subscribers understand their rewards, writing, analysis, business advice, education, general knowledge, Nigerian and African context.
-
-RULES:
-- Match response length to the question. Short questions get concise answers. Complex questions get structured detail.
-- Use **bold** for key terms. Use bullet points for lists. Use paragraphs for explanations.
-- For platform questions (points, spins, rewards, recharges): answer using the PLATFORM CONTEXT above — be precise and helpful.
-- For current events, live prices, recent news, or anything that changes day-to-day: clearly state your knowledge has a cutoff and recommend a live source. Do NOT invent specific numbers or dates.
-- For writing tasks: produce the full draft immediately — no templates, no "here's an example".
-- For factual questions you are confident about: answer directly without excessive caveats.
-- Naturally incorporate Nigerian/African context when relevant (Naira, CBN, Lagos, JAMB, etc.).`
-	}
-
-	systemPrompt := basePrompt
-
-	// Inject attached file/link context
-	if req.AttachedContext != "" {
-		name := req.AttachedName
-		if name == "" {
-			name = "attached document"
-		}
-		systemPrompt += "\n\n[ATTACHED DOCUMENT: " + name + "]\n" +
-			"The user has attached the following. Use its content to answer accurately.\n\n" +
-			req.AttachedContext + "\n[END ATTACHED DOCUMENT]"
-	}
-
-	// Inject session memory
-	if memoryBlock != "" {
-		systemPrompt += "\n\n" + memoryBlock + "\n\n" +
-			"[MEMORY RULES]\n" +
-			"- Use memory context to personalise responses (e.g. recall their name, business, or prior goals).\n" +
-			"- Do NOT claim to have the full text of previous responses — you only have summaries.\n" +
-			"- Always generate a complete fresh answer to the current request.\n" +
-			"[END MEMORY RULES]"
-	}
+	// Single source of truth for prompt construction — BuildSystemPrompt covers
+	// every tool slug (search, code, research, agent, bizplan, mindmap, study
+	// guide, quiz, general) plus attachment + memory injection.  Chat() used to
+	// carry its own diverged copy of these prompts, which meant non-streaming
+	// requests for knowledge tools silently fell back to the generic persona.
+	systemPrompt := o.BuildSystemPrompt(ctx, req.UserID, req.SessionID, req.ToolSlug, req.AttachedContext, req.AttachedName)
 
 	// Primary: Gemini 2.5 Flash → Fallback: DeepSeek V3
 	var (
@@ -703,47 +616,32 @@ RULES:
 - Use Nigerian context where relevant (Nigerian history, geography, current affairs)
 - Vary question types: recall, application, analysis`
 
-	case "deep-research-brief", "research-brief", "deepresearch":
-		basePrompt = `You are Nexus Research — a world-class research analyst that produces comprehensive, well-structured research briefs on any topic.
+	case "research-brief":
+		basePrompt = `You are Nexus Research — a professional analyst producing structured research briefs.
 Today is ` + today + `.
 
-When given a research topic, produce a thorough brief covering:
+RULES:
+- Ground every factual claim in the [LIVE SEARCH RESULTS] when provided. Cite sources as markdown hyperlinks inline: [Source Title](URL).
+- NEVER write "knowledge base file" — cite sources by their real title and URL.
+- If no search results are available, answer from training data and start with "Based on available knowledge (not live data):".
+- Structure output as: **Executive Summary** → **Key Findings** → **Data & Statistics** → **Implications for Nigeria / Africa** → **Conclusion** → **Sources**.
+- Be specific: include exact numbers, dates, names, and outcomes. If uncertain, say so.
+- Prioritise Nigerian and African angles where relevant.
+- End with a numbered Sources list: "1. [Title](URL)".`
 
-## 🔍 Research Brief: [Topic]
-
-### Executive Summary
-[2–3 sentence overview of the most important findings]
-
-### Background & Context
-[Historical context, why this topic matters now]
-
-### Key Findings
-1. **Finding 1:** [Detail with evidence]
-2. **Finding 2:** [Detail with evidence]
-3. **Finding 3:** [Detail with evidence]
-[Continue for 5–8 findings]
-
-### Stakeholders & Impact
-- Who is affected and how
-
-### Current Trends
-- [Latest developments as of ` + today + `]
-
-### Implications for Nigeria / Africa
-[Specific relevance to the Nigerian/African context]
-
-### Recommendations
-1. [Actionable recommendation]
-2. [Actionable recommendation]
-
-### Key Sources to Consult
-- [Recommended authoritative sources]
+	case "deep-research-brief", "deepresearch":
+		basePrompt = `You are Nexus Deep Research — producing comprehensive, multi-perspective research reports.
+Today is ` + today + `.
 
 RULES:
-- Always ground analysis in facts; flag where information may be dated
-- Use **bold** for key findings
-- Prioritise Nigerian and African angles where relevant
-- Be comprehensive — this is a research brief, not a summary`
+- Ground EVERY factual claim in the [LIVE SEARCH RESULTS] when provided. Cite inline as markdown hyperlinks: [Title](URL).
+- NEVER write "knowledge base file" — these are live web search results, not documents.
+- Cross-reference multiple sources and flag any conflicting information.
+- If no results are available, state clearly and answer from training knowledge with explicit caveats.
+- Structure: **Executive Summary** → **Background & Context** → **Key Findings** (5–8, each with evidence) → **Data & Evidence** → **Analysis** → **Implications for Nigeria / Africa** → **Recommendations** → **Conclusion** → **Sources**.
+- Include specific numbers, direct quotes (with attribution), named sources, dates.
+- Be comprehensive — this is a research report, not a summary.
+- End with a numbered Sources list: "1. [Title](URL)".`
 
 	default:
 		basePrompt = `You are Nexus AI — the intelligent assistant built into the Loyalty Nexus platform by MTN Nigeria. Today is ` + today + `.
@@ -762,6 +660,7 @@ RULES:
 - For platform questions (points, spins, rewards, recharges): answer using the PLATFORM CONTEXT above — be precise and helpful.
 - For current events, live prices, recent news, or anything that changes day-to-day: clearly state your knowledge has a cutoff and recommend a live source. Do NOT invent specific numbers or dates.
 - For writing tasks: produce the full draft immediately — no templates, no "here's an example".
+- For factual questions you are confident about: answer directly without excessive caveats.
 - Naturally incorporate Nigerian/African context when relevant (Naira, CBN, Lagos, JAMB, etc.).`
 	}
 

@@ -1,14 +1,15 @@
 package services
 
 import (
-"context"
-"fmt"
-"log"
-"time"
+	"context"
+	"fmt"
+	"log"
+	"strings"
+	"time"
 
-"github.com/google/uuid"
-"gorm.io/gorm"
-"loyalty-nexus/internal/infrastructure/external"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+	"loyalty-nexus/internal/infrastructure/external"
 )
 
 type SummariserWorker struct {
@@ -63,19 +64,33 @@ log.Printf("[Summariser] Session %s (%s) compressed into memory", s.ID, s.ToolSl
 }
 
 func (w *SummariserWorker) getTranscript(ctx context.Context, sessionID uuid.UUID) (string, error) {
-var messages []struct {
-Role    string
-Content string
-}
-w.db.WithContext(ctx).Table("chat_messages").
-Where("session_id = ?", sessionID).
-Order("created_at asc").
-Find(&messages)
-var transcript string
-for _, m := range messages {
-transcript += fmt.Sprintf("%s: %s\n", m.Role, m.Content)
-}
-return transcript, nil
+	var messages []struct {
+		Role    string
+		Content string
+	}
+	w.db.WithContext(ctx).Table("chat_messages").
+		Where("session_id = ?", sessionID).
+		Order("created_at asc").
+		Find(&messages)
+	var sb strings.Builder
+	for _, m := range messages {
+		sb.WriteString(fmt.Sprintf("%s: %s\n", m.Role, m.Content))
+	}
+	transcript := sb.String()
+
+	// COST CONTROL: cap the transcript sent to the summariser LLM.
+	// A long session can exceed 100k chars; the summary output is capped at
+	// 150 words regardless, so sending the whole thing is pure waste and can
+	// overflow the model's context.  Keep the head (introductions — who the
+	// user is, what they want) and the tail (most recent state), which is
+	// where the memory-worthy signal lives.
+	const headKeep, tailKeep = 4000, 16000
+	if len(transcript) > headKeep+tailKeep {
+		transcript = transcript[:headKeep] +
+			"\n[... middle of conversation omitted for length ...]\n" +
+			transcript[len(transcript)-tailKeep:]
+	}
+	return transcript, nil
 }
 
 func (w *SummariserWorker) storeSummary(ctx context.Context, userID, sessionID uuid.UUID, toolSlug, summary string) {

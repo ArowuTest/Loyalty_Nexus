@@ -764,6 +764,23 @@ func (o *AIStudioOrchestrator) enhanceVideoPrompt(ctx context.Context, userPromp
 
 func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	prompt := o.enhanceImagePrompt(ctx, slug, env.Prompt)
+
+	// Honour the style tags the tool form collected.  The web frontend also
+	// prepends "[Style1, Style2]" to the prompt text as belt-and-suspenders,
+	// so only append tags that aren't already present (mobile clients send
+	// style_tags without the prefix).
+	for _, tag := range env.StyleTags {
+		if tag != "" && !strings.Contains(strings.ToLower(prompt), strings.ToLower(tag)) {
+			prompt = prompt + ", " + tag + " style"
+		}
+	}
+	// Honour the negative prompt.  FLUX-family models have no separate
+	// negative-prompt parameter, so fold it into the prompt as an explicit
+	// avoidance instruction — measurably effective with FLUX/Aurora.
+	if env.NegativePrompt != "" {
+		prompt = prompt + ". Avoid: " + env.NegativePrompt
+	}
+
 	// Remap alias slugs to canonical ones
 	switch slug {
 	case "my-ai-photo":
@@ -970,12 +987,6 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 				log.Printf("[AIStudio] FAL Flux Ultra (reference) failed: %v — falling back to standard generation", err)
 			}
 		}
-		// ── DB-first ────────────────────────────────────────────────────────
-		in := providerInput{Prompt: prompt}
-		if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryImage, in); err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
-		}
-		// ── Hardcoded fallback ───────────────────────────────────────────────
 		// Extract user-supplied seed from extra_params (sent by ImageCreator Advanced Settings)
 		var userSeed int64
 		if env.Extra != nil {
@@ -983,6 +994,13 @@ func (o *AIStudioOrchestrator) dispatchImage(ctx context.Context, slug string, e
 				userSeed = int64(s)
 			}
 		}
+		// ── DB-first — pass aspect ratio + seed so admin-configured providers
+		// honour the same controls as the hardcoded chain below ──────────────
+		in := providerInput{Prompt: prompt, AspectRatio: env.AspectRatio, Seed: userSeed}
+		if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryImage, in); err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+		}
+		// ── Hardcoded fallback ───────────────────────────────────────────────
 		// tier 1: HuggingFace FLUX.1-Schnell (free, uses HF_TOKEN)
 		if hfKey := os.Getenv("HF_TOKEN"); hfKey != "" {
 			url, err := o.callHFFluxSchnell(ctx, hfKey, prompt)
@@ -1068,6 +1086,15 @@ func (o *AIStudioOrchestrator) dispatchBgRemover(ctx context.Context, imageURL s
 //   animate-photo    → FAL LTX-Video → wan-fast FREE → p-video FREE (ltx-2 was OFF — replaced)
 
 func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
+	// Honour the user's negative prompt across every video slug.  env is a
+	// value copy, so mutating env.Prompt here reaches all per-slug paths below
+	// (they read env.Prompt) without touching each call site.  Video models
+	// have no separate negative-prompt parameter — fold it in as an explicit
+	// avoidance instruction.
+	if env.NegativePrompt != "" && env.Prompt != "" {
+		env.Prompt = env.Prompt + ". Avoid: " + env.NegativePrompt
+	}
+
 	// Remap alias slugs to canonical ones
 	switch slug {
 	case "animate-my-photo":
@@ -1416,8 +1443,8 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		}
 	}
 
-	// ── DB-first ─────────────────────────────────────────────────────────
-	vidIn := providerInput{Prompt: env.Prompt, ImageURL: imageURL}
+	// ── DB-first — aspect ratio threaded so DB providers match hardcoded chain ──
+	vidIn := providerInput{Prompt: env.Prompt, ImageURL: imageURL, AspectRatio: env.AspectRatio}
 	if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryVideo, vidIn); err == nil {
 		return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
 	}
@@ -2172,8 +2199,12 @@ func (o *AIStudioOrchestrator) callGeminiFlash(ctx context.Context, systemPrompt
 			{"parts": []map[string]string{{"text": userPrompt}}},
 		},
 		"generationConfig": map[string]interface{}{
-			"temperature":     0.7,
-			"maxOutputTokens": 4096,
+			"temperature": 0.7,
+			// 8192 — long-form knowledge tools (bizplan: 9 sections + 3-year
+			// financials; deep research briefs) were being truncated mid-document
+			// at 4096.  Output is billed per token actually generated, so this
+			// only costs more when the tool genuinely needs the length.
+			"maxOutputTokens": 8192,
 		},
 	}
 
@@ -2232,7 +2263,7 @@ func (o *AIStudioOrchestrator) callGroqLlama4(ctx context.Context, systemPrompt,
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
 		},
-		"max_tokens":  4096,
+		"max_tokens":  8192, // match Gemini — long-form tools truncated at 4096
 		"temperature": 0.7,
 	}
 
@@ -2253,7 +2284,7 @@ func (o *AIStudioOrchestrator) callDeepSeek(ctx context.Context, systemPrompt, u
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
 		},
-		"max_tokens":  4096,
+		"max_tokens":  8192, // match Gemini — long-form tools truncated at 4096
 		"temperature": 0.7,
 	}
 
@@ -2714,7 +2745,11 @@ func (o *AIStudioOrchestrator) callFALVideo(ctx context.Context, falKey, model, 
 	req.Header.Set("Authorization", "Key "+falKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := o.httpClient.Do(req)
+	// fal.run is synchronous — Kling pro renders routinely exceed 2 minutes.
+	// The shared o.httpClient (120s) guaranteed timeouts on premium video, so
+	// use a dedicated long-lived client (same pattern as Suno / Pollinations).
+	falVideoClient := &http.Client{Timeout: 300 * time.Second}
+	resp, err := falVideoClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -2791,7 +2826,10 @@ func (o *AIStudioOrchestrator) callFALMultiImageVideo(ctx context.Context, falKe
 	req.Header.Set("Authorization", "Key "+falKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := o.httpClient.Do(req)
+	// Dedicated 300s client — multi-image Kling renders take minutes; the
+	// shared 120s client would time out before the render completes.
+	falMultiClient := &http.Client{Timeout: 300 * time.Second}
+	resp, err := falMultiClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -5070,12 +5108,15 @@ func (o *AIStudioOrchestrator) callPollinationsElevenMusic(ctx context.Context, 
 	req.Header.Set("Authorization", "Bearer "+sk)
 	req.Header.Set("User-Agent", "NexusAI/1.0")
 
-	// Music generation can take up to 3 minutes
+	// Music generation can take up to 3 minutes.
+	// Use a dedicated client — the shared o.httpClient has a 120s timeout that
+	// would silently cap the 180s context deadline set below.
 	musicCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 	req = req.WithContext(musicCtx)
 
-	resp, err := o.httpClient.Do(req)
+	musicClient := &http.Client{Timeout: 200 * time.Second}
+	resp, err := musicClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("pollinations ElevenMusic request: %w", err)
 	}
