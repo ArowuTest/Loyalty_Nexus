@@ -664,6 +664,9 @@ export default function NexusChatUI({
   const [isLoading, setIsLoading]   = useState(false);
   const [msgCount, setMsgCount]     = useState(0);
   const [msgLimit, setMsgLimit]     = useState(20);
+  // True when a previous conversation was restored — surfaces the memory
+  // affordance in the header so users know Nexus remembers them.
+  const [hasMemory, setHasMemory]   = useState(false);
   // Guard against click-through: when NexusChatUI slides in over the "Open Chat"
   // button, the pointer-up event from that click can land on a suggestion chip.
   // Block chip clicks for 350ms after mount to prevent accidental auto-send.
@@ -709,6 +712,37 @@ export default function NexusChatUI({
       setMsgCount(d.used ?? 0);
       setMsgLimit(d.limit ?? 20);
     }).catch(() => {});
+
+    // Restore server-side history so reopening the chat continues the
+    // conversation instead of showing an empty thread.  The backend keeps the
+    // active session (≤30 min idle) with full messages; older sessions are
+    // compressed into memory summaries that Nexus recalls automatically.
+    api.getChatHistory(toolSlug).then((res: unknown) => {
+      const h = res as {
+        session_id?: string;
+        messages?: { role: string; content: string; created_at: string }[];
+      };
+      if (h?.session_id) {
+        sessionId.current = h.session_id;
+        try { localStorage.setItem(`nexus_chat_session_${toolSlug}`, h.session_id); } catch { /**/ }
+      }
+      if (h?.messages && h.messages.length > 0) {
+        const restored: Message[] = h.messages.map((m, i) => ({
+          id: `hist-${i}`,
+          role: m.role === "user" ? "user" as const : "assistant" as const,
+          content: m.content,
+          displayContent: m.content,
+          isStreaming: false,
+          timestamp: m.created_at ? new Date(m.created_at) : new Date(),
+        }));
+        // Keep the welcome bubble on top, then the restored conversation.
+        // Only splice in history while the thread is still pristine — if the
+        // user already sent a message before this fetch resolved, leave their
+        // thread alone rather than clobbering it.
+        setMessages((prev) => (prev.length === 1 ? [prev[0], ...restored] : prev));
+        setHasMemory(true);
+      }
+    }).catch(() => { /* history restore is best-effort */ });
   }, [toolSlug]);
 
   // ── Scroll management ─────────────────────────────────────────────────────
@@ -884,7 +918,9 @@ export default function NexusChatUI({
           <h1 className="text-[15px] font-semibold text-white leading-none truncate">{cfg.label}</h1>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-            <span className="text-[10px] text-white/30 font-medium">Online</span>
+            <span className="text-[10px] text-white/30 font-medium">
+              {hasMemory ? "Online · remembers your conversation" : "Online"}
+            </span>
           </div>
         </div>
 
