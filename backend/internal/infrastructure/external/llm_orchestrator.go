@@ -47,7 +47,8 @@ const (
 type LLMRequest struct {
 	UserID          string
 	SessionID       string   // for session memory lookup
-	Prompt          string
+	Prompt          string   // sent to the LLM — may be augmented (e.g. web-search results prepended)
+	DisplayPrompt   string   // the ORIGINAL user message to persist/show. If empty, Prompt is used.
 	History         []string
 	ToolSlug        string   // optional: "web-search-ai" | "code-helper" — routes to Pollinations
 	AttachedContext string   // extracted text from uploaded file or URL — injected into system prompt
@@ -413,7 +414,16 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 
 	_ = o.usageTracker.Increment(ctx, req.UserID)
 
-	resolvedSessionID := o.persistMessages(ctx, uid, req.SessionID, req.ToolSlug, req.Prompt, text)
+	// Persist the ORIGINAL user message, never the augmented one.  Search-grounded
+	// tools prepend [LIVE WEB SEARCH RESULTS …] to req.Prompt before calling Chat();
+	// storing that blob would corrupt the chat-history UI (the user's message would
+	// display as a wall of search results) AND poison the memory block on every
+	// subsequent turn.  DisplayPrompt holds the real message; fall back to Prompt.
+	persistPrompt := req.DisplayPrompt
+	if persistPrompt == "" {
+		persistPrompt = req.Prompt
+	}
+	resolvedSessionID := o.persistMessages(ctx, uid, req.SessionID, req.ToolSlug, persistPrompt, text)
 	go o.recordProviderUse(context.Background(), provider, true, "")
 
 	return &LLMResponse{
@@ -762,7 +772,15 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 	switch req.ToolSlug {
 
 	// ── Search-grounded tools: Tavily → Gemini ─────────────────────────────
-	case "web-search-ai", "ask-nexus", "nexus-chat", "research-brief", "deep-research-brief", "nexus-agent":
+	// Search-grounded tools ONLY — the user explicitly chose a research/search
+	// tool, so a live web query per message is expected.  ask-nexus and
+	// nexus-chat were REMOVED from this list: they are general conversational
+	// assistants, and forcing a Tavily search on every message (a) burned a paid
+	// search on things like "what's my name", (b) injected irrelevant web results
+	// that overrode the user's own session memory, and (c) is unnecessary — the
+	// general persona already tells the model to recommend a live source for
+	// time-sensitive questions.  Those slugs now fall through to plain Chat().
+	case "web-search-ai", "research-brief", "deep-research-brief", "nexus-agent":
 
 		// Determine how many search results to fetch based on depth
 		numResults := 5
@@ -784,9 +802,12 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 				"Today is " + today + ". If the question requires current data, say so clearly.]\n\n" + req.Prompt
 		}
 
-		// Reuse Chat() with augmented prompt — it picks the right system prompt for this slug
+		// Reuse Chat() with augmented prompt — it picks the right system prompt for this slug.
+		// DisplayPrompt carries the ORIGINAL question so Chat() persists/shows that,
+		// not the search-results-augmented blob.
 		augReq := req
 		augReq.Prompt = augmentedPrompt
+		augReq.DisplayPrompt = req.Prompt
 		resp, err := o.Chat(ctx, augReq)
 		if err != nil {
 			return nil, err
