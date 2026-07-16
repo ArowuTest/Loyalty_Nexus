@@ -1,14 +1,17 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Loader2, X, ImageIcon, Sparkles, AlertTriangle,
-  Mic, MicOff, Volume2, Music, User,
+  Mic, MicOff, Volume2, Music, User, Circle, Square, CheckCircle2, Trash2,
 } from 'lucide-react';
 import { useSpeechToText } from '@/hooks/useSpeechToText';
 import { TemplateProps, GeneratePayload } from './types';
 import { cn } from '@/lib/utils';
 import api from '@/lib/api';
+import { useStore } from '@/store/useStore';
+
+const MY_VOICE = '__my_voice__'; // sentinel: use the user's ElevenLabs clone
 
 const DEFAULT_VOICES = ['Bill', 'Cherry', 'Ethan', 'Sarah'];
 const DEFAULT_ASPECTS = [
@@ -46,6 +49,69 @@ export default function TalkingAvatar({ tool, onSubmit, isLoading, userPoints, p
 
   const fileRef  = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
+
+  // ── Voice cloning ("My Voice") ─────────────────────────────────────────────
+  const user       = useStore((s) => s.user);
+  const setUser    = useStore((s) => s.setUser);
+  const [hasClone,     setHasClone]     = useState<boolean>(!!user?.cloned_voice_id);
+  const [recorderOpen, setRecorderOpen] = useState(false);
+  const [recording,    setRecording]    = useState(false);
+  const [recordSecs,   setRecordSecs]   = useState(0);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [cloning,      setCloning]      = useState(false);
+  const [recordError,  setRecordError]  = useState('');
+  const mediaRecRef = useRef<MediaRecorder | null>(null);
+  const chunksRef   = useRef<BlobPart[]>([]);
+  const timerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+
+  async function startRecording() {
+    setRecordError('');
+    setRecordedBlob(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunksRef.current = [];
+      const mr = new MediaRecorder(stream);
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      mr.onstop = () => {
+        setRecordedBlob(new Blob(chunksRef.current, { type: 'audio/webm' }));
+        stream.getTracks().forEach((t) => t.stop());
+      };
+      mediaRecRef.current = mr;
+      mr.start();
+      setRecording(true);
+      setRecordSecs(0);
+      timerRef.current = setInterval(() => setRecordSecs((s) => {
+        if (s >= 45) { stopRecording(); return s; } // hard cap 45s
+        return s + 1;
+      }), 1000);
+    } catch {
+      setRecordError('Microphone access denied. Allow mic access and try again.');
+    }
+  }
+  function stopRecording() {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (mediaRecRef.current && mediaRecRef.current.state !== 'inactive') mediaRecRef.current.stop();
+    setRecording(false);
+  }
+  async function saveClone() {
+    if (!recordedBlob) return;
+    setCloning(true);
+    setRecordError('');
+    try {
+      const r = await api.cloneVoice(recordedBlob);
+      setHasClone(true);
+      setVoice(MY_VOICE);
+      if (user) setUser({ ...user, cloned_voice_id: r.voice_id });
+      setRecorderOpen(false);
+      setRecordedBlob(null);
+    } catch (e) {
+      setRecordError(e instanceof Error ? e.message : 'Voice cloning failed');
+    } finally {
+      setCloning(false);
+    }
+  }
 
   const { speechState, speechError, interimText, handleMicClick } =
     useSpeechToText({
@@ -99,12 +165,18 @@ export default function TalkingAvatar({ tool, onSubmit, isLoading, userPoints, p
     }
     setUploading(false);
 
+    const isMyVoice = voice === MY_VOICE && !useOwnAudio;
+    const extra: Record<string, unknown> = {};
+    if (finalAudioUrl) extra.audio_url = finalAudioUrl;
+    if (isMyVoice)     extra.voice_source = 'elevenlabs'; // backend resolves the user's clone server-side
+
     const payload: GeneratePayload = {
       prompt:       useOwnAudio ? '' : script.trim(),
       image_url:    finalImageUrl,
-      voice_id:     useOwnAudio ? undefined : voice,
+      // For "My Voice" we omit voice_id — the backend uses the user's stored clone.
+      voice_id:     useOwnAudio || isMyVoice ? undefined : voice,
       aspect_ratio: aspect,
-      extra_params: finalAudioUrl ? { audio_url: finalAudioUrl } : undefined,
+      extra_params: Object.keys(extra).length > 0 ? extra : undefined,
     };
     onSubmit(payload);
   }
@@ -269,7 +341,84 @@ export default function TalkingAvatar({ tool, onSubmit, isLoading, userPoints, p
                 {v}
               </button>
             ))}
+            {/* My Voice — the user's ElevenLabs clone */}
+            <button
+              onClick={() => { if (hasClone) setVoice(MY_VOICE); else setRecorderOpen(true); }}
+              className={cn(
+                'flex items-center gap-1 text-[12px] px-3 py-1.5 rounded-lg border font-semibold transition-all',
+                voice === MY_VOICE
+                  ? 'bg-cyan-600 text-white border-cyan-500'
+                  : 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30 hover:border-cyan-400/60',
+              )}
+            >
+              <Mic size={11} /> {hasClone ? 'My Voice' : 'Clone my voice'}
+            </button>
+            {hasClone && (
+              <button
+                onClick={() => setRecorderOpen(true)}
+                className="text-[11px] px-2 py-1.5 rounded-lg text-white/40 hover:text-white/70 transition-all"
+                title="Re-record your voice"
+              >
+                Re-record
+              </button>
+            )}
           </div>
+
+          {/* ── Inline voice recorder ── */}
+          {recorderOpen && (
+            <div className="mt-3 rounded-xl border border-cyan-500/25 bg-cyan-500/[0.04] p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[12px] font-semibold text-cyan-200">Record your voice</p>
+                <button onClick={() => { stopRecording(); setRecorderOpen(false); setRecordedBlob(null); }} className="text-white/40 hover:text-white/80">
+                  <X size={15} />
+                </button>
+              </div>
+              <p className="text-[11px] text-white/45 leading-relaxed">
+                Read a few sentences clearly (10–30 seconds) in a quiet room. We&apos;ll clone your voice so the avatar can speak any script as you.
+              </p>
+
+              {!recordedBlob ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={recording ? stopRecording : startRecording}
+                    className={cn(
+                      'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-all',
+                      recording ? 'bg-red-600 text-white' : 'bg-cyan-600 text-white hover:opacity-90',
+                    )}
+                  >
+                    {recording ? <><Square size={14} /> Stop</> : <><Circle size={14} className="fill-current" /> Record</>}
+                  </button>
+                  {recording && (
+                    <span className="text-[13px] tabular-nums text-red-300 font-semibold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" /> {recordSecs}s
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                  <audio controls src={URL.createObjectURL(recordedBlob)} className="w-full h-9" />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={saveClone}
+                      disabled={cloning}
+                      className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-fuchsia-600 text-white text-sm font-bold px-4 py-2 hover:opacity-90 disabled:opacity-50"
+                    >
+                      {cloning ? <><Loader2 size={14} className="animate-spin" /> Cloning…</> : <><CheckCircle2 size={14} /> Use this voice</>}
+                    </button>
+                    <button
+                      onClick={() => setRecordedBlob(null)}
+                      disabled={cloning}
+                      className="flex items-center gap-1 text-[12px] text-white/40 hover:text-white/70 px-2 py-2"
+                    >
+                      <Trash2 size={12} /> Redo
+                    </button>
+                  </div>
+                </div>
+              )}
+              {recordError && <p className="text-[11px] text-red-400/80">{recordError}</p>}
+            </div>
+          )}
         </div>
       )}
 

@@ -166,6 +166,43 @@ func (h *StudioHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"url": pubURL, "key": key})
 }
 
+// ─── POST /api/v1/studio/voice/clone ──────────────────────────────────────────
+// Accepts a multipart audio recording ("file") and registers it as the user's
+// ElevenLabs Instant Voice Clone, so the Talking Avatar tool can speak in their
+// own voice. Returns { voice_id }.
+func (h *StudioHandler) CloneVoice(w http.ResponseWriter, r *http.Request) {
+	uid := r.Context().Value(middleware.ContextUserID).(string)
+	userID, err := uuid.Parse(uid)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid user token"})
+		return
+	}
+	if err := r.ParseMultipartForm(15 << 20); err != nil { // 15 MB — a voice sample is small
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "recording too large (max 15 MB)"})
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing audio recording"})
+		return
+	}
+	defer func() { _ = file.Close() }()
+	audio, err := io.ReadAll(file)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read recording"})
+		return
+	}
+	voiceID, err := h.studioSvc.RegisterVoiceClone(r.Context(), userID, audio, header.Filename)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"voice_id": voiceID,
+		"message":  "Your voice is ready — select \"My Voice\" in Talking Avatar.",
+	})
+}
+
 // ─── GET /api/v1/studio/tools ─────────────────────────────────────────────────
 
 func (h *StudioHandler) ListTools(w http.ResponseWriter, r *http.Request) {

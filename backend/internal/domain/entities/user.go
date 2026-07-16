@@ -42,6 +42,7 @@ type User struct {
 	LifetimePoints        int64      `db:"lifetime_points"         gorm:"column:lifetime_points"          json:"-"` // deprecated: source of truth is wallet.lifetime_points
 	TotalSpins            int        `db:"total_spins"             gorm:"column:total_spins"              json:"total_spins"`
 	StudioUseCount        int        `db:"studio_use_count"        gorm:"column:studio_use_count"         json:"studio_use_count"`
+	ClonedVoiceID         string     `db:"cloned_voice_id"         gorm:"column:cloned_voice_id;default:''" json:"cloned_voice_id,omitempty"` // ElevenLabs IVC voice id for Talking Avatar "My Voice"
 	GoogleWalletObjectID  string     `db:"google_wallet_object_id" gorm:"column:google_wallet_object_id" json:"google_wallet_object_id,omitempty"`
 	ApplePassSerial       string     `db:"apple_pass_serial"       gorm:"column:apple_pass_serial"        json:"apple_pass_serial,omitempty"`
 	SpinCredits           int        `db:"spin_credits"            gorm:"column:spin_credits"             json:"spin_credits"`

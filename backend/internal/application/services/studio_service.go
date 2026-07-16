@@ -13,9 +13,14 @@ package services
 // hardcoded.  Admin can change it via UpdateToolCost without a code deploy.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -541,6 +546,97 @@ func (s *StudioService) DisputeGeneration(ctx context.Context, genID uuid.UUID, 
 		}
 		return tx.Create(refundTx).Error
 	})
+}
+
+// RegisterVoiceClone creates an ElevenLabs Instant Voice Clone from a user's
+// recorded audio sample and stores the resulting voice_id on the user, so the
+// Talking Avatar tool can speak scripts in their own voice. Any previous clone
+// is best-effort deleted first to avoid orphaning voices on the ElevenLabs side.
+// Returns the new voice_id.
+func (s *StudioService) RegisterVoiceClone(ctx context.Context, userID uuid.UUID, audio []byte, filename string) (string, error) {
+	apiKey := os.Getenv("ELEVENLABS_API_KEY")
+	if apiKey == "" {
+		return "", fmt.Errorf("voice cloning unavailable: ELEVENLABS_API_KEY not configured")
+	}
+	if len(audio) < 2000 {
+		return "", fmt.Errorf("recording too short — please record at least a few seconds of clear speech")
+	}
+	if filename == "" {
+		filename = "sample.webm"
+	}
+
+	// Best-effort delete of the user's previous clone (keeps the ElevenLabs
+	// voice library tidy; failure here is non-fatal).
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("user not found")
+	}
+	if user.ClonedVoiceID != "" {
+		s.deleteElevenLabsVoice(ctx, apiKey, user.ClonedVoiceID)
+	}
+
+	// Build the multipart body: name + files (the audio sample).
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("name", "nexus-voice-"+userID.String()[:8])
+	_ = mw.WriteField("remove_background_noise", "true")
+	fw, err := mw.CreateFormFile("files", filename)
+	if err != nil {
+		return "", err
+	}
+	if _, err := fw.Write(audio); err != nil {
+		return "", err
+	}
+	_ = mw.Close()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.elevenlabs.io/v1/voices/add", &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("xi-api-key", apiKey)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("elevenlabs add-voice: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		msg := string(raw)
+		if len(msg) > 200 {
+			msg = msg[:200]
+		}
+		return "", fmt.Errorf("voice clone failed (%d): %s", resp.StatusCode, msg)
+	}
+	var parsed struct {
+		VoiceID string `json:"voice_id"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.VoiceID == "" {
+		return "", fmt.Errorf("voice clone: no voice_id returned")
+	}
+
+	// Persist on the user.
+	if err := s.db.WithContext(ctx).Table("users").
+		Where("id = ?", userID).
+		Update("cloned_voice_id", parsed.VoiceID).Error; err != nil {
+		return "", fmt.Errorf("failed to save voice: %w", err)
+	}
+	return parsed.VoiceID, nil
+}
+
+// deleteElevenLabsVoice best-effort removes a voice from the ElevenLabs library.
+func (s *StudioService) deleteElevenLabsVoice(ctx context.Context, apiKey, voiceID string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, "https://api.elevenlabs.io/v1/voices/"+voiceID, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("xi-api-key", apiKey)
+	client := &http.Client{Timeout: 15 * time.Second}
+	if resp, err := client.Do(req); err == nil {
+		_ = resp.Body.Close()
+	}
 }
 
 // GetSessionUsage returns the active session for a user (nil if none within 30 min).

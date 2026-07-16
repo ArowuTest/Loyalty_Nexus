@@ -518,6 +518,7 @@ func main() {
 		mux.Handle("POST /api/v1/studio/generate/{id}/dispute", auth(http.HandlerFunc(studioH.DisputeGeneration)))
 		mux.Handle("GET /api/v1/studio/session", auth(http.HandlerFunc(studioH.GetSessionUsage)))
 		mux.Handle("POST /api/v1/studio/upload", auth(http.HandlerFunc(studioH.UploadAsset)))			// REQ: VoiceToPlan + image-editor pre-upload
+		mux.Handle("POST /api/v1/studio/voice/clone", auth(http.HandlerFunc(studioH.CloneVoice)))		// Talking Avatar: register user's ElevenLabs voice clone
 
 			// ─── Nexus Chat ─────────────────────────────────────────────────────
 			mux.Handle("POST /api/v1/studio/chat", auth(http.HandlerFunc(studioH.Chat)))

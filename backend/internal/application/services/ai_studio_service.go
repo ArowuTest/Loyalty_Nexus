@@ -329,7 +329,7 @@ func (o *AIStudioOrchestrator) route(ctx context.Context, gen *entities.AIGenera
 	case catVision:
 		return o.dispatchVision(ctx, slug, env)
 	case catAvatar:
-		return o.dispatchAvatar(ctx, slug, env)
+		return o.dispatchAvatar(ctx, gen.UserID, slug, env)
 	default:
 		return nil, fmt.Errorf("unhandled category %q", cat)
 	}
@@ -340,7 +340,15 @@ func (o *AIStudioOrchestrator) route(ctx context.Context, gen *entities.AIGenera
 // FAL fallback. Providers are keyed by input SHAPE, so each adapter reads only the
 // fields it needs from providerInput — text-driven models use Prompt+VoiceID,
 // audio-driven models use AudioURL (resolved from the script via TTS on demand).
-func (o *AIStudioOrchestrator) dispatchAvatar(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
+//
+// Voice handling:
+//   - preset voice (Bill/Cherry/…)     → FAL text-driven model (fast, internal TTS)
+//   - "My Voice" (voice_source=elevenlabs) → we TTS the script in the user's OWN
+//     stored ElevenLabs clone, then lip-sync the audio (audio-driven path). The
+//     clone id is resolved SERVER-SIDE from the user record, never trusted from
+//     the client, so nobody can borrow another user's voice.
+//   - uploaded audio (audio_url)       → lip-sync straight to that audio.
+func (o *AIStudioOrchestrator) dispatchAvatar(ctx context.Context, userID uuid.UUID, slug string, env promptEnvelope) (*studioProviderResult, error) {
 	imageURL := env.ImageURL
 	if imageURL == "" {
 		return nil, fmt.Errorf("talking-avatar: a source photo (image_url) is required")
@@ -348,36 +356,80 @@ func (o *AIStudioOrchestrator) dispatchAvatar(ctx context.Context, slug string, 
 	script := env.Prompt
 	voice := env.VoiceID
 	preAudio := ""
+	useClonedVoice := false
 	if env.Extra != nil {
 		if a, ok := env.Extra["audio_url"].(string); ok {
 			preAudio = a
+		}
+		if vs, ok := env.Extra["voice_source"].(string); ok && vs == "elevenlabs" {
+			useClonedVoice = true
 		}
 	}
 	if script == "" && preAudio == "" {
 		return nil, fmt.Errorf("talking-avatar: a script or an uploaded audio clip is required")
 	}
 
-	// ── DB-first: admin-configured avatar providers (priority order) ──────────
-	in := providerInput{ImageURL: imageURL, Prompt: script, VoiceID: voice, AudioURL: preAudio}
+	// Resolve the user's cloned voice id SERVER-SIDE (security: never trust a
+	// client-supplied ElevenLabs voice id — always use the one on the user record).
+	clonedVoiceID := ""
+	if useClonedVoice {
+		if u, err := o.userRepo.FindByID(ctx, userID); err == nil && u != nil {
+			clonedVoiceID = u.ClonedVoiceID
+		}
+		if clonedVoiceID == "" {
+			return nil, fmt.Errorf("talking-avatar: no cloned voice found — record your voice first")
+		}
+	}
+
+	falKey := os.Getenv("FAL_API_KEY")
+
+	// ── AUDIO PATH: uploaded audio OR the user's cloned voice ─────────────────
+	// Both require OUR audio (a clip or ElevenLabs TTS in the clone) fed to an
+	// audio-driven lip-sync model. This also refines dispatch: with audio present
+	// we go straight to the audio-driven provider instead of the text model.
+	if preAudio != "" || useClonedVoice {
+		audioURL := preAudio
+		if audioURL == "" {
+			a, err := o.resolveAvatarAudio(ctx, script, clonedVoiceID, "")
+			if err != nil {
+				return nil, fmt.Errorf("talking-avatar: %w", err)
+			}
+			audioURL = a
+		}
+		// DB-first (audio-shape providers). Prompt is left empty so the text-driven
+		// provider fails its local validation instantly and the chain moves to the
+		// audio-driven one — no wasted network call.
+		in := providerInput{ImageURL: imageURL, AudioURL: audioURL}
+		if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryAvatar, in); err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+		}
+		if falKey != "" {
+			if url, err := o.callFALAvatarAudio(ctx, falKey, "veed/fabric-1.0", imageURL, audioURL); err == nil {
+				return &studioProviderResult{OutputURL: url, Provider: "fal/veed-fabric", CostMicros: 20000}, nil
+			} else {
+				return nil, fmt.Errorf("talking-avatar: %w", err)
+			}
+		}
+		return nil, fmt.Errorf("talking-avatar unavailable: configure FAL_API_KEY (or an avatar provider in admin)")
+	}
+
+	// ── TEXT PATH: a preset voice + a typed script ────────────────────────────
+	// DB-first via the avatar provider registry (admin-swappable priority order).
+	in := providerInput{ImageURL: imageURL, Prompt: script, VoiceID: voice}
 	if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryAvatar, in); err == nil {
 		return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
 	}
-
-	// ── Hardcoded fallback (registry empty or all DB providers failed) ────────
-	falKey := os.Getenv("FAL_API_KEY")
 	if falKey == "" {
 		return nil, fmt.Errorf("talking-avatar unavailable: configure FAL_API_KEY (or an avatar provider in admin)")
 	}
-	// Tier 1: FAL text-driven avatar (self-contained TTS) — needs a script.
-	if script != "" {
-		if url, err := o.callFALAvatarText(ctx, falKey, "fal-ai/ai-avatar/single-text", imageURL, script, voice); err == nil {
-			return &studioProviderResult{OutputURL: url, Provider: "fal/ai-avatar-single-text", CostMicros: 40000}, nil
-		} else {
-			log.Printf("[Avatar] FAL text-avatar failed: %v — trying audio-driven", err)
-		}
+	// Tier 1: FAL text-driven avatar (self-contained TTS).
+	if url, err := o.callFALAvatarText(ctx, falKey, "fal-ai/ai-avatar/single-text", imageURL, script, voice); err == nil {
+		return &studioProviderResult{OutputURL: url, Provider: "fal/ai-avatar-single-text", CostMicros: 40000}, nil
+	} else {
+		log.Printf("[Avatar] FAL text-avatar failed: %v — trying audio-driven", err)
 	}
-	// Tier 2: FAL audio-driven lip-sync (TTS the script, then lip-sync).
-	audioURL, err := o.resolveAvatarAudio(ctx, script, voice, preAudio)
+	// Tier 2: TTS the script (preset voice), then audio-driven lip-sync.
+	audioURL, err := o.resolveAvatarAudio(ctx, script, voice, "")
 	if err != nil {
 		return nil, fmt.Errorf("talking-avatar: %w", err)
 	}

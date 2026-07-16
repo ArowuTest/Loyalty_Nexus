@@ -12,6 +12,7 @@ interface User {
   is_active: boolean;
   state?: string;
   date_of_birth?: string;
+  cloned_voice_id?: string; // ElevenLabs IVC id — set once the user records their voice
 }
 
 interface Wallet {

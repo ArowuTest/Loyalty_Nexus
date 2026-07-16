@@ -364,6 +364,26 @@ class APIClient {
     return resp.json() as Promise<{ url: string; key: string }>;
   }
 
+  /**
+   *  cloneVoice — register a recorded audio sample as the user's ElevenLabs
+   *  voice clone. Returns { voice_id }. Used by Talking Avatar "My Voice".
+   */
+  async cloneVoice(audio: Blob, filename = "voice-sample.webm"): Promise<{ voice_id: string; message: string }> {
+    const form = new FormData();
+    form.append("file", audio, filename);
+    const token = this.getToken();
+    const resp = await fetch(`${BASE_URL}/studio/voice/clone`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? `Voice cloning failed (${resp.status})`);
+    }
+    return resp.json() as Promise<{ voice_id: string; message: string }>;
+  }
+
   // ── Draws (user-facing) ───────────────────────────────────────────────────
   getDraws() { return this.request("GET", "/draws"); }
   getDrawWinners(id: string) { return this.request("GET", `/draws/${id}/winners`); }
