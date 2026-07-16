@@ -65,6 +65,7 @@ const (
 	catMusic     studioToolCat = "music"
 	catComposite studioToolCat = "composite"
 	catVision    studioToolCat = "vision"
+	catAvatar    studioToolCat = "avatar" // talking-head / lip-synced digital human
 )
 
 // slugCategory maps every tool slug to its dispatch category.
@@ -123,6 +124,8 @@ var slugCategory = map[string]studioToolCat{
 	"image-compose":         catImage,  // Whisk-style subject+scene+style composition (Flux Ultra)
 	// ── Free chat tools ──────────────────────────────────────────────────────────────────────────────────────
 	"ask-nexus":             catText,   // free conversational AI
+	// ── Talking Avatar (photo + script → lip-synced talking-head video) ──────────
+	"talking-avatar":        catAvatar,
 	"nexus-chat":            catText,   // free Gemini Flash chat
 	"voice-to-plan":         catText,   // voice-to-business-plan
 
@@ -325,8 +328,63 @@ func (o *AIStudioOrchestrator) route(ctx context.Context, gen *entities.AIGenera
 		return o.dispatchComposite(ctx, slug, env)
 	case catVision:
 		return o.dispatchVision(ctx, slug, env)
+	case catAvatar:
+		return o.dispatchAvatar(ctx, slug, env)
 	default:
 		return nil, fmt.Errorf("unhandled category %q", cat)
+	}
+}
+
+// dispatchAvatar handles talking-avatar tools (photo + script → lip-synced video).
+// DB-first via the avatar provider registry (admin-swappable), then a hardcoded
+// FAL fallback. Providers are keyed by input SHAPE, so each adapter reads only the
+// fields it needs from providerInput — text-driven models use Prompt+VoiceID,
+// audio-driven models use AudioURL (resolved from the script via TTS on demand).
+func (o *AIStudioOrchestrator) dispatchAvatar(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
+	imageURL := env.ImageURL
+	if imageURL == "" {
+		return nil, fmt.Errorf("talking-avatar: a source photo (image_url) is required")
+	}
+	script := env.Prompt
+	voice := env.VoiceID
+	preAudio := ""
+	if env.Extra != nil {
+		if a, ok := env.Extra["audio_url"].(string); ok {
+			preAudio = a
+		}
+	}
+	if script == "" && preAudio == "" {
+		return nil, fmt.Errorf("talking-avatar: a script or an uploaded audio clip is required")
+	}
+
+	// ── DB-first: admin-configured avatar providers (priority order) ──────────
+	in := providerInput{ImageURL: imageURL, Prompt: script, VoiceID: voice, AudioURL: preAudio}
+	if url, _, cost, usedSlug, err := o.runProviderChain(ctx, entities.ProviderCategoryAvatar, in); err == nil {
+		return &studioProviderResult{OutputURL: url, Provider: "db/" + usedSlug, CostMicros: cost}, nil
+	}
+
+	// ── Hardcoded fallback (registry empty or all DB providers failed) ────────
+	falKey := os.Getenv("FAL_API_KEY")
+	if falKey == "" {
+		return nil, fmt.Errorf("talking-avatar unavailable: configure FAL_API_KEY (or an avatar provider in admin)")
+	}
+	// Tier 1: FAL text-driven avatar (self-contained TTS) — needs a script.
+	if script != "" {
+		if url, err := o.callFALAvatarText(ctx, falKey, "fal-ai/ai-avatar/single-text", imageURL, script, voice); err == nil {
+			return &studioProviderResult{OutputURL: url, Provider: "fal/ai-avatar-single-text", CostMicros: 40000}, nil
+		} else {
+			log.Printf("[Avatar] FAL text-avatar failed: %v — trying audio-driven", err)
+		}
+	}
+	// Tier 2: FAL audio-driven lip-sync (TTS the script, then lip-sync).
+	audioURL, err := o.resolveAvatarAudio(ctx, script, voice, preAudio)
+	if err != nil {
+		return nil, fmt.Errorf("talking-avatar: %w", err)
+	}
+	if url, err := o.callFALAvatarAudio(ctx, falKey, "veed/fabric-1.0", imageURL, audioURL); err == nil {
+		return &studioProviderResult{OutputURL: url, Provider: "fal/veed-fabric", CostMicros: 20000}, nil
+	} else {
+		return nil, fmt.Errorf("talking-avatar: all providers failed: %w", err)
 	}
 }
 
@@ -2847,6 +2905,285 @@ func (o *AIStudioOrchestrator) callFALMultiImageVideo(ctx context.Context, falKe
 		return "", fmt.Errorf("FAL multi-image video parse failed: %s", truncateStr(string(raw), 200))
 	}
 	return parsed.Video.URL, nil
+}
+
+// ─── Talking-Avatar adapters ──────────────────────────────────────────────────
+//
+// Two FAL templates by INPUT SHAPE (so future FAL avatar models are a DB-row-only
+// change), plus a HeyGen adapter for its bespoke upload→generate→poll API.
+// All follow the callFALVideo pattern: POST fal.run/<model>, Key auth, 300s
+// client (FAL avatar renders exceed the shared 120s client), parse {video:{url}}.
+
+// resolveAvatarAudio returns a usable audio URL for audio-driven lip-sync models.
+// If the caller pre-uploaded audio, that is used; otherwise the script is spoken
+// via the existing internal TTS fallback chain (ElevenLabs → Google → Pollinations).
+// Called on demand ONLY by audio-driven adapters, so no TTS is wasted on the
+// text-driven path (where the model does its own TTS).
+func (o *AIStudioOrchestrator) resolveAvatarAudio(ctx context.Context, script, voiceID, preUploaded string) (string, error) {
+	if preUploaded != "" {
+		return preUploaded, nil
+	}
+	if script == "" {
+		return "", fmt.Errorf("avatar: no script or audio provided")
+	}
+	// Tier 1: ElevenLabs (best quality)
+	if k := os.Getenv("ELEVENLABS_API_KEY"); k != "" {
+		vid := voiceID
+		if vid == "" {
+			vid = os.Getenv("ELEVENLABS_VOICE_ID")
+			if vid == "" {
+				vid = "EXAVITQu4vr4xnSDxMaL" // Sarah — safe default
+			}
+		}
+		if url, err := o.callElevenLabsTTS(ctx, k, vid, script); err == nil {
+			return url, nil
+		} else {
+			log.Printf("[Avatar] ElevenLabs TTS failed: %v — trying Google", err)
+		}
+	}
+	// Tier 2: Google Cloud TTS
+	if k := os.Getenv("GOOGLE_CLOUD_TTS_KEY"); k != "" {
+		if url, err := o.callGoogleCloudTTS(ctx, k, script); err == nil {
+			return url, nil
+		} else {
+			log.Printf("[Avatar] Google TTS failed: %v — trying Pollinations", err)
+		}
+	}
+	// Tier 3: Pollinations Qwen TTS
+	if url, err := o.callPollinationsTTS(ctx, script, voiceID); err == nil {
+		return url, nil
+	}
+	return "", fmt.Errorf("avatar: all TTS providers failed (configure ELEVENLABS_API_KEY / GOOGLE_CLOUD_TTS_KEY / POLLINATIONS_SECRET_KEY)")
+}
+
+// callFALAvatarText drives a FAL avatar model that takes {image_url, text_input,
+// voice} and does TTS internally (e.g. fal-ai/ai-avatar/single-text). One call:
+// photo + script → lip-synced talking-head video.
+func (o *AIStudioOrchestrator) callFALAvatarText(ctx context.Context, falKey, model, imageURL, script, voice string) (string, error) {
+	if model == "" {
+		model = "fal-ai/ai-avatar/single-text"
+	}
+	if imageURL == "" {
+		return "", fmt.Errorf("fal-avatar-text: image_url required")
+	}
+	if script == "" {
+		return "", fmt.Errorf("fal-avatar-text: script (text_input) required")
+	}
+	if voice == "" {
+		voice = "Bill" // model's default voice roster
+	}
+	payload := map[string]interface{}{
+		"image_url":  imageURL,
+		"text_input": script,
+		"voice":      voice,
+		// The model's "prompt" is a delivery/scene description, distinct from the spoken script.
+		"prompt": "A person looking at the camera and speaking naturally with clear lip movement and subtle, professional expression.",
+	}
+	return o.postFALAvatar(ctx, falKey, model, payload)
+}
+
+// callFALAvatarAudio drives an audio-driven FAL lip-sync model that takes
+// {image_url, audio_url} (e.g. veed/fabric-1.0). The audio is resolved by the
+// caller (pre-uploaded or TTS'd from the script) — see resolveAvatarAudio.
+func (o *AIStudioOrchestrator) callFALAvatarAudio(ctx context.Context, falKey, model, imageURL, audioURL string) (string, error) {
+	if model == "" {
+		model = "veed/fabric-1.0"
+	}
+	if imageURL == "" {
+		return "", fmt.Errorf("fal-avatar-audio: image_url required")
+	}
+	if audioURL == "" {
+		return "", fmt.Errorf("fal-avatar-audio: audio_url required")
+	}
+	payload := map[string]interface{}{
+		"image_url": imageURL,
+		"audio_url": audioURL,
+	}
+	return o.postFALAvatar(ctx, falKey, model, payload)
+}
+
+// postFALAvatar POSTs a payload to fal.run/<model> and extracts the video URL.
+// Shared by both FAL avatar templates. Dedicated 300s client — avatar renders
+// (esp. at $0.20/sec models) routinely exceed the shared 120s client.
+func (o *AIStudioOrchestrator) postFALAvatar(ctx context.Context, falKey, model string, payload map[string]interface{}) (string, error) {
+	if falKey == "" {
+		return "", fmt.Errorf("fal avatar: FAL_API_KEY not configured")
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://fal.run/"+model, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Key "+falKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	falAvatarClient := &http.Client{Timeout: 300 * time.Second}
+	resp, err := falAvatarClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("FAL avatar %s %d: %s", model, resp.StatusCode, truncateStr(string(raw), 200))
+	}
+	// FAL avatar/video models return {"video":{"url":...}}
+	var parsed struct {
+		Video struct {
+			URL string `json:"url"`
+		} `json:"video"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Video.URL == "" {
+		return "", fmt.Errorf("FAL avatar parse failed (%s): %s", model, truncateStr(string(raw), 200))
+	}
+	return parsed.Video.URL, nil
+}
+
+// callHeyGen drives HeyGen's Avatar IV API (their photorealistic photo-avatar).
+// Fully implemented but DORMANT — no provider row enables it until an admin adds
+// a HEYGEN_API_KEY and flips the heygen ai_provider_configs row active. Flow:
+//   1. POST /v1/asset/upload  → image_key for the source photo
+//   2. POST /v2/video/av4/generate  {image_key, script, voice_id} → video_id
+//   3. poll GET /v1/video_status.get?video_id=…  until completed → video_url
+func (o *AIStudioOrchestrator) callHeyGen(ctx context.Context, apiKey, imageURL, script, voiceID string) (string, error) {
+	if apiKey == "" {
+		return "", fmt.Errorf("heygen: HEYGEN_API_KEY not configured")
+	}
+	if imageURL == "" || script == "" {
+		return "", fmt.Errorf("heygen: image_url and script required")
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
+
+	// Step 1: upload the photo → image_key. HeyGen's upload accepts raw image bytes.
+	imgBytes, ctype, err := o.fetchRemoteBytes(ctx, imageURL)
+	if err != nil {
+		return "", fmt.Errorf("heygen: fetch image: %w", err)
+	}
+	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://upload.heygen.com/v1/asset", bytes.NewReader(imgBytes))
+	if err != nil {
+		return "", err
+	}
+	upReq.Header.Set("X-Api-Key", apiKey)
+	upReq.Header.Set("Content-Type", ctype)
+	upResp, err := client.Do(upReq)
+	if err != nil {
+		return "", fmt.Errorf("heygen upload: %w", err)
+	}
+	upRaw, _ := io.ReadAll(upResp.Body)
+	_ = upResp.Body.Close()
+	if upResp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("heygen upload %d: %s", upResp.StatusCode, truncateStr(string(upRaw), 200))
+	}
+	var upParsed struct {
+		Data struct {
+			ImageKey string `json:"image_key"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(upRaw, &upParsed); err != nil || upParsed.Data.ImageKey == "" {
+		return "", fmt.Errorf("heygen upload parse: %s", truncateStr(string(upRaw), 200))
+	}
+
+	// Step 2: generate the Avatar IV video.
+	vid := voiceID
+	if vid == "" {
+		vid = "1bd001e7e50f421d891986aad5158bc8" // a documented HeyGen default voice
+	}
+	genPayload := map[string]interface{}{
+		"image_key": upParsed.Data.ImageKey,
+		"script":    script,
+		"voice_id":  vid,
+	}
+	genBody, _ := json.Marshal(genPayload)
+	genReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.heygen.com/v2/video/av4/generate", bytes.NewReader(genBody))
+	if err != nil {
+		return "", err
+	}
+	genReq.Header.Set("X-Api-Key", apiKey)
+	genReq.Header.Set("Content-Type", "application/json")
+	genResp, err := client.Do(genReq)
+	if err != nil {
+		return "", fmt.Errorf("heygen generate: %w", err)
+	}
+	genRaw, _ := io.ReadAll(genResp.Body)
+	_ = genResp.Body.Close()
+	if genResp.StatusCode != http.StatusOK && genResp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("heygen generate %d: %s", genResp.StatusCode, truncateStr(string(genRaw), 200))
+	}
+	var genParsed struct {
+		Data struct {
+			VideoID string `json:"video_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(genRaw, &genParsed); err != nil || genParsed.Data.VideoID == "" {
+		return "", fmt.Errorf("heygen generate parse: %s", truncateStr(string(genRaw), 200))
+	}
+
+	// Step 3: poll for completion (up to ~5 min).
+	for attempt := 0; attempt < 60; attempt++ {
+		select {
+		case <-ctx.Done():
+			return "", fmt.Errorf("heygen: context cancelled while polling")
+		case <-time.After(5 * time.Second):
+		}
+		stReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			"https://api.heygen.com/v1/video_status.get?video_id="+genParsed.Data.VideoID, nil)
+		if err != nil {
+			continue
+		}
+		stReq.Header.Set("X-Api-Key", apiKey)
+		stResp, err := client.Do(stReq)
+		if err != nil {
+			continue
+		}
+		stRaw, _ := io.ReadAll(stResp.Body)
+		_ = stResp.Body.Close()
+		var stParsed struct {
+			Data struct {
+				Status   string `json:"status"`
+				VideoURL string `json:"video_url"`
+				Error    any    `json:"error"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(stRaw, &stParsed); err != nil {
+			continue
+		}
+		switch stParsed.Data.Status {
+		case "completed":
+			if stParsed.Data.VideoURL == "" {
+				return "", fmt.Errorf("heygen: completed but no video_url")
+			}
+			return stParsed.Data.VideoURL, nil
+		case "failed":
+			return "", fmt.Errorf("heygen: generation failed: %v", stParsed.Data.Error)
+		}
+	}
+	return "", fmt.Errorf("heygen: timed out after 5 minutes (video_id=%s)", genParsed.Data.VideoID)
+}
+
+// fetchRemoteBytes downloads a remote asset and returns its bytes + content-type.
+func (o *AIStudioOrchestrator) fetchRemoteBytes(ctx context.Context, url string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := o.httpClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("fetch %s: status %d", url, resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	ctype := resp.Header.Get("Content-Type")
+	if ctype == "" {
+		ctype = "image/jpeg"
+	}
+	return data, ctype, nil
 }
 
 // callGoogleCloudTTS calls Google Cloud Text-to-Speech API.

@@ -76,6 +76,7 @@ const (
 	ProviderCategoryMusic      = "music"
 	ProviderCategoryBGRemove   = "bg-remove"
 	ProviderCategoryVision     = "vision"
+	ProviderCategoryAvatar     = "avatar" // talking-head / lip-synced digital human
 )
 
 // ── Template constants ────────────────────────────────────────────────────────
@@ -101,6 +102,11 @@ const (
 	TemplateMubert          = "mubert"
 	TemplateRemoveBG        = "remove-bg"
 	TemplateRembg           = "rembg"
+	// ── Avatar (talking-head) templates — registered by INPUT SHAPE, not vendor,
+	// so a future FAL avatar model is a DB-row-only change (no code). ──
+	TemplateFALAvatarText  = "fal-avatar-text"  // {image_url, text_input, voice} → video; model does TTS internally
+	TemplateFALAvatarAudio = "fal-avatar-audio" // {image_url, audio_url} → video; audio-driven lip-sync (TTS first)
+	TemplateHeyGen         = "heygen"           // HeyGen Avatar IV bespoke API (upload → generate → poll)
 )
 
 // ValidCategories and ValidTemplates for frontend dropdowns.
@@ -108,6 +114,7 @@ var ValidCategories = []string{
 	ProviderCategoryText, ProviderCategoryImage, ProviderCategoryVideo,
 	ProviderCategoryTTS, ProviderCategoryTranscribe, ProviderCategoryTranslate,
 	ProviderCategoryMusic, ProviderCategoryBGRemove, ProviderCategoryVision,
+	ProviderCategoryAvatar,
 }
 
 var ValidTemplates = []string{
@@ -117,4 +124,5 @@ var ValidTemplates = []string{
 	TemplateHFImage, TemplateFALImage, TemplateFALVideo, TemplateFALBGRemove,
 	TemplateElevenLabsTTS, TemplateElevenLabsMusic,
 	TemplateMubert, TemplateRemoveBG, TemplateRembg,
+	TemplateFALAvatarText, TemplateFALAvatarAudio, TemplateHeyGen,
 }

@@ -33,7 +33,8 @@ export type UITemplate =
   | 'transcribe'
   | 'vision-ask'
   | 'code-pro'
-  | 'knowledge-doc';
+  | 'knowledge-doc'
+  | 'talking-avatar';
 
 export interface AspectRatioOption {
   label: string;
@@ -142,6 +143,10 @@ export interface UIConfig {
   max_scenes?: number;                  // max number of scenes (default 6)
   max_characters?: number;              // max number of characters (default 5)
   default_duration_script?: number;     // default video duration in seconds for VideoScript
+  // talking-avatar
+  max_script_chars?: number;            // cap on the spoken script (bounds cost)
+  avatar_voices?: string[];             // simple voice-name list for the avatar model
+  allow_audio_upload?: boolean;         // let the user supply their own audio instead of TTS
 }
 
 export interface StudioTool {

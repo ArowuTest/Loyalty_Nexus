@@ -143,6 +143,26 @@ func (o *AIStudioOrchestrator) callByTemplate(
 		}
 		outputURL, err = o.callFALVideo(ctx, key, model, in.ImageURL, in.Prompt)
 
+	// ── Avatar (talking-head) ──────────────────────────────────────────────────
+	case entities.TemplateFALAvatarText:
+		// Text-driven: model does its own TTS from the script (in.Prompt) + voice.
+		outputURL, err = o.callFALAvatarText(ctx, key, p.ModelID, in.ImageURL, in.Prompt, in.VoiceID)
+
+	case entities.TemplateFALAvatarAudio:
+		// Audio-driven: resolve audio on demand (pre-uploaded or TTS the script),
+		// so no TTS is wasted when a text-driven provider was chosen instead.
+		audioURL := in.AudioURL
+		if audioURL == "" {
+			audioURL, err = o.resolveAvatarAudio(ctx, in.Prompt, in.VoiceID, "")
+			if err != nil {
+				break
+			}
+		}
+		outputURL, err = o.callFALAvatarAudio(ctx, key, p.ModelID, in.ImageURL, audioURL)
+
+	case entities.TemplateHeyGen:
+		outputURL, err = o.callHeyGen(ctx, key, in.ImageURL, in.Prompt, in.VoiceID)
+
 	case entities.TemplatePollVideo:
 		model := p.ModelID
 		if model == "" {
