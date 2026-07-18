@@ -207,6 +207,13 @@ services:
         value: "500000"
       - key: MONTHLY_DRAW_PRIZE_NAIRA
         value: "1000000"
+      # ── Remotion render-service (Video Templates) ─────────────────────────
+      # URL of the self-hosted render service below. Host-portable: point this
+      # at the Render service now, at a GCP Cloud Run URL later — no code change.
+      - key: RENDER_SERVICE_URL
+        sync: false
+      - key: RENDER_SERVICE_TOKEN
+        sync: false   # shared secret; must match the render-service value
 
   # ─── Background Worker (Docker) ───────────────────────────────────────────
   - type: worker
@@ -247,6 +254,40 @@ services:
         value: N-Alert
       - key: OPERATION_MODE
         value: independent
+
+  # ─── Remotion Render Service (Docker Node — self-hosted templated video) ──
+  # Wraps Remotion's renderMedia() with headless Chromium. Portable container:
+  # runs here on Render now; the SAME image runs on GCP Cloud Run later (no AWS,
+  # no @remotion/cloudrun). The Go API calls it via RENDER_SERVICE_URL.
+  - type: web
+    name: loyalty-nexus-render
+    runtime: docker
+    repo: https://github.com/ArowuTest/Loyalty_Nexus
+    branch: main
+    dockerfilePath: ./render-service/Dockerfile
+    dockerContext: ./render-service
+    healthCheckPath: /health
+    plan: standard          # Chromium is RAM-heavy — starter (512MB) would OOM
+    autoDeploy: false
+    envVars:
+      - key: PORT
+        value: "8090"
+      - key: RENDER_SERVICE_TOKEN
+        sync: false          # shared secret; must match the API service value
+      - key: AWS_REGION
+        value: auto
+      - key: AWS_S3_BUCKET
+        sync: false
+      - key: AWS_S3_ENDPOINT
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: STORAGE_CDN_BASE_URL
+        sync: false
+      - key: STORAGE_PUBLIC_URL
+        sync: false
 
   # ─── Redis ────────────────────────────────────────────────────────────────
   - type: redis

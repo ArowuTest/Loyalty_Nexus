@@ -22,7 +22,7 @@ import {
 import {
   MusicComposer, ImageCreator, ImageEditor, ImageCompose,
   VideoCreator, VideoAnimator, VideoEditor, VideoExtender, VideoMultiScene, VideoScript, VoiceStudio,
-  Transcribe, VisionAsk, CodePro, KnowledgeDoc, TalkingAvatar,
+  Transcribe, VisionAsk, CodePro, KnowledgeDoc, TalkingAvatar, VideoSlideshow,
 } from "../../components/studio/templates";
 import type { GeneratePayload } from "../../components/studio/templates";
 import type { UITemplate, UIConfig } from "../../types/studio";
@@ -2322,6 +2322,7 @@ function renderTemplate(
     case "code-pro":        return <CodePro        {...props} />;
     case "vision-ask":      return <VisionAsk      {...props} preloadImageUrl={preloadImageUrl} />;
     case "talking-avatar":  return <TalkingAvatar  {...props} preloadImageUrl={preloadImageUrl} />;
+    case "video-slideshow": return <VideoSlideshow {...props} />;
     case "knowledge-doc":
     default:                return <KnowledgeDoc   {...props} />;
   }

@@ -34,7 +34,8 @@ export type UITemplate =
   | 'vision-ask'
   | 'code-pro'
   | 'knowledge-doc'
-  | 'talking-avatar';
+  | 'talking-avatar'
+  | 'video-slideshow';
 
 export interface AspectRatioOption {
   label: string;
@@ -147,6 +148,9 @@ export interface UIConfig {
   max_script_chars?: number;            // cap on the spoken script (bounds cost)
   avatar_voices?: string[];             // simple voice-name list for the avatar model
   allow_audio_upload?: boolean;         // let the user supply their own audio instead of TTS
+  // video-slideshow (Remotion)
+  min_images?: number;                  // minimum images required for a montage
+  coming_soon_note?: string;            // banner shown while a tool is pre-launch
 }
 
 export interface StudioTool {

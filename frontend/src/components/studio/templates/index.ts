@@ -14,4 +14,5 @@ export { default as CodePro }          from './CodePro';
 export { default as KnowledgeDoc }     from './KnowledgeDoc';
 export { default as VideoScript }      from './VideoScript';
 export { default as TalkingAvatar }    from './TalkingAvatar';
+export { default as VideoSlideshow }   from './VideoSlideshow';
 export type { TemplateProps, GeneratePayload } from './types';

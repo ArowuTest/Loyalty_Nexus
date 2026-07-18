@@ -383,6 +383,10 @@ func (o *AIStudioOrchestrator) callRemotionRender(ctx context.Context, base, com
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Shared-secret auth for the internal render-service.
+	if tok := os.Getenv("RENDER_SERVICE_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	// Dedicated long timeout — a templated render can take 1-3 minutes.
 	client := &http.Client{Timeout: 300 * time.Second}
 	resp, err := client.Do(req)
