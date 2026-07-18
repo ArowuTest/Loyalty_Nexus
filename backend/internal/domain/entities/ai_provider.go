@@ -77,6 +77,7 @@ const (
 	ProviderCategoryBGRemove   = "bg-remove"
 	ProviderCategoryVision     = "vision"
 	ProviderCategoryAvatar     = "avatar" // talking-head / lip-synced digital human
+	ProviderCategoryRender     = "render" // programmatic/templated video (Remotion)
 )
 
 // ── Template constants ────────────────────────────────────────────────────────
@@ -107,6 +108,10 @@ const (
 	TemplateFALAvatarText  = "fal-avatar-text"  // {image_url, text_input, voice} → video; model does TTS internally
 	TemplateFALAvatarAudio = "fal-avatar-audio" // {image_url, audio_url} → video; audio-driven lip-sync (TTS first)
 	TemplateHeyGen         = "heygen"           // HeyGen Avatar IV bespoke API (upload → generate → poll)
+	// ── Render (Remotion) — self-hosted render-service, host-portable Render→GCP.
+	// The render TARGET lives behind RENDER_SERVICE_URL; this template just POSTs
+	// {composition, props} and polls for the MP4. ──
+	TemplateRemotion = "remotion"
 )
 
 // ValidCategories and ValidTemplates for frontend dropdowns.
@@ -114,7 +119,7 @@ var ValidCategories = []string{
 	ProviderCategoryText, ProviderCategoryImage, ProviderCategoryVideo,
 	ProviderCategoryTTS, ProviderCategoryTranscribe, ProviderCategoryTranslate,
 	ProviderCategoryMusic, ProviderCategoryBGRemove, ProviderCategoryVision,
-	ProviderCategoryAvatar,
+	ProviderCategoryAvatar, ProviderCategoryRender,
 }
 
 var ValidTemplates = []string{
@@ -125,4 +130,5 @@ var ValidTemplates = []string{
 	TemplateElevenLabsTTS, TemplateElevenLabsMusic,
 	TemplateMubert, TemplateRemoveBG, TemplateRembg,
 	TemplateFALAvatarText, TemplateFALAvatarAudio, TemplateHeyGen,
+	TemplateRemotion,
 }

@@ -66,6 +66,7 @@ const (
 	catComposite studioToolCat = "composite"
 	catVision    studioToolCat = "vision"
 	catAvatar    studioToolCat = "avatar" // talking-head / lip-synced digital human
+	catRender    studioToolCat = "render" // programmatic/templated video (Remotion)
 )
 
 // slugCategory maps every tool slug to its dispatch category.
@@ -126,6 +127,9 @@ var slugCategory = map[string]studioToolCat{
 	"ask-nexus":             catText,   // free conversational AI
 	// ── Talking Avatar (photo + script → lip-synced talking-head video) ──────────
 	"talking-avatar":        catAvatar,
+	// ── Remotion templated video (SCAFFOLDING — tool ships is_active=false until
+	// the render-service exists; hidden from users by ListActiveTools) ──────────
+	"video-slideshow":       catRender,
 	"nexus-chat":            catText,   // free Gemini Flash chat
 	"voice-to-plan":         catText,   // voice-to-business-plan
 
@@ -330,9 +334,73 @@ func (o *AIStudioOrchestrator) route(ctx context.Context, gen *entities.AIGenera
 		return o.dispatchVision(ctx, slug, env)
 	case catAvatar:
 		return o.dispatchAvatar(ctx, gen.UserID, slug, env)
+	case catRender:
+		return o.dispatchRender(ctx, slug, env)
 	default:
 		return nil, fmt.Errorf("unhandled category %q", cat)
 	}
+}
+
+// dispatchRender handles Remotion templated-video tools (SCAFFOLDING for Track A).
+// It posts {composition, props} to the self-hosted render-service at
+// RENDER_SERVICE_URL (host-portable Render→GCP) and polls for the MP4. The
+// render-service and the video-slideshow tool are not live yet — the tool row
+// ships is_active=false, so this path is only reachable once both exist. Reuses
+// the same points/refund pipeline as every other dispatcher.
+func (o *AIStudioOrchestrator) dispatchRender(ctx context.Context, slug string, env promptEnvelope) (*studioProviderResult, error) {
+	base := os.Getenv("RENDER_SERVICE_URL")
+	if base == "" {
+		return nil, fmt.Errorf("video templates are not configured yet (RENDER_SERVICE_URL unset)")
+	}
+	// The composition id is the tool slug (e.g. "video-slideshow"); props carry
+	// the user's inputs (image URLs, music, captions) from the envelope's Extra bag.
+	composition := slug
+	props := map[string]interface{}{
+		"prompt":       env.Prompt,
+		"aspectRatio":  env.AspectRatio,
+	}
+	if env.Extra != nil {
+		for k, v := range env.Extra {
+			props[k] = v
+		}
+	}
+	url, err := o.callRemotionRender(ctx, strings.TrimRight(base, "/"), composition, props)
+	if err != nil {
+		return nil, fmt.Errorf("video template render failed: %w", err)
+	}
+	return &studioProviderResult{OutputURL: url, Provider: "remotion/" + composition, CostMicros: 1000}, nil
+}
+
+// callRemotionRender POSTs a render request to the self-hosted render-service and
+// returns the resulting MP4 URL. The service wraps Remotion's renderMedia();
+// where it actually renders (Render container now, GCP Cloud Run later) is its
+// own internal detail — this Go side only ever speaks HTTP to RENDER_SERVICE_URL.
+func (o *AIStudioOrchestrator) callRemotionRender(ctx context.Context, base, composition string, props map[string]interface{}) (string, error) {
+	payload := map[string]interface{}{"composition": composition, "props": props}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/render", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// Dedicated long timeout — a templated render can take 1-3 minutes.
+	client := &http.Client{Timeout: 300 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("render-service %d: %s", resp.StatusCode, truncateStr(string(raw), 200))
+	}
+	var parsed struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.URL == "" {
+		return "", fmt.Errorf("render-service: no url in response: %s", truncateStr(string(raw), 200))
+	}
+	return parsed.URL, nil
 }
 
 // dispatchAvatar handles talking-avatar tools (photo + script → lip-synced video).
