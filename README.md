@@ -1,6 +1,6 @@
 # ⚡ Loyalty Nexus
 
-> **Nigeria's premium telecom loyalty platform** — recharge airtime, earn Pulse Points, spin to win cash/data prizes, and access 17 free AI tools powered by NotebookLM, Groq and Gemini.
+> **Nigeria's premium telecom loyalty platform** — recharge airtime, earn Pulse Points, spin to win cash/data prizes, and access 50+ AI tools (image, video, music, voice, talking avatars, chat) powered by Gemini, Groq, DeepSeek, FAL, Grok, ElevenLabs and more.
 
 [![Go](https://img.shields.io/badge/Go-1.23-blue)](https://go.dev) [![Next.js](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org) [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue)](https://postgresql.org) [![Redis](https://img.shields.io/badge/Redis-7-red)](https://redis.io) [![License](https://img.shields.io/badge/License-Private-lightgrey)](#)
 
@@ -262,7 +262,20 @@ GET  /api/v1/admin/regional-wars
 
 ## AI Studio Tools
 
-All 17 tools are free. Cost = Pulse Points spent per generation:
+The Studio now ships **50+ tools** across Chat, Create, Learn and Build. Cost = Pulse Points spent per generation (admin-configurable); every generation is an atomic point deduction with **automatic refund on failure**. Providers are DB-driven, priority-ordered rows in `ai_provider_configs`, so adding or switching a provider is a config change, not a deploy.
+
+### Flagship features
+
+- **Talking Avatar** — photo + typed script → lip-synced talking-head video. Preset voices, upload-your-own-audio, or **clone your own voice** (ElevenLabs Instant Voice Cloning: record once, then any script speaks in your voice). Provider-swappable — FAL avatar models live, **HeyGen Avatar IV** adapter ships dormant (flip on in admin, no deploy). Endpoints: `POST /api/v1/studio/generate` (`tool_slug=talking-avatar`) and `POST /api/v1/studio/voice/clone`.
+- **Nexus Chat** — conversational AI with persistent per-tool memory (session summaries + recent-message recall) and optional live web search (Tavily) for research tools.
+- **Image / Video / Music / Voice** — image (standard → premium via Grok/FAL/Pollinations), video (animate, cinematic, Veo, edit, extend), music & jingles (Suno/ElevenLabs), narration & TTS (ElevenLabs/Google/Pollinations).
+
+### Roadmap (scoped, not yet built)
+
+- **Remotion video templates** — near-free templated/personalized video (slideshows from AI images, "Recharge Wrapped", prize-reveal clips) via a self-hosted renderer, host-portable Render → GCP behind an internal render-service boundary.
+- **Claude / ChatGPT connector** — a remote MCP server + OAuth 2.1 layer (reuses OTP for identity) so users can trigger Studio generations from inside Claude/ChatGPT and spend their Pulse Points, with per-connection spend caps, scopes, and one-tap revoke.
+
+### Legacy tool table (illustrative — predates the 50-tool expansion)
 
 | # | Tool | Provider | Cost |
 |---|------|----------|------|

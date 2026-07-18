@@ -119,7 +119,34 @@ Strong retention and engagement driver. Phase 1 can be shipped as mostly-static 
 | 1 | Public Regional Wars Leaderboard | HIGH | 2–3 days (FE + 1 API endpoint) | `GET /wars/public-leaderboard` endpoint |
 | 2 | Community Page — Phase 1 (static) | MEDIUM | 1 day | None |
 | 2 | Community Page — Phase 2 (full) | MEDIUM | 5–7 days | Auth, DB schema, moderation |
+| 3 | Remotion Video Templates | MEDIUM | 3–5 days | Node render-service on Render |
+| 4 | Claude/ChatGPT MCP Connector | HIGH | 5–8 days | OAuth 2.1 AS + MCP server + security review |
 
 ---
 
-*These features are noted for post-launch implementation. Current sprint focus: E2E testing and production data seeding.*
+## FEATURE 3 — Remotion Video Templates (cheap, templated video)
+
+### Overview
+Programmatic, **templated** video (React/Remotion) as a near-free complement to the AI-generative video tools. Renders deterministic content — slideshows from a user's AI images, personalized **"Recharge Wrapped"**, prize-reveal clips, captioned social clips, lyric/quote videos. ~$0.001/render vs $0.20/sec for FAL avatar.
+
+### Approach
+- **Render target: self-hosted `renderMedia()` — NO AWS.** A Docker Node "render-service" runs Remotion + headless Chromium, deployed on **Render** now; the same container is **host-portable to GCP Cloud Run** (plain container, reusing existing GCS creds) when Loyalty Nexus migrates — a config change, not a rewrite. NOT the alpha `@remotion/cloudrun` distributed product. AWS Lambda only if volume ever justifies it.
+- **Go backend** reuses the shipped `dispatchAvatar` pattern: new `render` provider category + `remotion` template in `entities/ai_provider.go`; `dispatchRender` in `ai_studio_service.go` calls the render-service via an **env-configured `RENDER_SERVICE_URL`** (never a hardcoded host, so the GCP move is one env var). Reuses `RequestGeneration` (points), `worker.DispatchGeneration`, `uploadOrDataURI` (R2/GCS), and `FailGeneration` (refund).
+- **Phase-1 slice:** one composition + one tool — `video-slideshow` (3–5 user images + a music-tool track → montage with transitions/captions → MP4).
+- **Owner action:** Remotion Company License (~$100/mo) for commercial use. Cap length/resolution and queue one render at a time on a Standard+ Render instance (Chromium is RAM-heavy).
+
+## FEATURE 4 — Claude / ChatGPT MCP Connector (+ OAuth 2.1)
+
+### Overview
+Expose Nexus AI Studio as a remote **MCP server** so a user connects their Loyalty Nexus account inside Claude/ChatGPT and triggers generations that spend **their own Pulse Points**. The assistant is the conversational front-end; LN is the generation backend + wallet.
+
+### Approach
+- **OAuth 2.1 authorization layer** (delegated authorization — **does NOT replace OTP; reuses it** to verify identity on a consent page). Spec: OAuth 2.1 + PKCE(S256) + Dynamic Client Registration (RFC 7591 — Claude auto-registers) + Protected Resource Metadata (RFC 9728). Build with a vetted Go library (`ory/fosite`), not hand-rolled. New endpoints: `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`, `POST /oauth/register`, `GET /oauth/authorize` (OTP-backed consent), `POST /oauth/token`. New tables: `oauth_clients`, `oauth_auth_codes`, `oauth_tokens` (scopes + `spend_cap_daily` + revoked) — mirrors the admin-refresh-token store (migration 074).
+- **MCP server** (Streamable HTTP, 2026 standard) exposing tools — `generate_image`, `generate_video_from_image`, `talking_avatar`, `check_balance` — each validating the token, resolving the user, calling the existing generation pipeline, and enforcing the spend cap.
+- **Security (non-negotiable — money path):** per-token daily/absolute spend caps, scopes, rate limiting, an audit row per agent-triggered spend, one-tap revoke, and a **"Connected Apps"** management screen in the LN app.
+- **Phase-1 slice:** fosite AS + OTP consent + one tool (`generate_image`) + spend cap + revoke, verified by adding the connector in a real Claude account.
+- **Note:** larger, security-critical; recommend after Remotion, as a dedicated reviewed build.
+
+---
+
+*These features are noted for post-launch implementation. Talking Avatar + Voice Cloning (Jul 2026) are BUILT & DEPLOYED (see README / PROJECT_OVERVIEW). Remotion + MCP connector are scoped and approved, not yet built.*

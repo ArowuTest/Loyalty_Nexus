@@ -26,10 +26,12 @@ A gamified prize wheel utilizing a server-side cryptographically secure pseudo-r
 *   **Controls:** Enforces daily spin limits, global liability caps, and per-prize inventory caps to protect platform margins.
 
 ### 2.3. Nexus AI Studio
-A suite of 17 free AI tools categorized into Chat, Create, Learn, and Build. This is the platform's primary differentiator.
-*   **Tools include:** PDF Study Guides, Business Plan Generators, AI Image Generators, Voice Stories, and Language Translators.
-*   **Providers:** Powered by a cascade of AI services including NotebookLM (zero API cost), Groq, Gemini Flash, DeepSeek, HuggingFace Flux, and FAL.AI.
-*   **Economy:** Users "pay" for these generations using their earned Pulse Points.
+A suite of 50+ AI tools categorized into Chat, Create, Learn, and Build. This is the platform's primary differentiator.
+*   **Tools include:** PDF Study Guides, Business Plan Generators, AI Image Generators (standard → premium), AI Video (animate / cinematic / Veo), Music & Jingles, Voice/Narration, Language Translation, and a live-search Chat.
+*   **Talking Avatar (Jul 2026):** Turn a photo + a typed script into a lip-synced talking-head video. Users can pick a preset voice, upload their own audio, or **clone their own voice** (ElevenLabs Instant Voice Cloning — record once, then speak any script in their own voice). Built provider-swappable: FAL avatar models are live and a **HeyGen Avatar IV** adapter ships dormant, so switching providers is an admin config change, not a deploy.
+*   **Providers:** A cascade of AI services — Gemini 2.5 Flash, Groq, DeepSeek, Tavily (live web search), HuggingFace/Pollinations/FAL (image), Grok/FAL/Pollinations (video), ElevenLabs/Google/Pollinations (voice), Suno (music). Every provider is an admin-configurable, priority-ordered row in `ai_provider_configs` — a new/cheaper provider is a DB change, not code.
+*   **Economy:** Users "pay" for these generations using their earned Pulse Points. Every generation is an atomic point deduction with automatic refund-on-failure.
+*   **Roadmap (scoped):** (a) **Remotion video templates** — near-free templated/personalized video (slideshows from AI images, "Recharge Wrapped", prize-reveal clips) via a self-hosted renderer, host-portable across Render → GCP; (b) **Claude/ChatGPT connector** — a remote MCP server + OAuth 2.1 layer (reusing OTP for identity) letting users trigger Studio generations from inside Claude/ChatGPT and spend their Pulse Points, with per-connection spend caps and one-tap revoke.
 
 ### 2.4. Regional Wars
 A monthly competition where the 37 Nigerian states compete based on cumulative recharge volume. Powered by Redis sorted sets for real-time leaderboards, the winning state's participants receive bonus Pulse Points.
