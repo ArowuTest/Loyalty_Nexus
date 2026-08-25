@@ -1517,7 +1517,15 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 		}
-		log.Printf("[AIStudio] p-video failed for video-cinematic: %v", err)
+		log.Printf("[AIStudio] p-video failed for video-cinematic: %v — trying nova-reel", err)
+		// Tier 3: nova-reel — the ONLY video model Pollinations still lists as free
+		// (wan-fast and p-video were both flipped to paid). Verified live 2026-08-25:
+		// HTTP 200, content-type video/mp4, 3.4 MB.
+		vidURL, err = o.callPollinationsVideoModel(ctx, novaReelModelID(), imgURL, motionPrompt, 300, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
+		if err == nil {
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/nova-reel", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] nova-reel failed for video-cinematic: %v", err)
 		return nil, fmt.Errorf("video-cinematic: all providers failed")
 	}
 
@@ -1589,7 +1597,13 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 		if err == nil {
 			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 		}
-		log.Printf("[AIStudio] p-video fallback failed for video-veo: %v", err)
+		log.Printf("[AIStudio] p-video fallback failed for video-veo: %v — trying nova-reel", err)
+		// Fallback 3: nova-reel — the only still-free Pollinations video model (verified 2026-08-25).
+		vidURL, err = o.callPollinationsVideoModel(ctx, novaReelModelID(), "", prompt, 300, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true")
+		if err == nil {
+			return &studioProviderResult{OutputURL: vidURL, Provider: "pollinations/nova-reel", CostMicros: 0}, nil
+		}
+		log.Printf("[AIStudio] nova-reel fallback failed for video-veo: %v", err)
 		return nil, fmt.Errorf("video-veo: all providers failed")
 	}
 
@@ -1680,7 +1694,14 @@ func (o *AIStudioOrchestrator) dispatchVideo(ctx context.Context, slug string, e
 	if videoURL, err := o.callPollinationsVideoModel(ctx, "p-video", imageURL, motionDesc, 300, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true"); err == nil {
 		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/p-video", CostMicros: 0}, nil
 	} else {
-		log.Printf("[AIStudio] Pollinations p-video failed: %v", err)
+		log.Printf("[AIStudio] Pollinations p-video failed: %v — trying nova-reel", err)
+	}
+
+	// Tier 4: nova-reel — the only still-free Pollinations video model (verified 2026-08-25).
+	if videoURL, err := o.callPollinationsVideoModel(ctx, novaReelModelID(), imageURL, motionDesc, 300, env.AspectRatio, fmt.Sprintf("%d", env.Duration), "true"); err == nil {
+		return &studioProviderResult{OutputURL: videoURL, Provider: "pollinations/nova-reel", CostMicros: 0}, nil
+	} else {
+		log.Printf("[AIStudio] Pollinations nova-reel failed: %v", err)
 	}
 
 	return nil, fmt.Errorf("video generation unavailable: all providers failed")
@@ -2291,6 +2312,14 @@ func (o *AIStudioOrchestrator) assembleVideoJingle(ctx context.Context, env prom
 			videoURL = url
 		} else {
 			log.Printf("[AIStudio] video-jingle: p-video fallback failed: %v", err)
+		}
+	}
+	if videoURL == "" {
+		// nova-reel — the only still-free Pollinations video model (verified 2026-08-25).
+		if url, err := o.callPollinationsVideoModel(ctx, novaReelModelID(), "", videoPrompt, 180, env.AspectRatio, "15", "true"); err == nil {
+			videoURL = url
+		} else {
+			log.Printf("[AIStudio] video-jingle: nova-reel fallback failed: %v", err)
 		}
 	}
 	// ── Return composite result ───────────────────────────────────────────────
@@ -3812,11 +3841,19 @@ func (o *AIStudioOrchestrator) callPollinationsImageWithSeed(ctx context.Context
 	case "21:9", "ultrawide":
 		width, height = 1536, 640
 	}
-	// flux-realism produces significantly higher quality photorealistic images than base flux.
-	// For AI Studio we always want the best visual quality since users spend points.
+	// Model must be a CURRENTLY-VALID Pollinations model id. "flux-realism" was retired and now
+	// returns HTTP 400 "Invalid model or alias", which broke every image tool that lands here.
+	// Verified live 2026-08-25 against gen.pollinations.ai: flux returns a real FLUX.1 Schnell
+	// image (EXIF model=flux). POLLINATIONS_IMAGE_MODEL allows swapping without a redeploy —
+	// other verified-working ids: gptimage, gptimage-large, zimage, nova-canvas, kontext,
+	// seedream5, nanobanana-pro.
+	imgModel := os.Getenv("POLLINATIONS_IMAGE_MODEL")
+	if imgModel == "" {
+		imgModel = "flux"
+	}
 	apiURL := fmt.Sprintf(
-		"https://gen.pollinations.ai/image/%s?model=flux-realism&width=%d&height=%d&nologo=true&seed=%d&enhance=true",
-		encoded, width, height, seed,
+		"https://gen.pollinations.ai/image/%s?model=%s&width=%d&height=%d&nologo=true&seed=%d&enhance=true",
+		encoded, url.QueryEscape(imgModel), width, height, seed,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
@@ -4068,6 +4105,21 @@ func mapToQwenVoice(voice string) string {
 	default:
 		return "Cherry" // safe default: warm, clear female voice
 	}
+}
+
+// novaReelModelID() is the last free-tier video model on Pollinations, used as the terminal
+// fallback in every video chain.
+//
+// Pollinations re-priced its video catalogue: as of 2026-08-25 the live /models feed marks
+// EVERY video model paid_only=true EXCEPT nova-reel — including wan-fast and p-video, which
+// this code had been treating as free. That is why video generation started failing.
+// Verified live 2026-08-25: nova-reel → HTTP 200, content-type video/mp4, 3.4 MB.
+// POLLINATIONS_VIDEO_MODEL overrides it without a redeploy if the free tier moves again.
+func novaReelModelID() string {
+	if m := os.Getenv("POLLINATIONS_VIDEO_MODEL"); m != "" {
+		return m
+	}
+	return "nova-reel"
 }
 
 // callPollinationsVideo generates a short video using wan-fast (FREE).
