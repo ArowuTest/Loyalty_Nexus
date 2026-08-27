@@ -131,7 +131,6 @@ class _WebsiteBuilderScreenState extends ConsumerState<WebsiteBuilderScreen> {
   // Step 2
   final _fieldCtrls = <String, TextEditingController>{};
   final _slugCtrl = TextEditingController();
-  bool _slugAvail = false;
   bool _slugLoading = false;
   Timer? _slugTimer;
   String _slugStatus = ''; // '', 'free', 'taken'
@@ -146,7 +145,6 @@ class _WebsiteBuilderScreenState extends ConsumerState<WebsiteBuilderScreen> {
   // Step 5
   String? _generationId;
   String? _publicUrl;
-  String? _vanitySlug;
   String _genStatus = 'pending';
   Timer? _pollTimer;
   WebViewController? _webCtrl;
@@ -199,7 +197,6 @@ class _WebsiteBuilderScreenState extends ConsumerState<WebsiteBuilderScreen> {
       final res = await api.checkSlug(slug);
       final avail = res['available'] as bool? ?? true;
       setState(() {
-        _slugAvail = avail;
         _slugStatus = avail ? 'free' : 'taken';
         _slugLoading = false;
       });
@@ -246,7 +243,6 @@ class _WebsiteBuilderScreenState extends ConsumerState<WebsiteBuilderScreen> {
       );
       _generationId = res['generation_id']?.toString();
       _publicUrl = res['public_url']?.toString();
-      _vanitySlug = res['vanity_slug']?.toString();
       _genStatus = res['status']?.toString() ?? 'pending';
 
       setState(() { _generating = false; });

@@ -983,9 +983,9 @@ class _SpinProgressCard extends StatelessWidget {
         );
 
     final hasActiveTier = tierRec != null;
-    final emoji  = hasActiveTier ? tierRec!.$2 : '⚡';
-    final color  = hasActiveTier ? tierRec!.$3 : NexusColors.primary;
-    final label  = hasActiveTier ? tierRec!.$1 : 'No Tier';
+    final emoji  = hasActiveTier ? tierRec.$2 : '⚡';
+    final color  = hasActiveTier ? tierRec.$3 : NexusColors.primary;
+    final label  = hasActiveTier ? tierRec.$1 : 'No Tier';
 
     return Container(
       decoration: BoxDecoration(

@@ -189,12 +189,20 @@ class PushNotificationService {
 
   String _buildPayload(Map<String, dynamic> data) {
     // Backend sends 'route' or 'type' in FCM data payload
-    return data['route'] as String? ?? _typeToRoute(data['type'] as String?);
+    return data['route'] as String? ?? typeToRoute(data['type'] as String?);
   }
 
-  static String _typeToRoute(String? type) {
+  /// Maps an FCM `type` to an in-app route.
+  ///
+  /// Public + static so it can be unit-tested: a bad mapping here (e.g. the old
+  /// `/spin/prizes`, which was never a registered route) silently drops testers
+  /// on an error page, and that is exactly the class of bug tests must catch.
+  @visibleForTesting
+  static String typeToRoute(String? type) {
     switch (type) {
-      case 'spin_result':     return '/spin/prizes';
+      // '/spin/prizes' was never a registered route — tapping the most common
+      // notification in a spin-to-win app landed testers on go_router's error page.
+      case 'spin_result':     return '/prizes';
       case 'draw_winner':
       case 'draw_result':     return '/draws';
       case 'point_credit':

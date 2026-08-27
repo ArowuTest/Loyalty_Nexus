@@ -52,16 +52,13 @@ jobs:
           storeFile=loyalty-nexus-release.jks
           EOF
 
-      # ── 7. Write Firebase config files (gitignored, must be injected) ────────
-      - name: Write google-services.json
-        run: |
-          echo '${{ secrets.GOOGLE_SERVICES_JSON }}' \
-            > mobile/android/app/google-services.json
-
-      - name: Write GoogleService-Info.plist
-        run: |
-          echo '${{ secrets.GOOGLE_SERVICE_INFO_PLIST }}' \
-            > mobile/ios/Runner/GoogleService-Info.plist
+      # ── 7. Firebase config files ────────────────────────────────────────────
+      # NOT injected: google-services.json and GoogleService-Info.plist are TRACKED
+      # in the repo and valid there. They hold only public client identifiers that
+      # ship inside every distributed binary anyway.
+      # Previously these were overwritten from secrets — when a secret was unset,
+      # `echo '' > file` wrote an EMPTY file and the google-services Gradle plugin
+      # failed the build with a parse error.
 
       # ── 8. Install Flutter dependencies ──────────────────────────────────────
       - name: Flutter pub get
@@ -76,7 +73,7 @@ jobs:
       # ── 10. Flutter unit tests ─────────────────────────────────────────────────
       - name: Flutter test
         working-directory: mobile
-        run: flutter test --reporter=compact || true
+        run: flutter test --reporter=compact
 
       # ── 11. Build debug APK ────────────────────────────────────────────────────
       - name: Build debug APK

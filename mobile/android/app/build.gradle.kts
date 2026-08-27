@@ -8,6 +8,7 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
     // Firebase / Google Services
     id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
 }
 
 // Load signing credentials from key.properties (not committed to git)
@@ -60,8 +61,23 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
         getByName("release") {
+            // FAIL FAST — never silently degrade to debug signing.
+            // The old fallback shipped a DEBUG-SIGNED release artifact with no
+            // warning if key.properties was missing. Play rejects it, and any
+            // tester who installed it cannot upgrade in place (signature
+            // mismatch forces an uninstall). A local debug/profile run is
+            // unaffected; only assembling a RELEASE without a keystore fails.
             signingConfig = if (keyPropertiesFile.exists()) {
                 signingConfigs.getByName("release")
+            } else if (project.gradle.startParameter.taskNames.any {
+                    it.contains("Release") || it.contains("release")
+                }) {
+                throw GradleException(
+                    "Release build requested but android/key.properties is missing. " +
+                    "A debug-signed release cannot be distributed: Play rejects it and " +
+                    "testers cannot upgrade in place. Provide the keystore (CI injects it) " +
+                    "or build a debug variant instead."
+                )
             } else {
                 signingConfigs.getByName("debug")
             }

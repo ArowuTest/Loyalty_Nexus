@@ -51,5 +51,11 @@
 	<string>Loyalty Nexus needs microphone access to record audio for the Transcribe tool in AI Studio.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Loyalty Nexus uses speech recognition to let you dictate prompts to AI Studio tools instead of typing.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

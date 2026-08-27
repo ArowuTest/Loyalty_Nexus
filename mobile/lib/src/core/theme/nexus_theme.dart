@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 
@@ -133,13 +132,13 @@ class NexusRadius {
 
 class NexusText {
   static TextStyle displayXl(BuildContext ctx) =>
-      GoogleFonts.syne(fontSize: 40, fontWeight: FontWeight.w900, color: NexusColors.textPrimary, letterSpacing: -1);
+      TextStyle(fontFamily: 'Syne', fontSize: 40, fontWeight: FontWeight.w900, color: NexusColors.textPrimary, letterSpacing: -1);
 
   static TextStyle display(BuildContext ctx) =>
-      GoogleFonts.syne(fontSize: 28, fontWeight: FontWeight.w800, color: NexusColors.textPrimary, letterSpacing: -0.5);
+      TextStyle(fontFamily: 'Syne', fontSize: 28, fontWeight: FontWeight.w800, color: NexusColors.textPrimary, letterSpacing: -0.5);
 
   static TextStyle heading(BuildContext ctx) =>
-      GoogleFonts.syne(fontSize: 20, fontWeight: FontWeight.w700, color: NexusColors.textPrimary);
+      TextStyle(fontFamily: 'Syne', fontSize: 20, fontWeight: FontWeight.w700, color: NexusColors.textPrimary);
 
   static const subheading = TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: NexusColors.textPrimary);
 
@@ -179,11 +178,14 @@ class NexusTheme {
         outline:        NexusColors.border,
       ),
 
-      textTheme: GoogleFonts.interTextTheme(base.textTheme).copyWith(
-        displayLarge:  GoogleFonts.syne(fontSize: 40, fontWeight: FontWeight.w900, color: NexusColors.textPrimary),
-        displayMedium: GoogleFonts.syne(fontSize: 28, fontWeight: FontWeight.w800, color: NexusColors.textPrimary),
-        displaySmall:  GoogleFonts.syne(fontSize: 22, fontWeight: FontWeight.w700, color: NexusColors.textPrimary),
-        headlineLarge: GoogleFonts.syne(fontSize: 20, fontWeight: FontWeight.w700, color: NexusColors.textPrimary),
+      // Bundled Inter (assets/fonts) instead of GoogleFonts.interTextTheme —
+      // that variant issues an HTTP request to fonts.gstatic.com while building
+      // the theme, which degrades first launch on a poor network and fails in tests.
+      textTheme: base.textTheme.apply(fontFamily: 'Inter').copyWith(
+        displayLarge:  TextStyle(fontFamily: 'Syne', fontSize: 40, fontWeight: FontWeight.w900, color: NexusColors.textPrimary),
+        displayMedium: TextStyle(fontFamily: 'Syne', fontSize: 28, fontWeight: FontWeight.w800, color: NexusColors.textPrimary),
+        displaySmall:  TextStyle(fontFamily: 'Syne', fontSize: 22, fontWeight: FontWeight.w700, color: NexusColors.textPrimary),
+        headlineLarge: TextStyle(fontFamily: 'Syne', fontSize: 20, fontWeight: FontWeight.w700, color: NexusColors.textPrimary),
         headlineMedium:const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: NexusColors.textPrimary),
         headlineSmall: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: NexusColors.textPrimary),
         titleLarge:    const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: NexusColors.textPrimary),
@@ -202,7 +204,7 @@ class NexusTheme {
         elevation:          0,
         scrolledUnderElevation: 0,
         centerTitle:        false,
-        titleTextStyle:     GoogleFonts.syne(
+        titleTextStyle:     TextStyle(fontFamily: 'Syne', 
           fontSize: 20, fontWeight: FontWeight.w700, color: NexusColors.textPrimary),
         iconTheme: const IconThemeData(color: NexusColors.textPrimary, size: 22),
         systemOverlayStyle: const SystemUiOverlayStyle(

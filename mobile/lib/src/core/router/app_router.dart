@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -47,18 +48,26 @@ class AppRoutes {
 }
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authStateProvider);
+  // Deliberately NOT ref.watch(authStateProvider): watching would return a
+  // brand-new GoRouter on every auth change, discarding the navigation stack and
+  // all StatefulShellRoute branch state. refreshListenable below already re-runs
+  // `redirect` on auth changes, and `redirect` reads live state via ref.read.
 
   return GoRouter(
     initialLocation: '/',
     debugLogDiagnostics: false,
     refreshListenable: _AuthListenable(ref),
 
+    // Without this an unknown deep link or a stale push payload drops the
+    // tester on go_router's default exception page.
+    errorBuilder: (ctx, state) => _RouteNotFound(location: state.uri.toString()),
+
     redirect: (ctx, state) {
       final loc       = state.matchedLocation;
-      final loading   = authState.isLoading;
-      final loggedIn  = authState.isAuthenticated;
-      final isNew     = authState.isNewUser;
+      final live      = ref.read(authStateProvider);
+      final loading   = live.isLoading;
+      final loggedIn  = live.isAuthenticated;
+      final isNew     = live.isNewUser;
 
       // Wait for auth init
       if (loading) return null;
@@ -145,5 +154,46 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 class _AuthListenable extends ChangeNotifier {
   _AuthListenable(Ref ref) {
     ref.listen(authStateProvider, (_, __) => notifyListeners());
+  }
+}
+
+/// Shown when a deep link or push payload points at a route that does not exist.
+/// Replaces go_router's raw exception page, which is not something a tester
+/// should ever see.
+class _RouteNotFound extends StatelessWidget {
+  const _RouteNotFound({required this.location});
+  final String location;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0F),
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.explore_off_outlined, size: 44, color: Colors.white38),
+                const SizedBox(height: 16),
+                const Text('We could not open that link',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Text(location,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white30, fontSize: 11)),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: () => context.go('/dashboard'),
+                  child: const Text('Go to Home'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

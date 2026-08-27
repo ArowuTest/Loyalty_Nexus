@@ -9,17 +9,16 @@
 # CardTheme/CardThemeData class of breakage.
 #
 # ── ONE-TIME SETUP (see docs/MOBILE_RELEASE_SETUP.md) ────────────────────────────
-#   iOS      · App Store Connect API key uploaded to Codemagic as integration
-#              "loyalty-nexus-asc" (Issuer ID + Key ID + .p8)
-#            · Bundle ID ng.loyaltynexus.loyaltyNexus registered in the Developer
-#              portal, and an app record created in App Store Connect
+#   iOS      · App Store Connect API key as Codemagic integration "loyalty-nexus-asc"
+#            · Bundle ID ng.loyaltynexus.loyaltyNexus registered + app record created
 #   Android  · Keystore uploaded to Codemagic as reference "loyalty_nexus_keystore"
+#              — MUST be the same keystore as the GitHub secret ANDROID_KEYSTORE_BASE64,
+#                or existing testers cannot upgrade in place
 #            · Firebase service-account JSON in group "firebase_credentials"
-#              as FIREBASE_SERVICE_ACCOUNT
-#   Both     · Tester emails/groups configured in TestFlight + Firebase App Distribution
+#   Both     · Tester groups configured in TestFlight + Firebase App Distribution
 #
-# Firebase config files (google-services.json / GoogleService-Info.plist) are tracked
-# in the repo, so no secret injection is needed for them here.
+# Firebase client configs (google-services.json / GoogleService-Info.plist) are
+# tracked in the repo, so nothing is injected for them.
 
 definitions:
   flutter_version: &flutter_version 3.44.3
@@ -35,13 +34,16 @@ definitions:
       name: Flutter analyze
       script: |
         cd mobile
-        flutter analyze --no-fatal-warnings --no-fatal-infos
+        # Errors and warnings fail the build. Infos (style hints) do not.
+        flutter analyze --no-fatal-infos
 
     - &test
       name: Flutter test
       script: |
         cd mobile
-        flutter test --reporter=compact || true
+        # Deliberately NOT `|| true`. A test step that cannot fail manufactures
+        # false confidence — that is exactly how a broken suite went unnoticed.
+        flutter test --reporter=compact
 
 workflows:
 
@@ -62,6 +64,10 @@ workflows:
         bundle_identifier: ng.loyaltynexus.loyaltyNexus
       groups:
         - appstore_credentials
+      vars:
+        # Compile-time API base. Override per-workflow to point test builds at
+        # staging; production is NOT assumed silently.
+        API_URL: 'https://loyalty-nexus-api.onrender.com/api/v1'
 
     triggering:
       events:
@@ -76,36 +82,45 @@ workflows:
       - *analyze
       - *test
 
-      - name: Set build number from Codemagic
+      - name: Apply signing profiles to the Xcode project
         script: |
-          cd mobile
-          # Use Codemagic's incrementing build number so TestFlight never rejects
-          # a duplicate CFBundleVersion.
-          echo "BUILD_NUMBER=$(($(app-store-connect get-latest-testflight-build-number \
-            "$APP_STORE_APPLE_ID" --warn-on-existing-build 2>/dev/null || echo 0) + 1))"
+          # REQUIRED. This is what writes /Users/builder/export_options.plist and
+          # rewrites CODE_SIGN_IDENTITY / DEVELOPMENT_TEAM in the project. Without
+          # it, `flutter build ipa --export-options-plist=...` fails at export
+          # because that file never exists.
+          xcode-project use-profiles
 
-      - name: Install CocoaPods
+      - name: Derive version from the git tag
         script: |
-          cd mobile/ios
-          pod install --repo-update
+          # CFBundleVersion must strictly increase or TestFlight rejects the
+          # upload as duplicate/lower. Codemagic's BUILD_NUMBER is monotonic.
+          # CFBundleShortVersionString comes from the tag (v1.2.0 -> 1.2.0), so
+          # tagging actually changes what testers see — previously every build
+          # shipped as 1.0.0 regardless of tag.
+          TAG="${CM_TAG:-v0.0.0}"
+          echo "BUILD_NAME=${TAG#v}" >> $CM_ENV
+          echo "BUILD_NUM=${BUILD_NUMBER}" >> $CM_ENV
 
       - name: Build IPA
         script: |
           cd mobile
           flutter build ipa --release \
-            --build-number=$(($PROJECT_BUILD_NUMBER)) \
+            --build-name="$BUILD_NAME" \
+            --build-number="$BUILD_NUM" \
+            --dart-define=API_URL="$API_URL" \
             --export-options-plist=/Users/builder/export_options.plist
 
     artifacts:
       - mobile/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
-      - mobile/build/ios/archive/*.xcarchive
 
     publishing:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
-        # Uncomment once a tester group exists in App Store Connect:
+        # NOTE: with no beta_groups the build lands in App Store Connect but is
+        # attached to NO tester group — someone must assign it manually. Uncomment
+        # and set the real group name once it exists in TestFlight.
         # beta_groups:
         #   - Internal Testers
         submit_to_app_store: false
@@ -132,6 +147,8 @@ workflows:
         - loyalty_nexus_keystore
       groups:
         - firebase_credentials
+      vars:
+        API_URL: 'https://loyalty-nexus-api.onrender.com/api/v1'
 
     triggering:
       events:
@@ -146,19 +163,42 @@ workflows:
       - *analyze
       - *test
 
+      - name: Write key.properties from Codemagic keystore
+        script: |
+          # The Gradle config reads android/key.properties and now FAILS HARD if it
+          # is absent rather than silently debug-signing a release. Codemagic
+          # exposes the uploaded keystore via CM_KEYSTORE_PATH and friends.
+          cat > mobile/android/key.properties <<EOF
+          storePassword=$CM_KEYSTORE_PASSWORD
+          keyPassword=$CM_KEY_PASSWORD
+          keyAlias=$CM_KEY_ALIAS
+          storeFile=$CM_KEYSTORE_PATH
+          EOF
+          echo "key.properties written (storeFile=$CM_KEYSTORE_PATH)"
+
+      - name: Derive version from the git tag
+        script: |
+          TAG="${CM_TAG:-v0.0.0}"
+          echo "BUILD_NAME=${TAG#v}" >> $CM_ENV
+          echo "BUILD_NUM=${BUILD_NUMBER}" >> $CM_ENV
+
       - name: Build release APK
         script: |
           cd mobile
           # APK (not AAB) so Firebase App Distribution testers can sideload directly.
           flutter build apk --release \
-            --build-number=$(($PROJECT_BUILD_NUMBER))
+            --build-name="$BUILD_NAME" \
+            --build-number="$BUILD_NUM" \
+            --dart-define=API_URL="$API_URL"
 
       - name: Build release AAB
         script: |
           cd mobile
           # AAB for the eventual Play Console upload.
           flutter build appbundle --release \
-            --build-number=$(($PROJECT_BUILD_NUMBER))
+            --build-name="$BUILD_NAME" \
+            --build-number="$BUILD_NUM" \
+            --dart-define=API_URL="$API_URL"
 
     artifacts:
       - mobile/build/app/outputs/flutter-apk/app-release.apk

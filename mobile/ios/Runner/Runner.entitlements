@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required for APNs registration. Without this, getAPNSToken() never returns
+	     a usable token and firebase_messaging is dead on iOS.
+	     Codemagic's use-profiles rewrites this to 'production' for App Store builds. -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>
