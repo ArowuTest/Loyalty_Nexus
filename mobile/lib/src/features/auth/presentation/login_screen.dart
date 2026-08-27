@@ -145,7 +145,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             'code':         code,
             'purpose':      'login',
           });
-      final token     = res['token'] as String;
+      // Was `res['token'] as String` — an unchecked cast. If the backend ever
+      // omitted or renamed 'token', that threw a TypeError caught by NOTHING
+      // (only ApiException was handled), while `finally` quietly reset _loading.
+      // The tester tapped Verify, the spinner stopped, and nothing happened:
+      // a silent dead-end on the one screen every user must pass through.
+      final token = res['token'] as String?;
+      if (token == null || token.isEmpty) {
+        throw ApiException('Sign-in failed — please try again.');
+      }
       final isNewUser = res['is_new_user'] as bool? ?? false;
 
       await ref.read(authStateProvider.notifier).setAuth(
@@ -163,6 +171,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       }
     } on ApiException catch (e) {
       setState(() => _error = e.message);
+      _clearOtp();
+    } catch (e) {
+      // Anything unexpected (parse error, type error, platform failure) must
+      // still surface to the user rather than silently stopping the spinner.
+      setState(() => _error = 'Something went wrong. Please try again.');
       _clearOtp();
     } finally {
       if (mounted) setState(() => _loading = false);

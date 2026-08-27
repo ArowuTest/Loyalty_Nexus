@@ -11,6 +11,16 @@ import '../api/api_client.dart';
 // ── Connectivity provider ───────────────────────────────────────────────────────────
 
 final _connectivityProvider = StreamProvider.autoDispose<bool>((ref) async* {
+  // Seed with the CURRENT state first. onConnectivityChanged only emits on a
+  // *change*, so a user who opened the app already offline never saw the offline
+  // banner — the stream stayed empty and `valueOrNull ?? true` read as "online"
+  // while every request quietly failed.
+  try {
+    final initial = await Connectivity().checkConnectivity();
+    yield !initial.contains(ConnectivityResult.none);
+  } catch (_) {
+    yield true; // never block the UI on a connectivity probe
+  }
   yield* Connectivity().onConnectivityChanged.map(
     (results) => !results.contains(ConnectivityResult.none));
 });

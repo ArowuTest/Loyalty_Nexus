@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Must match NexusColors.background (0xFF0F1123) in lib/src/core/theme/nexus_theme.dart.
+         The native window is painted with this before Flutter's first frame; any
+         mismatch shows as a flash at launch. -->
+    <color name="nexus_background">#FF0F1123</color>
+</resources>

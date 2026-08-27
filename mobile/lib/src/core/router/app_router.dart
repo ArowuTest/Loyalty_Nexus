@@ -54,7 +54,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   // `redirect` on auth changes, and `redirect` reads live state via ref.read.
 
   return GoRouter(
-    initialLocation: '/',
+    // Starts on /splash, NOT '/'. '/' is the LOGIN screen, and while auth was
+    // still resolving from secure storage the redirect returned null — so every
+    // returning user saw login flash before the dashboard.
+    initialLocation: '/splash',
     debugLogDiagnostics: false,
     refreshListenable: _AuthListenable(ref),
 
@@ -69,8 +72,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final loggedIn  = live.isAuthenticated;
       final isNew     = live.isNewUser;
 
-      // Wait for auth init
-      if (loading) return null;
+      // Auth still resolving from secure storage: hold on the branded splash.
+      // Returning null here rendered whatever `initialLocation` pointed at — the
+      // login screen — producing the classic "app looks broken" flash.
+      if (loading) return loc == '/splash' ? null : '/splash';
+
+      // Auth resolved — nobody should sit on /splash.
+      if (loc == '/splash') return loggedIn ? (isNew ? '/register' : '/dashboard') : '/';
 
       // Not logged in — allow / and public recharge routes
       if (!loggedIn) {
@@ -92,6 +100,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     },
 
     routes: [
+      // ── Boot ─────────────────────────────────────────────────────────────
+      GoRoute(path: '/splash', builder: (_, __) => const _SplashScreen()),
+
       // ── Auth ─────────────────────────────────────────────────────────────
       GoRoute(path: '/', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
@@ -192,6 +203,29 @@ class _RouteNotFound extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown while auth resolves from secure storage on cold start.
+///
+/// Deliberately matches the native launch background (#0F1123) so the handoff
+/// from the OS splash to Flutter's first frame is seamless — no flash, and no
+/// glimpse of the login screen for users who are already signed in.
+class _SplashScreen extends StatelessWidget {
+  const _SplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xFF0F1123),
+      body: Center(
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: CircularProgressIndicator(strokeWidth: 2.5),
         ),
       ),
     );

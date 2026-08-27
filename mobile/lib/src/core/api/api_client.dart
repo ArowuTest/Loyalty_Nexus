@@ -9,6 +9,34 @@ import 'package:mime/mime.dart';
 const _baseUrl = String.fromEnvironment(
   'API_URL', defaultValue: 'https://loyalty-nexus-api.onrender.com/api/v1');
 
+
+// ─── Retry policy ─────────────────────────────────────────────────────────────
+
+const _maxRetries = 2;
+
+/// Only safe-to-repeat requests are retried: idempotent GETs that failed for a
+/// transport reason (timeout / connection loss) or a 5xx. A 4xx is a real answer
+/// from the server and must not be retried.
+bool _shouldRetry(DioException err) {
+  if (err.requestOptions.method.toUpperCase() != 'GET') return false;
+  switch (err.type) {
+    case DioExceptionType.connectionTimeout:
+    case DioExceptionType.receiveTimeout:
+    case DioExceptionType.sendTimeout:
+    case DioExceptionType.connectionError:
+      return true;
+    case DioExceptionType.badResponse:
+      final c = err.response?.statusCode ?? 0;
+      return c >= 500 && c < 600;
+    default:
+      return false;
+  }
+}
+
+/// Invoked when the API returns 401 so the app can clear auth state and route
+/// the user back to login instead of failing silently on every screen.
+void Function()? onUnauthorized;
+
 // ─── Dio Provider ─────────────────────────────────────────────────────────────
 
 final dioProvider = Provider<Dio>((ref) {
@@ -17,6 +45,7 @@ final dioProvider = Provider<Dio>((ref) {
     baseUrl: _baseUrl,
     connectTimeout: const Duration(seconds: 15),
     receiveTimeout: const Duration(seconds: 30),
+    sendTimeout:    const Duration(seconds: 30),
     headers: {'Content-Type': 'application/json'},
   ));
   dio.interceptors.add(InterceptorsWrapper(
@@ -25,8 +54,37 @@ final dioProvider = Provider<Dio>((ref) {
       if (token != null) opts.headers['Authorization'] = 'Bearer $token';
       handler.next(opts);
     },
-    onError: (err, handler) {
-      if (err.response?.statusCode == 401) storage.deleteAll();
+    onError: (err, handler) async {
+      // ── Retry idempotent reads on transient network failure ───────────────
+      // This app ships onto Nigerian mobile networks where a single dropped
+      // packet is routine. Without this, one blip becomes a visible error.
+      // GET only — never retry a POST/PUT, which could double-charge points.
+      if (_shouldRetry(err)) {
+        final attempt = (err.requestOptions.extra['retry_attempt'] as int? ?? 0) + 1;
+        if (attempt <= _maxRetries) {
+          // Backoff with jitter so a flapping network does not resonate.
+          final delayMs = (250 * (1 << (attempt - 1))) + (attempt * 60);
+          await Future<void>.delayed(Duration(milliseconds: delayMs));
+          final opts = err.requestOptions;
+          opts.extra = {...opts.extra, 'retry_attempt': attempt};
+          try {
+            final res = await dio.fetch<dynamic>(opts);
+            return handler.resolve(res);
+          } catch (_) {
+            // fall through to normal error handling below
+          }
+        }
+      }
+
+      if (err.response?.statusCode == 401) {
+        // Was: fire-and-forget storage.deleteAll() that wiped ALL secure storage
+        // and never told anyone. The session died silently and every subsequent
+        // screen failed until the user force-quit. Now: await, delete only the
+        // auth keys, and signal so the app can route back to login.
+        await storage.delete(key: 'nexus_token');
+        await storage.delete(key: 'nexus_user');
+        onUnauthorized?.call();
+      }
       handler.next(err);
     },
   ));
