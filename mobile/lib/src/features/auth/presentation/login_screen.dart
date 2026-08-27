@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/api_client.dart';
+import '../../../core/notifications/push_notification_service.dart';
 import '../../../core/auth/auth_provider.dart';
 import '../../../core/theme/nexus_theme.dart';
 
@@ -160,6 +161,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         token:     token,
         phone:     _cleanPhone,
         isNewUser: isNewUser,
+      );
+
+      // Now — not on first frame — is the moment to ask for notifications. The
+      // user has just signed in, so they have context for what the alerts are
+      // about. Deliberately not awaited: a slow or denied prompt must not hold up
+      // the success animation or navigation.
+      unawaited(
+        ref.read(pushNotificationServiceProvider)?.requestPermissionAndRegister()
+            ?? Future.value(false),
       );
 
       setState(() { _step = _Step.success; });

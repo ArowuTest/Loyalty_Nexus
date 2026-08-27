@@ -138,6 +138,9 @@ class _LoyaltyNexusAppState extends ConsumerState<LoyaltyNexusApp> {
       final router    = ref.read(appRouterProvider);
       final container = ProviderScope.containerOf(context);
       _push = PushNotificationService(container: container, router: router);
+      // Publish it so screens can request notification permission at a sensible
+      // moment (after login) rather than on the first frame.
+      ref.read(pushNotificationServiceProvider.notifier).state = _push;
       _push!.init();
     } catch (e, st) {
       debugPrint('[push] init failed: $e');

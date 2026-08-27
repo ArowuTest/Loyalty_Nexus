@@ -49,14 +49,27 @@ class PushNotificationService {
     // 1 — Register background handler
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-    // 2 — Request permission (iOS / Android 13+)
-    await _requestPermission();
-
-    // 3 — Set up local notifications plugin (for foreground display)
+    // 2 — Set up local notifications plugin (for foreground display)
     await _setupLocalNotifications();
 
-    // 4 — FCM token
-    await _registerToken();
+    // 3 — Token, but ONLY if the user has already granted permission.
+    //
+    // The permission PROMPT is deliberately NOT here. init() runs from a
+    // post-frame callback on the very first frame, so the system dialog used to
+    // appear before the tester had seen a single screen. That tanks opt-in rates,
+    // and Apple explicitly discourages it. A denied prompt is also effectively
+    // permanent — iOS will not ask twice.
+    //
+    // requestPermissionAndRegister() is called after login instead, once the user
+    // has context for what the notifications are about.
+    final current = await FirebaseMessaging.instance.getNotificationSettings();
+    if (current.authorizationStatus == AuthorizationStatus.authorized ||
+        current.authorizationStatus == AuthorizationStatus.provisional) {
+      await _registerToken();
+    } else {
+      debugPrint('[FCM] permission not yet granted (${current.authorizationStatus}) '
+          '— deferring prompt until after login');
+    }
 
     // 5 — Foreground messages
     FirebaseMessaging.onMessage.listen(_handleForeground);
@@ -76,7 +89,23 @@ class PushNotificationService {
 
   // ── Permission ──────────────────────────────────────────────────────────────
 
-  Future<void> _requestPermission() async {
+  /// Prompts for notification permission and, if granted, registers the FCM token.
+  ///
+  /// Call this at a moment the user has context — after a successful login — not
+  /// on first frame. Safe to call repeatedly: if permission was already decided,
+  /// the OS returns the existing status without showing a dialog.
+  Future<bool> requestPermissionAndRegister() async {
+    try {
+      final granted = await _requestPermission();
+      if (granted) await _registerToken();
+      return granted;
+    } catch (e) {
+      debugPrint('[FCM] permission/registration failed: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _requestPermission() async {
     final settings = await FirebaseMessaging.instance.requestPermission(
       alert:         true,
       announcement:  false,
@@ -87,6 +116,8 @@ class PushNotificationService {
       sound:         true,
     );
     debugPrint('[FCM] Auth status: ${settings.authorizationStatus}');
+    return settings.authorizationStatus == AuthorizationStatus.authorized ||
+        settings.authorizationStatus == AuthorizationStatus.provisional;
   }
 
   // ── Local notification plugin setup ─────────────────────────────────────────
@@ -233,8 +264,11 @@ class PushNotificationService {
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
-final pushNotificationServiceProvider = Provider<PushNotificationService>((ref) {
-  throw UnimplementedError(
-      'pushNotificationServiceProvider must be overridden in main.dart '
-      'with a ProviderContainer and GoRouter instance');
-});
+/// Holds the live PushNotificationService once main.dart has constructed it.
+///
+/// Was a Provider that unconditionally threw UnimplementedError and was never
+/// overridden — a latent crash for the first caller. Nullable on purpose: the
+/// service does not exist before the first frame, and does not exist at all when
+/// Firebase failed to initialise (see firebaseReady in main.dart).
+final pushNotificationServiceProvider =
+    StateProvider<PushNotificationService?>((ref) => null);
