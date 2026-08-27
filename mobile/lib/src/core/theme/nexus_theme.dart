@@ -211,7 +211,7 @@ class NexusTheme {
         ),
       ),
 
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color:     NexusColors.surface,
         elevation: 0,
         shape:     RoundedRectangleBorder(
@@ -286,7 +286,7 @@ class NexusTheme {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       ),
 
-      tabBarTheme: const TabBarTheme(
+      tabBarTheme: const TabBarThemeData(
         labelColor:         NexusColors.textPrimary,
         unselectedLabelColor: NexusColors.textSecondary,
         indicatorColor:     NexusColors.primary,
@@ -295,7 +295,7 @@ class NexusTheme {
         unselectedLabelStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
       ),
 
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: NexusColors.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 8,
