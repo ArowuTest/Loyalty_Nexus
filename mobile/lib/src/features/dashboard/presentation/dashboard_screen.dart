@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,92 +14,123 @@ import '../../passport/presentation/wallet_onboarding_sheet.dart';
 // Returns cached data instantly (so UI never shows blank), then fetches fresh
 // data and updates the UI automatically via Riverpod's rebuild.
 
-final walletProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  final cache = ref.read(cacheServiceProvider);
-  final cached = cache.getMap(CacheKeys.wallet, maxAgeMinutes: 5);
+
+// ─── Stale-while-revalidate ───────────────────────────────────────────────────
+//
+// The previous implementation returned cached data and kicked off a background
+// refresh that wrote the fresh result to disk — but NEVER invalidated the
+// provider. The UI therefore kept showing stale data until the TTL expired; the
+// "updates the UI automatically" claim in the old comment was not true.
+//
+// Naively calling ref.invalidateSelf() after the refresh would infinite-loop:
+// the rebuild reads a now-fresh cache, returns it, and schedules another refresh.
+// _revalidated bounds it to ONE background refresh per key per app session; a
+// user-initiated pull-to-refresh still forces a real round trip regardless.
+final _revalidated = <String>{};
+
+/// Clears the revalidation guard — call on logout or an explicit full refresh so
+/// the next read genuinely revalidates again.
+void resetSwrGuard() => _revalidated.clear();
+
+/// Returns cached data immediately, then refreshes ONCE in the background and
+/// rebuilds the provider only if the data actually changed.
+Future<T> _swr<T>({
+  required Ref ref,
+  required String key,
+  required T? cached,
+  required Future<T> Function() fetch,
+  required Future<void> Function(T) store,
+}) async {
   if (cached != null) {
-    // schedule background refresh after returning cached data
-    Future.microtask(() async {
-      try {
-        final fresh = await ref.read(userApiProvider).getWallet();
-        await cache.put(CacheKeys.wallet, fresh);
-      } catch (_) {}
-    });
+    if (!_revalidated.contains(key)) {
+      _revalidated.add(key);
+      // Detached on purpose: the caller must not wait on it.
+      Future.microtask(() async {
+        try {
+          final fresh = await fetch();
+          await store(fresh);
+          // Only disturb the UI when the content genuinely differs.
+          if (jsonEncode(fresh) != jsonEncode(cached)) {
+            ref.invalidateSelf();
+          }
+        } catch (_) {
+          // A failed background refresh must never surface: the user already has
+          // usable cached data on screen.
+        }
+      });
+    }
     return cached;
   }
-  final data = await ref.read(userApiProvider).getWallet();
-  await cache.put(CacheKeys.wallet, data);
+  final data = await fetch();
+  await store(data);
+  _revalidated.add(key);
   return data;
+}
+
+final walletProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final cache = ref.read(cacheServiceProvider);
+  return _swr<Map<String, dynamic>>(
+    ref: ref,
+    key: CacheKeys.wallet,
+    cached: cache.getMap(CacheKeys.wallet, maxAgeMinutes: 5),
+    fetch: () async {
+      return ref.read(userApiProvider).getWallet();
+    },
+    store: (d) => cache.put(CacheKeys.wallet, d),
+  );
 });
 
 final profileProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   final cache = ref.read(cacheServiceProvider);
-  final cached = cache.getMap(CacheKeys.profile, maxAgeMinutes: 10);
-  if (cached != null) {
-    Future.microtask(() async {
-      try {
-        final fresh = await ref.read(userApiProvider).getProfile();
-        await cache.put(CacheKeys.profile, fresh);
-      } catch (_) {}
-    });
-    return cached;
-  }
-  final data = await ref.read(userApiProvider).getProfile();
-  await cache.put(CacheKeys.profile, data);
-  return data;
+  return _swr<Map<String, dynamic>>(
+    ref: ref,
+    key: CacheKeys.profile,
+    cached: cache.getMap(CacheKeys.profile, maxAgeMinutes: 10),
+    fetch: () async {
+      return ref.read(userApiProvider).getProfile();
+    },
+    store: (d) => cache.put(CacheKeys.profile, d),
+  );
 });
 
 final passportProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   final cache = ref.read(cacheServiceProvider);
-  final cached = cache.getMap(CacheKeys.passport, maxAgeMinutes: 5);
-  if (cached != null) {
-    Future.microtask(() async {
-      try {
-        final fresh = await ref.read(userApiProvider).getPassport();
-        await cache.put(CacheKeys.passport, fresh);
-      } catch (_) {}
-    });
-    return cached;
-  }
-  final data = await ref.read(userApiProvider).getPassport();
-  await cache.put(CacheKeys.passport, data);
-  return data;
+  return _swr<Map<String, dynamic>>(
+    ref: ref,
+    key: CacheKeys.passport,
+    cached: cache.getMap(CacheKeys.passport, maxAgeMinutes: 5),
+    fetch: () async {
+      return ref.read(userApiProvider).getPassport();
+    },
+    store: (d) => cache.put(CacheKeys.passport, d),
+  );
 });
 
 final warsLeaderboardProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final cache = ref.read(cacheServiceProvider);
-  final cached = cache.getList(CacheKeys.leaderboard, maxAgeMinutes: 3);
-  if (cached != null) {
-    Future.microtask(() async {
-      try {
-        final resp  = await ref.read(warsApiProvider).getLeaderboardData();
-        final fresh = (resp['leaderboard'] as List?) ?? [];
-        await cache.putList(CacheKeys.leaderboard, fresh);
-      } catch (_) {}
-    });
-    return cached;
-  }
-  final resp = await ref.read(warsApiProvider).getLeaderboardData();
-  final data = (resp['leaderboard'] as List?) ?? [];
-  await cache.putList(CacheKeys.leaderboard, data);
-  return data;
+  return _swr<List<dynamic>>(
+    ref: ref,
+    key: CacheKeys.leaderboard,
+    cached: cache.getList(CacheKeys.leaderboard, maxAgeMinutes: 3),
+    fetch: () async {
+      final resp = await ref.read(warsApiProvider).getLeaderboardData();
+      return (resp['leaderboard'] as List?) ?? [];
+    },
+    store: (d) => cache.putList(CacheKeys.leaderboard, d),
+  );
 });
 
 final transactionsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
   final cache = ref.read(cacheServiceProvider);
-  final cached = cache.getList(CacheKeys.transactions, maxAgeMinutes: 2);
-  if (cached != null) {
-    Future.microtask(() async {
-      try {
-        final fresh = await ref.read(userApiProvider).getTransactions();
-        await cache.putList(CacheKeys.transactions, fresh);
-      } catch (_) {}
-    });
-    return cached;
-  }
-  final data = await ref.read(userApiProvider).getTransactions();
-  await cache.putList(CacheKeys.transactions, data);
-  return data;
+  return _swr<List<dynamic>>(
+    ref: ref,
+    key: CacheKeys.transactions,
+    cached: cache.getList(CacheKeys.transactions, maxAgeMinutes: 2),
+    fetch: () async {
+      return ref.read(userApiProvider).getTransactions();
+    },
+    store: (d) => cache.putList(CacheKeys.transactions, d),
+  );
 });
 
 final bonusPulseProvider = FutureProvider.autoDispose<int>((ref) async {
@@ -744,7 +776,12 @@ class _WarsMiniCard extends ConsumerWidget {
           // My rank card
           myRankAsync.when(
             loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
+            // Was `const SizedBox.shrink()` — the section silently VANISHED on
+            // failure, so a tester could not tell an outage from having no data.
+            error: (_, __) => _SectionError(
+              message: 'Could not load your rank.',
+              onRetry: () => ref.invalidate(myWarRankProvider),
+            ),
             data: (rank) {
               final ranked = (rank?['ranked'] as bool?) == true;
               final entry  = ranked ? (rank?['entry'] as Map?) : null;
@@ -796,7 +833,12 @@ class _WarsMiniCard extends ConsumerWidget {
           // Top 3 leaderboard
           lbAsync.when(
             loading: () => const _LoadingRow(label: 'Loading leaderboard…'),
-            error: (_, __) => const SizedBox.shrink(),
+            // Was `const SizedBox.shrink()` — the section silently VANISHED on
+            // failure, so a tester could not tell an outage from having no data.
+            error: (_, __) => _SectionError(
+              message: 'Could not load the leaderboard.',
+              onRetry: () => ref.invalidate(warsLeaderboardProvider),
+            ),
             data: (lb) {
               if (lb.isEmpty) return const SizedBox.shrink();
               final medals = ['🥇', '🥈', '🥉'];
@@ -995,7 +1037,12 @@ class _RecentTransactions extends ConsumerWidget {
     final txAsync = ref.watch(transactionsProvider);
     return txAsync.when(
       loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      // Was `const SizedBox.shrink()` — the section silently VANISHED on
+      // failure, so a tester could not tell an outage from having no data.
+      error: (_, __) => _SectionError(
+        message: 'Could not load recent activity.',
+        onRetry: () => ref.invalidate(transactionsProvider),
+      ),
       data: (txns) {
         if (txns.isEmpty) return Container(
           padding: const EdgeInsets.all(16),
@@ -1304,4 +1351,46 @@ class _QuickAiTools extends StatelessWidget {
       ))).toList()),
     ],
   );
+}
+
+/// Compact inline error for a single dashboard section.
+///
+/// The full-screen `NexusErrorState` is too heavy for one card in a scrolling
+/// dashboard, but silently rendering nothing (the previous `SizedBox.shrink()`)
+/// left testers unable to distinguish an outage from an empty state.
+class _SectionError extends StatelessWidget {
+  const _SectionError({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, size: 18, color: Color(0xFF6b7280)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(message,
+                style: const TextStyle(color: Color(0xFF9ca3af), fontSize: 12)),
+          ),
+          TextButton(
+            onPressed: onRetry,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 32),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+            ),
+            child: const Text('Retry', style: TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
 }

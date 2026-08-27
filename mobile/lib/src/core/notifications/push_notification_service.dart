@@ -92,7 +92,10 @@ class PushNotificationService {
   // ── Local notification plugin setup ─────────────────────────────────────────
 
   Future<void> _setupLocalNotifications() async {
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    // Android renders notification icons as an ALPHA MASK in a single tint colour.
+    // '@mipmap/ic_launcher' is full-colour, so it showed as a grey blob in the
+    // status bar. ic_stat_notification is a white-on-transparent silhouette.
+    const androidInit = AndroidInitializationSettings('@drawable/ic_stat_notification');
     const iosInit     = DarwinInitializationSettings(
       requestAlertPermission: false, // already requested above
       requestBadgePermission: true,
@@ -168,7 +171,7 @@ class PushNotificationService {
           channelDescription: _androidChannel.description,
           importance: Importance.high,
           priority: Priority.high,
-          icon: '@mipmap/ic_launcher',
+          icon: '@drawable/ic_stat_notification',
         ),
         iOS: const DarwinNotificationDetails(
           presentAlert: true,

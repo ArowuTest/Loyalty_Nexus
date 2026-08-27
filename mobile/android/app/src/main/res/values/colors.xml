@@ -5,4 +5,7 @@
          mismatch shows as a flash at launch. -->
     <color name="nexus_background">#FF0F1123</color>
 	<color name="ic_launcher_background">#0F1123</color>
+    <!-- Tint applied to the notification silhouette. Matches the web manifest
+         theme_color and NexusColors.primary. -->
+    <color name="nexus_notification_accent">#FF5F72F9</color>
 </resources>

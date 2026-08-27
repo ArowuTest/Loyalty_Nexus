@@ -23,13 +23,11 @@ void main() {
   runZonedGuarded<Future<void>>(() async {
     WidgetsFlutterBinding.ensureInitialized();
 
-    // KNOWN GAP (tracked): google_fonts fetches Inter from fonts.gstatic.com on
-    // first launch, so a poor connection renders a fallback font and re-lays-out
-    // when it lands. The correct fix is to bundle Inter and drop google_fonts in
-    // favour of `fontFamily`, as Syne already is.
-    // NOT setting allowRuntimeFetching=false here on purpose: with Inter absent
-    // from assets that flag makes google_fonts THROW, which is strictly worse
-    // than a slow first paint. Bundle the font first, then flip this.
+    // Fonts: Inter + Syne are BUNDLED (see pubspec assets/fonts) and applied via
+    // `fontFamily`. google_fonts has been removed entirely — it fetched Inter from
+    // fonts.gstatic.com while BUILDING the theme, so first launch on a poor
+    // connection rendered a fallback font and re-laid-out when the download landed.
+    // Nothing here touches the network.
 
     // ── Firebase: guarded, never fatal ──────────────────────────────────────
     // Previously an unguarded `await Firebase.initializeApp()` sat between
