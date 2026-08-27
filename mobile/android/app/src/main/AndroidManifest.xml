@@ -37,6 +37,34 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- ── Deep links ────────────────────────────────────────────────
+                 Only MAIN/LAUNCHER existed before, so nothing could open the app
+                 from outside it. For a telco loyalty product driven by SMS
+                 campaigns that is a functional gap, not polish: a link in a
+                 campaign SMS had no way to reach a screen.
+
+                 App Links (verified https). autoVerify requires
+                 https://loyaltynexus.ng/.well-known/assetlinks.json to be hosted
+                 with this app's signing-certificate SHA-256, or Android silently
+                 falls back to a chooser dialog. See docs/MOBILE_DEEP_LINKS.md. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"
+                      android:host="loyaltynexus.ng"
+                      android:pathPrefix="/app"/>
+            </intent-filter>
+
+            <!-- Custom scheme. Works with no hosting at all, so it is the
+                 reliable fallback while assetlinks.json is not yet deployed. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="loyaltynexus"/>
+            </intent-filter>
         </activity>
         <!-- Firebase-SDK-handled notifications (delivered while the app is in the
              background) are built by the SDK, NOT by our Dart code, so they need

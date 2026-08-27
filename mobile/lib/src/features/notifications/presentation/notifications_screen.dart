@@ -14,17 +14,28 @@ class _NotifsState {
   final int unreadCount;
   final String? cursor;
   final bool loadingMore;
+  /// True until the first load settles. Without this the UI cannot distinguish
+  /// "still loading" from "you have no notifications".
+  final bool loading;
+  /// Non-null when the last load FAILED. Previously every error was swallowed by
+  /// `catch (_) {}`, so a failed fetch rendered the empty state and the user was
+  /// told they had no notifications when in fact the request had died.
+  final String? error;
   const _NotifsState({
     this.items = const [], this.unreadCount = 0,
     this.cursor, this.loadingMore = false,
+    this.loading = true, this.error,
   });
   _NotifsState copyWith({List<Map>? items, int? unreadCount, String? cursor,
-    bool clearCursor = false, bool? loadingMore}) =>
+    bool clearCursor = false, bool? loadingMore,
+    bool? loading, String? error, bool clearError = false}) =>
       _NotifsState(
         items: items ?? this.items,
         unreadCount: unreadCount ?? this.unreadCount,
         cursor: clearCursor ? null : (cursor ?? this.cursor),
         loadingMore: loadingMore ?? this.loadingMore,
+        loading: loading ?? this.loading,
+        error: clearError ? null : (error ?? this.error),
       );
 }
 
@@ -37,6 +48,7 @@ class _NotifsNotifier extends StateNotifier<_NotifsState> {
   _NotifsNotifier(this._api) : super(const _NotifsState()) { _load(); }
 
   Future<void> _load() async {
+    state = state.copyWith(loading: true, clearError: true);
     try {
       final Map res = await _api.list() as Map;
       final items = ((res['notifications'] ?? []) as List).cast<Map>();
@@ -44,8 +56,16 @@ class _NotifsNotifier extends StateNotifier<_NotifsState> {
         items: items,
         unreadCount: res['unread_count'] as int? ?? 0,
         cursor: res['cursor']?.toString(),
+        loading: false,
       );
-    } catch (_) {}
+    } catch (e) {
+      // Keep whatever was already on screen — a failed refresh should not wipe
+      // notifications the user can still read.
+      state = state.copyWith(
+        loading: false,
+        error: 'Could not load notifications.',
+      );
+    }
   }
 
   Future<void> refresh() => _load();
@@ -148,7 +168,14 @@ class NotificationsScreen extends ConsumerWidget {
       body: RefreshIndicator(
         onRefresh: () => notifier.refresh(),
         color: NexusColors.primary,
-        child: items.isEmpty
+        child: state.loading && items.isEmpty
+            ? const Center(child: CircularProgressIndicator())
+            : state.error != null && items.isEmpty
+            ? ListView(children: [
+                const Gap(80),
+                _LoadError(message: state.error!, onRetry: () => notifier.refresh()),
+              ])
+            : items.isEmpty
             ? ListView(children: [const Gap(80), _EmptyState()])
             : _NotifList(items: items, state: state, notifier: notifier),
       ),
@@ -342,3 +369,43 @@ class _EmptyState extends StatelessWidget {
   );
 }
 
+
+/// Shown when the notification list FAILED to load, as distinct from being empty.
+///
+/// Before this, every error path was `catch (_) {}` and the screen rendered the
+/// empty state — telling the user they had no notifications when the request had
+/// actually died.
+class _LoadError extends StatelessWidget {
+  const _LoadError({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          children: [
+            const Icon(Icons.cloud_off_rounded, size: 44, color: Color(0xFF6b7280)),
+            const Gap(14),
+            Text(message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFF9ca3af), fontSize: 13)),
+            const Gap(18),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded, size: 16),
+              label: const Text('Try again'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(140, 44),
+                foregroundColor: NexusColors.primary,
+                side: const BorderSide(color: NexusColors.primary),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

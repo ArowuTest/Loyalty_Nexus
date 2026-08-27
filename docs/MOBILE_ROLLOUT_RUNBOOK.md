@@ -122,12 +122,49 @@ Most incidents are faster to kill from the backend than from the store.
 - Return a maintenance response for the affected route
 - If the client is hard-broken, a forced-update prompt is the last resort
 
-> **Gap, stated honestly:** this app has **no remote feature-flag or
-> force-update mechanism** today. Adding one (Firebase Remote Config is the
-> cheap option, and `firebase_core` is already present) is the single highest-value
-> operational addition before a public launch. Until then, a client bug that
-> escapes the tester stages can only be fixed by shipping a new build and waiting
-> for review.
+### The remote kill switch — BUILT, but you must arm it
+
+`lib/src/core/remote_config/` implements force-update, maintenance mode and
+per-feature kill switches over Firebase Remote Config. **It ships permissive**: until
+the parameters below exist in the console, the in-app defaults apply and nothing is
+ever blocked. Create them *before* the first tester build, so the mechanism is live
+when you need it rather than being built under pressure.
+
+**Firebase console → Remote Config → add these parameters:**
+
+| Parameter | Type | Initial value | Effect |
+|---|---|---|---|
+| `minimum_supported_version` | String | `0.0.0` | Below this → **hard block** + "Update now". `0.0.0` blocks nobody. |
+| `latest_version` | String | `0.0.0` | Below this → dismissible banner. Never blocks. |
+| `maintenance_mode` | Boolean | `false` | `true` → **hard block** with a message. |
+| `maintenance_message` | String | *(see defaults)* | Shown during maintenance. |
+| `update_message` | String | *(see defaults)* | Shown on the update screen/banner. |
+| `killed_features` | String (JSON) | `[]` | e.g. `["spin"]` disables ONE flow without blocking the app. |
+| `android_store_url` | String | Play listing URL | "Update now" target on Android. |
+| `ios_store_url` | String | App Store URL | "Update now" target on iOS. **Placeholder until the App Store ID exists — set it after Step 1 of the setup doc.** |
+
+**How to actually use it in an incident**
+
+| Situation | Action | Blast radius |
+|---|---|---|
+| One feature broken (e.g. spin) | `killed_features` → `["spin"]` | That flow only — everything else keeps working |
+| Backend down / migrating | `maintenance_mode` → `true` | Everyone, with an explanation |
+| Shipped build is dangerous | `minimum_supported_version` → the FIXED version | Everyone on older builds, pushed to update |
+| Nudge onto a new build | `latest_version` → the new version | Banner only, nobody blocked |
+
+Propagation is **≤ 15 minutes** (the fetch interval), and the app re-evaluates on
+resume — so a switch flipped while someone has the app backgrounded takes effect
+without them relaunching.
+
+> ⚠️ **`minimum_supported_version` is the loaded gun.** Setting it to a version
+> nobody has yet locks out **every user**. Verified by test that equal versions do
+> NOT count as older, so setting it to the currently-shipped version is safe — but
+> setting it *higher* than what is live in the store blocks everyone with no way
+> back except shipping. Always confirm the target build is downloadable first.
+
+**Test it before you rely on it.** During Stage 1 of the rollout, flip
+`maintenance_mode` on and off with a real device. A kill switch nobody has ever
+pulled is not a kill switch.
 
 ---
 
@@ -163,7 +200,9 @@ shipping a broken build to everyone is neither.
 
 State these openly rather than discovering them mid-incident.
 
-- **No remote kill switch / feature flags** (see §5) — the biggest operational gap
+- ✅ **Remote kill switch now exists** (§5) — but it is INERT until the Remote
+  Config parameters are created in the Firebase console, and untested until you
+  have pulled it once on a real device
 - **No staged-rollout automation** — Play percentages are moved by hand
 - **The iOS build has never run.** Budget one iteration on CocoaPods/signing at the
   first Codemagic Mac build

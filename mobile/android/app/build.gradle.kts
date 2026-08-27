@@ -38,10 +38,39 @@ android {
 
     signingConfigs {
         create("release") {
-            keyAlias = keyProperties["keyAlias"] as String? ?: ""
-            keyPassword = keyProperties["keyPassword"] as String? ?: ""
-            storeFile = keyProperties["storeFile"]?.let { file("$it") }
-            storePassword = keyProperties["storePassword"] as String? ?: ""
+            // Read each value and FAIL LOUDLY if it is missing or blank.
+            //
+            // These were previously `... as String? ?: ""`. That silent default is
+            // how an empty alias reached the signer and produced, ten minutes into
+            // the build, deep inside :app:packageRelease:
+            //     KeytoolException: No key with alias '' found in keystore
+            // A signing credential that is silently blank is strictly worse than a
+            // build that stops immediately and says which value is missing.
+            fun requireProp(name: String): String {
+                // This block is CONFIGURED for every build, debug included. When
+                // key.properties is absent entirely that is the normal local-dev
+                // case — return empty and let the buildTypes guard below decide
+                // (it already fails hard only for RELEASE tasks). Throwing here
+                // would break `flutter run` for anyone without a keystore.
+                if (!keyPropertiesFile.exists()) return ""
+                val v = (keyProperties[name] as String?)?.trim()
+                if (v.isNullOrEmpty()) {
+                    throw GradleException(
+                        "Release signing: '$name' is missing or blank in " +
+                        "android/key.properties. Every release-signing value must be " +
+                        "present — a blank one silently yields an unusable artifact. " +
+                        "In CI these come from the ANDROID_* repository secrets."
+                    )
+                }
+                return v
+            }
+
+            keyAlias = requireProp("keyAlias")
+            keyPassword = requireProp("keyPassword")
+            storePassword = requireProp("storePassword")
+            // Only resolve a file when there is genuinely one to resolve.
+            val storeFileName = requireProp("storeFile")
+            storeFile = if (storeFileName.isEmpty()) null else file(storeFileName)
         }
     }
 
