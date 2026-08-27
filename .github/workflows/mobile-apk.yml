@@ -178,28 +178,62 @@ jobs:
         # for 53 consecutive runs.
         run: flutter test --reporter=compact
 
+      # Flutter's own path detection is broken for this project — its wrapper
+      # reports "Gradle build failed to produce an .apk file" even when Gradle
+      # ran assembleRelease to completion. The repo's ORIGINAL workflow hit the
+      # same thing and worked around it by calling ./gradlew directly; replacing
+      # that with `flutter build` reintroduced it.
+      #
+      # Rather than trust either the tool's exit code or a blanket `|| true`, the
+      # ARTIFACT is the success criterion: build, then locate what was actually
+      # produced. It is verified for real in the next step (permissions, signer),
+      # so an artifact that exists but is wrong still fails the job.
       - name: Build RELEASE APK
         working-directory: mobile
-        # Maven Central occasionally 429s a shared runner IP during plugin
-        # resolution. Retry once after a pause rather than failing a whole
-        # verification run on someone else's rate limit.
+        env:
+          API_URL: ${{ inputs.api_url || 'https://loyalty-nexus-api.onrender.com/api/v1' }}
         run: |
+          set +e
+          flutter build apk --release             --build-number=${{ github.run_number }}             --dart-define=API_URL="$API_URL"
+          rc=$?
           set -e
-          build_apk() {
-            flutter build apk --release \
-            --build-number=${{ github.run_number }} \
-            --dart-define=API_URL='${{ inputs.api_url || 'https://loyalty-nexus-api.onrender.com/api/v1' }}'
-          }
-          build_apk || { echo "::warning::first APK build failed — retrying once (likely a Maven 429)"; sleep 45; build_apk; }
+          echo "flutter exit code: $rc"
+
+          APK=$(find build -name '*.apk' -path '*release*' -size +1M 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::No release APK was produced (flutter exit $rc)."
+            echo "APKs found anywhere under build/:"
+            find build -name '*.apk' 2>/dev/null || echo "  (none)"
+            exit 1
+          fi
+          echo "found release APK: $APK"
+          mkdir -p build/app/outputs/flutter-apk
+          [ "$APK" = "build/app/outputs/flutter-apk/app-release.apk" ] ||             cp "$APK" build/app/outputs/flutter-apk/app-release.apk
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
 
       - name: Build RELEASE AAB
         working-directory: mobile
-        # The Play Console format. Built here so its (different) path is exercised
-        # too, not discovered for the first time at submission.
+        env:
+          API_URL: ${{ inputs.api_url || 'https://loyalty-nexus-api.onrender.com/api/v1' }}
+        # The Play Console format. Built here so its (different) packaging path is
+        # exercised too, rather than discovered for the first time at submission.
         run: |
-          flutter build appbundle --release \
-            --build-number=${{ github.run_number }} \
-            --dart-define=API_URL='${{ inputs.api_url || 'https://loyalty-nexus-api.onrender.com/api/v1' }}'
+          set +e
+          flutter build appbundle --release             --build-number=${{ github.run_number }}             --dart-define=API_URL="$API_URL"
+          rc=$?
+          set -e
+          echo "flutter exit code: $rc"
+
+          AAB=$(find build -name '*.aab' -size +1M 2>/dev/null | head -1)
+          if [ -z "$AAB" ]; then
+            echo "::error::No release AAB was produced (flutter exit $rc)."
+            find build -name '*.aab' 2>/dev/null || echo "  (none)"
+            exit 1
+          fi
+          echo "found release AAB: $AAB"
+          mkdir -p build/app/outputs/bundle/release
+          [ "$AAB" = "build/app/outputs/bundle/release/app-release.aab" ] ||             cp "$AAB" build/app/outputs/bundle/release/app-release.aab
+          ls -lh build/app/outputs/bundle/release/app-release.aab
 
       # Guards against the exact class of bug that made this workflow necessary:
       # a release artifact that builds fine but is unusable on a device.
