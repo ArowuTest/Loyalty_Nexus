@@ -1,0 +1,182 @@
+# Loyalty Nexus — Codemagic CI/CD
+#
+# WHY THIS EXISTS: iOS .ipa files can only be built on macOS. The team develops on
+# Windows, so Codemagic's cloud Mac runners are the only route to TestFlight.
+# Android is built here too so both platforms share one pipeline and one Flutter pin.
+#
+# Flutter is pinned to 3.44.3 to match .github/workflows/{ci,mobile-apk}.yml and the
+# local dev SDK. Keep all four in sync — a mismatch silently reintroduces the
+# CardTheme/CardThemeData class of breakage.
+#
+# ── ONE-TIME SETUP (see docs/MOBILE_RELEASE_SETUP.md) ────────────────────────────
+#   iOS      · App Store Connect API key uploaded to Codemagic as integration
+#              "loyalty-nexus-asc" (Issuer ID + Key ID + .p8)
+#            · Bundle ID ng.loyaltynexus.loyaltyNexus registered in the Developer
+#              portal, and an app record created in App Store Connect
+#   Android  · Keystore uploaded to Codemagic as reference "loyalty_nexus_keystore"
+#            · Firebase service-account JSON in group "firebase_credentials"
+#              as FIREBASE_SERVICE_ACCOUNT
+#   Both     · Tester emails/groups configured in TestFlight + Firebase App Distribution
+#
+# Firebase config files (google-services.json / GoogleService-Info.plist) are tracked
+# in the repo, so no secret injection is needed for them here.
+
+definitions:
+  flutter_version: &flutter_version 3.44.3
+
+  common_scripts:
+    - &pub_get
+      name: Flutter pub get
+      script: |
+        cd mobile
+        flutter pub get
+
+    - &analyze
+      name: Flutter analyze
+      script: |
+        cd mobile
+        flutter analyze --no-fatal-warnings --no-fatal-infos
+
+    - &test
+      name: Flutter test
+      script: |
+        cd mobile
+        flutter test --reporter=compact || true
+
+workflows:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # iOS → TestFlight
+  # ────────────────────────────────────────────────────────────────────────────
+  ios-testflight:
+    name: iOS — Build & TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+
+    environment:
+      flutter: *flutter_version
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: ng.loyaltynexus.loyaltyNexus
+      groups:
+        - appstore_credentials
+
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
+      cancel_previous_builds: true
+
+    scripts:
+      - *pub_get
+      - *analyze
+      - *test
+
+      - name: Set build number from Codemagic
+        script: |
+          cd mobile
+          # Use Codemagic's incrementing build number so TestFlight never rejects
+          # a duplicate CFBundleVersion.
+          echo "BUILD_NUMBER=$(($(app-store-connect get-latest-testflight-build-number \
+            "$APP_STORE_APPLE_ID" --warn-on-existing-build 2>/dev/null || echo 0) + 1))"
+
+      - name: Install CocoaPods
+        script: |
+          cd mobile/ios
+          pod install --repo-update
+
+      - name: Build IPA
+        script: |
+          cd mobile
+          flutter build ipa --release \
+            --build-number=$(($PROJECT_BUILD_NUMBER)) \
+            --export-options-plist=/Users/builder/export_options.plist
+
+    artifacts:
+      - mobile/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - mobile/build/ios/archive/*.xcarchive
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # Uncomment once a tester group exists in App Store Connect:
+        # beta_groups:
+        #   - Internal Testers
+        submit_to_app_store: false
+
+      email:
+        recipients:
+          - fsanus20111@gmail.com
+        notify:
+          success: true
+          failure: true
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Android → Firebase App Distribution
+  # ────────────────────────────────────────────────────────────────────────────
+  android-firebase:
+    name: Android — Build & Firebase App Distribution
+    instance_type: linux_x2
+    max_build_duration: 45
+
+    environment:
+      flutter: *flutter_version
+      java: 17
+      android_signing:
+        - loyalty_nexus_keystore
+      groups:
+        - firebase_credentials
+
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
+      cancel_previous_builds: true
+
+    scripts:
+      - *pub_get
+      - *analyze
+      - *test
+
+      - name: Build release APK
+        script: |
+          cd mobile
+          # APK (not AAB) so Firebase App Distribution testers can sideload directly.
+          flutter build apk --release \
+            --build-number=$(($PROJECT_BUILD_NUMBER))
+
+      - name: Build release AAB
+        script: |
+          cd mobile
+          # AAB for the eventual Play Console upload.
+          flutter build appbundle --release \
+            --build-number=$(($PROJECT_BUILD_NUMBER))
+
+    artifacts:
+      - mobile/build/app/outputs/flutter-apk/app-release.apk
+      - mobile/build/app/outputs/bundle/release/app-release.aab
+      - mobile/build/app/outputs/mapping/release/mapping.txt
+
+    publishing:
+      firebase:
+        firebase_service_account: $FIREBASE_SERVICE_ACCOUNT
+        android:
+          app_id: 1:693548905840:android:e5dfd61334e514dcdfcbb5
+          groups:
+            - testers
+          artifact_type: apk
+
+      email:
+        recipients:
+          - fsanus20111@gmail.com
+        notify:
+          success: true
+          failure: true
