@@ -72,6 +72,8 @@ dependencies:
   cupertino_icons: ^1.0.8
 
 dev_dependencies:
+  # Generates all Android (incl. adaptive) + iOS icon sizes from one master.
+  flutter_launcher_icons: ^0.14.3
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
@@ -104,3 +106,24 @@ flutter:
           weight: 700
         - asset: assets/fonts/Syne-ExtraBold.ttf
           weight: 800
+
+
+# ── App icons ─────────────────────────────────────────────────────────────────
+# Source: assets/images/logo-square.png — the 2048x2048 brand mark also present at
+# frontend/public/logo-square.png. Regenerate with:
+#   dart run flutter_launcher_icons
+# Before this, BOTH platforms shipped the stock Flutter icon (md5-verified against
+# the Flutter template).
+flutter_launcher_icons:
+  image_path: "assets/images/logo-square.png"
+
+  android: "ic_launcher"
+  # Adaptive icon for Android 8+. Without this the legacy icon is rendered inside
+  # a shrunken white container on modern launchers.
+  adaptive_icon_background: "#0F1123"   # matches NexusColors.background
+  adaptive_icon_foreground: "assets/images/logo-square.png"
+  min_sdk_android: 24
+
+  ios: true
+  # App Store icons must be fully opaque — Apple rejects alpha channels.
+  remove_alpha_ios: true

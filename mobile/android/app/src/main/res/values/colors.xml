@@ -4,4 +4,5 @@
          The native window is painted with this before Flutter's first frame; any
          mismatch shows as a flash at launch. -->
     <color name="nexus_background">#FF0F1123</color>
+	<color name="ic_launcher_background">#0F1123</color>
 </resources>

@@ -1,4 +1,25 @@
-name: Mobile — Build APK & Upload to Appetize
+# Mobile — Release Verification Gate
+#
+# ROLE OF THIS WORKFLOW (deliberate split):
+#   GitHub Actions  = VERIFY. Proves the RELEASE build path works on every push.
+#                     Artifacts stay private to the repo.
+#   Codemagic       = DISTRIBUTE. Signed builds to TestFlight + Firebase App
+#                     Distribution on a v* tag. It owns the Mac runners.
+#
+# WHY IT BUILDS RELEASE, NOT DEBUG:
+# For 53 green runs this built `assembleDebug`. That is why a release APK with no
+# INTERNET permission went unnoticed — debug inherits it from src/debug/. Release
+# is a genuinely different path: R8/minification, resource shrinking, release
+# signing, AOT. Building it here means the first `git tag` is not the first time
+# that code path has ever executed.
+#
+# WHY APPETIZE IS NO LONGER AUTOMATIC:
+# It previously uploaded a PRODUCTION-wired build to a PUBLIC Appetize URL on every
+# push to main, and posted the link in the job summary. Anyone with that link could
+# drive the production API — trigger OTP sends, consume endpoints. It is now a
+# deliberate, manually-dispatched action that requires an explicit API URL.
+
+name: Mobile — Release Verification
 
 on:
   push:
@@ -6,43 +27,61 @@ on:
     paths:
       - 'mobile/**'
       - '.github/workflows/mobile-apk.yml'
-  workflow_dispatch:   # allow manual trigger from GitHub UI
+  pull_request:
+    paths:
+      - 'mobile/**'
+  workflow_dispatch:
+    inputs:
+      publish_to_appetize:
+        description: 'Upload the build to a PUBLIC Appetize URL (demo only)'
+        type: boolean
+        default: false
+      api_url:
+        description: 'API base URL to compile in (use staging for shareable demos)'
+        type: string
+        default: 'https://loyalty-nexus-api.onrender.com/api/v1'
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-apk:
-    name: Build Debug APK & Upload to Appetize.io
+  verify-release:
+    name: Build & verify RELEASE artifacts
     runs-on: ubuntu-latest
 
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────────────────
       - uses: actions/checkout@v4
 
-      # ── 2. Set up Java 17 (required by Kotlin 2.1.0 + Firebase) ─────────────
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      # ── 3. Set up Android SDK ─────────────────────────────────────────────────
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      # ── 4. Set up Flutter stable ─────────────────────────────────────────────
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          # Keep in sync with codemagic.yaml, ci.yml and the local dev SDK.
+          # Drift here is what caused the CardTheme -> CardThemeData break.
           flutter-version: '3.44.3'
           channel: stable
           cache: true
 
-      # ── 5. Restore signing keystore from secret ──────────────────────────────
+      # Release signing. The Gradle config now FAILS if key.properties is absent
+      # rather than silently producing a debug-signed "release", so this must land.
       - name: Restore keystore
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode \
             > mobile/android/app/loyalty-nexus-release.jks
+          if [ ! -s mobile/android/app/loyalty-nexus-release.jks ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is empty or unset — a release build cannot be signed."
+            exit 1
+          fi
 
-      # ── 6. Write key.properties ──────────────────────────────────────────────
       - name: Write key.properties
         run: |
           cat > mobile/android/key.properties <<EOF
@@ -52,100 +91,123 @@ jobs:
           storeFile=loyalty-nexus-release.jks
           EOF
 
-      # ── 7. Firebase config files ────────────────────────────────────────────
-      # NOT injected: google-services.json and GoogleService-Info.plist are TRACKED
-      # in the repo and valid there. They hold only public client identifiers that
-      # ship inside every distributed binary anyway.
-      # Previously these were overwritten from secrets — when a secret was unset,
-      # `echo '' > file` wrote an EMPTY file and the google-services Gradle plugin
-      # failed the build with a parse error.
+      # Firebase client configs are TRACKED in the repo and valid there. They are
+      # NOT injected: they hold only public client identifiers that ship inside
+      # every distributed binary. Overwriting them from a secret meant an unset
+      # secret wrote an EMPTY file and failed the google-services Gradle plugin.
 
-      # ── 8. Install Flutter dependencies ──────────────────────────────────────
       - name: Flutter pub get
         working-directory: mobile
         run: flutter pub get
 
-      # ── 9. Flutter analyze (fail on errors only) ──────────────────────────────
       - name: Flutter analyze
         working-directory: mobile
-        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+        # Errors and warnings fail. Infos (style hints) do not.
+        run: flutter analyze --no-fatal-infos
 
-      # ── 10. Flutter unit tests ─────────────────────────────────────────────────
       - name: Flutter test
         working-directory: mobile
+        # Deliberately NOT `|| true`. A test step that cannot fail manufactures
+        # false confidence — that is how a missing test directory read as success
+        # for 53 consecutive runs.
         run: flutter test --reporter=compact
 
-      # ── 11. Build debug APK ────────────────────────────────────────────────────
-      - name: Build debug APK
+      - name: Build RELEASE APK
         working-directory: mobile
         run: |
-          # Run Gradle directly to bypass Flutter's APK path validation
-          # Flutter 3.27.x changed the output path and its wrapper fails to find the APK
-          chmod +x android/gradlew
-          cd android && ./gradlew assembleDebug --no-daemon 2>&1
-          cd ..
-          # Find the APK wherever Gradle placed it
-          APK=$(find . -name "app-debug.apk" 2>/dev/null | head -1)
-          if [ -z "$APK" ]; then
-            echo "ERROR: app-debug.apk not found"
-            find . -name "*.apk" 2>/dev/null
-            exit 1
-          fi
-          echo "Found APK at: $APK"
-          mkdir -p build/app/outputs/flutter-apk
-          cp "$APK" build/app/outputs/flutter-apk/app-debug.apk
-          echo "APK ready at: build/app/outputs/flutter-apk/app-debug.apk"
+          flutter build apk --release \
+            --build-number=${{ github.run_number }} \
+            --dart-define=API_URL='${{ inputs.api_url || 'https://loyalty-nexus-api.onrender.com/api/v1' }}'
 
-      # ── 12. Upload APK artifact ───────────────────────────────────────────────
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4  # v4 is current; v5 not yet released
+      - name: Build RELEASE AAB
+        working-directory: mobile
+        # The Play Console format. Built here so its (different) path is exercised
+        # too, not discovered for the first time at submission.
+        run: |
+          flutter build appbundle --release \
+            --build-number=${{ github.run_number }} \
+            --dart-define=API_URL='${{ inputs.api_url || 'https://loyalty-nexus-api.onrender.com/api/v1' }}'
+
+      # Guards against the exact class of bug that made this workflow necessary:
+      # a release artifact that builds fine but is unusable on a device.
+      - name: Verify release artifact
+        working-directory: mobile
+        run: |
+          set -e
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          AAB=build/app/outputs/bundle/release/app-release.aab
+          [ -f "$APK" ] || { echo "::error::release APK missing"; exit 1; }
+          [ -f "$AAB" ] || { echo "::error::release AAB missing"; exit 1; }
+
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt2 | sort -r | head -1)
+          echo "using $AAPT"
+
+          # 1. INTERNET permission must be in the RELEASE manifest. It was once
+          #    declared only in src/debug/, so release shipped with no network at
+          #    all and every API call failed. Never again silently.
+          PERMS=$("$AAPT" dump permissions "$APK")
+          echo "$PERMS"
+          echo "$PERMS" | grep -q 'android.permission.INTERNET' \
+            || { echo "::error::release APK has NO INTERNET permission — the app would be inert"; exit 1; }
+
+          # 2. Must not be debug-signed. A debug-signed release is Play-rejected and
+          #    blocks in-place upgrades for anyone who already installed.
+          SIGNER=$(keytool -printcert -jarfile "$APK" 2>/dev/null | grep -i "Owner:" | head -1 || true)
+          echo "signer: $SIGNER"
+          echo "$SIGNER" | grep -qi "CN=Android Debug" \
+            && { echo "::error::release APK is DEBUG-SIGNED"; exit 1; } || true
+
+          # 3. Application id + label sanity.
+          "$AAPT" dump badging "$APK" | grep -E "^package|application-label" || true
+
+          ls -lh "$APK" "$AAB"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: loyalty-nexus-debug-${{ github.sha }}
-          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
+          name: loyalty-nexus-release-${{ github.sha }}
+          path: |
+            mobile/build/app/outputs/flutter-apk/app-release.apk
+            mobile/build/app/outputs/bundle/release/app-release.aab
+            mobile/build/app/outputs/mapping/release/mapping.txt
           retention-days: 14
 
-      # ── 13. Upload to Appetize.io ─────────────────────────────────────────────
+      # ── Optional, manual only ────────────────────────────────────────────────
       - name: Upload to Appetize.io
         id: appetize
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_to_appetize }}
         run: |
-          APK_PATH="mobile/build/app/outputs/flutter-apk/app-debug.apk"
-
-          # Appetize v1 API uses HTTP Basic Auth: token as username, empty password
-          # Check if we already have a public key stored (for updates vs new uploads)
+          APK_PATH="mobile/build/app/outputs/flutter-apk/app-release.apk"
           if [ -n "${{ secrets.APPETIZE_PUBLIC_KEY }}" ]; then
-            echo "Updating existing Appetize app..."
             RESPONSE=$(curl -s -X POST \
               "https://api.appetize.io/v1/apps/${{ secrets.APPETIZE_PUBLIC_KEY }}" \
               -u "${{ secrets.APPETIZE_API_TOKEN }}:" \
-              -F "file=@${APK_PATH}" \
-              -F "platform=android" \
+              -F "file=@${APK_PATH}" -F "platform=android" \
               -F "note=Build ${{ github.sha }}")
           else
-            echo "Creating new Appetize app..."
-            RESPONSE=$(curl -s -X POST \
-              "https://api.appetize.io/v1/apps" \
+            RESPONSE=$(curl -s -X POST "https://api.appetize.io/v1/apps" \
               -u "${{ secrets.APPETIZE_API_TOKEN }}:" \
-              -F "file=@${APK_PATH}" \
-              -F "platform=android" \
-              -F "note=Loyalty Nexus — Build ${{ github.sha }}")
+              -F "file=@${APK_PATH}" -F "platform=android" \
+              -F "note=Loyalty Nexus — ${{ github.sha }}")
           fi
+          PUBLIC_KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('publicKey',''))")
+          echo "app_url=https://appetize.io/app/${PUBLIC_KEY}" >> $GITHUB_OUTPUT
 
-          echo "Appetize response: $RESPONSE"
-          PUBLIC_KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('publicKey',''))")
-          APP_URL="https://appetize.io/app/${PUBLIC_KEY}"
-
-          echo "public_key=${PUBLIC_KEY}" >> $GITHUB_OUTPUT
-          echo "app_url=${APP_URL}" >> $GITHUB_OUTPUT
-          echo "✅ Appetize URL: ${APP_URL}"
-
-      # ── 14. Post Appetize URL as job summary ──────────────────────────────────
-      - name: Post summary
+      - name: Summary
+        if: always()
         run: |
-          echo "## 📱 Loyalty Nexus — Debug APK" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Appetize URL** | ${{ steps.appetize.outputs.app_url }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Public Key** | \`${{ steps.appetize.outputs.public_key }}\` |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 📱 Loyalty Nexus — Release Verification"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Build number | \`${{ github.run_number }}\` |"
+            echo "| Artifacts | release APK + AAB + R8 mapping (private to this repo) |"
+            if [ -n "${{ steps.appetize.outputs.app_url }}" ]; then
+              echo "| Appetize (PUBLIC) | ${{ steps.appetize.outputs.app_url }} |"
+            fi
+            echo ""
+            echo "Distribution to testers is handled by **Codemagic** on a \`v*\` tag —"
+            echo "TestFlight for iOS, Firebase App Distribution for Android."
+          } >> $GITHUB_STEP_SUMMARY
