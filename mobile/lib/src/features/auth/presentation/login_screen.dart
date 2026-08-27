@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/api_client.dart';
+import '../../../core/analytics/analytics.dart';
 import '../../../core/notifications/push_notification_service.dart';
 import '../../../core/auth/auth_provider.dart';
 import '../../../core/theme/nexus_theme.dart';
@@ -163,6 +164,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         isNewUser: isNewUser,
       );
 
+      // Top of the funnel. No phone number is logged — only the outcome and
+      // whether this was an activation, so drop-off is measurable without PII.
+      unawaited(Analytics.instance.loginSucceeded(isNewUser: isNewUser));
+
       // Now — not on first frame — is the moment to ask for notifications. The
       // user has just signed in, so they have context for what the alerts are
       // about. Deliberately not awaited: a slow or denied prompt must not hold up
@@ -180,11 +185,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         context.go(isNewUser ? '/register' : '/dashboard');
       }
     } on ApiException catch (e) {
+      // Slug only — the raw server message can carry identifying detail.
+      unawaited(Analytics.instance
+          .loginFailed(e.statusCode == 401 ? 'invalid_otp' : 'api_error'));
       setState(() => _error = e.message);
       _clearOtp();
     } catch (e) {
       // Anything unexpected (parse error, type error, platform failure) must
       // still surface to the user rather than silently stopping the spinner.
+      unawaited(Analytics.instance.loginFailed('unexpected'));
       setState(() => _error = 'Something went wrong. Please try again.');
       _clearOtp();
     } finally {

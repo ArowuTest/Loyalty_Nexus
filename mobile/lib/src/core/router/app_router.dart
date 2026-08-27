@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../analytics/analytics.dart';
+
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
@@ -60,6 +62,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: '/splash',
     debugLogDiagnostics: false,
     refreshListenable: _AuthListenable(ref),
+
+    // GoRouter had NO observers, so no screen view was ever recorded.
+    observers: [AnalyticsRouteObserver()],
 
     // Without this an unknown deep link or a stale push payload drops the
     // tester on go_router's default exception page.

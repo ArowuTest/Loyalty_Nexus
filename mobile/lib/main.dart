@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'src/core/theme/nexus_theme.dart';
 import 'src/core/router/app_router.dart';
+import 'src/core/analytics/analytics.dart';
 import 'src/core/cache/cache_service.dart';
 import 'src/core/notifications/push_notification_service.dart';
 
@@ -56,6 +58,11 @@ void main() {
       };
       await FirebaseCrashlytics.instance
           .setCrashlyticsCollectionEnabled(!kDebugMode);
+
+      // firebase_analytics was a dependency with zero imports — sessions were
+      // auto-collected but no screens and no events. Attach it so the funnel is
+      // visible during the tester round, not just crashes.
+      Analytics.instance.attach(FirebaseAnalytics.instance);
     }
 
     // A build-method exception should not show testers a raw red/grey box.
