@@ -207,19 +207,65 @@ workflows:
         script: |
           cd mobile
           # APK (not AAB) so Firebase App Distribution testers can sideload directly.
+          set +e
           flutter build apk --release \
             --build-name="$BUILD_NAME" \
             --build-number="$BUILD_NUM" \
             --dart-define=API_URL="$API_URL"
+          rc=$?
+          set -e
+
+          # This project's android/build.gradle.kts has NO buildDir redirect, so
+          # AGP writes to android/app/build/outputs/ while flutter — and the
+          # `artifacts:` globs below — look under mobile/build/. That mismatch is
+          # why flutter reports "Gradle build failed to produce an .apk file" even
+          # on a successful build, and it would leave Codemagic collecting NOTHING
+          # and publishing NOTHING to Firebase, with no error naming the cause.
+          APK=$(find . -name '*.apk' -path '*release*' -size +1M 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            echo "No release APK produced (flutter exit $rc)"
+            find . -name '*.apk' 2>/dev/null || echo "  (none)"
+            exit 1
+          fi
+          mkdir -p build/app/outputs/flutter-apk
+          [ "$APK" = "./build/app/outputs/flutter-apk/app-release.apk" ] || \
+            cp "$APK" build/app/outputs/flutter-apk/app-release.apk
+          echo "release APK: $APK"
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
 
       - name: Build release AAB
         script: |
           cd mobile
           # AAB for the eventual Play Console upload.
+          set +e
           flutter build appbundle --release \
             --build-name="$BUILD_NAME" \
             --build-number="$BUILD_NUM" \
             --dart-define=API_URL="$API_URL"
+          rc=$?
+          set -e
+
+          AAB=$(find . -name '*.aab' -size +1M 2>/dev/null | head -1)
+          if [ -z "$AAB" ]; then
+            echo "No release AAB produced (flutter exit $rc)"
+            find . -name '*.aab' 2>/dev/null || echo "  (none)"
+            exit 1
+          fi
+          mkdir -p build/app/outputs/bundle/release
+          [ "$AAB" = "./build/app/outputs/bundle/release/app-release.aab" ] || \
+            cp "$AAB" build/app/outputs/bundle/release/app-release.aab
+
+          # R8 mapping. Without it, Crashlytics stack traces from release builds
+          # are unreadable — which defeats the point of shipping Crashlytics.
+          MAP=$(find . -name 'mapping.txt' -path '*release*' 2>/dev/null | head -1)
+          if [ -n "$MAP" ]; then
+            mkdir -p build/app/outputs/mapping/release
+            [ "$MAP" = "./build/app/outputs/mapping/release/mapping.txt" ] || \
+              cp "$MAP" build/app/outputs/mapping/release/mapping.txt
+            echo "mapping: $MAP"
+          fi
+          echo "release AAB: $AAB"
+          ls -lh build/app/outputs/bundle/release/app-release.aab
 
     artifacts:
       - mobile/build/app/outputs/flutter-apk/app-release.apk
