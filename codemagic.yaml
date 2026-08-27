@@ -165,16 +165,37 @@ workflows:
 
       - name: Write key.properties from Codemagic keystore
         script: |
-          # The Gradle config reads android/key.properties and now FAILS HARD if it
-          # is absent rather than silently debug-signing a release. Codemagic
-          # exposes the uploaded keystore via CM_KEYSTORE_PATH and friends.
+          set -e
+          # Validate BEFORE writing. Gradle now fails hard on a blank signing value
+          # rather than silently defaulting it to "" — but a clear message HERE
+          # beats one ten minutes later inside :app:packageRelease. That is exactly
+          # how `KeytoolException: No key with alias ''` reached us on GitHub
+          # Actions, and this workflow writes the same file the same way.
+          #
+          # These CM_* variables are populated by Codemagic from the keystore
+          # uploaded under the reference name in `android_signing:`. If that upload
+          # is missing or misnamed they are silently EMPTY.
+          missing=""
+          [ -n "$CM_KEYSTORE_PATH" ]     || missing="$missing CM_KEYSTORE_PATH"
+          [ -n "$CM_KEYSTORE_PASSWORD" ] || missing="$missing CM_KEYSTORE_PASSWORD"
+          [ -n "$CM_KEY_PASSWORD" ]      || missing="$missing CM_KEY_PASSWORD"
+          [ -n "$CM_KEY_ALIAS" ]         || missing="$missing CM_KEY_ALIAS"
+          if [ -n "$missing" ]; then
+            echo "ERROR: empty Codemagic signing variable(s):$missing"
+            echo "Check Code signing -> Android keystore is uploaded with reference"
+            echo "name 'loyalty_nexus_keystore' (must match android_signing: below)."
+            exit 1
+          fi
+          [ -f "$CM_KEYSTORE_PATH" ] || { echo "ERROR: keystore not at $CM_KEYSTORE_PATH"; exit 1; }
+
           cat > mobile/android/key.properties <<EOF
           storePassword=$CM_KEYSTORE_PASSWORD
           keyPassword=$CM_KEY_PASSWORD
           keyAlias=$CM_KEY_ALIAS
           storeFile=$CM_KEYSTORE_PATH
           EOF
-          echo "key.properties written (storeFile=$CM_KEYSTORE_PATH)"
+          # Never echo the values themselves.
+          echo "key.properties written (alias length: ${#CM_KEY_ALIAS}, keystore present)"
 
       - name: Derive version from the git tag
         script: |
