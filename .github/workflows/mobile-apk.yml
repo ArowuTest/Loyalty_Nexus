@@ -111,6 +111,21 @@ jobs:
           #   KeytoolException: No key with alias '' found in keystore
           # This was invisible for 53 green runs because they were all DEBUG
           # builds, which use the debug signing config and never read this file.
+          # STRIP CR/LF FIRST. A GitHub secret pasted from a terminal or editor can
+          # carry a leading/trailing newline, and the value is then non-empty while
+          # still being useless. With a LEADING CRLF the heredoc emits:
+          #     keyAlias=<CR><LF>loyalty-nexus-release
+          # so java.util.Properties reads keyAlias as EMPTY and the next line as
+          # junk — producing exactly:
+          #     KeytoolException: No key with alias '' found in keystore
+          # Diagnosed from this workflow's own output: alias length reported 23 for
+          # a 21-character alias. A plain -n check passes in that case, which is why
+          # the earlier validation did not catch it.
+          STORE_PASSWORD=$(printf '%s' "$STORE_PASSWORD" | tr -d '\015\012')
+          KEY_PASSWORD=$(printf '%s' "$KEY_PASSWORD" | tr -d '\015\012')
+          KEY_ALIAS=$(printf '%s' "$KEY_ALIAS" | tr -d '\015\012')
+
+
           missing=""
           [ -n "$STORE_PASSWORD" ] || missing="$missing ANDROID_STORE_PASSWORD"
           [ -n "$KEY_PASSWORD" ]   || missing="$missing ANDROID_KEY_PASSWORD"
@@ -131,6 +146,16 @@ jobs:
           storeFile=loyalty-nexus-release.jks
           EOF
           echo "key.properties written (alias length: ${#KEY_ALIAS})"
+          # Assert the file PARSES the way Java will read it: keyAlias must be a
+          # non-empty value on its own line. Guards against any future whitespace
+          # or quoting problem in a secret without ever echoing the value.
+          alias_line=$(grep -c '^keyAlias=..*$' mobile/android/key.properties || true)
+          if [ "$alias_line" != "1" ]; then
+            echo "::error::key.properties has no valid non-empty keyAlias line."
+            sed 's/=.*/=<redacted>/' mobile/android/key.properties
+            exit 1
+          fi
+          echo "key.properties verified: keyAlias line is well-formed"
 
       # Firebase client configs are TRACKED in the repo and valid there. They are
       # NOT injected: they hold only public client identifiers that ship inside
