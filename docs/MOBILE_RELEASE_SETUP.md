@@ -5,6 +5,19 @@ macOS, so **Codemagic cloud Mac runners** are the route to TestFlight. Android b
 run in the same pipeline so both platforms share one Flutter pin.
 
 Pipeline config: [`codemagic.yaml`](../codemagic.yaml)
+Operational half: [`MOBILE_ROLLOUT_RUNBOOK.md`](./MOBILE_ROLLOUT_RUNBOOK.md) — staged
+rollout, monitoring thresholds, rollback and hotfix procedure. **Read it before the
+first tag**, not during an incident.
+
+### How the two CI systems split
+| System | Role |
+|---|---|
+| **GitHub Actions** (`mobile-apk.yml`) | **Verifies** the RELEASE path on every push — builds a release APK *and* AAB, then asserts on the real artifact that INTERNET is present and it is not debug-signed. Artifacts stay private to the repo. |
+| **Codemagic** (`codemagic.yaml`) | **Distributes** on a `v*` tag — TestFlight (iOS) + Firebase App Distribution (Android). Owns the Mac runners. |
+
+Appetize upload is now **manual dispatch only**. It previously published a
+production-wired build to a public URL on every push, which let anyone with the
+link drive the production API.
 
 ---
 
@@ -151,5 +164,17 @@ compiled on one version and failed on another.
 - ⚠️ **The iOS build has never actually run.** Everything iOS-side is correct by
   inspection but unverified until the first Codemagic Mac build. Expect to iterate
   once on CocoaPods/signing — that is normal for a first iOS build.
-- ⚠️ `local_auth` and `permission_handler` are dependencies that **no code imports**.
-  Decide whether biometric login was intended, or drop them to slim the build.
+- ✅ App icons now generated from `assets/images/logo-square.png` via
+  `flutter_launcher_icons` (`dart run flutter_launcher_icons` to regenerate), including
+  an Android adaptive icon. **The artwork is inferred, not confirmed** — worth 10
+  seconds on a device to eyeball.
+- ✅ 19 dead dependencies removed, including `local_auth` and `permission_handler`
+  (both imported nowhere). That also removed two App Store review flags: a linked
+  Face ID API with no `NSFaceIDUsageDescription`, and permission_handler compiling
+  handlers for permissions the app never requests.
+- ⚠️ **No remote feature-flag / force-update mechanism exists.** A client bug that
+  escapes the tester stages can only be fixed by shipping a new build and waiting for
+  review. `firebase_core` is already present, so Firebase Remote Config is the cheap
+  fix — see the runbook §5.
+- ⚠️ `firebase_analytics` is installed but has **zero imports**, so no screen or event
+  tracking exists. Funnel regressions will be invisible; only crashes will show.
