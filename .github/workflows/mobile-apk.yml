@@ -199,11 +199,20 @@ jobs:
           set -e
           echo "flutter exit code: $rc"
 
-          APK=$(find build -name '*.apk' -path '*release*' -size +1M 2>/dev/null | head -1)
+          # Search the WHOLE module, not just build/. This project's
+          # android/build.gradle.kts has no buildDir redirect (newer Flutter
+          # templates dropped it), so AGP writes to its default location —
+          # android/app/build/outputs/apk/release/ — while the flutter tool only
+          # looks under mobile/build/. That mismatch IS the "failed to produce an
+          # .apk file" message; the artifact exists, just not where it looked.
+          # The repo's original workflow used `find .` for exactly this reason.
+          APK=$(find . -name '*.apk' -path '*release*' -size +1M 2>/dev/null | head -1)
           if [ -z "$APK" ]; then
             echo "::error::No release APK was produced (flutter exit $rc)."
-            echo "APKs found anywhere under build/:"
-            find build -name '*.apk' 2>/dev/null || echo "  (none)"
+            echo "Any .apk anywhere under mobile/:"
+            find . -name '*.apk' 2>/dev/null || echo "  (none)"
+            echo "outputs dirs present:"
+            find . -type d -name outputs 2>/dev/null || echo "  (none)"
             exit 1
           fi
           echo "found release APK: $APK"
@@ -224,10 +233,11 @@ jobs:
           set -e
           echo "flutter exit code: $rc"
 
-          AAB=$(find build -name '*.aab' -size +1M 2>/dev/null | head -1)
+          AAB=$(find . -name '*.aab' -size +1M 2>/dev/null | head -1)
           if [ -z "$AAB" ]; then
             echo "::error::No release AAB was produced (flutter exit $rc)."
-            find build -name '*.aab' 2>/dev/null || echo "  (none)"
+            echo "Any .aab anywhere under mobile/:"
+            find . -name '*.aab' 2>/dev/null || echo "  (none)"
             exit 1
           fi
           echo "found release AAB: $AAB"
