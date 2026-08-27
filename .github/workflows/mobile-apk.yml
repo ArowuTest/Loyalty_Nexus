@@ -259,10 +259,23 @@ jobs:
 
           # 2. Must not be debug-signed. A debug-signed release is Play-rejected and
           #    blocks in-place upgrades for anyone who already installed.
-          SIGNER=$(keytool -printcert -jarfile "$APK" 2>/dev/null | grep -i "Owner:" | head -1 || true)
-          echo "signer: $SIGNER"
-          echo "$SIGNER" | grep -qi "CN=Android Debug" \
+          #
+          #    Uses apksigner, NOT `keytool -printcert -jarfile`. keytool reads only
+          #    the V1 (JAR) signature; with minSdk 24 AGP may sign v2/v3 ONLY, in
+          #    which case keytool prints nothing, the grep matches nothing, and the
+          #    check SILENTLY PASSES. A verification that cannot fail is worse than
+          #    no verification.
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -r | head -1)
+          [ -n "$APKSIGNER" ] || { echo "::error::apksigner not found"; exit 1; }
+          CERTS=$("$APKSIGNER" verify --print-certs --verbose "$APK" 2>&1) || {
+            echo "::error::apksigner could not verify the APK signature"; echo "$CERTS"; exit 1; }
+          echo "$CERTS" | grep -E "Verified using|certificate DN" || true
+          echo "$CERTS" | grep -qi "CN=Android Debug" \
             && { echo "::error::release APK is DEBUG-SIGNED"; exit 1; } || true
+          # Positively assert a modern scheme verified, so a future signing-config
+          # change cannot quietly ship an unverifiable artifact.
+          echo "$CERTS" | grep -qE "Verified using v[234] scheme.*true" \
+            || { echo "::error::no v2/v3/v4 signature verified"; exit 1; }
 
           # 3. Application id + label sanity.
           "$AAPT" dump badging "$APK" | grep -E "^package|application-label" || true
