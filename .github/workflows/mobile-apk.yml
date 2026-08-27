@@ -233,7 +233,12 @@ jobs:
           set -e
           echo "flutter exit code: $rc"
 
-          AAB=$(find . -name '*.aab' -size +1M 2>/dev/null | head -1)
+          # Prefer the FINAL bundle under outputs/. Gradle also leaves an
+          # UNSIGNED intermediary-bundle.aab under intermediates/, which is
+          # larger and sorts first — the previous `find . -name '*.aab'`
+          # picked exactly that, and Play rejects an unsigned bundle.
+          AAB=$(find . -path '*outputs/bundle/*' -name '*.aab' -size +1M 2>/dev/null | head -1)
+          [ -n "$AAB" ] || AAB=$(find . -name '*.aab' -size +1M -not -path '*intermediates*' 2>/dev/null | head -1)
           if [ -z "$AAB" ]; then
             echo "::error::No release AAB was produced (flutter exit $rc)."
             echo "Any .aab anywhere under mobile/:"
