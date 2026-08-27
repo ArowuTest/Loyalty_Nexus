@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Loyalty Nexus needs access to your photos so you can attach an image to AI Studio tools and Nexus Chat.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Loyalty Nexus needs microphone access to record audio for the Transcribe tool in AI Studio.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Loyalty Nexus uses speech recognition to let you dictate prompts to AI Studio tools instead of typing.</string>
 </dict>
 </plist>

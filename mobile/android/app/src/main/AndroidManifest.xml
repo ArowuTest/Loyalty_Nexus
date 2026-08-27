@@ -1,6 +1,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Required in the MAIN manifest: the debug manifest also declares INTERNET,
+         which masked its absence here — release builds would ship with no network
+         access at all and every API call would fail. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- record + speech_to_text (Studio: Transcribe / dictation) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
+    <!-- Push notifications (firebase_messaging) — required from Android 13 (API 33) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
-        android:label="loyalty_nexus"
+        android:label="Loyalty Nexus"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

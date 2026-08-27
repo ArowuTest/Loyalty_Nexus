@@ -20,7 +20,9 @@ if (keyPropertiesFile.exists()) {
 android {
     namespace = "ng.loyaltynexus.loyalty_nexus"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "27.0.12077973"
+    // speech_to_text requires NDK 28.2.13676358; NDKs are backward compatible so
+    // the highest requested version wins (Flutter prints this exact instruction).
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         // Enable core library desugaring (required by flutter_local_notifications)
@@ -44,7 +46,10 @@ android {
 
     defaultConfig {
         applicationId = "ng.loyaltynexus.loyalty_nexus"
-        minSdk = 23  // record_android requires minSdk >= 23
+        // 24 = Android 7.0. Raised from 23: video_player_android 2.12.0 (pulled in by
+        // Flutter 3.44) declares minSdk 24, which failed the manifest merger.
+        // record_android needs >= 23, so 24 satisfies everything.
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
