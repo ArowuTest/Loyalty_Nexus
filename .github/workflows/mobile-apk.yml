@@ -100,13 +100,37 @@ jobs:
           fi
 
       - name: Write key.properties
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
+          # Validate BEFORE writing. A secret can exist in GitHub with an EMPTY
+          # value, and an empty alias fails 10 minutes later, deep inside
+          # :app:packageRelease, with:
+          #   KeytoolException: No key with alias '' found in keystore
+          # This was invisible for 53 green runs because they were all DEBUG
+          # builds, which use the debug signing config and never read this file.
+          missing=""
+          [ -n "$STORE_PASSWORD" ] || missing="$missing ANDROID_STORE_PASSWORD"
+          [ -n "$KEY_PASSWORD" ]   || missing="$missing ANDROID_KEY_PASSWORD"
+          [ -n "$KEY_ALIAS" ]      || missing="$missing ANDROID_KEY_ALIAS"
+          if [ -n "$missing" ]; then
+            echo "::error::Empty release-signing secret(s):$missing"
+            echo ""
+            echo "The keystore below contains these aliases — set ANDROID_KEY_ALIAS"
+            echo "to the correct one (alias names are not credentials):"
+            keytool -list -keystore mobile/android/app/loyalty-nexus-release.jks                     -storepass "$STORE_PASSWORD" 2>/dev/null               | grep -iE "alias name|Your keystore contains" ||               echo "  (could not read the keystore — is ANDROID_STORE_PASSWORD correct?)"
+            exit 1
+          fi
+
           cat > mobile/android/key.properties <<EOF
-          storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          storePassword=$STORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
           storeFile=loyalty-nexus-release.jks
           EOF
+          echo "key.properties written (alias length: ${#KEY_ALIAS})"
 
       # Firebase client configs are TRACKED in the repo and valid there. They are
       # NOT injected: they hold only public client identifiers that ship inside
