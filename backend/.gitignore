@@ -1,0 +1,9 @@
+
+# Compiled Go binaries. These were committed (38 MB of ELF, with debug_info and
+# unstripped) but are NEVER used: Dockerfile.api compiles from source in a builder
+# stage and takes /bin/api from there. Committing them bloated every clone AND every
+# Docker build context, since `COPY backend/ .` pulled them in.
+/api
+/migrate
+/api.exe
+/migrate.exe
