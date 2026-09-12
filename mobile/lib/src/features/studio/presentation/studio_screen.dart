@@ -450,7 +450,9 @@ class StudioScreen extends ConsumerStatefulWidget {
 class _StudioScreenState extends ConsumerState<StudioScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabs;
-  static const _storage = FlutterSecureStorage();
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
   static const _sessionKey = 'nexus_chat_session';
 
   // ── Chat state ──

@@ -59,7 +59,12 @@ class _TranscribeTemplateState extends ConsumerState<TranscribeTemplate> {
 
   Future<void> _pickAudio() async {
     final result = await FilePicker.platform.pickFiles(
-      type: FileType.audio,
+      // FileType.custom uses the document picker. FileType.audio on iOS opens
+      // MPMediaPickerController — a privacy-sensitive API that crashes the app
+      // without NSAppleMusicUsageDescription and only exposes the music library,
+      // not real recordings/files.
+      type: FileType.custom,
+      allowedExtensions: const ['m4a', 'mp3', 'wav', 'aac', 'ogg', 'flac', 'm4b'],
       allowMultiple: false,
     );
     if (result == null || result.files.isEmpty) return;
