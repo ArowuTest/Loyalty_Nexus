@@ -53,7 +53,10 @@ type InitiateRechargeRequest struct {
 	AmountKobo    int64      `json:"amount_kobo"`
 	VariationCode string     `json:"variation_code"`
 	Email         string     `json:"email"`
-	UserID        *uuid.UUID `json:"user_id,omitempty"`
+	// UserID is set from the JWT in the handler, never decoded from the request
+	// body — a guest must not be able to attach a recharge to another account,
+	// and a body value of the wrong type must not 400 the request.
+	UserID *uuid.UUID `json:"-"`
 }
 
 type InitiateRechargeResponse struct {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -121,8 +122,12 @@ func (h *VTURechargeHandler) PaystackWebhook(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusOK)
 
 	sig := r.Header.Get("X-Paystack-Signature")
+	// Detach from the request context: it is cancelled the moment this handler
+	// returns (we already wrote 200 above), which would abort the async DB
+	// writes in ProcessVTUPaystackWebhook. WithoutCancel keeps any values.
+	bgCtx := context.WithoutCancel(r.Context())
 	go func() {
-		if err := h.svc.ProcessVTUPaystackWebhook(r.Context(), body, sig); err != nil {
+		if err := h.svc.ProcessVTUPaystackWebhook(bgCtx, body, sig); err != nil {
 			log.Printf("[VTU] ProcessVTUPaystackWebhook: %v", err)
 		}
 	}()
