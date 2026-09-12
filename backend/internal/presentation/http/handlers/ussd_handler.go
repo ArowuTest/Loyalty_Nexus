@@ -98,8 +98,13 @@ func (h *USSDHandler) SetKnowledgeService(ks *services.USSDKnowledgeService) {
 func verifyATSignature(r *http.Request, body []byte) bool {
 	secret := os.Getenv("AT_WEBHOOK_SECRET")
 	if secret == "" {
-		// Secret not configured — allow through (dev / sandbox mode).
-		// Set AT_WEBHOOK_SECRET in production to enforce signature verification.
+		// Fail closed in production: an unset secret must NOT mean "accept any
+		// caller", or anyone could drive USSD sessions for an arbitrary MSISDN.
+		if os.Getenv("ENVIRONMENT") == "production" || os.Getenv("GO_ENV") == "production" {
+			log.Printf("[USSD] SECURITY: AT_WEBHOOK_SECRET not set in production — rejecting request")
+			return false
+		}
+		// Non-production only: allow through for local/dev testing.
 		return true
 	}
 	sig := r.Header.Get("X-AT-Signature")

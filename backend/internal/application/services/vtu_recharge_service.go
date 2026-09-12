@@ -748,13 +748,25 @@ func (s *VTURechargeService) initPaystack(ctx context.Context, ref, email string
 }
 
 func (s *VTURechargeService) verifySignature(body []byte, sig string) bool {
+	// Paystack signs webhooks with HMAC-SHA512 keyed by the account SECRET key;
+	// there is no separate "webhook secret". Prefer an explicit override if set,
+	// else fall back to the secret key. If NEITHER is configured, fail CLOSED —
+	// an unset secret must never mean "accept any body", or a forged
+	// charge.success would mint airtime + points with no payment.
 	secret := os.Getenv("PAYSTACK_WEBHOOK_SECRET")
 	if secret == "" {
-		log.Printf("[VTU] PAYSTACK_WEBHOOK_SECRET not set — skipping signature check (sandbox mode)")
-		return true
+		secret = os.Getenv("PAYSTACK_SECRET_KEY")
+	}
+	if secret == "" {
+		log.Printf("[VTU] SECURITY: no PAYSTACK_WEBHOOK_SECRET/PAYSTACK_SECRET_KEY set — rejecting webhook")
+		return false
+	}
+	if sig == "" {
+		log.Printf("[VTU] SECURITY: missing X-Paystack-Signature — rejecting webhook")
+		return false
 	}
 	mac := hmac.New(sha512.New, []byte(secret))
-	mac.Write(body)
+	mac.Write(body) //nolint:errcheck
 	return hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(sig))
 }
 
