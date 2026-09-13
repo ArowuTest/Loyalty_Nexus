@@ -5,39 +5,68 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
 	"loyalty-nexus/internal/domain/entities"
 )
 
-type AICapacityController struct{ rdb *redis.Client }
-
-func NewAICapacityController(rdb *redis.Client) *AICapacityController {
-	return &AICapacityController{rdb: rdb}
+type AICapacityController struct {
+	rdb *redis.Client
+	now func() time.Time // injectable clock; tests advance it to expire in-flight slots
 }
 
+func NewAICapacityController(rdb *redis.Client) *AICapacityController {
+	return &AICapacityController{rdb: rdb, now: time.Now}
+}
+
+func (c *AICapacityController) clock() time.Time {
+	if c.now == nil {
+		return time.Now()
+	}
+	return c.now()
+}
+
+// bookkeepingCtx detaches post-call bookkeeping (budget settlement, circuit
+// outcome) from the caller's cancellation. A client that disconnects during a
+// provider call — the normal streaming abort — must not leave the paid-budget
+// reservation un-refunded or the circuit outcome unrecorded (review M5). It is
+// bounded so a slow Redis cannot stall the request path.
+func bookkeepingCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+}
+
+// In-flight concurrency is a sorted set of reservation tokens scored by their
+// own expiry, not a counter with a key-level TTL (review M4). A counter's TTL
+// was set only when the key was created, so under steady load the whole gauge
+// was wiped every ttl seconds while calls were in flight (the limit stopped
+// being enforced), while refreshing it on every reserve would instead have let
+// a single leaked slot (process killed mid-call) pin the gauge high for as long
+// as traffic continued. Per-slot expiry gives the exact semantics: a slot lives
+// for the binding's timeout plus grace and vanishes on its own, whether or not
+// anything else is happening. The set itself carries a key-level TTL purely as
+// garbage collection.
 var aiReserveCapacityScript = redis.NewScript(`
 local rpm_limit = tonumber(ARGV[1])
 local concurrent_limit = tonumber(ARGV[2])
 local ttl = tonumber(ARGV[3])
+local now_ms = tonumber(ARGV[4])
+local token = ARGV[5]
+if concurrent_limit > 0 then
+  redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now_ms)
+end
 local rpm = tonumber(redis.call('GET', KEYS[1]) or '0')
-local concurrent = tonumber(redis.call('GET', KEYS[2]) or '0')
 if rpm_limit > 0 and rpm >= rpm_limit then return 2 end
-if concurrent_limit > 0 and concurrent >= concurrent_limit then return 3 end
+if concurrent_limit > 0 and redis.call('ZCARD', KEYS[2]) >= concurrent_limit then return 3 end
 if rpm_limit > 0 then
   local n = redis.call('INCR', KEYS[1])
   if n == 1 then redis.call('EXPIRE', KEYS[1], 120) end
 end
 if concurrent_limit > 0 then
-  local n = redis.call('INCR', KEYS[2])
-  if n == 1 then redis.call('EXPIRE', KEYS[2], ttl) end
+  redis.call('ZADD', KEYS[2], now_ms + ttl * 1000, token)
+  redis.call('EXPIRE', KEYS[2], ttl)
 end
 return 1
-`)
-var aiReleaseCapacityScript = redis.NewScript(`
-local current = tonumber(redis.call('GET', KEYS[1]) or '0')
-if current <= 1 then redis.call('DEL', KEYS[1]); return 0 end
-return redis.call('DECR', KEYS[1])
 `)
 
 func (c *AICapacityController) Reserve(ctx context.Context, binding entities.AIToolProviderBinding) (func(), string, bool) {
@@ -48,17 +77,18 @@ func (c *AICapacityController) Reserve(ctx context.Context, binding entities.AIT
 		return func() {}, "capacity_backend_unavailable", false
 	}
 
-	minute := time.Now().UTC().Unix() / 60
+	now := c.clock().UTC()
 	prefix := fmt.Sprintf("nexus:ai:capacity:%s", binding.ID.String())
-	rpmKey := fmt.Sprintf("%s:rpm:%d", prefix, minute)
-	concurrentKey := prefix + ":concurrent"
+	rpmKey := fmt.Sprintf("%s:rpm:%d", prefix, now.Unix()/60)
+	inflightKey := prefix + ":inflight"
 	ttl := binding.TimeoutMS/1000 + 60
 	if ttl < 180 {
 		ttl = 180
 	}
+	token := uuid.NewString()
 
 	code, err := aiReserveCapacityScript.Run(ctx, c.rdb,
-		[]string{rpmKey, concurrentKey}, binding.RequestsPerMinute, binding.MaxConcurrent, ttl).Int()
+		[]string{rpmKey, inflightKey}, binding.RequestsPerMinute, binding.MaxConcurrent, ttl, now.UnixMilli(), token).Int()
 	if err != nil {
 		return func() {}, "capacity_backend_error", false
 	}
@@ -76,7 +106,7 @@ func (c *AICapacityController) Reserve(ctx context.Context, binding entities.AIT
 			released = true
 			rctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			_ = aiReleaseCapacityScript.Run(rctx, c.rdb, []string{concurrentKey}).Err()
+			_ = c.rdb.ZRem(rctx, inflightKey, token).Err()
 		}, "reserved", true
 	default:
 		return func() {}, "capacity_unknown", false
@@ -159,7 +189,9 @@ func (c *AICapacityController) CircuitSuccess(ctx context.Context, binding entit
 	if binding.CircuitFailureThreshold <= 0 || binding.CircuitOpenSeconds <= 0 || c == nil || c.rdb == nil {
 		return
 	}
-	_ = aiCircuitSuccessScript.Run(ctx, c.rdb, circuitKeys(binding.ID.String())).Err()
+	bctx, cancel := bookkeepingCtx(ctx)
+	defer cancel()
+	_ = aiCircuitSuccessScript.Run(bctx, c.rdb, circuitKeys(binding.ID.String())).Err()
 }
 
 func (c *AICapacityController) CircuitFailure(ctx context.Context, binding entities.AIToolProviderBinding, halfOpen bool) {
@@ -170,7 +202,9 @@ func (c *AICapacityController) CircuitFailure(ctx context.Context, binding entit
 	if halfOpen {
 		half = 1
 	}
-	_ = aiCircuitFailureScript.Run(ctx, c.rdb, circuitKeys(binding.ID.String()),
+	bctx, cancel := bookkeepingCtx(ctx)
+	defer cancel()
+	_ = aiCircuitFailureScript.Run(bctx, c.rdb, circuitKeys(binding.ID.String()),
 		binding.CircuitFailureThreshold, binding.CircuitOpenSeconds, half).Err()
 }
 
@@ -268,7 +302,9 @@ func (c *AICapacityController) SettlePaidBudget(
 		}
 	}
 	delta := target - res.reserved
-	_ = aiBudgetSettleScript.Run(ctx, c.rdb, []string{res.hourKey, res.dayKey}, delta).Err()
+	bctx, cancel := bookkeepingCtx(ctx)
+	defer cancel()
+	_ = aiBudgetSettleScript.Run(bctx, c.rdb, []string{res.hourKey, res.dayKey}, delta).Err()
 }
 
 func (c *AICapacityController) CircuitNeutral(ctx context.Context, binding entities.AIToolProviderBinding, halfOpen bool) {
@@ -276,5 +312,7 @@ func (c *AICapacityController) CircuitNeutral(ctx context.Context, binding entit
 		return
 	}
 	keys := circuitKeys(binding.ID.String())
-	_ = c.rdb.Del(ctx, keys[2]).Err()
+	bctx, cancel := bookkeepingCtx(ctx)
+	defer cancel()
+	_ = c.rdb.Del(bctx, keys[2]).Err()
 }

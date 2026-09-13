@@ -113,16 +113,28 @@ func (o *AIStudioOrchestrator) StudioWorkerPoolConfig(queueClass string) AIStudi
 	return cfg
 }
 
+// classifyRoutingError maps an adapter error to a ledger error class and
+// whether the chain may fail over to the next candidate. A content refusal is
+// a verdict about the prompt, so it is checked first — typed (structural
+// detection in the adapters) and then textual — before any status-code rule:
+// a 403 or 400 that carries a policy signal must never be re-shopped to
+// another provider, while a plain 403 is a credential problem another provider
+// may well not share.
 func classifyRoutingError(err error) (string, bool) {
 	if err == nil {
 		return "", false
 	}
+	if isProviderRefusal(err) {
+		return "POLICY_REJECTION", false
+	}
 	s := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(s, "invalid input"), strings.Contains(s, "validation"), strings.Contains(s, "bad request"), strings.Contains(s, "http 400"):
-		return "INVALID_INPUT", false
-	case strings.Contains(s, "safety"), strings.Contains(s, "policy"), strings.Contains(s, "moderation"):
+	case strings.Contains(s, "safety"), strings.Contains(s, "policy"), strings.Contains(s, "moderation"),
+		strings.Contains(s, "content_filter"), strings.Contains(s, "content filter"):
 		return "POLICY_REJECTION", false
+	case strings.Contains(s, "invalid input"), strings.Contains(s, "validation"), strings.Contains(s, "bad request"),
+		strings.Contains(s, "http 400"), strings.Contains(s, "api 400"):
+		return "INVALID_INPUT", false
 	case strings.Contains(s, "429"), strings.Contains(s, "rate limit"), strings.Contains(s, "quota"):
 		return "RATE_LIMIT", true
 	case strings.Contains(s, "timeout"), strings.Contains(s, "deadline exceeded"):
@@ -284,12 +296,16 @@ func (o *AIStudioOrchestrator) runToolStageChain(ctx context.Context, generation
 		if timeout <= 0 {
 			timeout = 120 * time.Second
 		}
-		callCtx, cancel := context.WithTimeout(ctx, timeout)
 		provider := c.Provider
 		provider.ExtraConfig = mergeProviderRequestConfig(c.Provider.ExtraConfig, c.Binding.RequestConfig)
-		url, text, cost, callErr := o.callByTemplate(callCtx, provider, in)
-		cancel()
-		release()
+		// The in-flight slot and the timer are released from defers, so a panicking
+		// adapter (recovered by the HTTP server) cannot leak either (review M6).
+		url, text, cost, callErr := func() (string, string, int, error) {
+			callCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			defer release()
+			return o.callByTemplate(callCtx, provider, in)
+		}()
 
 		completed := time.Now()
 		duration := int(completed.Sub(started).Milliseconds())

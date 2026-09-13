@@ -1646,12 +1646,18 @@ func (o *AIStudioOrchestrator) callOpenAICompatible(ctx context.Context, endpoin
 
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
+		// A content-policy rejection arrives as a 400 — it is a verdict about the
+		// prompt, not a provider fault, and must not be shopped to the next provider.
+		if refusal, ok := openAIErrorRefusal(raw); ok {
+			return "", refusal
+		}
 		return "", fmt.Errorf("API %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
 
 	var parsed struct {
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
@@ -1663,12 +1669,24 @@ func (o *AIStudioOrchestrator) callOpenAICompatible(ctx context.Context, endpoin
 		return "", fmt.Errorf("parse: %w", err)
 	}
 	if parsed.Error != nil {
+		if refusal, ok := openAIErrorRefusal(raw); ok {
+			return "", refusal
+		}
 		return "", fmt.Errorf("API error: %s", parsed.Error.Message)
 	}
 	if len(parsed.Choices) == 0 {
 		return "", fmt.Errorf("no choices returned")
 	}
-	return parsed.Choices[0].Message.Content, nil
+	choice := parsed.Choices[0]
+	if choice.FinishReason == "content_filter" {
+		return "", &ProviderRefusalError{Provider: "openai-compatible", Reason: "finish_reason=content_filter"}
+	}
+	if choice.Message.Content == "" {
+		// Previously returned as a successful empty generation — charged,
+		// ledgered as SUCCEEDED, and blank for the user.
+		return "", fmt.Errorf("no content returned (finish_reason=%s)", choice.FinishReason)
+	}
+	return choice.Message.Content, nil
 }
 
 // callHFFluxSchnell calls HuggingFace FLUX.1-Schnell (free tier, ~3s).

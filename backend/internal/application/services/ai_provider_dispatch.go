@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -513,8 +514,8 @@ func (o *AIStudioOrchestrator) callGeminiFlashWithModel(
 	}
 
 	endpoint := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		model, apiKey,
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
+		model,
 	)
 	payload := map[string]interface{}{
 		"system_instruction": map[string]interface{}{
@@ -528,13 +529,15 @@ func (o *AIStudioOrchestrator) callGeminiFlashWithModel(
 			"maxOutputTokens": 8192,
 		},
 	}
-	return o.callGeminiEndpoint(ctx, endpoint, payload)
+	return o.callGeminiEndpoint(ctx, endpoint, apiKey, payload)
 }
 
 // callGeminiEndpoint POSTs a generateContent payload to any Gemini model
-// endpoint and extracts the first candidate's text.
+// endpoint. The key travels in the x-goog-api-key header, never the query
+// string (URLs are logged by proxies and error text), and the response is
+// decoded structurally so blocks and content stops surface as refusals.
 func (o *AIStudioOrchestrator) callGeminiEndpoint(
-	ctx context.Context, endpoint string, payload map[string]interface{},
+	ctx context.Context, endpoint, apiKey string, payload map[string]interface{},
 ) (string, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -545,6 +548,7 @@ func (o *AIStudioOrchestrator) callGeminiEndpoint(
 		return "", fmt.Errorf("gemini request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -552,29 +556,11 @@ func (o *AIStudioOrchestrator) callGeminiEndpoint(
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var result struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-		Error *struct {
-			Message string `json:"message"`
-			Code    int    `json:"code"`
-		} `json:"error"`
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return "", fmt.Errorf("gemini read: %w", err)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("gemini decode: %w", err)
-	}
-	if result.Error != nil {
-		return "", fmt.Errorf("gemini API error %d: %s", result.Error.Code, result.Error.Message)
-	}
-	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("gemini: no content returned")
-	}
-	return result.Candidates[0].Content.Parts[0].Text, nil
+	return decodeGeminiGenerateContent(resp.StatusCode, raw)
 }
 
 // callDeepSeekWithKey calls DeepSeek with an explicit API key.
@@ -646,39 +632,6 @@ func (o *AIStudioOrchestrator) callGeminiConfiguredMultimodal(
 		"contents":           []map[string]interface{}{{"parts": parts}},
 		"generationConfig":   map[string]interface{}{"maxOutputTokens": 65536, "temperature": 0.85},
 	}
-	body, _ := json.Marshal(payload)
-	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("Gemini multimodal HTTP: %w", err)
-	}
-	defer resp.Body.Close()
-	var parsed struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-		Error *struct {
-			Message string `json:"message"`
-			Code    int    `json:"code"`
-		} `json:"error"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return "", err
-	}
-	if parsed.Error != nil {
-		return "", fmt.Errorf("Gemini API error %d: %s", parsed.Error.Code, parsed.Error.Message)
-	}
-	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("Gemini multimodal returned no content")
-	}
-	return parsed.Candidates[0].Content.Parts[0].Text, nil
+	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
+	return o.callGeminiEndpoint(ctx, endpoint, apiKey, payload)
 }

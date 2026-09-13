@@ -112,7 +112,6 @@ func (o *AIStudioOrchestrator) runToolStageStreamChain(
 		if timeout <= 0 {
 			timeout = 120 * time.Second
 		}
-		callCtx, cancel := context.WithTimeout(ctx, timeout)
 
 		emitted := false
 		wrappedChunk := func(chunk string) {
@@ -122,9 +121,14 @@ func (o *AIStudioOrchestrator) runToolStageStreamChain(
 			emitted = true
 			onChunk(chunk)
 		}
-		text, callErr := o.callByTemplateStream(callCtx, provider, in, wrappedChunk)
-		cancel()
-		release()
+		// The in-flight slot and the timer are released from defers, so a panicking
+		// adapter (recovered by the HTTP server) cannot leak either (review M6).
+		text, callErr := func() (string, error) {
+			callCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			defer release()
+			return o.callByTemplateStream(callCtx, provider, in, wrappedChunk)
+		}()
 		completed := time.Now()
 		duration := int(completed.Sub(started).Milliseconds())
 
@@ -229,10 +233,20 @@ func (o *AIStudioOrchestrator) streamOpenAICompatible(
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		if refusal, ok := openAIErrorRefusal(raw); ok {
+			return "", refusal
+		}
 		return "", fmt.Errorf("API %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
+	return consumeOpenAIStream(resp.Body, onChunk)
+}
+
+// consumeOpenAIStream reads an OpenAI-compatible SSE body, forwarding each
+// delta to onChunk. A finish_reason of content_filter, or a policy error
+// event, ends the stream as a ProviderRefusalError.
+func consumeOpenAIStream(body io.Reader, onChunk func(string)) (string, error) {
 	var full strings.Builder
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(body)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 	for scanner.Scan() {
@@ -246,7 +260,8 @@ func (o *AIStudioOrchestrator) streamOpenAICompatible(
 		}
 		var event struct {
 			Choices []struct {
-				Delta struct {
+				FinishReason string `json:"finish_reason"`
+				Delta        struct {
 					Content string `json:"content"`
 				} `json:"delta"`
 			} `json:"choices"`
@@ -258,9 +273,15 @@ func (o *AIStudioOrchestrator) streamOpenAICompatible(
 			continue
 		}
 		if event.Error != nil {
+			if refusal, ok := openAIErrorRefusal([]byte(data)); ok {
+				return "", refusal
+			}
 			return full.String(), fmt.Errorf("API stream error: %s", event.Error.Message)
 		}
 		for _, choice := range event.Choices {
+			if choice.FinishReason == "content_filter" {
+				return "", &ProviderRefusalError{Provider: "openai-compatible", Reason: "finish_reason=content_filter"}
+			}
 			if choice.Delta.Content == "" {
 				continue
 			}
@@ -288,8 +309,8 @@ func (o *AIStudioOrchestrator) streamGeminiConfigured(
 		return "", fmt.Errorf("Gemini model_id is required")
 	}
 	endpoint := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?key=%s&alt=sse",
-		model, key,
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse",
+		model,
 	)
 	payload := map[string]interface{}{
 		"system_instruction": map[string]interface{}{"parts": []map[string]string{{"text": in.SystemPrompt}}},
@@ -302,6 +323,7 @@ func (o *AIStudioOrchestrator) streamGeminiConfigured(
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("x-goog-api-key", key) // header, not query string: URLs leak into logs
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("gemini stream HTTP: %w", err)
@@ -311,8 +333,16 @@ func (o *AIStudioOrchestrator) streamGeminiConfigured(
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return "", fmt.Errorf("gemini stream %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
 	}
+	return consumeGeminiStream(resp.Body, onChunk)
+}
+
+// consumeGeminiStream reads a streamGenerateContent SSE body, forwarding each
+// visible text part to onChunk. A prompt-level block or a content-grounded
+// finishReason ends the stream as a ProviderRefusalError; thought parts of
+// reasoning models are never forwarded.
+func consumeGeminiStream(body io.Reader, onChunk func(string)) (string, error) {
 	var full strings.Builder
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -323,31 +353,23 @@ func (o *AIStudioOrchestrator) streamGeminiConfigured(
 		if data == "" {
 			continue
 		}
-		var event struct {
-			Candidates []struct {
-				Content struct {
-					Parts []struct {
-						Text string `json:"text"`
-					} `json:"parts"`
-				} `json:"content"`
-			} `json:"candidates"`
-			Error *struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
+		var event geminiGenerateContentResponse
 		if json.Unmarshal([]byte(data), &event) != nil {
 			continue
 		}
 		if event.Error != nil {
-			return full.String(), fmt.Errorf("gemini stream error: %s", event.Error.Message)
+			return full.String(), fmt.Errorf("gemini stream error %d (%s): %s", event.Error.Code, event.Error.Status, event.Error.Message)
+		}
+		if event.PromptFeedback != nil && event.PromptFeedback.BlockReason != "" {
+			return "", &ProviderRefusalError{Provider: "gemini", Reason: "prompt blocked: " + event.PromptFeedback.BlockReason}
 		}
 		for _, c := range event.Candidates {
-			for _, part := range c.Content.Parts {
-				if part.Text == "" {
-					continue
-				}
-				full.WriteString(part.Text)
-				onChunk(part.Text)
+			if geminiRefusalFinishReasons[c.FinishReason] {
+				return "", &ProviderRefusalError{Provider: "gemini", Reason: "candidate finished: " + c.FinishReason}
+			}
+			if text := geminiCandidateText(c); text != "" {
+				full.WriteString(text)
+				onChunk(text)
 			}
 		}
 	}
