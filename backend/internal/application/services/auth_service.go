@@ -25,12 +25,12 @@ import (
 )
 
 var (
-	ErrOTPNotFound        = errors.New("OTP not found or already used")
-	ErrOTPExpired         = errors.New("OTP has expired")
-	ErrOTPInvalid         = errors.New("OTP code is incorrect")
-	ErrUserBanned         = errors.New("account is suspended")
-	ErrRateLimitExceeded  = errors.New("rate limit exceeded: please try again later")
-	ErrTooManyAttempts    = errors.New("too many incorrect attempts: request a new code and try again shortly")
+	ErrOTPNotFound       = errors.New("OTP not found or already used")
+	ErrOTPExpired        = errors.New("OTP has expired")
+	ErrOTPInvalid        = errors.New("OTP code is incorrect")
+	ErrUserBanned        = errors.New("account is suspended")
+	ErrRateLimitExceeded = errors.New("rate limit exceeded: please try again later")
+	ErrTooManyAttempts   = errors.New("too many incorrect attempts: request a new code and try again shortly")
 )
 
 type AuthService struct {
@@ -244,15 +244,16 @@ func (s *AuthService) MintAdminToken(adminID uuid.UUID) (string, error) {
 
 func (s *AuthService) registerNewUser(ctx context.Context, phone string) (*entities.User, error) {
 	user := &entities.User{
-		ID:          uuid.New(),
-		PhoneNumber: phone,
-		UserCode:    generateUserCode(),
-		Tier:        entities.TierBronze,
-		IsActive:    true,
-		DeviceType:  "smartphone",
-		KYCStatus:   "unverified",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:                 uuid.New(),
+		PhoneNumber:        phone,
+		UserCode:           generateUserCode(),
+		Tier:               entities.TierBronze,
+		IsActive:           true,
+		SubscriptionStatus: entities.SubscriptionFree,
+		DeviceType:         "smartphone",
+		KYCStatus:          "unverified",
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
 	}
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, err

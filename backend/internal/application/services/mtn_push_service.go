@@ -323,11 +323,11 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 
 		// ── Update wallet atomically ──────────────────────────────────────────
 		updates := map[string]interface{}{
-			"draw_counter":          newDrawCounter,
-			"pulse_counter":         newPulseCounter,
-			"daily_recharge_kobo":   newDailyTotal,
-			"daily_recharge_date":   wallet.DailyRechargeDate,
-			"daily_spins_awarded":   wallet.DailySpinsAwarded + spinCreditsEarned,
+			"draw_counter":        newDrawCounter,
+			"pulse_counter":       newPulseCounter,
+			"daily_recharge_kobo": newDailyTotal,
+			"daily_recharge_date": wallet.DailyRechargeDate,
+			"daily_spins_awarded": wallet.DailySpinsAwarded + spinCreditsEarned,
 		}
 		if spinCreditsEarned > 0 {
 			updates["spin_credits"] = gorm.Expr("spin_credits + ?", spinCreditsEarned)
@@ -370,12 +370,12 @@ func (s *MTNPushService) ProcessMTNPush(ctx context.Context, payload MTNPushPayl
 		// 2. Spin credit award record.
 		if spinCreditsEarned > 0 {
 			meta, _ := json.Marshal(map[string]interface{}{
-				"amount_kobo":         amountKobo,
-				"recharge_type":       rechargeType,
-				"daily_total_kobo":    newDailyTotal,
-				"spin_tier":           spinTierName,
-				"daily_spins_cap":     wallet.DailySpinsAwarded,
-				"source":              "mtn_push",
+				"amount_kobo":      amountKobo,
+				"recharge_type":    rechargeType,
+				"daily_total_kobo": newDailyTotal,
+				"spin_tier":        spinTierName,
+				"daily_spins_cap":  wallet.DailySpinsAwarded,
+				"source":           "mtn_push",
 			})
 			spinTx := &entities.Transaction{
 				ID:          uuid.New(),
@@ -574,12 +574,13 @@ func (s *MTNPushService) resolveOrCreateUser(ctx context.Context, phone string) 
 	uid := uuid.New()
 	userCode := "MTN" + strings.ToUpper(uid.String()[:8])
 	newUser := &entities.User{
-		ID:          uid,
-		PhoneNumber: phone,
-		UserCode:    userCode,
-		Tier:        "BRONZE",
-		IsActive:    true,
-		CreatedAt:   time.Now(),
+		ID:                 uid,
+		PhoneNumber:        phone,
+		UserCode:           userCode,
+		Tier:               "BRONZE",
+		IsActive:           true,
+		CreatedAt:          time.Now(),
+		SubscriptionStatus: entities.SubscriptionFree,
 	}
 	if err := s.userRepo.Create(ctx, newUser); err != nil {
 		return nil, fmt.Errorf("auto-create user failed: %w", err)
