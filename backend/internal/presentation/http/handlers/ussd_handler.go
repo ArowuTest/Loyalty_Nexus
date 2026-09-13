@@ -42,9 +42,17 @@ import (
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/pkg/safe"
+	"loyalty-nexus/internal/presentation/http/middleware"
 
 	"github.com/google/uuid"
 )
+
+// ussdRateLimiter caps requests PER MSISDN (review finding S11). It is keyed by
+// phone, not IP, because every USSD request arrives from the shared telco-gateway
+// address — an IP-based limit would throttle the entire USSD channel. 20 requests
+// per minute is generous for an interactive menu session and caps session-spam
+// abuse.
+var ussdRateLimiter = middleware.NewRateLimiter(1*time.Minute, 20, 2*time.Minute)
 
 // USSDHandler handles all USSD gateway requests.
 type USSDHandler struct {
@@ -170,6 +178,16 @@ func (h *USSDHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		serviceCode = r.FormValue("serviceCode")
 	}
 	_ = serviceCode // used for routing config in future
+
+	// S11: per-MSISDN rate limit. Keyed by phone (not IP) so it caps one user's
+	// session spam without throttling the shared gateway. Returns a graceful USSD
+	// END so the handset shows a message rather than a protocol error.
+	if phone != "" && !ussdRateLimiter.Allow("ussd:"+phone) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "END Too many requests. Please try again in a moment.")
+		return
+	}
 
 	// REQ-6.5: Rollback any expired sessions with pending spins before processing.
 	// Use context.Background() so the goroutine is not cancelled when the HTTP
