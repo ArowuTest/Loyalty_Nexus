@@ -1,13 +1,10 @@
 package handlers
 
-// studio_worker.go — Async studio job dispatcher
+// studio_worker.go — bounded, class-separated async Studio dispatcher.
 //
-// Design principles:
-//   - Worker holds a reference to AIStudioOrchestrator (service layer)
-//   - All DB writes go through StudioService / AIStudioOrchestrator — never raw SQL here
-//   - The worker is constructed once at startup and injected into StudioHandler
-//   - DispatchGeneration runs in a goroutine so the HTTP handler returns immediately
-//   - Stale-job watchdog method re-queues pending jobs older than 10 minutes
+// Jobs are already durable in ai_generations before they reach this worker.
+// In-memory queues provide fast admission/back-pressure; the lifecycle recovery
+// path remains the safety net for process restarts.
 
 import (
 	"context"
@@ -20,99 +17,157 @@ import (
 	"loyalty-nexus/internal/domain/entities"
 )
 
-// AsyncStudioWorker owns the goroutine pool for AI generation jobs.
-type AsyncStudioWorker struct {
-	studioSvc *services.StudioService
-	orch      *services.AIStudioOrchestrator // 4-tier provider orchestrator
-	jobQueue  chan uuid.UUID                  // buffered channel — back-pressure protection
+type queuedStudioJob struct {
+	ID              uuid.UUID
+	ToolSlug        string
+	QueueClass      string
+	EnqueuedAt      time.Time
+	MaxQueueSeconds int
 }
 
-// NewAsyncStudioWorker creates the worker.
-// studioSvc is used to look up stale jobs; orch does the actual AI dispatch.
-// The second argument signature accepts interface{} so it can be called with
-// *services.AIStudioOrchestrator or nil (used in unit tests).
+// AsyncStudioWorker owns class-separated bounded worker pools so long-running
+// video work cannot starve interactive/image/audio generations.
+type AsyncStudioWorker struct {
+	studioSvc *services.StudioService
+	orch      *services.AIStudioOrchestrator
+	queues    map[string]chan queuedStudioJob
+}
+
+var studioQueueClasses = []string{
+	entities.QueueRealtime,
+	entities.QueueInteractive,
+	entities.QueueAsync,
+	entities.QueueHeavyAsync,
+	entities.QueueBackground,
+}
+
 func NewAsyncStudioWorker(studioSvc *services.StudioService, orch interface{}) *AsyncStudioWorker {
 	var o *services.AIStudioOrchestrator
-	if orch != nil {
-		if typed, ok := orch.(*services.AIStudioOrchestrator); ok {
-			o = typed
-		}
+	if typed, ok := orch.(*services.AIStudioOrchestrator); ok {
+		o = typed
 	}
 	w := &AsyncStudioWorker{
 		studioSvc: studioSvc,
 		orch:      o,
-		jobQueue:  make(chan uuid.UUID, 256), // 256 concurrent-ish jobs max
+		queues:    make(map[string]chan queuedStudioJob, len(studioQueueClasses)),
 	}
-	// Start background consumer
-	go w.run()
+	for _, class := range studioQueueClasses {
+		cfg := o.StudioWorkerPoolConfig(class)
+		ch := make(chan queuedStudioJob, cfg.Buffer)
+		w.queues[class] = ch
+		for i := 0; i < cfg.Workers; i++ {
+			go w.runQueue(class, i, ch)
+		}
+		log.Printf("[StudioWorker] class=%s workers=%d buffer=%d", class, cfg.Workers, cfg.Buffer)
+	}
 	return w
 }
 
-// DispatchGeneration enqueues a generation job for async processing.
-// gen must be a *entities.AIGeneration (the record returned by StudioService.RequestGeneration).
+func (w *AsyncStudioWorker) queueFor(class string) chan queuedStudioJob {
+	if q := w.queues[class]; q != nil {
+		return q
+	}
+	return w.queues[entities.QueueAsync]
+}
+
+func studioJobTimeout(class string) time.Duration {
+	switch class {
+	case entities.QueueHeavyAsync:
+		return 12 * time.Minute
+	case entities.QueueAsync:
+		return 7 * time.Minute
+	case entities.QueueBackground:
+		return 10 * time.Minute
+	case entities.QueueRealtime, entities.QueueInteractive:
+		return 3 * time.Minute
+	default:
+		return 7 * time.Minute
+	}
+}
+
+func (w *AsyncStudioWorker) classifyJob(toolSlug string) (string, int) {
+	if w.orch == nil {
+		return entities.QueueAsync, 60
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return w.orch.QueuePolicyForTool(ctx, toolSlug)
+}
+
+// DispatchGeneration enqueues a generation job after the DB transaction has
+// committed. Queue admission is non-blocking so API latency never depends on an
+// AI provider or a saturated worker pool.
 func (w *AsyncStudioWorker) DispatchGeneration(gen interface{}, _ []string) {
 	if w.orch == nil {
 		log.Println("[StudioWorker] orchestrator not configured — skipping dispatch")
 		return
 	}
-
-	// Accept *entities.AIGeneration only (type-safe)
 	typed, ok := gen.(*entities.AIGeneration)
 	if !ok {
 		log.Printf("[StudioWorker] unexpected type %T — expected *entities.AIGeneration", gen)
 		return
 	}
 
+	class, maxQueueSeconds := w.classifyJob(typed.ToolSlug)
+	job := queuedStudioJob{
+		ID: typed.ID, ToolSlug: typed.ToolSlug, QueueClass: class,
+		EnqueuedAt: time.Now(), MaxQueueSeconds: maxQueueSeconds,
+	}
 	select {
-	case w.jobQueue <- typed.ID:
-		// enqueued
+	case w.queueFor(class) <- job:
+		return
 	default:
-		// Queue full — fail the job immediately so points are refunded
-		log.Printf("[StudioWorker] queue full, failing gen %s immediately", typed.ID)
+		// Extreme overload beyond the bounded queue. Fail/refund immediately
+		// rather than allocating unbounded goroutines or memory.
+		log.Printf("[StudioWorker] queue full class=%s gen=%s", class, typed.ID)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = w.studioSvc.FailGeneration(ctx, typed.ID, "server busy — please retry in a moment")
+		_ = w.studioSvc.FailGeneration(ctx, typed.ID, "AI queue is at capacity — points refunded; please retry shortly")
 	}
 }
 
-// run is the background consumer goroutine.
-func (w *AsyncStudioWorker) run() {
-	for genID := range w.jobQueue {
-		// Give each job its own context with a generous timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		if dispatchErr := w.orch.Dispatch(ctx, genID); dispatchErr != nil {
-			log.Printf("[StudioWorker] dispatch error for gen %s: %v", genID, dispatchErr)
+func (w *AsyncStudioWorker) runQueue(class string, workerID int, jobs <-chan queuedStudioJob) {
+	for job := range jobs {
+		if job.MaxQueueSeconds > 0 && time.Since(job.EnqueuedAt) > time.Duration(job.MaxQueueSeconds)*time.Second {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_ = w.studioSvc.FailGeneration(ctx, job.ID, "AI queue wait limit exceeded — points refunded; please retry")
+			cancel()
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), studioJobTimeout(class))
+		if dispatchErr := w.orch.Dispatch(ctx, job.ID); dispatchErr != nil {
+			log.Printf("[StudioWorker] class=%s worker=%d gen=%s dispatch error: %v", class, workerID, job.ID, dispatchErr)
 		}
 		cancel()
 	}
 }
 
-// RecoverStaleJobs is called by the lifecycle worker (cron) to retry jobs that
-// got stuck in "pending" or "processing" state (e.g. pod restart mid-job).
+// RecoverStaleJobs re-admits durable jobs after an interrupted worker/process.
+// The DB remains the source of truth; duplicate safety is handled by the
+// generation status/refund guards in StudioService.
 func (w *AsyncStudioWorker) RecoverStaleJobs(ctx context.Context) {
 	if w.orch == nil {
 		return
 	}
-	const staleAfterSeconds = 10 * 60 // 10 minutes
-	stale, err := w.studioSvc.ListStalePendingJobs(ctx, staleAfterSeconds, 20)
+	const staleAfterSeconds = 10 * 60
+	stale, err := w.studioSvc.ListStalePendingJobs(ctx, staleAfterSeconds, 100)
 	if err != nil {
 		log.Printf("[StudioWorker] RecoverStaleJobs query: %v", err)
 		return
 	}
-	if len(stale) == 0 {
-		return
-	}
-	log.Printf("[StudioWorker] recovering %d stale jobs", len(stale))
 	for _, gen := range stale {
-		id := gen.ID // capture for goroutine
+		class, maxQueueSeconds := w.orch.QueuePolicyForTool(ctx, gen.ToolSlug)
+		job := queuedStudioJob{
+			ID: gen.ID, ToolSlug: gen.ToolSlug, QueueClass: class,
+			EnqueuedAt: time.Now(), MaxQueueSeconds: maxQueueSeconds,
+		}
 		select {
-		case w.jobQueue <- id:
+		case w.queueFor(class) <- job:
 		default:
-			log.Printf("[StudioWorker] queue full, skipping stale gen %s", id)
+			log.Printf("[StudioWorker] recovery queue full class=%s gen=%s; leaving durable job for next recovery", class, gen.ID)
 		}
 	}
 }
 
-// LinkHandler is kept for compatibility — the new worker no longer needs it.
-// Previously used to break circular initialization; now orch is injected directly.
 func (w *AsyncStudioWorker) LinkHandler(_ *StudioHandler) {}

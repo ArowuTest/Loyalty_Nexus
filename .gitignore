@@ -30,3 +30,12 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Build / agent scratch (never commit — regenerable)
+.gocache/
+.agent/
+.tmp/
+backend/.tmp/
+*.exit
+.npm-ci.err
+.tmp-build.cmd

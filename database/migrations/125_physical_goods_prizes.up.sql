@@ -3,6 +3,16 @@
 -- These prizes are fulfilled manually by admin (shipping, logistics).
 -- Users submit delivery details (name + address) when claiming.
 
+-- Widen the prize-pool type constraint so the Admin wheel can actually
+-- publish the physical/goods types supported by the runtime.
+ALTER TABLE prize_pool DROP CONSTRAINT IF EXISTS prize_pool_prize_type_check;
+ALTER TABLE prize_pool
+  ADD CONSTRAINT prize_pool_prize_type_check
+  CHECK (prize_type IN (
+    'try_again', 'airtime', 'data', 'data_bundle',
+    'momo_cash', 'pulse_points', 'physical', 'goods'
+  ));
+
 -- Delivery details on spin_results for physical prizes
 ALTER TABLE spin_results
   ADD COLUMN IF NOT EXISTS delivery_name    TEXT NOT NULL DEFAULT '',

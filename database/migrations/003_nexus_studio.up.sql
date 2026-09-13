@@ -35,7 +35,9 @@ CREATE INDEX IF NOT EXISTS idx_ai_generations_user ON ai_generations(user_id);
 CREATE INDEX IF NOT EXISTS idx_ai_generations_status ON ai_generations(status);
 
 -- Seed Initial Tools (Full Catalogue - Appendix B)
-INSERT INTO studio_tools (name, description, category, point_cost, provider, provider_tool_id, icon_name) VALUES
+INSERT INTO studio_tools (name, description, category, point_cost, provider, provider_tool_id, icon_name)
+SELECT v.name, v.description, v.category, v.point_cost, v.provider, v.provider_tool_id, v.icon_name
+FROM (VALUES
 ('Ask Nexus', 'Conversational AI assistant for brainstorming and help.', 'Chat', 0, 'GROQ', 'llama-4-scout', 'MessageSquare'),
 ('My AI Photo', 'Generate professional AI portraits from text.', 'Create', 10, 'HUGGING_FACE', 'flux-1-schnell', 'Camera'),
 ('Background Remover', 'Instantly remove backgrounds from your photos.', 'Create', 2, 'REM_BG', 'self-hosted', 'Scissors'),
@@ -53,4 +55,5 @@ INSERT INTO studio_tools (name, description, category, point_cost, provider, pro
 ('Voice to Plan', 'Record your idea to get a structured business plan.', 'Build', 6, 'ASSEMBLY_AI', 'voice-plan', 'Mic2'),
 ('Local Translation', 'Translate any text to Hausa, Yoruba, Igbo or Pidgin.', 'Build', 2, 'GOOGLE', 'translate', 'Languages'),
 ('Text to Speech', 'Natural audio reading with a Nigerian accent.', 'Build', 5, 'GOOGLE', 'tts-nigeria', 'Volume2')
-ON CONFLICT (name) DO NOTHING;
+) AS v(name, description, category, point_cost, provider, provider_tool_id, icon_name)
+WHERE NOT EXISTS (SELECT 1 FROM studio_tools st WHERE st.name = v.name);

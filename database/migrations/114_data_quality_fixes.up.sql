@@ -25,12 +25,7 @@ UPDATE studio_tools SET ui_template = 'video_animator'  WHERE ui_template IN ('V
 --   or leak into user-facing draw history queries.
 UPDATE draws
    SET status = 'CANCELLED'
- WHERE (
-         LOWER(name)        LIKE '%test%'
-      OR LOWER(name)        LIKE '%demo%'
-      OR LOWER(description) LIKE '%test%'
-      OR LOWER(description) LIKE '%demo%'
-   )
+ WHERE (LOWER(name) LIKE '%test%' OR LOWER(name) LIKE '%demo%')
    AND status NOT IN ('COMPLETED', 'CANCELLED');
 
 -- BUG-046: Voice Studio currently exposes OpenAI voice IDs (alloy, echo, fable, onyx,
@@ -39,25 +34,15 @@ UPDATE draws
 --   Replace voice_ids JSON so the UI offers the Pollinations TTS voices that actually work.
 --   This is a parameters JSONB update — safe to run multiple times (idempotent).
 UPDATE studio_tools
-   SET parameters = COALESCE(parameters, '{}'::jsonb) || '{
-     "voice_options": [
-       {"id": "Cherry",  "label": "Cherry  (Female, Friendly)"},
-       {"id": "Serena",  "label": "Serena  (Female, Professional)"},
-       {"id": "Ethan",   "label": "Ethan   (Male, Clear)"}
-     ]
-   }'::jsonb
- WHERE slug IN ('voice-studio', 'narrate-pro', 'ai-podcast', 'my-podcast')
-   AND parameters IS NOT NULL
-   AND parameters::text LIKE '%alloy%';   -- only update rows still using OpenAI IDs
-
--- For rows where parameters is null or doesn't have OpenAI IDs yet, insert the field:
-UPDATE studio_tools
-   SET parameters = COALESCE(parameters, '{}'::jsonb) || '{
-     "voice_options": [
-       {"id": "Cherry",  "label": "Cherry  (Female, Friendly)"},
-       {"id": "Serena",  "label": "Serena  (Female, Professional)"},
-       {"id": "Ethan",   "label": "Ethan   (Male, Clear)"}
-     ]
-   }'::jsonb
- WHERE slug IN ('voice-studio', 'narrate-pro', 'ai-podcast', 'my-podcast')
-   AND (parameters IS NULL OR parameters::text NOT LIKE '%voice_options%');
+SET    ui_config  = COALESCE(ui_config, '{}'::jsonb) || jsonb_build_object(
+                      'voices', jsonb_build_array(
+                        jsonb_build_object('id', 'Cherry', 'label', 'Cherry (Female, Friendly)'),
+                        jsonb_build_object('id', 'Serena', 'label', 'Serena (Female, Professional)'),
+                        jsonb_build_object('id', 'Ethan',  'label', 'Ethan (Male, Clear)')
+                      )
+                    ),
+       updated_at = NOW()
+WHERE  slug IN ('voice-studio', 'narrate-pro', 'ai-podcast', 'my-podcast')
+AND    (ui_config IS NULL
+        OR ui_config->'voices' IS NULL
+        OR NOT (ui_config->>'voices' LIKE '%Cherry%'));

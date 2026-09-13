@@ -25,6 +25,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"loyalty-nexus/internal/application/services"
+	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/infrastructure/persistence"
 )
@@ -109,11 +110,11 @@ func setupPrizeDB(t *testing.T) *gorm.DB {
 }
 
 func newPrizeSpinSvc(db *gorm.DB) *services.SpinService {
-	userRepo       := persistence.NewPostgresUserRepository(db)
-	txRepo         := persistence.NewPostgresTransactionRepository(db)
-	prizeRepo      := persistence.NewPostgresPrizeRepository(db)
+	userRepo := persistence.NewPostgresUserRepository(db)
+	txRepo := persistence.NewPostgresTransactionRepository(db)
+	prizeRepo := persistence.NewPostgresPrizeRepository(db)
 	fulfillCfgRepo := persistence.NewPostgresPrizeFulfillmentConfigRepository(db)
-	cfg            := config.NewConfigManager(db)
+	cfg := config.NewConfigManager(db)
 	return services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db, fulfillCfgRepo)
 }
 
@@ -486,5 +487,204 @@ func TestGetPrize_NotFound(t *testing.T) {
 	_, err := svc.GetPrize(context.Background(), uuid.New())
 	if err == nil {
 		t.Fatal("expected 'prize not found' error, got nil")
+	}
+}
+
+func TestPublishPrizeConfiguration_TenToFour_Atomic(t *testing.T) {
+	db := setupPrizeDB(t)
+	svc := newPrizeSpinSvc(db)
+
+	ids := make([]uuid.UUID, 10)
+	for i := 0; i < 10; i++ {
+		ids[i] = seedPrize(db, fmt.Sprintf("Legacy %02d", i+1), "pulse_points", 10, true)
+	}
+
+	published, err := svc.PublishPrizeConfiguration(context.Background(), []entities.PrizePoolEntry{
+		{ID: ids[0], Name: "40 Points", PrizeType: entities.PrizePulsePoints, BaseValue: 40, ProbWeight: 40, IsActive: true, ColorScheme: "#111111"},
+		{ID: ids[1], Name: "₦50 Airtime", PrizeType: entities.PrizeAirtime, BaseValue: 5000, ProbWeight: 30, IsActive: true, ColorScheme: "#222222"},
+		{ID: ids[2], Name: "Try Again", PrizeType: entities.PrizeTryAgain, ProbWeight: 20, IsActive: true, ColorScheme: "#333333"},
+		{ID: ids[3], Name: "₦100 Cash", PrizeType: entities.PrizeMoMoCash, BaseValue: 10000, ProbWeight: 10, IsActive: true, ColorScheme: "#444444"},
+	})
+	if err != nil {
+		t.Fatalf("PublishPrizeConfiguration: %v", err)
+	}
+
+	active := make([]entities.PrizePoolEntry, 0, 4)
+	for _, p := range published {
+		if p.IsActive {
+			active = append(active, p)
+		}
+	}
+	if len(active) != 4 {
+		t.Fatalf("expected exactly 4 active prizes after 10→4 publish, got %d", len(active))
+	}
+
+	var total float64
+	for i, p := range active {
+		total += p.ProbWeight
+		if p.SortOrder != i {
+			t.Errorf("active prize %q sort_order=%d, want %d", p.Name, p.SortOrder, i)
+		}
+	}
+	if total != 100 {
+		t.Fatalf("active probability total=%v, want 100", total)
+	}
+
+	var inactiveCount int64
+	if err := db.Table("prize_pool").Where("id IN ? AND is_active = ?", ids[4:], false).Count(&inactiveCount).Error; err != nil {
+		t.Fatalf("count omitted inactive rows: %v", err)
+	}
+	if inactiveCount != 6 {
+		t.Fatalf("expected 6 omitted prizes to be inactive, got %d", inactiveCount)
+	}
+
+	wheel, err := svc.GetWheelConfig(context.Background())
+	if err != nil {
+		t.Fatalf("GetWheelConfig: %v", err)
+	}
+	if len(wheel.Slots) != 4 {
+		t.Fatalf("wheel slot count=%d, want 4", len(wheel.Slots))
+	}
+	wantWeights := []float64{40, 30, 20, 10}
+	for i, want := range wantWeights {
+		if wheel.Slots[i].Probability != want {
+			t.Errorf("slot %d probability=%v, want %v", i, wheel.Slots[i].Probability, want)
+		}
+		if wheel.Slots[i].Index != i {
+			t.Errorf("slot %d index=%d", i, wheel.Slots[i].Index)
+		}
+	}
+}
+
+func TestPublishPrizeConfiguration_InvalidTotalRollsBack(t *testing.T) {
+	db := setupPrizeDB(t)
+	svc := newPrizeSpinSvc(db)
+
+	idA := seedPrize(db, "A", "pulse_points", 60, true)
+	idB := seedPrize(db, "B", "try_again", 40, true)
+
+	_, err := svc.PublishPrizeConfiguration(context.Background(), []entities.PrizePoolEntry{
+		{ID: idA, Name: "A changed", PrizeType: entities.PrizePulsePoints, BaseValue: 10, ProbWeight: 60, IsActive: true},
+		{ID: idB, Name: "B changed", PrizeType: entities.PrizeTryAgain, ProbWeight: 39, IsActive: true},
+	})
+	if err == nil {
+		t.Fatal("expected 99% publish to be rejected")
+	}
+
+	var names []string
+	if err := db.Table("prize_pool").Where("is_active = ?", true).Order("sort_order ASC").Pluck("name", &names).Error; err != nil {
+		t.Fatalf("read live wheel after rejected publish: %v", err)
+	}
+	if len(names) != 2 || names[0] != "A" || names[1] != "B" {
+		t.Fatalf("rejected publish mutated live wheel: %#v", names)
+	}
+}
+
+func TestPublishPrizeConfiguration_NoFixedTryAgainCap(t *testing.T) {
+	db := setupPrizeDB(t)
+	svc := newPrizeSpinSvc(db)
+
+	_, err := svc.PublishPrizeConfiguration(context.Background(), []entities.PrizePoolEntry{
+		{ID: uuid.New(), Name: "Try Again", PrizeType: entities.PrizeTryAgain, ProbWeight: 60, IsActive: true},
+		{ID: uuid.New(), Name: "40 Points", PrizeType: entities.PrizePulsePoints, BaseValue: 40, ProbWeight: 40, IsActive: true},
+	})
+	if err != nil {
+		t.Fatalf("admin-authored 60%% try-again / 40%% win wheel should be valid: %v", err)
+	}
+}
+
+func TestPublishPrizeConfiguration_UnsupportedTypeRejected(t *testing.T) {
+	db := setupPrizeDB(t)
+	svc := newPrizeSpinSvc(db)
+
+	_, err := svc.PublishPrizeConfiguration(context.Background(), []entities.PrizePoolEntry{
+		{ID: uuid.New(), Name: "Unsupported", PrizeType: entities.PrizeType("studio_credits"), ProbWeight: 100, IsActive: true},
+	})
+	if err == nil {
+		t.Fatal("expected unsupported prize type to be rejected")
+	}
+}
+
+
+func TestPublishPrizeConfiguration_RejectsIncompleteTotalAtomically(t *testing.T) {
+	db := setupPrizeDB(t)
+	svc := newPrizeSpinSvc(db)
+
+	seedPrize(db, "Current A", "airtime", 50, true)
+	seedPrize(db, "Current B", "pulse_points", 50, true)
+
+	draft := []entities.PrizePoolEntry{
+		{ID: uuid.New(), Name: "A", PrizeType: entities.PrizeAirtime, ProbWeight: 40, IsActive: true},
+		{ID: uuid.New(), Name: "B", PrizeType: entities.PrizePulsePoints, ProbWeight: 30, IsActive: true},
+		{ID: uuid.New(), Name: "C", PrizeType: entities.PrizeMoMoCash, ProbWeight: 20, IsActive: true},
+		{ID: uuid.New(), Name: "D", PrizeType: entities.PrizeTryAgain, ProbWeight: 5, IsActive: true},
+	}
+	if _, err := svc.PublishPrizeConfiguration(context.Background(), draft); err == nil {
+		t.Fatal("expected 95% draft to be rejected")
+	}
+
+	wheel, err := svc.GetWheelConfig(context.Background())
+	if err != nil {
+		t.Fatalf("existing 100%% wheel should remain valid after rejected publish: %v", err)
+	}
+	if len(wheel.Slots) != 2 {
+		t.Fatalf("rejected publish mutated live wheel: expected 2 slots, got %d", len(wheel.Slots))
+	}
+}
+
+func TestPublishPrizeConfiguration_TenToFourDynamicWheel(t *testing.T) {
+	db := setupPrizeDB(t)
+	svc := newPrizeSpinSvc(db)
+
+	ids := make([]uuid.UUID, 10)
+	for i := 0; i < 10; i++ {
+		ids[i] = seedPrize(db, fmt.Sprintf("Prize %02d", i+1), "pulse_points", 10, true)
+	}
+
+	weights := []float64{40, 30, 20, 10}
+	draft := make([]entities.PrizePoolEntry, 10)
+	for i := 0; i < 10; i++ {
+		draft[i] = entities.PrizePoolEntry{
+			ID:         ids[i],
+			Name:       fmt.Sprintf("Prize %02d", i+1),
+			PrizeType:  entities.PrizePulsePoints,
+			BaseValue:  float64((i + 1) * 10),
+			ProbWeight: 10,
+			IsActive:   i < 4,
+			ColorScheme: fmt.Sprintf("#%06X", 0x111111+i*0x080808),
+		}
+		if i < 4 {
+			draft[i].ProbWeight = weights[i]
+		}
+	}
+
+	published, err := svc.PublishPrizeConfiguration(context.Background(), draft)
+	if err != nil {
+		t.Fatalf("publish 10->4 wheel: %v", err)
+	}
+	if len(published) != 10 {
+		t.Fatalf("expected all 10 configured rows to remain manageable, got %d", len(published))
+	}
+
+	wheel, err := svc.GetWheelConfig(context.Background())
+	if err != nil {
+		t.Fatalf("GetWheelConfig: %v", err)
+	}
+	if len(wheel.Slots) != 4 {
+		t.Fatalf("expected exactly 4 live wheel sections, got %d", len(wheel.Slots))
+	}
+
+	total := 0.0
+	for i, slot := range wheel.Slots {
+		if slot.PrizeID != ids[i] {
+			t.Fatalf("slot %d prize mismatch: got %s want %s", i, slot.PrizeID, ids[i])
+		}
+		if slot.Probability != weights[i] {
+			t.Fatalf("slot %d probability: got %.2f want %.2f", i, slot.Probability, weights[i])
+		}
+		total += slot.Probability
+	}
+	if total != 100 {
+		t.Fatalf("published wheel probability total = %.2f, want 100.00", total)
 	}
 }

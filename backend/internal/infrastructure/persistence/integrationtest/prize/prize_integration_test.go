@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,6 +36,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"loyalty-nexus/internal/application/services"
+	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/infrastructure/persistence"
 	"loyalty-nexus/internal/presentation/http/handlers"
@@ -66,6 +68,9 @@ func testDSN() string {
 	if v := os.Getenv("TEST_DATABASE_URL"); v != "" {
 		return v
 	}
+	if v := os.Getenv("DATABASE_URL"); v != "" {
+		return v
+	}
 	return "postgres://nexus_test:nexus_test@localhost:5432/loyalty_nexus_test?sslmode=disable"
 }
 
@@ -75,6 +80,9 @@ func openTestDB(t *testing.T) *gorm.DB {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
+		if strings.EqualFold(os.Getenv("CI"), "true") {
+			t.Fatalf("required Postgres integration database unavailable in CI: %v", err)
+		}
 		t.Skipf("Postgres not available (%v) — skipping integration tests", err)
 	}
 	return db
@@ -97,25 +105,25 @@ func withTx(t *testing.T, db *gorm.DB, fn func(tx *gorm.DB)) {
 // ─── Service + Handler factory ────────────────────────────────────────────────
 
 func newSvc(db *gorm.DB) *services.SpinService {
-	userRepo       := persistence.NewPostgresUserRepository(db)
-	txRepo         := persistence.NewPostgresTransactionRepository(db)
-	prizeRepo      := persistence.NewPostgresPrizeRepository(db)
+	userRepo := persistence.NewPostgresUserRepository(db)
+	txRepo := persistence.NewPostgresTransactionRepository(db)
+	prizeRepo := persistence.NewPostgresPrizeRepository(db)
 	fulfillCfgRepo := persistence.NewPostgresPrizeFulfillmentConfigRepository(db)
-	cfg            := config.NewConfigManagerNoRefresh(db)
+	cfg := config.NewConfigManagerNoRefresh(db)
 	return services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db, fulfillCfgRepo)
 }
 
 // newAdminHandler builds the full AdminHandler wired to the given DB.
 func newAdminHandler(db *gorm.DB) *handlers.AdminHandler {
-	userRepo       := persistence.NewPostgresUserRepository(db)
-	txRepo         := persistence.NewPostgresTransactionRepository(db)
-	prizeRepo      := persistence.NewPostgresPrizeRepository(db)
+	userRepo := persistence.NewPostgresUserRepository(db)
+	txRepo := persistence.NewPostgresTransactionRepository(db)
+	prizeRepo := persistence.NewPostgresPrizeRepository(db)
 	fulfillCfgRepo := persistence.NewPostgresPrizeFulfillmentConfigRepository(db)
-	cfg            := config.NewConfigManagerNoRefresh(db)
-	spinSvc        := services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db, fulfillCfgRepo)
-	drawSvc   := services.NewDrawService(db)
-	fraudSvc      := services.NewFraudService(db)
-	claimSvc      := services.NewAdminClaimService(prizeRepo, nil)
+	cfg := config.NewConfigManagerNoRefresh(db)
+	spinSvc := services.NewSpinService(userRepo, txRepo, prizeRepo, nil, nil, cfg, db, fulfillCfgRepo)
+	drawSvc := services.NewDrawService(db)
+	fraudSvc := services.NewFraudService(db)
+	claimSvc := services.NewAdminClaimService(prizeRepo, nil)
 	drawWindowSvc := services.NewDrawWindowService(db)
 	return handlers.NewAdminHandler(db, cfg, spinSvc, drawSvc, drawWindowSvc, fraudSvc, nil, nil, claimSvc, nil)
 }
@@ -148,6 +156,7 @@ func buildRouter(db *gorm.DB, authSvc *services.AdminAuthService) http.Handler {
 
 	// Prize CRUD — static paths must be registered BEFORE wildcard {id} paths
 	mux.Handle("GET /api/v1/admin/prizes/summary", adminAuth(http.HandlerFunc(h.GetPrizeSummary)))
+	mux.Handle("PUT /api/v1/admin/prizes/config", adminAuth(http.HandlerFunc(h.PublishPrizeConfiguration)))
 	mux.Handle("POST /api/v1/admin/prizes/reorder", adminAuth(http.HandlerFunc(h.ReorderPrizes)))
 	mux.Handle("GET /api/v1/admin/prizes", adminAuth(http.HandlerFunc(h.GetPrizePool)))
 	mux.Handle("POST /api/v1/admin/prizes", adminAuth(http.HandlerFunc(h.CreatePrize)))
@@ -1203,6 +1212,138 @@ func TestPrizeRepo_UpdatedAt_IsSet_Postgres(t *testing.T) {
 		}
 		if updatedAt.Before(before) || updatedAt.After(after) {
 			t.Errorf("updated_at %v is outside expected range [%v, %v]", updatedAt, before, after)
+		}
+	})
+}
+
+func TestPublishPrizeConfiguration_DynamicWheelTenToFour_Postgres(t *testing.T) {
+	db := openTestDB(t)
+	withTx(t, db, func(tx *gorm.DB) {
+		if err := tx.Table("prize_pool").Where("is_active = ?", true).Update("is_active", false).Error; err != nil {
+			t.Fatalf("deactivate existing prize rows: %v", err)
+		}
+		svc := newSvc(tx)
+
+		prizes := make([]entities.PrizePoolEntry, 10)
+		for i := range prizes {
+			prizes[i] = entities.PrizePoolEntry{
+				ID:          uuid.New(),
+				Name:        fmt.Sprintf("Dynamic Prize %02d", i+1),
+				PrizeType:   entities.PrizePulsePoints,
+				BaseValue:   float64(i + 1),
+				IsActive:    true,
+				ProbWeight:  10.00,
+				ColorScheme: fmt.Sprintf("#%06X", 0x110000+i*0x001111),
+				SortOrder:   i,
+			}
+		}
+
+		if _, err := svc.PublishPrizeConfiguration(context.Background(), prizes); err != nil {
+			t.Fatalf("publish 10-prize wheel: %v", err)
+		}
+		wheel10, err := svc.GetWheelConfig(context.Background())
+		if err != nil {
+			t.Fatalf("get 10-prize wheel: %v", err)
+		}
+		if len(wheel10.Slots) != 10 {
+			t.Fatalf("expected 10 live wheel slots, got %d", len(wheel10.Slots))
+		}
+		total10 := 0.0
+		for i, slot := range wheel10.Slots {
+			if slot.Index != i {
+				t.Fatalf("slot %d returned index %d", i, slot.Index)
+			}
+			if slot.Probability != 10.00 {
+				t.Fatalf("slot %d probability = %.2f, want 10.00", i, slot.Probability)
+			}
+			total10 += slot.Probability
+		}
+		if math.Abs(total10-100.00) > 0.001 {
+			t.Fatalf("10-prize wheel total = %.2f, want 100.00", total10)
+		}
+
+		weights := []float64{40, 30, 20, 10}
+		for i := range prizes {
+			if i < 4 {
+				prizes[i].IsActive = true
+				prizes[i].ProbWeight = weights[i]
+			} else {
+				prizes[i].IsActive = false
+			}
+		}
+
+		if _, err := svc.PublishPrizeConfiguration(context.Background(), prizes); err != nil {
+			t.Fatalf("publish reduced 4-prize wheel: %v", err)
+		}
+		wheel4, err := svc.GetWheelConfig(context.Background())
+		if err != nil {
+			t.Fatalf("get 4-prize wheel: %v", err)
+		}
+		if len(wheel4.Slots) != 4 {
+			t.Fatalf("expected 4 live wheel slots, got %d", len(wheel4.Slots))
+		}
+		total4 := 0.0
+		for i, want := range weights {
+			got := wheel4.Slots[i]
+			if got.PrizeID != prizes[i].ID {
+				t.Fatalf("slot %d prize id = %s, want %s", i, got.PrizeID, prizes[i].ID)
+			}
+			if math.Abs(got.Probability-want) > 0.001 {
+				t.Fatalf("slot %d probability = %.2f, want %.2f", i, got.Probability, want)
+			}
+			total4 += got.Probability
+		}
+		if math.Abs(total4-100.00) > 0.001 {
+			t.Fatalf("4-prize wheel total = %.2f, want 100.00", total4)
+		}
+
+		var activeCount int64
+		if err := tx.Table("prize_pool").Where("is_active = ?", true).Count(&activeCount).Error; err != nil {
+			t.Fatalf("count active prizes: %v", err)
+		}
+		if activeCount != 4 {
+			t.Fatalf("database active prize count = %d, want 4", activeCount)
+		}
+	})
+}
+
+func TestPublishPrizeConfiguration_InvalidDraftRollsBack_Postgres(t *testing.T) {
+	db := openTestDB(t)
+	withTx(t, db, func(tx *gorm.DB) {
+		if err := tx.Table("prize_pool").Where("is_active = ?", true).Update("is_active", false).Error; err != nil {
+			t.Fatalf("deactivate existing prize rows: %v", err)
+		}
+		svc := newSvc(tx)
+
+		prizes := []entities.PrizePoolEntry{
+			{ID: uuid.New(), Name: "Prize A", PrizeType: entities.PrizePulsePoints, BaseValue: 10, IsActive: true, ProbWeight: 40, SortOrder: 0},
+			{ID: uuid.New(), Name: "Prize B", PrizeType: entities.PrizePulsePoints, BaseValue: 20, IsActive: true, ProbWeight: 30, SortOrder: 1},
+			{ID: uuid.New(), Name: "Prize C", PrizeType: entities.PrizePulsePoints, BaseValue: 30, IsActive: true, ProbWeight: 20, SortOrder: 2},
+			{ID: uuid.New(), Name: "Prize D", PrizeType: entities.PrizePulsePoints, BaseValue: 40, IsActive: true, ProbWeight: 10, SortOrder: 3},
+		}
+		if _, err := svc.PublishPrizeConfiguration(context.Background(), prizes); err != nil {
+			t.Fatalf("publish valid baseline: %v", err)
+		}
+
+		invalid := append([]entities.PrizePoolEntry(nil), prizes...)
+		invalid[0].ProbWeight = 30 // final total would be 90%
+
+		if _, err := svc.PublishPrizeConfiguration(context.Background(), invalid); err == nil {
+			t.Fatal("expected invalid 90% draft to be rejected")
+		}
+
+		wheel, err := svc.GetWheelConfig(context.Background())
+		if err != nil {
+			t.Fatalf("get live wheel after rejected draft: %v", err)
+		}
+		if len(wheel.Slots) != 4 {
+			t.Fatalf("live wheel changed after rejected draft: got %d slots", len(wheel.Slots))
+		}
+		want := []float64{40, 30, 20, 10}
+		for i := range want {
+			if math.Abs(wheel.Slots[i].Probability-want[i]) > 0.001 {
+				t.Fatalf("slot %d changed after rejected draft: got %.2f want %.2f", i, wheel.Slots[i].Probability, want[i])
+			}
 		}
 	})
 }

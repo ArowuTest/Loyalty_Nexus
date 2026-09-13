@@ -21,13 +21,23 @@ ALTER TABLE spin_results
 
 -- Backfill: rows created by migration 060 used is_fulfilled BOOLEAN instead.
 -- Map TRUE → 'completed', FALSE → 'pending' for any rows that have is_fulfilled set.
-UPDATE spin_results
-SET fulfillment_status = CASE
-    WHEN is_fulfilled IS TRUE THEN 'completed'
-    ELSE 'pending'
-END
-WHERE fulfillment_status = 'pending'
-  AND is_fulfilled IS NOT NULL;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='spin_results' AND column_name='is_fulfilled'
+    ) THEN
+        EXECUTE $sql$
+            UPDATE spin_results
+            SET fulfillment_status = CASE
+                WHEN is_fulfilled IS TRUE THEN 'completed'
+                ELSE 'pending'
+            END
+            WHERE fulfillment_status = 'pending'
+              AND is_fulfilled IS NOT NULL
+        $sql$;
+    END IF;
+END $$;
 
 -- Add index to match the one from migration 020
 CREATE INDEX IF NOT EXISTS idx_spin_results_fulfillment_status

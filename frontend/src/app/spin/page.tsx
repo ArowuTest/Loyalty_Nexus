@@ -12,6 +12,7 @@ import {
   History, Info, CheckCircle, ChevronDown, CreditCard, Smartphone, Package
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { buildWheelGradient, buildWheelSlices, isValidWheelPercentages, mapWheelSlots, wheelLandingDegrees } from "@/lib/wheel";
 import DailySpinProgress from "@/components/spin/DailySpinProgress";
 import { useStore } from "@/store/useStore";
 
@@ -29,21 +30,17 @@ const NIGERIAN_BANKS = [
   "Unity Bank","VFD Microfinance Bank","Wema Bank","Zenith Bank",
 ];
 
-// ── Fallback segments ──────────────────────────────────────────────────────
-const FALLBACK_SEGMENTS = [
-  { label: "₦500 Airtime",  prize_type: "airtime",       base_value: 50000,  probability: 20, color: "#10b981", is_active: true },
-  { label: "Try Again",     prize_type: "try_again",      base_value: 0,      probability: 30, color: "#4b5563", is_active: true },
-  { label: "100 Points",    prize_type: "pulse_points",   base_value: 100,    probability: 20, color: "#5f72f9", is_active: true },
-  { label: "₦1k Data",      prize_type: "data_bundle",    base_value: 100000, probability: 10, color: "#06b6d4", is_active: true },
-  { label: "50 Points",     prize_type: "pulse_points",   base_value: 50,     probability: 25, color: "#a78bfa", is_active: true },
-  { label: "₦2k Cash",      prize_type: "momo_cash",      base_value: 200000, probability: 5,  color: "#f59e0b", is_active: true },
-  { label: "Try Again",     prize_type: "try_again",      base_value: 0,      probability: 25, color: "#374151", is_active: true },
-  { label: "₦5k Cash",      prize_type: "momo_cash",      base_value: 500000, probability: 2,  color: "#f43f5e", is_active: true },
-];
-
-interface Segment { label: string; prize_type: string; base_value: number; probability: number; color: string; is_active: boolean; }
+interface Segment { prize_id: string; label: string; prize_type: string; base_value: number; probability: number; color: string; is_active: boolean; }
 interface SpinResult { id: string; prize_type: string; prize_value: number; slot_index: number; fulfillment_status: string; claim_status?: string; }
-interface SpinOutcome { spin_result?: SpinResult; prize_label: string; slot_index: number; message?: string; needs_momo_setup?: boolean; }
+interface SpinOutcome {
+  spin_result?: SpinResult;
+  prize_id: string;
+  prize_label: string;
+  slot_index: number;
+  wheel?: { slots?: Record<string, unknown>[]; required_credits?: number };
+  message?: string;
+  needs_momo_setup?: boolean;
+}
 interface SpinHistoryItem { id: string; prize_type: string; prize_value: number; fulfillment_status: string; claim_status?: string; created_at: string; }
 interface Wallet { spin_credits: number; pulse_points: number; }
 
@@ -351,8 +348,9 @@ function PrizeClaimModal({ item, onClose, onSuccess }: PrizeClaimModalProps) {
 // ── Main Page ──────────────────────────────────────────────────────────────
 export default function SpinPage() {
   const wheelRef = useRef<HTMLDivElement>(null);
-  const [segments, setSegments] = useState<Segment[]>(FALLBACK_SEGMENTS);
+  const [segments, setSegments] = useState<Segment[]>([]);
   const [loadingSegments, setLoadingSegments] = useState(true);
+  const [wheelError, setWheelError] = useState<string | null>(null);
   const [rotation, setRotation] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [spun, setSpun] = useState(false);
@@ -379,24 +377,29 @@ export default function SpinPage() {
   useEffect(() => {
     api.getWheelConfig()
       .then((res: any) => {
-        const raw: any[] = res?.slots ?? res?.prizes ?? res?.segments ?? [];
-        const mapped = raw.map((p: any): Segment => ({
-          label:       p.label ?? p.name ?? p.prize_name ?? "Prize",
-          prize_type:  (p.prize_type ?? p.type ?? "try_again").toLowerCase(),
-          base_value:  Number(p.base_value ?? p.prize_value ?? p.value ?? 0),
-          probability: Number(p.probability ?? p.win_probability_weight ?? 0),
-          color:       (p.prize_type === "try_again" || p.is_no_win)
-                         ? (p.color ?? "#374151")
-                         : (p.color ?? p.color_hex ?? "#5f72f9"),
-          is_active:   true,
-        }));
-        if (mapped.length >= 2) setSegments(mapped);
+        const raw = (res?.slots ?? res?.prizes ?? res?.segments ?? []) as Record<string, unknown>[];
+        const mapped = mapWheelSlots(raw);
+        if (mapped.length === 0) {
+          setSegments([]);
+          setWheelError("No active wheel prizes are configured.");
+          return;
+        }
+        if (!isValidWheelPercentages(mapped)) {
+          setSegments([]);
+          setWheelError("The published wheel configuration is invalid. Active probabilities must total exactly 100%.");
+          return;
+        }
+        setSegments(mapped);
+        setWheelError(null);
       })
-      .catch(() => {})
+      .catch((err: unknown) => {
+        setSegments([]);
+        setWheelError(err instanceof Error ? err.message : "Wheel configuration is unavailable.");
+      })
       .finally(() => setLoadingSegments(false));
   }, []);
 
-  const segAngle = 360 / segments.length;
+  const ranges = buildWheelSlices(segments);
 
   const handleSpin = useCallback(async () => {
     if (spinning || spun) return;
@@ -408,12 +411,22 @@ export default function SpinPage() {
     setShowResult(false);
     try {
       const res = await api.playSpin() as SpinOutcome;
-      // Absolute rotation — mirrors RechargeMax fix so pointer always lands
-      // on the correct segment regardless of how many spins have accumulated.
-      const targetIdx = res.slot_index ?? 0;
-      const segmentCentre = targetIdx * segAngle + segAngle / 2;
-      const landingAngle  = ((360 - (segmentCentre % 360)) + 360) % 360;
-      const nudge         = (Math.random() - 0.5) * (segAngle * 0.3);
+      const snapshot = mapWheelSlots((res.wheel?.slots ?? []) as Record<string, unknown>[]);
+      if (!isValidWheelPercentages(snapshot)) {
+        throw new Error("Spin returned an invalid wheel snapshot");
+      }
+      const prizeIdx = res.prize_id
+        ? snapshot.findIndex((segment) => segment.prize_id === res.prize_id)
+        : -1;
+      const targetIdx = prizeIdx >= 0 ? prizeIdx : (res.slot_index ?? 0);
+      const targetRange = buildWheelSlices(snapshot)[targetIdx];
+      if (!targetRange) {
+        throw new Error("Wheel result does not match the wheel snapshot used for this spin");
+      }
+      setSegments(snapshot);
+      setWheelError(null);
+      const { landing: landingAngle, sweep: segmentSpan } = wheelLandingDegrees(snapshot, targetIdx);
+      const nudge = (Math.random() - 0.5) * (segmentSpan * 0.3);
       const baseSpins     = Math.ceil(rotation / 360) * 360 + 5 * 360;
       const finalRotation = baseSpins + landingAngle + nudge;
       setRotation(finalRotation);
@@ -437,7 +450,7 @@ export default function SpinPage() {
       const msg = e instanceof Error ? e.message : "Spin failed";
       toast.error(msg);
     }
-  }, [spinning, spun, spinCredits, segAngle, rotation, mutateWallet, mutateHistory]);
+  }, [spinning, spun, spinCredits, rotation, mutateWallet, mutateHistory]);
 
   const handleReset = () => { setSpun(false); setOutcome(null); setShowResult(false); };
 
@@ -513,6 +526,10 @@ export default function SpinPage() {
               <div className="w-full h-full rounded-full flex items-center justify-center border-2 border-nexus-500/20">
                 <Loader2 className="text-nexus-400 animate-spin" size={32} />
               </div>
+            ) : wheelError || segments.length === 0 ? (
+              <div className="w-full h-full rounded-full flex items-center justify-center border-2 border-red-500/20 bg-red-500/5 p-6 text-center">
+                <p className="text-xs text-red-300">{wheelError ?? "No active wheel configuration is available."}</p>
+              </div>
             ) : (
               <>
                 {/* Pointer */}
@@ -530,13 +547,11 @@ export default function SpinPage() {
                     boxShadow: spinning
                       ? "0 0 40px rgba(95,114,249,0.6), 0 0 80px rgba(249,199,79,0.3)"
                       : "0 0 20px rgba(95,114,249,0.25)",
-                    background: `conic-gradient(${segments.map((s, i) =>
-                      `${s.color} ${i * segAngle}deg ${(i + 1) * segAngle}deg`
-                    ).join(", ")})`,
+                    background: buildWheelGradient(segments),
                   }}
                 >
                   {segments.map((seg, idx) => {
-                    const angle = idx * segAngle + segAngle / 2;
+                    const angle = ranges[idx]?.center ?? 0;
                     const rad = ((angle - 90) * Math.PI) / 180;
                     const r = 95;
                     return (
@@ -561,7 +576,7 @@ export default function SpinPage() {
                 <div className="absolute inset-0 flex items-center justify-center">
                   <motion.button
                     onClick={handleSpin}
-                    disabled={spinning || spun || spinCredits < 1}
+                    disabled={spinning || spun || spinCredits < 1 || segments.length === 0}
                     className="w-16 h-16 rounded-full font-black text-sm text-nexus-600 bg-white disabled:opacity-50 z-10 flex items-center justify-center"
                     style={{ boxShadow: "0 0 0 4px rgba(95,114,249,0.4), 0 4px 20px rgba(0,0,0,0.4)", border: "3px solid rgba(95,114,249,0.7)" }}
                     whileHover={!spinning && !spun && spinCredits > 0 ? { scale: 1.1 } : {}}
@@ -639,7 +654,7 @@ export default function SpinPage() {
             <div className="mt-5 space-y-2">
               <motion.button
                 onClick={handleSpin}
-                disabled={spinning || spinCredits < 1 || loadingSegments}
+                disabled={spinning || spinCredits < 1 || loadingSegments || segments.length === 0 || !!wheelError}
                 className="w-full py-3.5 rounded-2xl font-bold text-white bg-gradient-to-r from-nexus-600 to-nexus-500 disabled:opacity-40 flex items-center justify-center gap-2"
                 whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
               >

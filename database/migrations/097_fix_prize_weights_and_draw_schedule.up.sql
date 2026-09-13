@@ -36,6 +36,12 @@ INSERT INTO draw_schedules (
   (gen_random_uuid(), 'Daily Draw — Saturday',  'DAILY', 6, '21:00:00', 6, '00:00:00', 6, '20:59:59', 20, true, 16)
 ON CONFLICT DO NOTHING;
 
+-- Align the historical recurrence constraint with the application model.
+ALTER TABLE draws DROP CONSTRAINT IF EXISTS draws_recurrence_check;
+ALTER TABLE draws
+  ADD CONSTRAINT draws_recurrence_check
+  CHECK (recurrence IN ('none','once','daily','weekly','monthly'));
+
 -- Create the first active daily draw record for April 2026 (if not already present)
 INSERT INTO draws (
   id, name, draw_code, draw_type, status, prize_pool,

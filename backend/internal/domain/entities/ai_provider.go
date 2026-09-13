@@ -41,12 +41,12 @@ type AIProviderConfig struct {
 	Name         string              `json:"name"           gorm:"column:name"`
 	Slug         string              `json:"slug"           gorm:"column:slug;uniqueIndex"`
 	Category     string              `json:"category"       gorm:"column:category;index"` // text|image|video|tts|transcribe|translate|music|bg-remove|vision
-	Template     string              `json:"template"       gorm:"column:template"`        // driver key
-	EnvKey       string              `json:"env_key"        gorm:"column:env_key"`         // env var name (never expose value)
-	APIKeyEnc    string              `json:"-"              gorm:"column:api_key_enc"`     // AES-GCM encrypted, never sent to frontend
+	Template     string              `json:"template"       gorm:"column:template"`       // driver key
+	EnvKey       string              `json:"env_key"        gorm:"column:env_key"`        // env var name (never expose value)
+	APIKeyEnc    string              `json:"-"              gorm:"column:api_key_enc"`    // AES-GCM encrypted, never sent to frontend
 	ModelID      string              `json:"model_id"       gorm:"column:model_id"`
 	ExtraConfig  ProviderExtraConfig `json:"extra_config"   gorm:"column:extra_config;serializer:json;type:jsonb"`
-	Priority     int                 `json:"priority"       gorm:"column:priority"`        // 1=primary, higher=backup
+	Priority     int                 `json:"priority"       gorm:"column:priority"` // 1=primary, higher=backup
 	IsPrimary    bool                `json:"is_primary"     gorm:"column:is_primary"`
 	IsActive     bool                `json:"is_active"      gorm:"column:is_active"`
 	CostMicros   int                 `json:"cost_micros"    gorm:"column:cost_micros"`
@@ -78,31 +78,42 @@ const (
 	ProviderCategoryVision     = "vision"
 	ProviderCategoryAvatar     = "avatar" // talking-head / lip-synced digital human
 	ProviderCategoryRender     = "render" // programmatic/templated video (Remotion)
+	ProviderCategorySearch     = "search" // external web/research search provider
 )
 
 // ── Template constants ────────────────────────────────────────────────────────
 // Templates define WHICH driver function to call.
 const (
-	TemplatePollText        = "openai-compatible"   // generic OpenAI-compat POST /v1/chat/completions
-	TemplatePollImage       = "pollinations-image"
-	TemplatePollTTS         = "pollinations-tts"
-	TemplatePollVideo       = "pollinations-video"
-	TemplatePollMusic       = "pollinations-music"
-	TemplateGemini          = "gemini"
-	TemplateDeepSeek        = "deepseek"
-	TemplateGroqWhisper     = "groq-whisper"
-	TemplateAssemblyAI      = "assemblyai"
-	TemplateGoogleTTS       = "google-tts"
-	TemplateGoogleTranslate = "google-translate"
-	TemplateHFImage         = "hf-image"
-	TemplateFALImage        = "fal-image"
-	TemplateFALVideo        = "fal-video"
-	TemplateFALBGRemove     = "fal-bg-remove"
-	TemplateElevenLabsTTS   = "elevenlabs-tts"
-	TemplateElevenLabsMusic = "elevenlabs-music"
-	TemplateMubert          = "mubert"
-	TemplateRemoveBG        = "remove-bg"
-	TemplateRembg           = "rembg"
+	TemplatePollText         = "openai-compatible" // generic OpenAI-compat POST /v1/chat/completions
+	TemplatePollImage        = "pollinations-image"
+	TemplatePollGPTImage     = "pollinations-gpt-image"
+	TemplatePollImageEdit    = "pollinations-image-edit"
+	TemplatePollTTS          = "pollinations-tts"
+	TemplatePollVideo        = "pollinations-video"
+	TemplatePollMusic        = "pollinations-music"
+	TemplateGemini           = "gemini"
+	TemplateDeepSeek         = "deepseek"
+	TemplateGroqWhisper      = "groq-whisper"
+	TemplateOpenAITranscribe = "openai-transcribe"
+	TemplateAssemblyAI       = "assemblyai"
+	TemplateGoogleTTS        = "google-tts"
+	TemplateGoogleTranslate  = "google-translate"
+	TemplateHFImage          = "hf-image"
+	TemplateFALImage         = "fal-image"
+	TemplateFALImageUltra    = "fal-image-ultra"
+	TemplateFALImageEdit     = "fal-image-edit"
+	TemplateFALVideo         = "fal-video"
+	TemplateFALVideoMulti    = "fal-video-multi"
+	TemplateGrokImage        = "grok-image"
+	TemplateGrokVideo        = "grok-video"
+	TemplateFALBGRemove      = "fal-bg-remove"
+	TemplateElevenLabsTTS    = "elevenlabs-tts"
+	TemplateElevenLabsMusic  = "elevenlabs-music"
+	TemplateSunoMusic        = "suno-music"
+	TemplateHFMusicGen       = "hf-musicgen"
+	TemplateMubert           = "mubert"
+	TemplateRemoveBG         = "remove-bg"
+	TemplateRembg            = "rembg"
 	// ── Avatar (talking-head) templates — registered by INPUT SHAPE, not vendor,
 	// so a future FAL avatar model is a DB-row-only change (no code). ──
 	TemplateFALAvatarText  = "fal-avatar-text"  // {image_url, text_input, voice} → video; model does TTS internally
@@ -111,7 +122,8 @@ const (
 	// ── Render (Remotion) — self-hosted render-service, host-portable Render→GCP.
 	// The render TARGET lives behind RENDER_SERVICE_URL; this template just POSTs
 	// {composition, props} and polls for the MP4. ──
-	TemplateRemotion = "remotion"
+	TemplateRemotion     = "remotion"
+	TemplateTavilySearch = "tavily-search"
 )
 
 // ValidCategories and ValidTemplates for frontend dropdowns.
@@ -119,16 +131,16 @@ var ValidCategories = []string{
 	ProviderCategoryText, ProviderCategoryImage, ProviderCategoryVideo,
 	ProviderCategoryTTS, ProviderCategoryTranscribe, ProviderCategoryTranslate,
 	ProviderCategoryMusic, ProviderCategoryBGRemove, ProviderCategoryVision,
-	ProviderCategoryAvatar, ProviderCategoryRender,
+	ProviderCategoryAvatar, ProviderCategoryRender, ProviderCategorySearch,
 }
 
 var ValidTemplates = []string{
-	TemplatePollText, TemplatePollImage, TemplatePollTTS, TemplatePollVideo, TemplatePollMusic,
-	TemplateGemini, TemplateDeepSeek, TemplateGroqWhisper, TemplateAssemblyAI,
+	TemplatePollText, TemplatePollImage, TemplatePollGPTImage, TemplatePollImageEdit, TemplatePollTTS, TemplatePollVideo, TemplatePollMusic,
+	TemplateGemini, TemplateDeepSeek, TemplateGroqWhisper, TemplateOpenAITranscribe, TemplateAssemblyAI,
 	TemplateGoogleTTS, TemplateGoogleTranslate,
-	TemplateHFImage, TemplateFALImage, TemplateFALVideo, TemplateFALBGRemove,
-	TemplateElevenLabsTTS, TemplateElevenLabsMusic,
+	TemplateHFImage, TemplateFALImage, TemplateFALImageUltra, TemplateFALImageEdit, TemplateFALVideo, TemplateFALVideoMulti, TemplateGrokImage, TemplateGrokVideo, TemplateFALBGRemove,
+	TemplateElevenLabsTTS, TemplateElevenLabsMusic, TemplateSunoMusic, TemplateHFMusicGen,
 	TemplateMubert, TemplateRemoveBG, TemplateRembg,
 	TemplateFALAvatarText, TemplateFALAvatarAudio, TemplateHeyGen,
-	TemplateRemotion,
+	TemplateRemotion, TemplateTavilySearch,
 }

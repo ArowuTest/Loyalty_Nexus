@@ -26,21 +26,21 @@ import (
 // Zero-hardcoding: every business parameter is read from network_configs,
 // editable live via PUT /api/v1/admin/config/:key.
 type AdminHandler struct {
-	db              *gorm.DB
-	cfg             *config.ConfigManager
-	spinSvc         *services.SpinService
-	drawSvc         *services.DrawService
-	drawWindowSvc   *services.DrawWindowService
-	fraudSvc        *services.FraudService
-	warsSvc         *services.RegionalWarsService
-	studioSvc       *services.StudioService
-	claimSvc        *services.AdminClaimService
-	csvSvc          *services.MTNPushCSVService   // nil-safe; set via WithCSVService
-	bonusPulseSvc   *services.BonusPulseService   // nil-safe; set via WithBonusPulseService
-	notifySvc       *services.NotificationService  // for winner SMS notifications
-	settingsSvc     *services.SettingsService      // nil-safe; set via WithSettingsService
-	fulfillCfgRepo  repositories.PrizeFulfillmentConfigRepository
-	rdb             *redis.Client
+	db             *gorm.DB
+	cfg            *config.ConfigManager
+	spinSvc        *services.SpinService
+	drawSvc        *services.DrawService
+	drawWindowSvc  *services.DrawWindowService
+	fraudSvc       *services.FraudService
+	warsSvc        *services.RegionalWarsService
+	studioSvc      *services.StudioService
+	claimSvc       *services.AdminClaimService
+	csvSvc         *services.MTNPushCSVService   // nil-safe; set via WithCSVService
+	bonusPulseSvc  *services.BonusPulseService   // nil-safe; set via WithBonusPulseService
+	notifySvc      *services.NotificationService // for winner SMS notifications
+	settingsSvc    *services.SettingsService     // nil-safe; set via WithSettingsService
+	fulfillCfgRepo repositories.PrizeFulfillmentConfigRepository
+	rdb            *redis.Client
 }
 
 func NewAdminHandler(
@@ -52,7 +52,7 @@ func NewAdminHandler(
 	fraudSvc *services.FraudService,
 	warsSvc *services.RegionalWarsService,
 	studioSvc *services.StudioService,
-	claimSvc  *services.AdminClaimService,
+	claimSvc *services.AdminClaimService,
 	rdb *redis.Client,
 ) *AdminHandler {
 	return &AdminHandler{
@@ -172,14 +172,14 @@ func (h *AdminHandler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 	drawStats, _ := h.drawSvc.GetStats(ctx)
 
 	jsonOK(w, map[string]interface{}{
-		"total_users":       totalUsers,
-		"active_today":      activeToday,
-		"total_spins":       totalSpins,
-		"pending_prizes":    pendingPrizes,
+		"total_users":         totalUsers,
+		"active_today":        activeToday,
+		"total_spins":         totalSpins,
+		"pending_prizes":      pendingPrizes,
 		"total_points_issued": totalPointsIssued,
-		"spin_stats":        spinStats,
-		"draw_stats":        drawStats,
-		"generated_at":      time.Now(),
+		"spin_stats":          spinStats,
+		"draw_stats":          drawStats,
+		"generated_at":        time.Now(),
 	})
 }
 
@@ -247,17 +247,17 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type userRow struct {
-		ID          string     `gorm:"column:id" json:"id"`
-		PhoneNumber string     `gorm:"column:phone_number" json:"phone_number"`
-		Tier        string     `gorm:"column:tier" json:"tier"`
-		State       string     `gorm:"column:state" json:"state"`
-		IsActive    bool       `gorm:"column:is_active" json:"is_active"`
-		StreakCount int        `gorm:"column:streak_count" json:"streak_count"`
+		ID             string     `gorm:"column:id" json:"id"`
+		PhoneNumber    string     `gorm:"column:phone_number" json:"phone_number"`
+		Tier           string     `gorm:"column:tier" json:"tier"`
+		State          string     `gorm:"column:state" json:"state"`
+		IsActive       bool       `gorm:"column:is_active" json:"is_active"`
+		StreakCount    int        `gorm:"column:streak_count" json:"streak_count"`
 		LastRechargeAt *time.Time `gorm:"column:last_recharge_at" json:"last_recharge_at,omitempty"`
-		CreatedAt   time.Time  `gorm:"column:created_at" json:"created_at"`
-		PulsePoints  int64      `gorm:"column:pulse_points" json:"pulse_points"`
-		SpinCredits  int        `gorm:"column:spin_credits" json:"spin_credits"`
-		BonusPoints  int64      `gorm:"column:bonus_points" json:"bonus_points"`
+		CreatedAt      time.Time  `gorm:"column:created_at" json:"created_at"`
+		PulsePoints    int64      `gorm:"column:pulse_points" json:"pulse_points"`
+		SpinCredits    int        `gorm:"column:spin_credits" json:"spin_credits"`
+		BonusPoints    int64      `gorm:"column:bonus_points" json:"bonus_points"`
 	}
 
 	var users []userRow
@@ -288,22 +288,22 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	if state != "" {
 		dataQ = dataQ.Where("u.state = ?", state)
 	}
-	if dbErr := dataQ.Order("u.created_at DESC").Limit(limit).Offset((page-1)*limit).Find(&users).Error; dbErr != nil {
+	if dbErr := dataQ.Order("u.created_at DESC").Limit(limit).Offset((page - 1) * limit).Find(&users).Error; dbErr != nil {
 		log.Printf("[ListUsers] wallet join failed (%v), falling back to simple query", dbErr)
 		// Fallback: query without wallet join in case wallets table has issues
 		h.db.WithContext(r.Context()).Table("users u").
 			Select("u.id, u.phone_number, u.tier, u.state, u.is_active, u.streak_count, u.last_recharge_at, u.created_at, 0 AS pulse_points, 0 AS spin_credits, 0 AS bonus_points").
-			Order("u.created_at DESC").Limit(limit).Offset((page-1)*limit).Find(&users)
+			Order("u.created_at DESC").Limit(limit).Offset((page - 1) * limit).Find(&users)
 	}
 	if users == nil {
 		users = []userRow{}
 	}
 
 	jsonOK(w, map[string]interface{}{
-		"users":  users,
-		"total":  total,
-		"page":   page,
-		"limit":  limit,
+		"users": users,
+		"total": total,
+		"page":  page,
+		"limit": limit,
 	})
 }
 
@@ -410,65 +410,37 @@ func (h *AdminHandler) GetPrizeSummary(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, summary)
 }
 
-func (h *AdminHandler) ReorderPrizes(w http.ResponseWriter, r *http.Request) {
+func (h *AdminHandler) PublishPrizeConfiguration(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		OrderedIDs []string `json:"ordered_ids"`
+		Prizes []entities.PrizePoolEntry `json:"prizes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.OrderedIDs) == 0 {
-		jsonError(w, "ordered_ids array is required", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, "invalid prize configuration body", http.StatusBadRequest)
 		return
 	}
-	ids := make([]uuid.UUID, 0, len(body.OrderedIDs))
-	for _, s := range body.OrderedIDs {
-		id, err := uuid.Parse(s)
-		if err != nil {
-			jsonError(w, "invalid prize id: "+s, http.StatusBadRequest)
-			return
-		}
-		ids = append(ids, id)
-	}
-	if err := h.spinSvc.ReorderPrizes(r.Context(), ids); err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
+	prizes, err := h.spinSvc.PublishPrizeConfiguration(r.Context(), body.Prizes)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	jsonOK(w, map[string]string{"status": "reordered"})
+	summary, _ := h.spinSvc.GetPrizeProbabilitySummary(r.Context())
+	jsonOK(w, map[string]interface{}{
+		"status":  "published",
+		"prizes":  prizes,
+		"summary": summary,
+	})
+}
+
+func (h *AdminHandler) ReorderPrizes(w http.ResponseWriter, r *http.Request) {
+	jsonError(w, "Prize wheel mutations are atomic. Use PUT /api/v1/admin/prizes/config with the complete configured prize table; active probabilities must total exactly 100.00%.", http.StatusConflict)
 }
 
 func (h *AdminHandler) CreatePrize(w http.ResponseWriter, r *http.Request) {
-	var data map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		jsonError(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	prize, err := h.spinSvc.CreatePrize(r.Context(), data)
-	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	w.WriteHeader(http.StatusCreated)
-	if encErr := json.NewEncoder(w).Encode(prize); encErr != nil {
-		log.Printf("[Admin] CreatePrize encode error: %v", encErr)
-	}
+	jsonError(w, "Prize wheel mutations are atomic. Use PUT /api/v1/admin/prizes/config with the complete configured prize table; active probabilities must total exactly 100.00%.", http.StatusConflict)
 }
 
 func (h *AdminHandler) UpdatePrize(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	prizeID, err := uuid.Parse(idStr)
-	if err != nil {
-		jsonError(w, "invalid prize id", http.StatusBadRequest)
-		return
-	}
-	var data map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		jsonError(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	prize, err := h.spinSvc.UpdatePrize(r.Context(), prizeID, data)
-	if err != nil {
-		jsonError(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	jsonOK(w, prize)
+	jsonError(w, "Prize wheel mutations are atomic. Use PUT /api/v1/admin/prizes/config with the complete configured prize table; active probabilities must total exactly 100.00%.", http.StatusConflict)
 }
 
 // UpdatePrizeFull is an alias kept for backward compat with existing admin routes.
@@ -477,17 +449,7 @@ func (h *AdminHandler) UpdatePrizeFull(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) DeletePrize(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	prizeID, err := uuid.Parse(idStr)
-	if err != nil {
-		jsonError(w, "invalid prize id", http.StatusBadRequest)
-		return
-	}
-	if err := h.spinSvc.DeletePrize(r.Context(), prizeID); err != nil {
-		jsonError(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	jsonOK(w, map[string]string{"status": "deleted"})
+	jsonError(w, "Prize wheel mutations are atomic. Use PUT /api/v1/admin/prizes/config with the complete configured prize table; active probabilities must total exactly 100.00%.", http.StatusConflict)
 }
 
 func (h *AdminHandler) GetSpinConfig(w http.ResponseWriter, r *http.Request) {
@@ -550,10 +512,10 @@ func (h *AdminHandler) GetDraws(w http.ResponseWriter, r *http.Request) {
 
 func (h *AdminHandler) CreateDraw(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name           string    `json:"name"`
-		Description    string    `json:"description"`
-		DrawType       string    `json:"draw_type"`
-		Recurrence     string    `json:"recurrence"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		DrawType    string `json:"draw_type"`
+		Recurrence  string `json:"recurrence"`
 		// draw_time is the correct DB column name (migration 024 ADD COLUMN draw_time).
 		// The legacy JSON key draw_date is also accepted for backwards compatibility.
 		DrawTime       time.Time `json:"draw_time"`
@@ -1110,10 +1072,10 @@ func (h *AdminHandler) GetStudioGenerations(w http.ResponseWriter, r *http.Reque
 
 func (h *AdminHandler) GetPointsStats(w http.ResponseWriter, r *http.Request) {
 	type stats struct {
-		TotalPointsIssued int64 `json:"total_points_issued"`
-		TotalPointsSpent  int64 `json:"total_points_spent"`
+		TotalPointsIssued   int64 `json:"total_points_issued"`
+		TotalPointsSpent    int64 `json:"total_points_spent"`
 		PointsInCirculation int64 `json:"points_in_circulation"`
-		ActiveWallets     int64 `json:"active_wallets"`
+		ActiveWallets       int64 `json:"active_wallets"`
 	}
 	var s stats
 	// 'recharge_reward' does not exist; correct types are 'points_award' and 'bonus'.
@@ -1158,7 +1120,7 @@ func (h *AdminHandler) GetPointsHistory(w http.ResponseWriter, r *http.Request) 
 	}
 
 	base.Count(&total)
-	base.Order("t.created_at DESC").Limit(limit).Offset((page-1)*limit).Find(&rows)
+	base.Order("t.created_at DESC").Limit(limit).Offset((page - 1) * limit).Find(&rows)
 	jsonOK(w, map[string]interface{}{
 		"transactions": rows,
 		"total":        total,
@@ -1173,7 +1135,7 @@ func (h *AdminHandler) BroadcastNotification(w http.ResponseWriter, r *http.Requ
 	var body struct {
 		Title   string   `json:"title"`
 		Message string   `json:"message"`
-		Type    string   `json:"type"` // push | sms | both
+		Type    string   `json:"type"`    // push | sms | both
 		Targets []string `json:"targets"` // empty = all users
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -1278,10 +1240,10 @@ func (h *AdminHandler) GetRegionalWars(w http.ResponseWriter, r *http.Request) {
 	wars, _ := h.warsSvc.ListWars(r.Context(), 12)
 
 	jsonOK(w, map[string]interface{}{
-		"leaderboard":           leaderboard,
-		"history":               wars,
-		"prize_pool_kobo":       h.cfg.GetInt("regional_wars_prize_pool_kobo", 50_000_000),
-		"winning_bonus_pp":      h.cfg.GetInt("regional_wars_winning_bonus", 50),
+		"leaderboard":      leaderboard,
+		"history":          wars,
+		"prize_pool_kobo":  h.cfg.GetInt("regional_wars_prize_pool_kobo", 50_000_000),
+		"winning_bonus_pp": h.cfg.GetInt("regional_wars_winning_bonus", 50),
 	})
 }
 
@@ -1355,7 +1317,7 @@ func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		dbPoolOpen = stats.OpenConnections
 		dbPoolUsed = stats.InUse
 		dbPoolIdle = stats.Idle
-		dbPoolMax  = stats.MaxOpenConnections
+		dbPoolMax = stats.MaxOpenConnections
 	}
 
 	// Check Redis
@@ -1420,11 +1382,11 @@ func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 			"idle":     dbPoolIdle,
 			"max_open": dbPoolMax,
 		},
-		"redis_hit_rate":            100.0, // Placeholder for real metrics
-		"checked_at":                time.Now(),
-		"pending_prizes":            pendingPrizes,
-		"open_fraud_events":         openFraudEvents,
-		"version":                   "phase-8",
+		"redis_hit_rate":    100.0, // Placeholder for real metrics
+		"checked_at":        time.Now(),
+		"pending_prizes":    pendingPrizes,
+		"open_fraud_events": openFraudEvents,
+		"version":           "phase-8",
 	})
 }
 
@@ -2338,7 +2300,8 @@ func (h *AdminHandler) GetFulfillmentConfig(w http.ResponseWriter, r *http.Reque
 // UpdateFulfillmentConfig updates the fulfillment policy for a single prize type.
 // PUT /api/v1/admin/fulfillment-config/{prize_type}
 // Body: { "fulfillment_mode": "MANUAL"|"AUTO", "max_retry_attempts": 3,
-//         "retry_delay_seconds": 30, "fallback_to_manual": true }
+//
+//	"retry_delay_seconds": 30, "fallback_to_manual": true }
 func (h *AdminHandler) UpdateFulfillmentConfig(w http.ResponseWriter, r *http.Request) {
 	if h.fulfillCfgRepo == nil {
 		jsonError(w, "fulfillment config not available", http.StatusServiceUnavailable)

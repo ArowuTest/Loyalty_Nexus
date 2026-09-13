@@ -47,7 +47,7 @@ VALUES
      NOW()),
 
     -- App base URL (used in wallet pass deep links and SMS)
-    ('app_base_url',              'https://loyalty-nexus-api.onrender.com',
+    ('app_base_url',              '"https://loyalty-nexus-api.onrender.com"',
      'Public base URL of the API. Used in wallet pass back fields and SMS deep links.',
      NOW()),
 
@@ -107,16 +107,16 @@ VALUES
      NOW()),
 
     -- Storage backend
-    ('storage_backend',           'local',
+    ('storage_backend',           '"local"',
      'Storage backend for AI-generated assets. Values: local | s3 | gcs.',
      NOW()),
-    ('local_storage_base_path',   '/tmp/nexus-assets',
+    ('local_storage_base_path',   '"/tmp/nexus-assets"',
      'Local filesystem path for storing AI-generated assets.',
      NOW()),
-    ('local_storage_base_url',    'https://loyalty-nexus-api.onrender.com/assets',
+    ('local_storage_base_url',    '"https://loyalty-nexus-api.onrender.com/assets"',
      'Public URL prefix for locally stored assets.',
      NOW()),
-    ('storage_cdn_base_url',      '',
+    ('storage_cdn_base_url',      '""',
      'CDN base URL for assets when using S3/GCS. Leave empty to use storage_backend URL.',
      NOW()),
 
@@ -168,7 +168,7 @@ VALUES
      NOW()),
 
     -- MTN push pipeline
-    ('mtn_push_hmac_secret',            '',
+    ('mtn_push_hmac_secret',            '""',
      'HMAC secret for validating MTN push webhook payloads. Set via admin panel.',
      NOW()),
 
@@ -204,7 +204,7 @@ VALUES
      NOW()),
 
     -- Operation mode
-    ('operation_mode',                  'independent',
+    ('operation_mode',                  '"independent"',
      'Platform operation mode. Values: independent | telco_partner.',
      NOW()),
 
@@ -339,11 +339,13 @@ ON CONFLICT (region_code) DO NOTHING;
 -- ─────────────────────────────────────────────────────────────────────────────
 
 INSERT INTO subscription_plans (name, daily_cost_kobo, entries_per_day)
-VALUES
-    ('Basic',    5000,  1),
-    ('Standard', 10000, 3),
-    ('Premium',  20000, 7)
-ON CONFLICT (name) DO NOTHING;
+SELECT v.name, v.daily_cost_kobo, v.entries_per_day
+FROM (VALUES
+    ('Basic',    5000::INTEGER,  1::INTEGER),
+    ('Standard', 10000::INTEGER, 3::INTEGER),
+    ('Premium',  20000::INTEGER, 7::INTEGER)
+) AS v(name, daily_cost_kobo, entries_per_day)
+WHERE NOT EXISTS (SELECT 1 FROM subscription_plans p WHERE p.name = v.name);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 4. SMS TEMPLATES — ensure all required templates exist
@@ -433,31 +435,39 @@ ON CONFLICT (key) DO NOTHING;
 -- 5. DRAWS — ensure at least one active monthly draw exists
 -- ─────────────────────────────────────────────────────────────────────────────
 
-INSERT INTO draws (id, name, status, winner_count, prize_type, prize_value_kobo)
+INSERT INTO draws (
+    id, draw_code, name, type, draw_type, status,
+    prize_pool_total, prize_pool, winner_count, recurrence,
+    start_time, end_time, next_draw_at, created_at
+)
 VALUES
-    (gen_random_uuid(), 'Monthly Grand Draw — April 2026', 'ACTIVE', 3, 'MOMO_CASH', 5000000),
-    (gen_random_uuid(), 'Weekly Mega Spin Draw',           'ACTIVE', 1, 'MOMO_CASH', 1000000)
-ON CONFLICT DO NOTHING;
+    (gen_random_uuid(), 'DRAW-MONTHLY-GRAND-APR2026', 'Monthly Grand Draw — April 2026',
+     'MONTHLY', 'MONTHLY', 'ACTIVE', 5000000, 50000, 3, 'monthly',
+     NOW(), NOW() + INTERVAL '30 days', NOW() + INTERVAL '30 days', NOW()),
+    (gen_random_uuid(), 'DRAW-WEEKLY-MEGA-SPIN', 'Weekly Mega Spin Draw',
+     'WEEKLY', 'WEEKLY', 'ACTIVE', 1000000, 10000, 1, 'weekly',
+     NOW(), NOW() + INTERVAL '7 days', NOW() + INTERVAL '7 days', NOW())
+ON CONFLICT (draw_code) DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 6. POINTS EXPIRY POLICIES — ensure default rolling policy exists
 -- ─────────────────────────────────────────────────────────────────────────────
 
-INSERT INTO points_expiry_policies (policy_type, expiry_days, warn_days_before, is_active)
-VALUES
-    ('rolling', 365, 30, true)
-ON CONFLICT DO NOTHING;
+INSERT INTO points_expiry_policies (expiry_enabled, expiry_days, expiry_type, warn_days_before)
+SELECT true, 365, 'rolling', 30
+WHERE NOT EXISTS (SELECT 1 FROM points_expiry_policies WHERE expiry_type = 'rolling');
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 7. RECHARGE TIERS — ensure all tiers are present (supplement migration 040)
--- ─────────────────────────────────────────────────────────────────────────────
-
-INSERT INTO recharge_tiers (tier_name, min_kobo, max_kobo, points_per_recharge, spin_credits, tier_label)
+-- 7. SPIN TIERS — ensure all tiers are present (supplement migrations 040/043)
+-- The historical script targeted recharge_tiers with columns that belong to the
+-- spin-tier model. Use the canonical spin_tiers authority; existing canonical
+-- rows from migration 043 are preserved by ON CONFLICT DO NOTHING.
+INSERT INTO spin_tiers (id, tier_name, tier_display_name, min_daily_amount, max_daily_amount, spins_per_day, sort_order, is_active)
 VALUES
-    ('bronze',   10000,   49999,  10, 1, 'Bronze'),
-    ('silver',   50000,   99999,  25, 2, 'Silver'),
-    ('gold',    100000,  299999,  60, 3, 'Gold'),
-    ('platinum',300000, 99999999,150, 5, 'Platinum')
+    (gen_random_uuid(), 'bronze',   'Bronze',   10000,   49999,    1, 1, TRUE),
+    (gen_random_uuid(), 'silver',   'Silver',   50000,   99999,    2, 2, TRUE),
+    (gen_random_uuid(), 'gold',     'Gold',    100000,  299999,    3, 3, TRUE),
+    (gen_random_uuid(), 'platinum','Platinum',300000, 99999999,   5, 4, TRUE)
 ON CONFLICT (tier_name) DO NOTHING;
 
 -- COMMIT;  -- removed: managed by golang-migrate

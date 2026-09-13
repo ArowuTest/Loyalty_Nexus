@@ -316,8 +316,8 @@ DO $$ BEGIN
     ('referral_bonus_referee_pts',    '10',      'Points awarded to new user on their first recharge via referral'),
 
     -- Operation Mode (SRS REQ dual-mode)
-    ('operation_mode',                'independent', 'Platform mode: independent | integrated'),
-    ('ussd_shortcode',                '*789*NEXUS#',  'USSD shortcode for feature phone access'),
+    ('operation_mode',                '"independent"', 'Platform mode: independent | integrated'),
+    ('ussd_shortcode',                '"*789*NEXUS#"',  'USSD shortcode for feature phone access'),
 
     -- AI Studio tool point costs (admin-overridable, REQ-5.4.2)
     ('tool_cost_ask_nexus',           '0',       'Ask Nexus chat — always free'),

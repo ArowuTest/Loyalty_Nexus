@@ -35,7 +35,7 @@ UPDATE ai_provider_configs
 SET    is_active  = TRUE,
        updated_at = NOW()
 WHERE  (LOWER(name) LIKE '%elevenlabs%' OR LOWER(slug) LIKE '%elevenlabs%'
-        OR LOWER(provider_key) LIKE '%elevenlabs%')
+        OR LOWER(template) LIKE 'elevenlabs%')
 AND    is_active = FALSE;
 
 -- ─── DISABLE Google TTS provider record (it is a stub, never works) ──────────
@@ -92,11 +92,15 @@ AND    base_value  > 1000000;  -- values > 1MB in bytes need conversion
 -- service (which uses spin_tiers table via GetSpinTierFromDB instead).
 -- Remove them to prevent false admin confidence.
 
-DELETE FROM program_configs
-WHERE  key IN ('spin_max_per_day', 'spin_max_per_user_per_day');
+DO $$ BEGIN
+    IF to_regclass('public.program_configs') IS NOT NULL THEN
+        DELETE FROM program_configs
+        WHERE key IN ('spin_max_per_day', 'spin_max_per_user_per_day');
+    END IF;
+END $$;
 
 -- Also clean up from network_configs if present there
 UPDATE network_configs
-SET    value       = '-- UNUSED: spin limits are set in spin_tiers table, not here --',
+SET    value       = '"-- UNUSED: spin limits are set in spin_tiers table, not here --"',
        updated_at  = NOW()
 WHERE  key IN ('spin_max_per_day', 'spin_max_per_user_per_day');

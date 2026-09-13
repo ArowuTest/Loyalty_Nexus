@@ -18,11 +18,18 @@ import (
 
 // ─── Redis key helpers ────────────────────────────────────────────────────────
 
-func providerStatusKey(p LLMProvider) string    { return "nexus:ai:provider:" + string(p) + ":status" }
-func providerLastUsedKey(p LLMProvider) string  { return "nexus:ai:provider:" + string(p) + ":last_used_at" }
-func providerLastErrKey(p LLMProvider) string   { return "nexus:ai:provider:" + string(p) + ":last_error" }
-func providerReqTodayKey(p LLMProvider) string  { return "nexus:ai:provider:" + string(p) + ":requests_today" }
-const activeProviderKey    = "nexus:ai:active_chat_provider"
+func providerStatusKey(p LLMProvider) string { return "nexus:ai:provider:" + string(p) + ":status" }
+func providerLastUsedKey(p LLMProvider) string {
+	return "nexus:ai:provider:" + string(p) + ":last_used_at"
+}
+func providerLastErrKey(p LLMProvider) string {
+	return "nexus:ai:provider:" + string(p) + ":last_error"
+}
+func providerReqTodayKey(p LLMProvider) string {
+	return "nexus:ai:provider:" + string(p) + ":requests_today"
+}
+
+const activeProviderKey = "nexus:ai:active_chat_provider"
 const providerSwitchLogKey = "nexus:ai:provider_switch_log"
 
 // secondsUntilMidnightUTC returns the number of seconds until the next UTC midnight.
@@ -46,13 +53,13 @@ const (
 
 type LLMRequest struct {
 	UserID          string
-	SessionID       string   // for session memory lookup
-	Prompt          string   // sent to the LLM — may be augmented (e.g. web-search results prepended)
-	DisplayPrompt   string   // the ORIGINAL user message to persist/show. If empty, Prompt is used.
+	SessionID       string // for session memory lookup
+	Prompt          string // sent to the LLM — may be augmented (e.g. web-search results prepended)
+	DisplayPrompt   string // the ORIGINAL user message to persist/show. If empty, Prompt is used.
 	History         []string
-	ToolSlug        string   // optional: "web-search-ai" | "code-helper" — routes to Pollinations
-	AttachedContext string   // extracted text from uploaded file or URL — injected into system prompt
-	AttachedName    string   // display name of the attached file/link (e.g. "business_plan.pdf")
+	ToolSlug        string // optional: "web-search-ai" | "code-helper" — routes to Pollinations
+	AttachedContext string // extracted text from uploaded file or URL — injected into system prompt
+	AttachedName    string // display name of the attached file/link (e.g. "business_plan.pdf")
 }
 
 type LLMResponse struct {
@@ -68,6 +75,11 @@ type LLMClient interface {
 	Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error)
 }
 
+// LLMRouteFunc delegates provider/model selection to the governed AI routing layer.
+// It keeps this infrastructure package independent of the application/services package.
+type LLMRouteFunc func(ctx context.Context, toolSlug, systemPrompt, userPrompt string) (text, provider string, err error)
+type LLMRouteStreamFunc func(ctx context.Context, toolSlug, systemPrompt, userPrompt string, onChunk func(string)) (text, provider string, err error)
+
 type UsageTracker interface {
 	GetDailyCount(ctx context.Context, userID string) (int, error)
 	Increment(ctx context.Context, userID string) error
@@ -76,41 +88,36 @@ type UsageTracker interface {
 // ─── LLMOrchestrator struct ─────────────────────────────────────────────────
 
 type LLMOrchestrator struct {
-	groqClient       LLMClient
-	geminiClient     LLMClient // gemini-2.5-flash
-	deepSeekClient   LLMClient
-	usageTracker     UsageTracker
-	chatRepo         repositories.ChatRepository
-	groqDailyLimit   int
-	geminiDailyLimit int
-	rdb              *redis.Client
-	httpClient       *http.Client // shared for Pollinations helper calls
-	tavilyKey        string       // Tavily Search API key — live web search grounding
+	usageTracker    UsageTracker
+	chatRepo        repositories.ChatRepository
+	rdb             *redis.Client
+	httpClient      *http.Client       // shared for Pollinations helper calls
+	tavilyKey       string             // Tavily Search API key — live web search grounding
+	routeFunc       LLMRouteFunc       // Router V2 authority when configured
+	routeStreamFunc LLMRouteStreamFunc // Router V2 streaming authority
 }
 
 // ─── Constructor ─────────────────────────────────────────────────────────────
 
 func NewLLMOrchestrator(
-	g, gem, ds LLMClient,
 	ut UsageTracker,
 	cr repositories.ChatRepository,
 	rdb *redis.Client,
-	groqLim, gemLim int,
 	tavilyKey string,
 ) *LLMOrchestrator {
 	return &LLMOrchestrator{
-		groqClient:       g,
-		geminiClient:     gem,
-		deepSeekClient:   ds,
-		usageTracker:     ut,
-		chatRepo:         cr,
-		rdb:              rdb,
-		groqDailyLimit:   groqLim,
-		geminiDailyLimit: gemLim,
-		httpClient:       &http.Client{Timeout: 60 * time.Second},
-		tavilyKey:        tavilyKey,
+		usageTracker: ut,
+		chatRepo:     cr,
+		rdb:          rdb,
+		httpClient:   &http.Client{Timeout: 60 * time.Second},
+		tavilyKey:    tavilyKey,
 	}
 }
+
+// SetRouteFunc installs the governed Router V2 callback. When set, Chat never
+// selects a compiled Gemini/Groq/DeepSeek chain.
+func (o *LLMOrchestrator) SetRouteFunc(fn LLMRouteFunc)             { o.routeFunc = fn }
+func (o *LLMOrchestrator) SetRouteStreamFunc(fn LLMRouteStreamFunc) { o.routeStreamFunc = fn }
 
 // ─── buildMemoryBlock constructs the [NEXUS MEMORY] context block ────────────
 
@@ -305,7 +312,6 @@ func (o *LLMOrchestrator) RecordStudioToolUse(ctx context.Context, toolSlug, pro
 
 // ─── Chat ────────────────────────────────────────────────────────────────────
 
-
 // ─── searchTavily calls the Tavily Search API and returns formatted results ───
 // Returns an empty string (not an error) when the key is absent so callers
 // can always fall back to training-data responses without crashing.
@@ -317,12 +323,12 @@ func (o *LLMOrchestrator) searchTavily(ctx context.Context, query string, maxRes
 		maxResults = 5
 	}
 	payload := map[string]interface{}{
-		"api_key":              o.tavilyKey,
-		"query":                query,
-		"max_results":          maxResults,
-		"include_answer":       true,
-		"include_raw_content":  false,
-		"search_depth":         "advanced",
+		"api_key":             o.tavilyKey,
+		"query":               query,
+		"max_results":         maxResults,
+		"include_answer":      true,
+		"include_raw_content": false,
+		"search_depth":        "advanced",
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -346,9 +352,9 @@ func (o *LLMOrchestrator) searchTavily(ctx context.Context, query string, maxRes
 	var result struct {
 		Answer  string `json:"answer"`
 		Results []struct {
-			Title   string `json:"title"`
-			URL     string `json:"url"`
-			Content string `json:"content"`
+			Title   string  `json:"title"`
+			URL     string  `json:"url"`
+			Content string  `json:"content"`
 			Score   float64 `json:"score"`
 		} `json:"results"`
 	}
@@ -392,24 +398,29 @@ func (o *LLMOrchestrator) Chat(ctx context.Context, req LLMRequest) (*LLMRespons
 	// requests for knowledge tools silently fell back to the generic persona.
 	systemPrompt := o.BuildSystemPrompt(ctx, req.UserID, req.SessionID, req.ToolSlug, req.AttachedContext, req.AttachedName)
 
-	// Primary: Gemini 2.5 Flash → Fallback: DeepSeek V3
 	var (
 		text     string
 		provider LLMProvider
 		err      error
 	)
-	text, err = o.geminiClient.Complete(ctx, systemPrompt, req.Prompt)
-	if err != nil {
-		log.Printf("[LLM] Gemini failed → DeepSeek: %v", err)
-		go o.recordProviderUse(context.Background(), ProviderGeminiLite, false, err.Error())
-		text, err = o.deepSeekClient.Complete(ctx, systemPrompt, req.Prompt)
-		provider = ProviderDeepSeek
+	if o.routeFunc != nil {
+		routeSlug := req.ToolSlug
+		if routeSlug == "" || routeSlug == "general" || routeSlug == "ask-nexus" {
+			routeSlug = "nexus-chat"
+		}
+		var providerName string
+		text, providerName, err = o.routeFunc(ctx, routeSlug, systemPrompt, req.Prompt)
+		provider = LLMProvider(providerName)
 	} else {
-		provider = ProviderGeminiLite
+		err = fmt.Errorf("governed AI routing is not configured")
+		provider = LLMProvider("ROUTER_V2")
 	}
 	if err != nil {
+		if provider == "" {
+			provider = LLMProvider("ROUTER_V2")
+		}
 		go o.recordProviderUse(context.Background(), provider, false, err.Error())
-		return nil, fmt.Errorf("all LLM providers exhausted: %w", err)
+		return nil, fmt.Errorf("all configured LLM routes exhausted: %w", err)
 	}
 
 	_ = o.usageTracker.Increment(ctx, req.UserID)
@@ -753,7 +764,11 @@ func (o *LLMOrchestrator) Summarize(ctx context.Context, transcript string) (str
 		"Write as a concise structured paragraph (max 150 words) that gives the AI everything it needs to continue naturally.\n\n" +
 		"Conversation:\n" + transcript
 
-	return o.geminiClient.Complete(ctx, systemPrompt, userPrompt)
+	if o.routeFunc != nil {
+		text, _, err := o.routeFunc(ctx, "__ai-memory-summarizer", systemPrompt, userPrompt)
+		return text, err
+	}
+	return "", fmt.Errorf("AI memory summarizer route is not configured")
 }
 
 // ─── ChatWithTool ─────────────────────────────────────────────────────────────
@@ -762,12 +777,13 @@ func (o *LLMOrchestrator) Summarize(ctx context.Context, transcript string) (str
 // persists the exchange to the session just like a normal Chat() call.
 //
 // Routing logic:
-//   web-search-ai, research-brief, deep-research-brief, nexus-agent
-//     → searchTavily() for live grounding → Gemini synthesises results
-//   code-helper, code-pro
-//     → Chat() with code-helper system prompt (Gemini; Pollinations Qwen removed)
-//   everything else
-//     → Chat() (Gemini 2.5 Flash → DeepSeek V3 fallback)
+//
+//	web-search-ai, research-brief, deep-research-brief, nexus-agent
+//	  → searchTavily() for live grounding → Gemini synthesises results
+//	code-helper, code-pro
+//	  → Chat() with code-helper system prompt (Gemini; Pollinations Qwen removed)
+//	everything else
+//	  → Chat() (Gemini 2.5 Flash → DeepSeek V3 fallback)
 func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LLMResponse, error) {
 	switch req.ToolSlug {
 
@@ -780,7 +796,12 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 	// that overrode the user's own session memory, and (c) is unnecessary — the
 	// general persona already tells the model to recommend a live source for
 	// time-sensitive questions.  Those slugs now fall through to plain Chat().
-	case "web-search-ai", "research-brief", "deep-research-brief", "nexus-agent":
+	case "web-search-ai":
+		// Router V2 carries stage-specific web_search=true, allowing OpenRouter or
+		// another configured search-capable provider to own grounding without Tavily/Gemini lock-in.
+		return o.Chat(ctx, req)
+
+	case "research-brief", "deep-research-brief", "nexus-agent":
 
 		// Determine how many search results to fetch based on depth
 		numResults := 5
@@ -812,9 +833,9 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 		if err != nil {
 			return nil, err
 		}
-		// Label provider to show search was used
+		// Preserve the actual routed model while indicating external search grounding.
 		if searchResults != "" {
-			resp.Provider = "TAVILY+GEMINI"
+			resp.Provider = LLMProvider("TAVILY+" + string(resp.Provider))
 		}
 		return resp, nil
 
@@ -829,7 +850,6 @@ func (o *LLMOrchestrator) ChatWithTool(ctx context.Context, req LLMRequest) (*LL
 		return o.Chat(ctx, req)
 	}
 }
-
 
 func (o *LLMOrchestrator) callPollinationsChat(ctx context.Context, sk string, payload interface{}) (string, error) {
 	body, err := json.Marshal(payload)
@@ -862,7 +882,9 @@ func (o *LLMOrchestrator) callPollinationsChat(ctx context.Context, sk string, p
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
-		Error *struct{ Message string `json:"message"` } `json:"error"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return "", fmt.Errorf("pollinations chat parse: %w", err)
@@ -877,7 +899,9 @@ func (o *LLMOrchestrator) callPollinationsChat(ctx context.Context, sk string, p
 }
 
 func min(a, b int) int {
-	if a < b { return a }
+	if a < b {
+		return a
+	}
 	return b
 }
 
@@ -1486,14 +1510,14 @@ func (a *GrokAdapter) ComposeImages(ctx context.Context, prompt string, imageURL
 //   - VideoEdit:        VideoURL set + prompt → edit existing video
 //   - VideoExtend:      VideoURL set + Extend=true → extend existing video
 type GrokVideoRequest struct {
-	Prompt              string
-	ImageURL            string   // image-to-video: source image
-	VideoURL            string   // video-edit / video-extend: source video
-	ReferenceImageURLs  []string // reference-image mode: 1-7 reference images
-	Duration            int      // seconds (2-15 for generation, 2-10 for extension)
-	AspectRatio         string   // "16:9", "9:16", "1:1"
-	Resolution          string   // "480p" or "720p"
-	Extend              bool     // true = video extension mode
+	Prompt             string
+	ImageURL           string   // image-to-video: source image
+	VideoURL           string   // video-edit / video-extend: source video
+	ReferenceImageURLs []string // reference-image mode: 1-7 reference images
+	Duration           int      // seconds (2-15 for generation, 2-10 for extension)
+	AspectRatio        string   // "16:9", "9:16", "1:1"
+	Resolution         string   // "480p" or "720p"
+	Extend             bool     // true = video extension mode
 }
 
 // GenerateVideo submits a Grok Imagine video request and polls until done.
@@ -1684,4 +1708,37 @@ func truncateGrokStr(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func (o *LLMOrchestrator) ChatStream(
+	ctx context.Context,
+	req LLMRequest,
+	onChunk func(string),
+) (*LLMResponse, error) {
+	if o.routeStreamFunc == nil {
+		return o.Chat(ctx, req)
+	}
+	uid, _ := uuid.Parse(req.UserID)
+	systemPrompt := o.BuildSystemPrompt(ctx, req.UserID, req.SessionID, req.ToolSlug, req.AttachedContext, req.AttachedName)
+	routeSlug := req.ToolSlug
+	if routeSlug == "" || routeSlug == "general" || routeSlug == "ask-nexus" {
+		routeSlug = "nexus-chat"
+	}
+	text, providerName, err := o.routeStreamFunc(ctx, routeSlug, systemPrompt, req.Prompt, onChunk)
+	provider := LLMProvider(providerName)
+	if err != nil {
+		if provider == "" {
+			provider = LLMProvider("ROUTER_V2")
+		}
+		go o.recordProviderUse(context.Background(), provider, false, err.Error())
+		return nil, err
+	}
+	_ = o.usageTracker.Increment(ctx, req.UserID)
+	persistPrompt := req.DisplayPrompt
+	if persistPrompt == "" {
+		persistPrompt = req.Prompt
+	}
+	resolvedSessionID := o.persistMessages(ctx, uid, req.SessionID, req.ToolSlug, persistPrompt, text)
+	go o.recordProviderUse(context.Background(), provider, true, "")
+	return &LLMResponse{Text: text, Provider: provider, SessionID: resolvedSessionID}, nil
 }

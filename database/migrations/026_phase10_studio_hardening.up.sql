@@ -11,20 +11,25 @@
 
 -- ─── studio_tools: add new columns ───────────────────────────────────────────
 
+-- provider_tool becomes canonical in this migration; keep the legacy NOT NULL
+-- provider_tool_id column insert-compatible for older code/schema consumers.
+ALTER TABLE studio_tools ALTER COLUMN provider_tool_id SET DEFAULT '';
+
 ALTER TABLE studio_tools
     ADD COLUMN IF NOT EXISTS slug          TEXT        NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS sort_order    INT         NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS provider_tool TEXT        NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS icon          TEXT        NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
--- Unique index on slug (used by FindToolBySlug)
-CREATE UNIQUE INDEX IF NOT EXISTS uidx_studio_tools_slug ON studio_tools (slug);
-
--- Back-fill slugs for any existing rows using the name column
+-- Back-fill slugs for any existing rows using the name column before enforcing uniqueness.
 UPDATE studio_tools
 SET slug = LOWER(REGEXP_REPLACE(TRIM(name), '[\s_]+', '-', 'g'))
 WHERE slug = '';
+
+-- Unique index on slug (used by FindToolBySlug)
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_studio_tools_slug ON studio_tools (slug);
 
 -- ─── ai_generations: add new columns ────────────────────────────────────────
 
@@ -99,6 +104,16 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     expires_at   TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days'
 );
 
+-- chat_sessions may already exist from the legacy chat schema. Evolve it to the
+-- canonical phase-10 shape before indexes/triggers reference the new columns.
+ALTER TABLE chat_sessions
+    ADD COLUMN IF NOT EXISTS title          TEXT        NOT NULL DEFAULT 'Nexus Chat',
+    ADD COLUMN IF NOT EXISTS summary        TEXT        NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS message_count  INT         NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS last_provider  TEXT        NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS expires_at     TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days';
+
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions (user_id, updated_at DESC);
 
 -- ─── chat_messages ────────────────────────────────────────────────────────────
@@ -112,6 +127,17 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     provider   TEXT        NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Legacy chat_messages lacks user_id/provider. Backfill user_id through the
+-- owning session so replay is safe even when chat history already exists.
+ALTER TABLE chat_messages
+    ADD COLUMN IF NOT EXISTS user_id  UUID REFERENCES users(id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT '';
+UPDATE chat_messages m
+SET user_id = s.user_id
+FROM chat_sessions s
+WHERE m.session_id = s.id AND m.user_id IS NULL;
+ALTER TABLE chat_messages ALTER COLUMN user_id SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages (session_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_user    ON chat_messages (user_id, created_at DESC);

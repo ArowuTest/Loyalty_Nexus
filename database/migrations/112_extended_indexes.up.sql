@@ -43,25 +43,22 @@ CREATE INDEX IF NOT EXISTS idx_studio_sessions_stale_sweep
     WHERE ended_at IS NULL;
 
 -- ─── AI STUDIO — studio_usage_metrics ─────────────────────────────────────────
--- user_id + created_at: per-user usage stats, quota checks
-CREATE INDEX IF NOT EXISTS idx_studio_usage_user_created
-    ON studio_usage_metrics (user_id, created_at DESC);
-
--- tool_slug + created_at: aggregate tool popularity, admin dashboard
-CREATE INDEX IF NOT EXISTS idx_studio_usage_tool_created
-    ON studio_usage_metrics (tool_slug, created_at DESC)
-    WHERE tool_slug IS NOT NULL;
-
--- status + created_at: billing sweep for failed/pending usage records
-CREATE INDEX IF NOT EXISTS idx_studio_usage_status_created
-    ON studio_usage_metrics (status, created_at)
-    WHERE status IN ('pending', 'failed');
+-- Current schema records one cost observation per generation/provider.
+CREATE INDEX IF NOT EXISTS idx_studio_usage_generation_created
+    ON studio_usage_metrics (generation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_studio_usage_provider_created
+    ON studio_usage_metrics (provider, created_at DESC);
 
 -- ─── AI STUDIO — studio_config ────────────────────────────────────────────────
--- key: GetConfig (every configuration read)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_config_key_unique
-    ON studio_config (key)
-    WHERE key IS NOT NULL;
+-- Legacy optional table; current runtime configuration authority is elsewhere.
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='studio_config' AND column_name='key'
+    ) THEN
+        EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_config_key_unique ON studio_config (key) WHERE key IS NOT NULL';
+    END IF;
+END $$;
 
 -- ─── RECHARGES ────────────────────────────────────────────────────────────────
 -- NOTE: idx_recharges_msisdn, idx_recharges_payref, idx_recharges_status
@@ -102,7 +99,7 @@ CREATE INDEX IF NOT EXISTS idx_mtn_csv_rows_upload_status
 
 -- msisdn + status: dedup check per phone number
 CREATE INDEX IF NOT EXISTS idx_mtn_csv_rows_msisdn_status
-    ON mtn_push_csv_rows (msisdn, status)
+    ON mtn_push_csv_rows (raw_msisdn, status)
     WHERE status = 'pending';
 
 -- ─── WARS — war_secondary_draw_winners ────────────────────────────────────────
@@ -116,65 +113,33 @@ CREATE INDEX IF NOT EXISTS idx_war_sec_winners_payment_status
 CREATE INDEX IF NOT EXISTS idx_war_sec_winners_war_state
     ON war_secondary_draw_winners (war_id, state);
 
--- ─── WARS — regional_stats ────────────────────────────────────────────────────
--- war_id + state: GetStatsByWar (leaderboard computation)
-CREATE INDEX IF NOT EXISTS idx_regional_stats_war_state
-    ON regional_stats (war_id, state);
+-- ─── WARS — regional_stats / regional_settings ────────────────────────────────
+-- Current tournament model ranks by regional recharge volume and joins on region_code.
+CREATE INDEX IF NOT EXISTS idx_regional_stats_recharge_rank
+    ON regional_stats (total_recharge_kobo DESC, region_code);
+CREATE INDEX IF NOT EXISTS idx_regional_settings_region_code
+    ON regional_settings (region_code);
 
--- war_id + total_points DESC: sorted leaderboard
-CREATE INDEX IF NOT EXISTS idx_regional_stats_war_points
-    ON regional_stats (war_id, total_points DESC);
-
--- ─── WARS — regional_settings ─────────────────────────────────────────────────
--- war_id: GetSettingsByWar (prize config)
-CREATE INDEX IF NOT EXISTS idx_regional_settings_war_id
-    ON regional_settings (war_id);
-
--- ─── PRIZE_CLAIMS ─────────────────────────────────────────────────────────────
--- spin_result_id: GetClaimByResult (dedup / status check)
-CREATE INDEX IF NOT EXISTS idx_prize_claims_spin_result_id
-    ON prize_claims (spin_result_id);
-
--- user_id + status + created_at: GetUserClaims pagination
-CREATE INDEX IF NOT EXISTS idx_prize_claims_user_status_created
-    ON prize_claims (user_id, status, created_at DESC);
-
--- status + created_at: admin pending claims queue
-CREATE INDEX IF NOT EXISTS idx_prize_claims_status_created
-    ON prize_claims (status, created_at DESC)
-    WHERE status IN ('pending', 'processing');
-
--- ─── USER_SUBSCRIPTIONS ───────────────────────────────────────────────────────
--- user_id + status: GetActiveSubscription (every premium feature gate check)
-CREATE INDEX IF NOT EXISTS idx_user_subs_user_status
-    ON user_subscriptions (user_id, status)
-    WHERE status = 'active';
-
--- plan_id + status: plan usage stats
-CREATE INDEX IF NOT EXISTS idx_user_subs_plan_status
-    ON user_subscriptions (plan_id, status);
-
--- expires_at: subscription expiry sweep (lifecycle worker)
-CREATE INDEX IF NOT EXISTS idx_user_subs_expires_at
-    ON user_subscriptions (expires_at)
-    WHERE status = 'active' AND expires_at IS NOT NULL;
-
--- ─── SUBSCRIPTION_PLANS ───────────────────────────────────────────────────────
--- is_active + sort_order: ListActivePlans (pricing page, subscription flow)
-CREATE INDEX IF NOT EXISTS idx_sub_plans_active_sort
-    ON subscription_plans (is_active, sort_order)
-    WHERE is_active = TRUE;
-
--- ─── WALLET_PASSES ────────────────────────────────────────────────────────────
--- user_id: GetPassForUser (Apple/Google Wallet card lookup)
-CREATE INDEX IF NOT EXISTS idx_wallet_passes_user_id
-    ON wallet_passes (user_id);
-
--- pass_type_id + serial_number: wallet pass update callback (unique lookup)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_passes_type_serial
-    ON wallet_passes (pass_type_id, serial_number)
-    WHERE pass_type_id IS NOT NULL;
-
+-- ─── OPTIONAL LEGACY PRIZE / SUBSCRIPTION / WALLET TABLES ─────────────────────
+DO $$ BEGIN
+    IF to_regclass('public.prize_claims') IS NOT NULL THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_prize_claims_spin_result_id ON prize_claims (spin_result_id)';
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_prize_claims_user_status_created ON prize_claims (user_id, status, created_at DESC)';
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_prize_claims_status_created ON prize_claims (status, created_at DESC) WHERE status IN (''pending'', ''processing'')';
+    END IF;
+    IF to_regclass('public.user_subscriptions') IS NOT NULL THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_user_subs_user_status ON user_subscriptions (user_id, status) WHERE status = ''active''';
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_user_subs_plan_status ON user_subscriptions (plan_id, status)';
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_user_subs_expires_at ON user_subscriptions (expires_at) WHERE status = ''active'' AND expires_at IS NOT NULL';
+    END IF;
+    IF to_regclass('public.subscription_plans') IS NOT NULL THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_sub_plans_active_sort ON subscription_plans (is_active, sort_order) WHERE is_active = TRUE';
+    END IF;
+    IF to_regclass('public.wallet_passes') IS NOT NULL THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_wallet_passes_user_id ON wallet_passes (user_id)';
+        EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_passes_type_serial ON wallet_passes (pass_type_id, serial_number) WHERE pass_type_id IS NOT NULL';
+    END IF;
+END $$;
 -- ─── PLATFORM_SETTINGS ────────────────────────────────────────────────────────
 -- category: GetSettingsByCategory (admin config panel grouping)
 CREATE INDEX IF NOT EXISTS idx_platform_settings_category
@@ -187,45 +152,56 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_expiry_notif_gen_window
     ON asset_expiry_notifications (generation_id, notif_window);
 
 -- ─── PROGRAM_CONFIGS ──────────────────────────────────────────────────────────
--- key: GetConfig (every program configuration read — very hot, KV lookup)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_program_configs_key_unique
-    ON program_configs (key)
-    WHERE key IS NOT NULL;
+-- Legacy optional config table; current authority is network_configs.
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='program_configs' AND column_name='key'
+    ) THEN
+        EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS idx_program_configs_key_unique ON program_configs (key) WHERE key IS NOT NULL';
+    END IF;
+END $$;
 
 -- ─── HLR_CACHE ────────────────────────────────────────────────────────────────
--- msisdn: HLR lookup (every MTN push / recharge initiation)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_hlr_cache_msisdn_unique
-    ON hlr_cache (msisdn);
-
--- expires_at: cache invalidation sweep
-CREATE INDEX IF NOT EXISTS idx_hlr_cache_expires_at
-    ON hlr_cache (expires_at)
-    WHERE expires_at IS NOT NULL;
+-- Optional legacy cache table. Current HLR repository uses network_cache.
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='hlr_cache' AND column_name='msisdn'
+    ) THEN
+        EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS idx_hlr_cache_msisdn_unique ON hlr_cache (msisdn)';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='hlr_cache' AND column_name='expires_at'
+    ) THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_hlr_cache_expires_at ON hlr_cache (expires_at) WHERE expires_at IS NOT NULL';
+    END IF;
+END $$;
 
 -- ─── NETWORK_CACHE ────────────────────────────────────────────────────────────
--- msisdn: GetCachedNetwork (every recharge before VTPass call)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_network_cache_msisdn_unique
-    ON network_cache (msisdn);
+-- Current HLR repository resolves by phone_number and checks cache_expires.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_network_cache_phone_unique
+    ON network_cache (phone_number);
+CREATE INDEX IF NOT EXISTS idx_network_cache_expiry
+    ON network_cache (cache_expires);
 
 -- ─── NETWORK_CONFIGS ──────────────────────────────────────────────────────────
--- network_code: GetNetworkConfig (every recharge routing decision)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_network_configs_code_unique
-    ON network_configs (network_code)
-    WHERE network_code IS NOT NULL;
+-- ConfigManager resolves the canonical key/value store by key.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_network_configs_key_unique_112
+    ON network_configs (key);
 
 -- ─── MSISDN_BLACKLIST ─────────────────────────────────────────────────────────
 -- msisdn: IsBlacklisted (fraud check on every recharge / spin)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_msisdn_blacklist_unique
-    ON msisdn_blacklist (msisdn);
+    ON msisdn_blacklist (phone_number);
 
 -- ─── GHOST_NUDGE_LOG ──────────────────────────────────────────────────────────
--- user_id + sent_at: HasNudgeBeenSent (prevent duplicate nudges)
+-- Current schema records nudged_at and channel/status, not sent_at/nudge_type.
 CREATE INDEX IF NOT EXISTS idx_ghost_nudge_user_sent
-    ON ghost_nudge_log (user_id, sent_at DESC);
-
--- nudge_type + sent_at: batch nudge sweep (lifecycle worker)
-CREATE INDEX IF NOT EXISTS idx_ghost_nudge_type_sent
-    ON ghost_nudge_log (nudge_type, sent_at DESC);
+    ON ghost_nudge_log (user_id, nudged_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ghost_nudge_status_nudged
+    ON ghost_nudge_log (status, nudged_at DESC);
 
 -- ─── GOOGLE_WALLET_OBJECTS ────────────────────────────────────────────────────
 -- user_id: GetGoogleWalletObject (wallet pass display)
@@ -238,34 +214,37 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_google_wallet_objects_object_id
     WHERE object_id IS NOT NULL;
 
 -- ─── SESSION_SUMMARIES ────────────────────────────────────────────────────────
--- session_id: GetSummaryBySession (chat context recall)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_session_summaries_session_id
-    ON session_summaries (session_id);
-
--- user_id + created_at: GetRecentSummaries (multi-session context)
-CREATE INDEX IF NOT EXISTS idx_session_summaries_user_created
-    ON session_summaries (user_id, created_at DESC);
+-- Current chat memory is scoped by user_id + tool_slug and ordered by created_at.
+CREATE INDEX IF NOT EXISTS idx_session_summaries_user_tool_created
+    ON session_summaries (user_id, tool_slug, created_at DESC);
 
 -- ─── NOTIFICATION_BROADCASTS ──────────────────────────────────────────────────
--- status + scheduled_at: broadcast worker queue
-CREATE INDEX IF NOT EXISTS idx_notif_broadcasts_status_scheduled
-    ON notification_broadcasts (status, scheduled_at)
-    WHERE status IN ('pending', 'processing');
-
--- created_by + created_at: admin broadcast history
-CREATE INDEX IF NOT EXISTS idx_notif_broadcasts_created_by_at
-    ON notification_broadcasts (created_by, created_at DESC)
-    WHERE created_by IS NOT NULL;
+-- Historical table shapes differ. Index optional queue/audit columns only when present;
+-- created_at already has an index from the base broadcast migration.
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='notification_broadcasts' AND column_name='status'
+    ) AND EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='notification_broadcasts' AND column_name='scheduled_at'
+    ) THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_notif_broadcasts_status_scheduled ON notification_broadcasts (status, scheduled_at) WHERE status IN (''pending'', ''processing'')';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='notification_broadcasts' AND column_name='created_by'
+    ) THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_notif_broadcasts_created_by_at ON notification_broadcasts (created_by, created_at DESC) WHERE created_by IS NOT NULL';
+    END IF;
+END $$;
 
 -- ─── ARPU_UPLIFT_TRACKING ─────────────────────────────────────────────────────
--- user_id + period: GetArpuByUserPeriod (analytics)
+-- Current monetization path keys monthly snapshots by user_id + month_period.
 CREATE INDEX IF NOT EXISTS idx_arpu_uplift_user_period
-    ON arpu_uplift_tracking (user_id, period);
-
--- period + segment: aggregate ARPU by segment/period (BI reports)
-CREATE INDEX IF NOT EXISTS idx_arpu_uplift_period_segment
-    ON arpu_uplift_tracking (period, segment)
-    WHERE segment IS NOT NULL;
+    ON arpu_uplift_tracking (user_id, month_period);
+CREATE INDEX IF NOT EXISTS idx_arpu_uplift_period
+    ON arpu_uplift_tracking (month_period);
 
 -- ─── ADMIN_REFRESH_TOKENS (supplement) ────────────────────────────────────────
 -- NOTE: idx_admin_refresh_tokens_admin_id, _token_hash, _expires_at exist already.

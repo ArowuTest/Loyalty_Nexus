@@ -3,37 +3,37 @@ import AdminShell from "@/components/layout/AdminShell";
 import { useEffect, useState, useCallback } from "react";
 import adminAPI, { Prize, SpinTier } from "@/lib/api";
 
-const PRIZE_TYPES = ["try_again","pulse_points","bonus_points","airtime","data_bundle","momo_cash","studio_credits"] as const;
+const PRIZE_TYPES = ["try_again","pulse_points","airtime","data_bundle","momo_cash","physical","goods"] as const;
 type PrizeType = typeof PRIZE_TYPES[number];
 
 const TYPE_ICONS: Record<PrizeType, string> = {
   try_again:      "🔄",
   pulse_points:   "💎",
-  bonus_points:   "⭐",
   airtime:        "📱",
   data_bundle:    "📶",
   momo_cash:      "💰",
-  studio_credits: "🎨",
+  physical:       "📦",
+  goods:          "🎁",
 };
 
 const TYPE_LABELS: Record<PrizeType, string> = {
   try_again:      "Try Again (no prize)",
   pulse_points:   "Pulse Points",
-  bonus_points:   "Bonus Points",
   airtime:        "Airtime",
   data_bundle:    "Data Bundle",
   momo_cash:      "Cash Prize",
-  studio_credits: "Studio Credits",
+  physical:       "Physical Prize",
+  goods:          "Goods / Merchandise",
 };
 
 const DEFAULT_COLORS: Record<PrizeType, string> = {
   try_again:      "#6b7280",
   pulse_points:   "#5f72f9",
-  bonus_points:   "#f59e0b",
   airtime:        "#2196F3",
   data_bundle:    "#9C27B0",
   momo_cash:      "#10b981",
-  studio_credits: "#8B5CF6",
+  physical:       "#f97316",
+  goods:          "#ec4899",
 };
 
 type LocalPrize = Prize & { _dirty?: boolean; _isNew?: boolean };
@@ -90,9 +90,8 @@ export default function SpinConfigPage() {
     setPrizes(prev => prev.map((p, j) => j === i ? { ...p, [field]: val, _dirty: true } : p));
 
   const addSlot = () => {
-    if (prizes.length >= 16) { setError("Maximum 16 slots"); return; }
     const newPrize: LocalPrize = {
-      id: "", name: "New Prize",
+      id: crypto.randomUUID(), name: "New Prize",
       prize_type: "try_again",
       base_value: 0, win_probability_weight: 0,
       is_active: true, is_no_win: true,
@@ -105,46 +104,44 @@ export default function SpinConfigPage() {
   const removeSlot = (i: number) => {
     const p = prizes[i];
     if (p._isNew) { setPrizes(prev => prev.filter((_, j) => j !== i)); return; }
-    if (!confirm(`Delete "${p.name}"?`)) return;
-    adminAPI.deletePrize(p.id).then(load).catch(e => setError(String(e)));
+    if (!confirm(`Remove "${p.name}" from the live wheel? You can re-enable it later.`)) return;
+    update(i, "is_active", false);
   };
 
   const validateAndSave = async () => {
     setError(null);
     const active = prizes.filter(p => p.is_active);
-    const total = active.reduce((s, p) => s + (p.win_probability_weight || 0), 0);
-    if (total > 100.00 + 0.001) { // allow tiny floating-point tolerance
-      setError(`Total probability is ${total.toFixed(2)}% — must be ≤ 100.00%. Reduce some weights before saving.`);
+    if (active.length === 0) {
+      setError("At least one prize must be active before publishing the wheel.");
       return;
     }
+    const totalCents = active.reduce((s, p) => s + Math.round((p.win_probability_weight || 0) * 100), 0);
+    if (active.some(p => (p.win_probability_weight || 0) <= 0)) {
+      setError("Every active prize must have a probability greater than 0%.");
+      return;
+    }
+    if (totalCents !== 10000) {
+      setError(`Active prize probabilities total ${(totalCents / 100).toFixed(2)}% — they must equal exactly 100.00% before publishing.`);
+      return;
+    }
+
     setSaving(true);
     try {
-      for (const p of prizes) {
-        if (!p._dirty) continue;
-        const payload = {
-          name: p.name,
-          prize_type: p.prize_type,
-          base_value: p.base_value,
-          win_probability_weight: p.win_probability_weight,
-          daily_inventory_cap: p.daily_inventory_cap ?? -1,
-          is_active: p.is_active,
-          is_no_win: p.is_no_win ?? false,
-          no_win_message: p.no_win_message ?? "",
-          color_scheme: p.color_scheme ?? DEFAULT_COLORS[p.prize_type as PrizeType] ?? "#888",
-          sort_order: p.sort_order ?? 0,
-          minimum_recharge: p.minimum_recharge ?? 0,
-        };
-        if (p._isNew) {
-          await adminAPI.createPrize(payload as Omit<Prize, "id">);
-        } else {
-          await adminAPI.updatePrize(p.id, payload);
-        }
-      }
+      const payload = prizes.map((p, index): Prize => ({
+        ...p,
+        sort_order: index,
+        is_no_win: p.prize_type === "try_again",
+        base_value: p.prize_type === "try_again" ? 0 : p.base_value,
+        daily_inventory_cap: (p.daily_inventory_cap ?? -1) < 0 ? undefined : p.daily_inventory_cap,
+        color_scheme: p.color_scheme ?? DEFAULT_COLORS[p.prize_type as PrizeType] ?? "#888",
+        minimum_recharge: p.minimum_recharge ?? 0,
+      }));
+      await adminAPI.publishPrizeConfiguration(payload);
       await load();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(e instanceof Error ? e.message : "Publish failed");
     } finally {
       setSaving(false);
     }
@@ -225,7 +222,7 @@ export default function SpinConfigPage() {
             </button>
             <button onClick={validateAndSave} disabled={saving}
               style={{ padding: "8px 18px", borderRadius: 8, background: saved ? "#10b981" : "#5f72f9", color: "#fff", fontWeight: 600, fontSize: 13, border: "none", cursor: "pointer", opacity: saving ? 0.6 : 1 }}>
-              {saving ? "Saving…" : saved ? "✓ Saved" : "Save Prize Table"}
+              {saving ? "Publishing…" : saved ? "✓ Published" : "Publish Wheel"}
             </button>
           </div>
         </div>
@@ -280,7 +277,7 @@ export default function SpinConfigPage() {
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <h2 style={{ fontSize: 15, fontWeight: 600, color: "#e2e8ff" }}>Prize Slots ({prizes.length}/16)</h2>
+              <h2 style={{ fontSize: 15, fontWeight: 600, color: "#e2e8ff" }}>Prize Slots ({prizes.filter(p => p.is_active).length} active / {prizes.length} configured)</h2>
               <button onClick={addSlot}
                 style={{ padding: "7px 16px", border: "1px solid rgba(95,114,249,0.4)", borderRadius: 8, color: "#5f72f9", background: "transparent", fontSize: 13, cursor: "pointer" }}>
                 + Add Slot

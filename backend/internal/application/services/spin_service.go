@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"math/big"
+	"strings"
 	"time"
 
 	"loyalty-nexus/internal/domain/entities"
@@ -61,11 +63,13 @@ func NewSpinService(
 }
 
 type SpinOutcome struct {
-	SpinResult  *entities.SpinResult `json:"spin_result"`
-	PrizeLabel  string               `json:"prize_label"`
-	SlotIndex   int                  `json:"slot_index"`
-	Message     string               `json:"message"`
-	NeedsMoMo   bool                 `json:"needs_momo_setup"` // Prompt user to link MoMo
+	SpinResult *entities.SpinResult       `json:"spin_result"`
+	PrizeID    uuid.UUID                  `json:"prize_id"`
+	PrizeLabel string                     `json:"prize_label"`
+	SlotIndex  int                        `json:"slot_index"`
+	Wheel      *entities.SpinWheelPayload `json:"wheel"`
+	Message    string                     `json:"message"`
+	NeedsMoMo  bool                       `json:"needs_momo_setup"` // Prompt user to link MoMo
 }
 
 // PlaySpin executes a single spin:
@@ -125,7 +129,7 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 	}
 
 	// --- Step 4: Select prize via CSPRNG (REQ-3.2) ---
-	prize, slotIdx, err := s.selectPrize(ctx, forceLowValue, todayAmountKobo)
+	prize, slotIdx, wheelSnapshot, err := s.selectPrize(ctx, forceLowValue, todayAmountKobo)
 	if err != nil {
 		return nil, fmt.Errorf("prize selection failed: %w", err)
 	}
@@ -232,17 +236,17 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 			return err
 		}
 
-			// For Pulse Points prizes, award immediately via ledger
-			if prize.PrizeType == entities.PrizePulsePoints {
-				pts := int64(prize.BaseValue)
-				if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).Updates(map[string]interface{}{
-					"pulse_points":    gorm.Expr("pulse_points + ?", pts),
-					"lifetime_points": gorm.Expr("lifetime_points + ?", pts),
-				}).Error; err != nil {
-					return err
-				}
-				wallet.PulsePoints += pts
-				wallet.LifetimePoints += pts
+		// For Pulse Points prizes, award immediately via ledger
+		if prize.PrizeType == entities.PrizePulsePoints {
+			pts := int64(prize.BaseValue)
+			if err := dbTx.Table("wallets").Where("user_id = ?", wallet.UserID).Updates(map[string]interface{}{
+				"pulse_points":    gorm.Expr("pulse_points + ?", pts),
+				"lifetime_points": gorm.Expr("lifetime_points + ?", pts),
+			}).Error; err != nil {
+				return err
+			}
+			wallet.PulsePoints += pts
+			wallet.LifetimePoints += pts
 			ptsTx := &entities.Transaction{
 				ID:           uuid.New(),
 				UserID:       userID,
@@ -267,47 +271,49 @@ func (s *SpinService) PlaySpin(ctx context.Context, userID uuid.UUID) (*SpinOutc
 		return nil, err
 	}
 
-		// --- Step 6: Background fulfillment dispatch ---
-		// Check admin-configured fulfillment mode for this prize type.
-		// Default: MANUAL (user must claim from dashboard — unchanged behaviour).
-		// AUTO: fire VTPass immediately in a bounded goroutine (airtime/data only).
-		cfg, _ := s.fulfillCfgRepo.GetByPrizeType(ctx, prize.PrizeType)
-		isAuto := cfg != nil && cfg.FulfillmentMode == entities.FulfillmentModeAuto && entities.IsAutoProvisionable(prize.PrizeType)
+	// --- Step 6: Background fulfillment dispatch ---
+	// Check admin-configured fulfillment mode for this prize type.
+	// Default: MANUAL (user must claim from dashboard — unchanged behaviour).
+	// AUTO: fire VTPass immediately in a bounded goroutine (airtime/data only).
+	cfg, _ := s.fulfillCfgRepo.GetByPrizeType(ctx, prize.PrizeType)
+	isAuto := cfg != nil && cfg.FulfillmentMode == entities.FulfillmentModeAuto && entities.IsAutoProvisionable(prize.PrizeType)
 
-		if isAuto {
-			// Flip status from pending_claim → pending so fulfillSvc.Fulfill() acts on it
-			s.db.WithContext(ctx).Table("spin_results").Where("id = ?", spinResult.ID).
-				Update("fulfillment_status", entities.FulfillPending)
-			spinResult.FulfillmentStatus = entities.FulfillPending
-			cfgCopy := *cfg
-			resultCopy := *spinResult
-			safe.Go(func() {
-				// Acquire a semaphore slot (up to 8 s wait before giving up)
-				acquireCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-				defer cancel()
-				select {
-				case <-s.provisionSem:
-					defer func() { s.provisionSem <- struct{}{} }()
-				case <-acquireCtx.Done():
-					log.Printf("[SPIN] auto-provision semaphore timeout prize=%s type=%s", resultCopy.ID, resultCopy.PrizeType)
-					return
-				}
-				s.autoProvisionWithRetry(context.Background(), resultCopy, cfgCopy)
-			})
-		} else if spinResult.FulfillmentStatus == entities.FulfillPending {
-			// Existing path: MoMo or other prizes already set to FulfillPending
-			safe.Go(func() {
-				if err := s.fulfillSvc.Fulfill(context.Background(), spinResult); err != nil {
-					log.Printf("[SPIN] Fulfillment failed for %s: %v", spinResult.ID, err)
-				}
-			})
-		}
+	if isAuto {
+		// Flip status from pending_claim → pending so fulfillSvc.Fulfill() acts on it
+		s.db.WithContext(ctx).Table("spin_results").Where("id = ?", spinResult.ID).
+			Update("fulfillment_status", entities.FulfillPending)
+		spinResult.FulfillmentStatus = entities.FulfillPending
+		cfgCopy := *cfg
+		resultCopy := *spinResult
+		safe.Go(func() {
+			// Acquire a semaphore slot (up to 8 s wait before giving up)
+			acquireCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			select {
+			case <-s.provisionSem:
+				defer func() { s.provisionSem <- struct{}{} }()
+			case <-acquireCtx.Done():
+				log.Printf("[SPIN] auto-provision semaphore timeout prize=%s type=%s", resultCopy.ID, resultCopy.PrizeType)
+				return
+			}
+			s.autoProvisionWithRetry(context.Background(), resultCopy, cfgCopy)
+		})
+	} else if spinResult.FulfillmentStatus == entities.FulfillPending {
+		// Existing path: MoMo or other prizes already set to FulfillPending
+		safe.Go(func() {
+			if err := s.fulfillSvc.Fulfill(context.Background(), spinResult); err != nil {
+				log.Printf("[SPIN] Fulfillment failed for %s: %v", spinResult.ID, err)
+			}
+		})
+	}
 
 	// Build outcome response
 	outcome := &SpinOutcome{
 		SpinResult: spinResult,
+		PrizeID:    prize.ID,
 		PrizeLabel: s.buildPrizeLabel(prize),
 		SlotIndex:  slotIdx,
+		Wheel:      s.buildWheelPayload(wheelSnapshot),
 		NeedsMoMo:  spinResult.FulfillmentStatus == entities.FulfillPendingMoMo,
 	}
 	outcome.Message = s.buildWinMessage(outcome, user.PhoneNumber)
@@ -333,7 +339,13 @@ func (s *SpinService) GetWheelConfig(ctx context.Context) (*entities.SpinWheelPa
 	if err != nil {
 		return nil, err
 	}
+	if err := validateActivePrizeProbabilityPool(prizes); err != nil {
+		return nil, err
+	}
+	return s.buildWheelPayload(prizes), nil
+}
 
+func (s *SpinService) buildWheelPayload(prizes []entities.PrizePoolEntry) *entities.SpinWheelPayload {
 	fallbackColors := []string{"#FF6B35", "#FFD700", "#00B4D8", "#06D6A0", "#EF476F", "#118AB2", "#073B4C", "#FFB703"}
 	slots := make([]entities.SpinSlot, len(prizes))
 	for i, p := range prizes {
@@ -342,44 +354,58 @@ func (s *SpinService) GetWheelConfig(ctx context.Context) (*entities.SpinWheelPa
 			color = fallbackColors[i%len(fallbackColors)]
 		}
 		slots[i] = entities.SpinSlot{
-			Index:     i,
-			PrizeType: p.PrizeType,
-			Label:     s.buildPrizeLabel(&p),
-			Color:     color,
-			IconName:  p.IconName,
-			IsNoWin:   p.IsNoWin,
-			NoWinMsg:  p.NoWinMessage,
+			Index:       i,
+			PrizeID:     p.ID,
+			PrizeType:   p.PrizeType,
+			Label:       s.buildPrizeLabel(&p),
+			BaseValue:   p.BaseValue,
+			Probability: p.ProbWeight,
+			Color:       color,
+			IconName:    p.IconName,
+			IsNoWin:     p.IsNoWin,
+			NoWinMsg:    p.NoWinMessage,
 		}
 	}
 	return &entities.SpinWheelPayload{
 		Slots:           slots,
 		RequiredCredits: 1,
-	}, nil
+	}
 }
 
 // selectPrize uses CSPRNG weighted random selection.
-func (s *SpinService) selectPrize(ctx context.Context, forceLowValue bool, todayAmountKobo int64) (*entities.PrizePoolEntry, int, error) {
-	var prizes []entities.PrizePoolEntry
-	var err error
-
-	if forceLowValue {
-		prizes, err = s.prizeRepo.ListActivePrizesMaxValue(ctx, 5000) // Max ₦50 when cap hit
-	} else {
-		prizes, err = s.prizeRepo.ListActivePrizesSorted(ctx)
+func (s *SpinService) selectPrize(ctx context.Context, forceLowValue bool, todayAmountKobo int64) (*entities.PrizePoolEntry, int, []entities.PrizePoolEntry, error) {
+	// Validate the complete active baseline before any eligibility filtering. The
+	// admin contract is absolute percentages totaling exactly 100%; conditional
+	// eligibility below may then reweight the remaining eligible subset.
+	allPrizes, err := s.prizeRepo.ListActivePrizesSorted(ctx)
+	if err != nil || len(allPrizes) == 0 {
+		return nil, 0, nil, fmt.Errorf("no active prizes available")
 	}
-	if err != nil || len(prizes) == 0 {
-		return nil, 0, fmt.Errorf("no active prizes available")
+	if err := validateActivePrizeProbabilityPool(allPrizes); err != nil {
+		return nil, 0, nil, err
 	}
 
-	// Check daily inventory caps and minimum recharge.
-	// fullIdx tracks each eligible prize's position in the full sorted prizes slice
-	// so slot_index always maps to the correct wheel segment on the frontend.
+	// Check liability, daily inventory caps and minimum recharge while always
+	// retaining each prize's index in the complete live Admin wheel. The index
+	// returned to clients must never be relative to a filtered subset.
 	type eligibleEntry struct {
 		prize   entities.PrizePoolEntry
 		fullIdx int
 	}
-	eligible := make([]eligibleEntry, 0, len(prizes))
-	for fullI, p := range prizes {
+	eligible := make([]eligibleEntry, 0, len(allPrizes))
+	for fullI, p := range allPrizes {
+		if forceLowValue {
+			// Once the daily liability cap is hit, allow no-win/points prizes and
+			// monetary prizes worth at most ₦50 (5,000 kobo).
+			switch p.PrizeType {
+			case entities.PrizeTryAgain, entities.PrizePulsePoints:
+				// non-cash liability path remains eligible
+			default:
+				if p.BaseValue > 5000 {
+					continue
+				}
+			}
+		}
 		if p.MinimumRecharge > 0 && todayAmountKobo < p.MinimumRecharge {
 			continue // User hasn't recharged enough today for this prize
 		}
@@ -392,33 +418,33 @@ func (s *SpinService) selectPrize(ctx context.Context, forceLowValue bool, today
 		eligible = append(eligible, eligibleEntry{prize: p, fullIdx: fullI})
 	}
 	if len(eligible) == 0 {
-		// Fallback: all prizes eligible — rebuild with full indices
-		for fullI, p := range prizes {
-			eligible = append(eligible, eligibleEntry{prize: p, fullIdx: fullI})
-		}
+		return nil, 0, nil, fmt.Errorf("no prizes currently eligible for this spin")
 	}
 
-	// Weighted CSPRNG selection — weights are NUMERIC(5,2) summing to 100.00
-	// Scale to integer precision (multiply by 100 → range 0–10000) for rand.Int
-	totalWeightF := 0.0
+	// Conditional weighted selection: the baseline is exactly 100%, but
+	// inventory/recharge/liability filters can produce a subset. Reweight that
+	// eligible subset proportionally without changing the configured baseline.
+	totalWeightInt := int64(0)
 	for _, e := range eligible {
-		totalWeightF += e.prize.ProbWeight
+		totalWeightInt += probabilityCents(e.prize.ProbWeight)
 	}
-	if totalWeightF == 0 {
-		return nil, 0, fmt.Errorf("all prizes have zero weight")
+	if totalWeightInt <= 0 {
+		return nil, 0, nil, fmt.Errorf("all eligible prizes have zero weight")
 	}
-	totalWeightInt := int64(totalWeightF * 100)
-	roll, _ := rand.Int(rand.Reader, big.NewInt(totalWeightInt))
+	roll, err := rand.Int(rand.Reader, big.NewInt(totalWeightInt))
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("secure prize randomization failed: %w", err)
+	}
 	cursor := int64(0)
 	for _, e := range eligible {
-		cursor += int64(e.prize.ProbWeight * 100)
+		cursor += probabilityCents(e.prize.ProbWeight)
 		if roll.Int64() < cursor {
 			p := e.prize
-			return &p, e.fullIdx, nil // fullIdx = correct wheel segment position
+			return &p, e.fullIdx, allPrizes, nil // fullIdx = correct wheel segment position
 		}
 	}
 	p := eligible[0].prize
-	return &p, eligible[0].fullIdx, nil
+	return &p, eligible[0].fullIdx, allPrizes, nil
 }
 
 func (s *SpinService) buildPrizeLabel(p *entities.PrizePoolEntry) string {
@@ -474,11 +500,98 @@ func (s *SpinService) GetAllPrizes(ctx context.Context, includeInactive ...bool)
 	return prizes, err
 }
 
+func probabilityCents(weight float64) int64 {
+	return int64(math.Round(weight * 100))
+}
+
+func validateActivePrizeProbabilityPool(prizes []entities.PrizePoolEntry) error {
+	activeCount := 0
+	total := int64(0)
+	for _, p := range prizes {
+		if !p.IsActive {
+			continue
+		}
+		activeCount++
+		cents := probabilityCents(p.ProbWeight)
+		if cents <= 0 {
+			return fmt.Errorf("active prize %q must have a probability greater than 0%%", p.Name)
+		}
+		total += cents
+	}
+	if activeCount == 0 {
+		return fmt.Errorf("spin probability pool invalid: at least one active prize is required")
+	}
+	if total != 10000 {
+		return fmt.Errorf("spin probability pool invalid: active probabilities total %.2f%%, expected exactly 100.00%%", float64(total)/100)
+	}
+	return nil
+}
+
+func lockPrizeProbabilityPool(tx *gorm.DB) error {
+	if tx.Dialector.Name() != "postgres" {
+		return nil
+	}
+	// Transaction-scoped lock serializes concurrent admin wheel publications.
+	return tx.Exec("SELECT pg_advisory_xact_lock(?)", int64(0x4C4E5052495A45)).Error
+}
+
+func validateStoredActivePrizePoolTx(tx *gorm.DB) error {
+	var active []entities.PrizePoolEntry
+	if err := tx.Table("prize_pool").Where("is_active = ?", true).Order("sort_order ASC").Find(&active).Error; err != nil {
+		return err
+	}
+	return validateActivePrizeProbabilityPool(active)
+}
+
+func validateAdminPrizeDefinition(p *entities.PrizePoolEntry) error {
+	p.Name = strings.TrimSpace(p.Name)
+	if p.Name == "" {
+		return fmt.Errorf("prize name is required")
+	}
+	switch p.PrizeType {
+	case entities.PrizeTryAgain:
+		p.IsNoWin = true
+		p.BaseValue = 0
+	case entities.PrizePulsePoints, entities.PrizeAirtime, entities.PrizeDataBundle,
+		entities.PrizeMoMoCash, entities.PrizePhysical, entities.PrizeGoods:
+		p.IsNoWin = false
+	default:
+		return fmt.Errorf("prize %q has unsupported prize_type %q", p.Name, p.PrizeType)
+	}
+	if p.PrizeType != entities.PrizeTryAgain && p.BaseValue < 0 {
+		return fmt.Errorf("prize %q cannot have a negative value", p.Name)
+	}
+	if p.IsActive && p.ProbWeight <= 0 {
+		return fmt.Errorf("active prize %q must have a probability greater than 0%%", p.Name)
+	}
+	if p.ProbWeight < 0 || p.ProbWeight > 100 {
+		return fmt.Errorf("prize %q probability must be between 0 and 100", p.Name)
+	}
+	if p.PrizeType == entities.PrizeDataBundle {
+		validDataKobo := map[int64]bool{
+			10000: true, 20000: true, 50000: true,
+			100000: true, 150000: true, 200000: true,
+		}
+		if !validDataKobo[int64(p.BaseValue)] {
+			return fmt.Errorf(
+				"data_bundle prize %q must use a supported bundle value in kobo (10000, 20000, 50000, 100000, 150000, 200000)",
+				p.Name,
+			)
+		}
+	}
+	if p.DailyInventoryCap != nil && *p.DailyInventoryCap < 0 {
+		p.DailyInventoryCap = nil
+	}
+	return nil
+}
+
 // PrizeProbabilitySummary is returned by GetPrizeProbabilitySummary.
 type PrizeProbabilitySummary struct {
-	TotalWeight     float64                `json:"total_weight"`      // sum of all active weights (max 100.00)
-	RemainingBudget float64                `json:"remaining_budget"` // 100.00 - TotalWeight
-	PercentUsed     float64                `json:"percent_used"`     // same as TotalWeight (already a percentage)
+	TotalWeight     float64                `json:"total_weight"`
+	RemainingBudget float64                `json:"remaining_budget"`
+	PercentUsed     float64                `json:"percent_used"`
+	IsValid         bool                   `json:"is_valid"`
+	ActiveCount     int                    `json:"active_count"`
 	Prizes          []PrizeProbabilityItem `json:"prizes"`
 }
 
@@ -487,7 +600,7 @@ type PrizeProbabilityItem struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	PrizeType   string  `json:"prize_type"`
-	Weight      float64 `json:"weight"`   // NUMERIC(5,2) — directly the percentage (e.g. 25.00 = 25%)
+	Weight      float64 `json:"weight"`  // NUMERIC(5,2) — directly the percentage (e.g. 25.00 = 25%)
 	Percent     float64 `json:"percent"` // same as Weight for backward compat
 	IsActive    bool    `json:"is_active"`
 	IsNoWin     bool    `json:"is_no_win"`
@@ -501,11 +614,13 @@ func (s *SpinService) GetPrizeProbabilitySummary(ctx context.Context) (*PrizePro
 	if err != nil {
 		return nil, err
 	}
-	totalWeight := 0.0
+	totalCents := int64(0)
+	activeCount := 0
 	items := make([]PrizeProbabilityItem, 0, len(prizes))
 	for _, p := range prizes {
 		if p.IsActive {
-			totalWeight += p.ProbWeight
+			activeCount++
+			totalCents += probabilityCents(p.ProbWeight)
 		}
 		items = append(items, PrizeProbabilityItem{
 			ID:          p.ID.String(),
@@ -519,10 +634,13 @@ func (s *SpinService) GetPrizeProbabilitySummary(ctx context.Context) (*PrizePro
 			SortOrder:   p.SortOrder,
 		})
 	}
+	totalWeight := float64(totalCents) / 100
 	return &PrizeProbabilitySummary{
 		TotalWeight:     totalWeight,
 		RemainingBudget: 100.00 - totalWeight,
-		PercentUsed:     totalWeight, // already a percentage
+		PercentUsed:     totalWeight,
+		IsValid:         activeCount > 0 && totalCents == 10000,
+		ActiveCount:     activeCount,
 		Prizes:          items,
 	}, nil
 }
@@ -549,8 +667,105 @@ func (s *SpinService) GetPrize(ctx context.Context, prizeID uuid.UUID) (*entitie
 	return &p, nil
 }
 
-// CreatePrize creates a new prize slot (admin).
-// Validates that total ProbWeight of all active prizes ≤ 100.00 (representing 100%).
+// PublishPrizeConfiguration atomically publishes the complete Admin-authored
+// wheel definition. Admin may add, disable, re-enable, reorder, or reweight
+// prizes in one draft; the live wheel changes only if the final active
+// probabilities total exactly 100.00%.
+func (s *SpinService) PublishPrizeConfiguration(ctx context.Context, prizes []entities.PrizePoolEntry) ([]entities.PrizePoolEntry, error) {
+	if len(prizes) == 0 {
+		return nil, fmt.Errorf("prize configuration cannot be empty")
+	}
+
+	seen := make(map[uuid.UUID]struct{}, len(prizes))
+	incomingIDs := make([]uuid.UUID, 0, len(prizes))
+	for i := range prizes {
+		p := &prizes[i]
+		if p.ID == uuid.Nil {
+			p.ID = uuid.New()
+		}
+		if _, exists := seen[p.ID]; exists {
+			return nil, fmt.Errorf("duplicate prize id %s in configuration", p.ID)
+		}
+		seen[p.ID] = struct{}{}
+		incomingIDs = append(incomingIDs, p.ID)
+
+		if err := validateAdminPrizeDefinition(p); err != nil {
+			return nil, fmt.Errorf("prize %d: %w", i+1, err)
+		}
+		if p.DailyInventoryCap != nil && *p.DailyInventoryCap < 0 {
+			p.DailyInventoryCap = nil
+		}
+		p.SortOrder = i
+	}
+
+	if err := validateActivePrizeProbabilityPool(prizes); err != nil {
+		return nil, err
+	}
+
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockPrizeProbabilityPool(tx); err != nil {
+			return err
+		}
+
+		// This endpoint publishes the complete wheel. Any historical/configured
+		// row omitted from the draft is retained for auditability but removed
+		// from the live wheel.
+		if err := tx.Table("prize_pool").
+			Where("id NOT IN ?", incomingIDs).
+			Update("is_active", false).Error; err != nil {
+			return fmt.Errorf("deactivate omitted prizes: %w", err)
+		}
+
+		for i := range prizes {
+			p := prizes[i]
+			var count int64
+			if err := tx.Table("prize_pool").Where("id = ?", p.ID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				if err := tx.Table("prize_pool").Create(&p).Error; err != nil {
+					return fmt.Errorf("create prize %q: %w", p.Name, err)
+				}
+				continue
+			}
+
+			updates := map[string]interface{}{
+				"name":                   p.Name,
+				"prize_code":             p.PrizeCode,
+				"variation_code":         p.VariationCode,
+				"prize_type":             p.PrizeType,
+				"base_value":             p.BaseValue,
+				"win_probability_weight": p.ProbWeight,
+				"daily_inventory_cap":    p.DailyInventoryCap,
+				"is_active":              p.IsActive,
+				"is_no_win":              p.IsNoWin,
+				"no_win_message":         p.NoWinMessage,
+				"color_scheme":           p.ColorScheme,
+				"icon_name":              p.IconName,
+				"sort_order":             p.SortOrder,
+				"minimum_recharge":       p.MinimumRecharge,
+				"terms_and_conditions":   p.TermsAndConditions,
+			}
+			if err := tx.Table("prize_pool").Where("id = ?", p.ID).Updates(updates).Error; err != nil {
+				return fmt.Errorf("update prize %q: %w", p.Name, err)
+			}
+		}
+
+		var active []entities.PrizePoolEntry
+		if err := tx.Table("prize_pool").Where("is_active = ?", true).Order("sort_order ASC").Find(&active).Error; err != nil {
+			return err
+		}
+		return validateActivePrizeProbabilityPool(active)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.GetAllPrizes(ctx, true)
+}
+
+// CreatePrize is a legacy/internal single-row helper retained for tests and
+// non-live tooling. Production Admin publishes the complete live wheel through
+// PublishPrizeConfiguration. This helper only prevents totals above 100%.
 func (s *SpinService) CreatePrize(ctx context.Context, data map[string]interface{}) (*entities.PrizePoolEntry, error) {
 	name, _ := data["name"].(string)
 	if name == "" {
@@ -570,8 +785,9 @@ func (s *SpinService) CreatePrize(ctx context.Context, data map[string]interface
 		isActive = ia
 	}
 
-	// Validate total weight doesn't exceed 100.00 (= 100%)
-	if s.db != nil {
+	// Legacy single-row mutation helper: never allow an active total above 100%.
+	// The live Admin UI uses PublishPrizeConfiguration for exact-100 atomic publication.
+	if s.db != nil && isActive {
 		var currentTotal float64
 		s.db.WithContext(ctx).Table("prize_pool").
 			Where("is_active = true").
@@ -592,6 +808,19 @@ func (s *SpinService) CreatePrize(ctx context.Context, data map[string]interface
 					"(₦100=10000, ₦200=20000, ₦500=50000, ₦1000=100000, ₦1500=150000, ₦2000=200000) — got %d",
 				int64(baseValue),
 			)
+		}
+	}
+
+	if isActive {
+		var currentTotal float64
+		if err := s.db.WithContext(ctx).Table("prize_pool").
+			Where("is_active = ?", true).
+			Select("COALESCE(SUM(win_probability_weight), 0)").
+			Scan(&currentTotal).Error; err != nil {
+			return nil, err
+		}
+		if currentTotal+probWeight > 100.0001 {
+			return nil, fmt.Errorf("adding this prize (%.2f%%) would exceed 100%% total (current: %.2f%%)", probWeight, currentTotal)
 		}
 	}
 
@@ -639,7 +868,7 @@ func (s *SpinService) CreatePrize(ctx context.Context, data map[string]interface
 	if err := s.db.WithContext(ctx).Table("prize_pool").Create(&prize).Error; err != nil {
 		return nil, fmt.Errorf("create prize: %w", err)
 	}
-	return &prize, nil
+	return s.GetPrize(ctx, prize.ID)
 }
 
 // UpdatePrize updates an existing prize slot (admin).
@@ -648,7 +877,6 @@ func (s *SpinService) UpdatePrize(ctx context.Context, prizeID uuid.UUID, data m
 	if err != nil {
 		return nil, err
 	}
-
 	updates := map[string]interface{}{}
 	if v, ok := data["name"].(string); ok && v != "" {
 		updates["name"] = v
@@ -663,8 +891,7 @@ func (s *SpinService) UpdatePrize(ctx context.Context, prizeID uuid.UUID, data m
 	}
 	if v, ok := data["win_probability_weight"].(float64); ok {
 		newWeight := v
-		// Validate weight cap (exclude current prize from count)
-		if s.db != nil {
+		if s.db != nil && prize.IsActive {
 			var otherTotal float64
 			s.db.WithContext(ctx).Table("prize_pool").
 				Where("is_active = true AND id != ?", prizeID).
@@ -728,6 +955,21 @@ func (s *SpinService) UpdatePrize(ctx context.Context, prizeID uuid.UUID, data m
 		return prize, nil
 	}
 
+	// Legacy helper compatibility: prevent totals above 100%, but do not require
+	// an exact 100% draft. The live Admin route publishes the whole table atomically.
+	if prize.IsActive {
+		var otherTotal float64
+		if err := s.db.WithContext(ctx).Table("prize_pool").
+			Where("is_active = ? AND id <> ?", true, prizeID).
+			Select("COALESCE(SUM(win_probability_weight), 0)").
+			Scan(&otherTotal).Error; err != nil {
+			return nil, err
+		}
+		if otherTotal+prize.ProbWeight > 100.0001 {
+			return nil, fmt.Errorf("updating this prize to %.2f%% would exceed 100%% total (others: %.2f%%)", prize.ProbWeight, otherTotal)
+		}
+	}
+
 	// Validate data_bundle base_value against VTPass tiers when either field changes.
 	finalPrizeType := prize.PrizeType
 	if pt, ok := updates["prize_type"].(string); ok && pt != "" {
@@ -752,13 +994,13 @@ func (s *SpinService) UpdatePrize(ctx context.Context, prizeID uuid.UUID, data m
 	if err := s.db.WithContext(ctx).Table("prize_pool").Where("id = ?", prizeID).Updates(updates).Error; err != nil {
 		return nil, fmt.Errorf("update prize: %w", err)
 	}
-	return prize, nil
+	return s.GetPrize(ctx, prizeID)
 }
 
-// DeletePrize soft-deletes a prize (sets is_active = false).
+// DeletePrize is a legacy/internal soft-delete helper. The production Admin
+// wheel uses PublishPrizeConfiguration for atomic live changes.
 func (s *SpinService) DeletePrize(ctx context.Context, prizeID uuid.UUID) error {
-	return s.db.WithContext(ctx).
-		Table("prize_pool").
+	return s.db.WithContext(ctx).Table("prize_pool").
 		Where("id = ?", prizeID).
 		Update("is_active", false).Error
 }
@@ -918,7 +1160,6 @@ func (s *SpinService) CheckEligibility(ctx context.Context, userID uuid.UUID) (*
 		ProgressPercent:  progressPercent,
 	}, nil
 }
-
 
 // ─── Phone-based Live-Query Eligibility (RechargeMax Pattern) ────────────────
 
@@ -1083,6 +1324,7 @@ func normaliseSpinPhone(phone string) string {
 	}
 	return phone
 }
+
 // ─── MoMo Hold Flow (Spec §8.2 — new, not in RechargeMax) ───────────────
 
 // ConfirmMoMoPrize is called once the user links their MoMo number after winning.
@@ -1156,34 +1398,34 @@ func (s *SpinService) GetStats(ctx context.Context) (map[string]interface{}, err
 // because the USSD session timed out (REQ-6.5).
 // It marks the spin result as "failed" and restores the user's spin credit.
 func (s *SpinService) RollbackSpin(ctx context.Context, spinResultID uuid.UUID) error {
-return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-var result entities.SpinResult
-if err := tx.Table("spin_results").
-Where("id = ? AND fulfillment_status = ?", spinResultID, entities.FulfillPending).
-First(&result).Error; err != nil {
-// Already fulfilled or does not exist — nothing to roll back.
-return nil
-}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var result entities.SpinResult
+		if err := tx.Table("spin_results").
+			Where("id = ? AND fulfillment_status = ?", spinResultID, entities.FulfillPending).
+			First(&result).Error; err != nil {
+			// Already fulfilled or does not exist — nothing to roll back.
+			return nil
+		}
 
-// Mark the spin result as failed with a clear reason.
-if err := tx.Table("spin_results").
-Where("id = ?", spinResultID).
-Updates(map[string]interface{}{
-"fulfillment_status": entities.FulfillFailed,
-"error_message":      "USSD session timed out — spin rolled back",
-}).Error; err != nil {
-return fmt.Errorf("rollback spin result: %w", err)
-}
+		// Mark the spin result as failed with a clear reason.
+		if err := tx.Table("spin_results").
+			Where("id = ?", spinResultID).
+			Updates(map[string]interface{}{
+				"fulfillment_status": entities.FulfillFailed,
+				"error_message":      "USSD session timed out — spin rolled back",
+			}).Error; err != nil {
+			return fmt.Errorf("rollback spin result: %w", err)
+		}
 
-// Restore the spin credit to the user's wallet.
-if err := tx.Table("wallets").
-Where("user_id = ?", result.UserID).
-UpdateColumn("spin_credits", gorm.Expr("spin_credits + 1")).Error; err != nil {
-return fmt.Errorf("restore spin credit: %w", err)
-}
+		// Restore the spin credit to the user's wallet.
+		if err := tx.Table("wallets").
+			Where("user_id = ?", result.UserID).
+			UpdateColumn("spin_credits", gorm.Expr("spin_credits + 1")).Error; err != nil {
+			return fmt.Errorf("restore spin credit: %w", err)
+		}
 
-return nil
-})
+		return nil
+	})
 }
 
 // ─── Spin Tiers (Admin) ──────────────────────────────────────────────────
@@ -1200,17 +1442,39 @@ func (s *SpinService) CreateSpinTier(ctx context.Context, data map[string]interf
 		IsActive: true,
 	}
 
-	if v, ok := data["tier_name"].(string); ok { tier.TierName = v }
-	if v, ok := data["tier_display_name"].(string); ok { tier.TierDisplayName = v }
-	if v, ok := data["min_daily_amount"].(float64); ok { tier.MinDailyAmount = int64(v) }
-	if v, ok := data["max_daily_amount"].(float64); ok { tier.MaxDailyAmount = int64(v) }
-	if v, ok := data["spins_per_day"].(float64); ok { tier.SpinsPerDay = int(v) }
-	if v, ok := data["tier_color"].(string); ok { tier.TierColor = v }
-	if v, ok := data["tier_icon"].(string); ok { tier.TierIcon = v }
-	if v, ok := data["tier_badge"].(string); ok { tier.TierBadge = v }
-	if v, ok := data["description"].(string); ok { tier.Description = v }
-	if v, ok := data["sort_order"].(float64); ok { tier.SortOrder = int(v) }
-	if v, ok := data["is_active"].(bool); ok { tier.IsActive = v }
+	if v, ok := data["tier_name"].(string); ok {
+		tier.TierName = v
+	}
+	if v, ok := data["tier_display_name"].(string); ok {
+		tier.TierDisplayName = v
+	}
+	if v, ok := data["min_daily_amount"].(float64); ok {
+		tier.MinDailyAmount = int64(v)
+	}
+	if v, ok := data["max_daily_amount"].(float64); ok {
+		tier.MaxDailyAmount = int64(v)
+	}
+	if v, ok := data["spins_per_day"].(float64); ok {
+		tier.SpinsPerDay = int(v)
+	}
+	if v, ok := data["tier_color"].(string); ok {
+		tier.TierColor = v
+	}
+	if v, ok := data["tier_icon"].(string); ok {
+		tier.TierIcon = v
+	}
+	if v, ok := data["tier_badge"].(string); ok {
+		tier.TierBadge = v
+	}
+	if v, ok := data["description"].(string); ok {
+		tier.Description = v
+	}
+	if v, ok := data["sort_order"].(float64); ok {
+		tier.SortOrder = int(v)
+	}
+	if v, ok := data["is_active"].(bool); ok {
+		tier.IsActive = v
+	}
 
 	if err := s.db.WithContext(ctx).Create(&tier).Error; err != nil {
 		return nil, err
@@ -1225,17 +1489,50 @@ func (s *SpinService) UpdateSpinTier(ctx context.Context, id uuid.UUID, data map
 	}
 
 	updates := map[string]interface{}{}
-	if v, ok := data["tier_name"].(string); ok { updates["tier_name"] = v; tier.TierName = v }
-	if v, ok := data["tier_display_name"].(string); ok { updates["tier_display_name"] = v; tier.TierDisplayName = v }
-	if v, ok := data["min_daily_amount"].(float64); ok { updates["min_daily_amount"] = int64(v); tier.MinDailyAmount = int64(v) }
-	if v, ok := data["max_daily_amount"].(float64); ok { updates["max_daily_amount"] = int64(v); tier.MaxDailyAmount = int64(v) }
-	if v, ok := data["spins_per_day"].(float64); ok { updates["spins_per_day"] = int(v); tier.SpinsPerDay = int(v) }
-	if v, ok := data["tier_color"].(string); ok { updates["tier_color"] = v; tier.TierColor = v }
-	if v, ok := data["tier_icon"].(string); ok { updates["tier_icon"] = v; tier.TierIcon = v }
-	if v, ok := data["tier_badge"].(string); ok { updates["tier_badge"] = v; tier.TierBadge = v }
-	if v, ok := data["description"].(string); ok { updates["description"] = v; tier.Description = v }
-	if v, ok := data["sort_order"].(float64); ok { updates["sort_order"] = int(v); tier.SortOrder = int(v) }
-	if v, ok := data["is_active"].(bool); ok { updates["is_active"] = v; tier.IsActive = v }
+	if v, ok := data["tier_name"].(string); ok {
+		updates["tier_name"] = v
+		tier.TierName = v
+	}
+	if v, ok := data["tier_display_name"].(string); ok {
+		updates["tier_display_name"] = v
+		tier.TierDisplayName = v
+	}
+	if v, ok := data["min_daily_amount"].(float64); ok {
+		updates["min_daily_amount"] = int64(v)
+		tier.MinDailyAmount = int64(v)
+	}
+	if v, ok := data["max_daily_amount"].(float64); ok {
+		updates["max_daily_amount"] = int64(v)
+		tier.MaxDailyAmount = int64(v)
+	}
+	if v, ok := data["spins_per_day"].(float64); ok {
+		updates["spins_per_day"] = int(v)
+		tier.SpinsPerDay = int(v)
+	}
+	if v, ok := data["tier_color"].(string); ok {
+		updates["tier_color"] = v
+		tier.TierColor = v
+	}
+	if v, ok := data["tier_icon"].(string); ok {
+		updates["tier_icon"] = v
+		tier.TierIcon = v
+	}
+	if v, ok := data["tier_badge"].(string); ok {
+		updates["tier_badge"] = v
+		tier.TierBadge = v
+	}
+	if v, ok := data["description"].(string); ok {
+		updates["description"] = v
+		tier.Description = v
+	}
+	if v, ok := data["sort_order"].(float64); ok {
+		updates["sort_order"] = int(v)
+		tier.SortOrder = int(v)
+	}
+	if v, ok := data["is_active"].(bool); ok {
+		updates["is_active"] = v
+		tier.IsActive = v
+	}
 
 	if len(updates) > 0 {
 		if err := s.db.WithContext(ctx).Model(&tier).Updates(updates).Error; err != nil {

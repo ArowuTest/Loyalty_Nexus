@@ -4,6 +4,8 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -31,6 +33,19 @@ func (p *AIProviderConfig) ResolveKey() string {
 //   - "aes:<base64>"  → AES-256-GCM, key from PROVIDER_ENCRYPTION_KEY env var
 //   - "b64:<base64>"  → plain base64 (no encryption key configured at store time)
 //   - anything else   → treated as legacy plaintext
+func decodeProviderEntityMasterKey(value string) ([]byte, error) {
+	if len(value) == 64 {
+		decoded, err := hex.DecodeString(value)
+		if err == nil && len(decoded) == 32 {
+			return decoded, nil
+		}
+	}
+	if len(value) == 32 {
+		return []byte(value), nil
+	}
+	return nil, fmt.Errorf("provider master key must be 32 raw bytes or 64 hex characters")
+}
+
 func decryptKey(enc string) (string, error) {
 	switch {
 	case strings.HasPrefix(enc, "b64:"):
@@ -46,7 +61,11 @@ func decryptKey(enc string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		block, err := aes.NewCipher([]byte(encKey))
+		keyBytes, err := decodeProviderEntityMasterKey(encKey)
+		if err != nil {
+			return "", err
+		}
+		block, err := aes.NewCipher(keyBytes)
 		if err != nil {
 			return "", err
 		}
