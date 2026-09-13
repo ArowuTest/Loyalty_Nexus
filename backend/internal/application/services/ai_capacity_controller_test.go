@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,6 +65,44 @@ func TestCapacityControllerEnforcesConcurrentLimit(t *testing.T) {
 		t.Fatalf("reserve after release failed: %s", reason)
 	}
 	release2()
+}
+
+// The reserve is a single Lua script, so a burst of concurrent reserves admits
+// exactly the configured number — never one more because two goroutines read
+// the same count.
+func TestCapacityControllerConcurrentReservesRespectTheLimit(t *testing.T) {
+	c, _ := testCapacityController(t)
+	b := entities.AIToolProviderBinding{ID: uuid.New(), MaxConcurrent: 3, TimeoutMS: 5000}
+
+	const workers = 25
+	var wg sync.WaitGroup
+	var admitted int32
+	releases := make(chan func(), workers)
+	start := make(chan struct{})
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			release, _, ok := c.Reserve(context.Background(), b)
+			if ok {
+				atomic.AddInt32(&admitted, 1)
+				releases <- release
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(releases)
+	if admitted != 3 {
+		t.Fatalf("admitted %d of %d simultaneous reserves, want exactly 3", admitted, workers)
+	}
+	for release := range releases {
+		release()
+	}
+	if _, reason, ok := c.Reserve(context.Background(), b); !ok {
+		t.Fatalf("all slots were released, reserve should succeed: %s", reason)
+	}
 }
 
 // A slot whose release was lost (process killed mid-call) must expire on its

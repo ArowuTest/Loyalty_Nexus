@@ -1,10 +1,8 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -80,45 +78,8 @@ func (o *AIStudioOrchestrator) callGeminiConfiguredDocument(
 			"maxOutputTokens": 8192,
 		},
 	}
-	body, _ := json.Marshal(payload)
-	endpoint := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		model, apiKey,
-	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("Gemini document request: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Gemini document HTTP %d: %s", resp.StatusCode, truncateStr(string(raw), 300))
-	}
-	var parsed struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return "", err
-	}
-	if parsed.Error != nil {
-		return "", fmt.Errorf("Gemini document API error: %s", parsed.Error.Message)
-	}
-	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("Gemini document returned no content")
-	}
-	return parsed.Candidates[0].Content.Parts[0].Text, nil
+	// Shared Gemini call: key in the x-goog-api-key header, structural decode so
+	// a blocked or content-stopped answer is a refusal rather than "no content".
+	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
+	return o.callGeminiEndpoint(ctx, endpoint, apiKey, payload)
 }

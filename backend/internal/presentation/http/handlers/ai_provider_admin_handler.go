@@ -70,6 +70,19 @@ func validateProviderBaseURL(u string) error {
 	return nil
 }
 
+// storedKeyStillBound decides whether a stored credential survives an
+// extra_config change (review B1). The key is sent to base_url on every live
+// request and on Test, so it is bound to the endpoint it was entered for: when
+// base_url moves without a fresh api_key in the same call, the stored key is
+// dropped rather than silently re-pointed at the new host — otherwise an admin
+// could redirect an existing key to a URL they control and harvest it.
+func storedKeyStillBound(oldCfg, newCfg entities.ProviderExtraConfig, newAPIKey *string) bool {
+	if providerBaseURL(newCfg) == providerBaseURL(oldCfg) {
+		return true
+	}
+	return newAPIKey != nil && *newAPIKey != ""
+}
+
 // ── GET /api/v1/admin/ai-providers ───────────────────────────────────────────
 func (h *AIProviderAdminHandler) ListProviders(w http.ResponseWriter, r *http.Request) {
 	providers, err := h.repo.ListAll(r.Context())
@@ -280,19 +293,11 @@ func (h *AIProviderAdminHandler) UpdateProvider(w http.ResponseWriter, r *http.R
 		p.ModelID = *body.ModelID
 	}
 	if body.ExtraConfig != nil {
-		// B1: bind the stored credential to the endpoint it was provisioned for.
-		// The key is sent as a Bearer token to base_url on every live request and
-		// on Test, so if base_url changes WITHOUT a fresh api_key the old key is
-		// cleared rather than silently pointed at a new host — otherwise an admin
-		// could redirect an existing key to an attacker-controlled URL and harvest
-		// it. A legitimate endpoint change re-supplies the key in the same call.
-		newBase := providerBaseURL(body.ExtraConfig)
-		if err := validateProviderBaseURL(newBase); err != nil {
+		if err := validateProviderBaseURL(providerBaseURL(body.ExtraConfig)); err != nil {
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if newBase != providerBaseURL(p.ExtraConfig) && p.APIKeyEnc != "" &&
-			(body.APIKey == nil || *body.APIKey == "") {
+		if p.APIKeyEnc != "" && !storedKeyStillBound(p.ExtraConfig, body.ExtraConfig, body.APIKey) {
 			p.APIKeyEnc = ""
 			log.Printf("[AIProviderAdmin] base_url changed for %s without a new api_key — stored key cleared; re-supply the key for the new endpoint", p.Slug)
 		}

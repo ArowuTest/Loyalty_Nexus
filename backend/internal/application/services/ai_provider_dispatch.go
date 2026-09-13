@@ -1,23 +1,18 @@
 package services
 
-// ai_provider_dispatch.go — DB-driven dynamic dispatch engine
+// ai_provider_dispatch.go — Admin-configured provider dispatch (AI Routing V2)
 //
-// Architecture:
+//	Admin UI → ai_provider_configs + ai_tool_stages + ai_tool_provider_bindings
+//	     ↓
+//	runToolStageChain / streamToolStageChain (ai_router_v2.go, ai_streaming.go)
+//	     ↓  ordered candidates, circuit + capacity + budget reserved per attempt
+//	callByTemplate(ctx, p, in)   ← routes provider.template → the matching adapter
 //
-//   Admin UI → ai_provider_configs (DB)
-//        ↓
-//   dbProviders(ctx, category)          ← sorted by priority ASC, is_active=true
-//        ↓
-//   runProviderChain(ctx, category, in) ← tries each DB provider in order
-//        ↓
-//   callByTemplate(ctx, p, in)          ← routes template → correct callXxx()
-//        ↓
-//   hardcodedFallbackChain(...)         ← original Go chains, used when DB is empty
-//
-// Backward compatibility guarantee:
-//   If DB is empty, unavailable, or returns no active providers for a category,
-//   every dispatch function falls straight through to its original hardcoded chain.
-//   Zero regressions possible.
+// There is deliberately no fallback outside the configured route: an empty or
+// exhausted route is ErrNoConfiguredAIRoute, an unknown template is an error,
+// and no adapter reads a provider key from the environment or hard-codes a
+// model. A tool that must always answer is configured with a last-resort
+// binding in the Admin UI, where it is visible and auditable.
 
 import (
 	"bytes"
@@ -25,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
@@ -264,7 +258,8 @@ func (o *AIStudioOrchestrator) callByTemplate(
 		}
 		model := p.ModelID
 		if model == "" {
-			model = "fal-ai/ltx-video"
+			err = errModelIDRequired(p)
+			break
 		}
 		outputURL, err = o.callFALVideo(ctx, key, model, in.ImageURL, in.Prompt, promptEnvelope{
 			Duration: in.DurationSecs, AspectRatio: in.AspectRatio, Extra: in.Extra,
@@ -277,7 +272,8 @@ func (o *AIStudioOrchestrator) callByTemplate(
 		}
 		model := p.ModelID
 		if model == "" {
-			model = "fal-ai/kling-video/v2.6/pro/multi-image-to-video"
+			err = errModelIDRequired(p) // silently picking the paid Kling Pro model here is exactly the hidden fallback V2 forbids
+			break
 		}
 		outputURL, err = o.callFALMultiImageVideoConfigured(ctx, key, model, in.ReferenceImageURLs, in.Prompt, in.DurationSecs, in.AspectRatio, in.Extra)
 
@@ -327,9 +323,8 @@ func (o *AIStudioOrchestrator) callByTemplate(
 		}
 		model := p.ModelID
 		if model == "" {
-			// Default changed from seedance (PAID, 1.8 pollen/M) to wan-fast (FREE, 91.4% success)
-			// ltx-2 was also removed (OFF, 5.3% success)
-			model = "wan-fast"
+			err = errModelIDRequired(p)
+			break
 		}
 		dur := in.DurationSecs
 		if dur <= 0 {
@@ -428,11 +423,8 @@ func (o *AIStudioOrchestrator) callByTemplate(
 		outputURL, err = o.callRembgService(ctx, key, in.ImageURL)
 
 	case entities.TemplateFALBGRemove:
-		model := p.ModelID
-		if model == "" {
-			model = "fal-ai/birefnet"
-		}
-		outputURL, err = o.callFALBgRemoverWithModel(ctx, key, model, in.ImageURL)
+		// Single fixed FAL endpoint; there is no model to choose.
+		outputURL, err = o.callFALBgRemover(ctx, key, in.ImageURL)
 
 	case entities.TemplateRemoveBG:
 		outputURL, err = o.callRemoveBg(ctx, key, in.ImageURL)
@@ -443,39 +435,13 @@ func (o *AIStudioOrchestrator) callByTemplate(
 	return
 }
 
-// ── runProviderChain executes the DB-configured chain for a category ──────────
-//
-// It iterates active providers (sorted by priority) and calls each via
-// callByTemplate. On success it returns immediately. On failure it logs and
-// continues. Returns (nil, ErrAllFailed) if every provider fails.
-//
-// in: unified input bag
-// onResult: optional hook called on success — use to set Provider/CostMicros
-func (o *AIStudioOrchestrator) runProviderChain(
-	ctx context.Context,
-	category string,
-	in providerInput,
-) (outputURL, outputText string, costMicros int, usedSlug string, err error) {
-
-	providers := o.dbProviders(ctx, category)
-	if len(providers) == 0 {
-		return "", "", 0, "", errNoDBProviders
-	}
-
-	for _, p := range providers {
-		url, text, cost, callErr := o.callByTemplate(ctx, p, in)
-		if callErr != nil {
-			log.Printf("[AIStudio][DB] %s/%s failed: %v — trying next", category, p.Slug, callErr)
-			continue
-		}
-		return url, text, cost, p.Slug, nil
-	}
-	return "", "", 0, "", fmt.Errorf("all DB-configured %s providers failed", category)
+// errModelIDRequired is the answer to an empty model_id on a template where the
+// model matters: a configuration error surfaced to the Admin, never a model
+// picked in code (that would be a hidden fallback — invisible, unaudited, and
+// on some templates a paid one).
+func errModelIDRequired(p entities.AIProviderConfig) error {
+	return fmt.Errorf("%s (%s): model_id not configured — set it on the provider", p.Slug, p.Template)
 }
-
-// errNoDBProviders is a sentinel indicating the DB has no providers for this
-// category — callers should run their hardcoded fallback chain instead.
-var errNoDBProviders = fmt.Errorf("no DB providers for category")
 
 // ── Key / URL resolution helpers ─────────────────────────────────────────────
 
@@ -499,15 +465,14 @@ func resolveBaseURLForProvider(p entities.AIProviderConfig) string {
 // ── Thin key-parametrised wrappers for callXxx functions that hard-code their
 // own env reads. These let callByTemplate pass the DB-resolved key explicitly.
 
-// callGeminiFlashWithModel calls Gemini with an explicit model and API key.
-// Unlike callGeminiFlash (which hardcodes gemini-2.5-flash + env key), this
-// honours the admin-configured model ID and DB-stored key so the provider
-// registry can actually switch Gemini variants without a code deploy.
+// callGeminiFlashWithModel calls Gemini with the admin-configured model ID and
+// the resolved key. An empty model_id is a configuration error, not an excuse
+// to pick a model in code: the same rule the streaming path enforces.
 func (o *AIStudioOrchestrator) callGeminiFlashWithModel(
 	ctx context.Context, model, apiKey, systemPrompt, userPrompt string,
 ) (string, error) {
 	if model == "" {
-		model = "gemini-2.5-flash"
+		return "", fmt.Errorf("gemini: model_id not configured for this provider")
 	}
 	if apiKey == "" {
 		return "", fmt.Errorf("gemini: provider API key not configured")
@@ -571,7 +536,7 @@ func (o *AIStudioOrchestrator) callDeepSeekWithKey(
 		return "", fmt.Errorf("deepseek: provider API key not configured")
 	}
 	if model == "" {
-		model = "deepseek-chat"
+		return "", fmt.Errorf("deepseek: model_id not configured for this provider")
 	}
 	payload := map[string]interface{}{
 		"model": model,
@@ -585,22 +550,6 @@ func (o *AIStudioOrchestrator) callDeepSeekWithKey(
 		"Bearer "+apiKey,
 		payload,
 	)
-}
-
-// callFALBgRemoverWithModel calls FAL background removal with an explicit model slug.
-func (o *AIStudioOrchestrator) callFALBgRemoverWithModel(
-	ctx context.Context, falKey, model, imageURL string,
-) (string, error) {
-	if model == "" {
-		model = "fal-ai/birefnet"
-	}
-	// callFALBgRemover currently hardcodes birefnet — reuse it for that model,
-	// otherwise use the generic FAL image endpoint.
-	if model == "fal-ai/birefnet" || model == "birefnet" {
-		return o.callFALBgRemover(ctx, falKey, imageURL)
-	}
-	// Generic FAL remove-bg via image endpoint
-	return o.callFALBgRemover(ctx, falKey, imageURL)
 }
 
 func (o *AIStudioOrchestrator) callGeminiConfiguredMultimodal(
