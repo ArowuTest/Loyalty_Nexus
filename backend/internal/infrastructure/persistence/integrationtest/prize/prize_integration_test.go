@@ -222,6 +222,7 @@ func decodeJSON(t *testing.T, resp *http.Response, dest interface{}) {
 func TestPrizeRepo_CreateAndFetch_Postgres(t *testing.T) {
 	db := openTestDB(t)
 	withTx(t, db, func(tx *gorm.DB) {
+		tx.Exec("DELETE FROM prize_pool") // migrations seed a full 100% wheel; this test authors its own
 		svc := newSvc(tx)
 		ctx := context.Background()
 
@@ -370,6 +371,7 @@ func TestPrizeRepo_ProbabilityBudget_Postgres(t *testing.T) {
 func TestPrizeRepo_UpdatePrize_Postgres(t *testing.T) {
 	db := openTestDB(t)
 	withTx(t, db, func(tx *gorm.DB) {
+		tx.Exec("DELETE FROM prize_pool") // migrations seed a full 100% wheel; this test authors its own
 		svc := newSvc(tx)
 		ctx := context.Background()
 
@@ -425,6 +427,7 @@ func TestPrizeRepo_UpdatePrize_Postgres(t *testing.T) {
 func TestPrizeRepo_SoftDelete_Postgres(t *testing.T) {
 	db := openTestDB(t)
 	withTx(t, db, func(tx *gorm.DB) {
+		tx.Exec("DELETE FROM prize_pool") // migrations seed a full 100% wheel; this test authors its own
 		svc := newSvc(tx)
 		ctx := context.Background()
 
@@ -579,118 +582,6 @@ func TestHTTP_GetPrizePool_ReturnsJSON(t *testing.T) {
 	}
 }
 
-// TestHTTP_CreatePrize_Postgres tests POST /admin/prizes creates a real prize row.
-func TestHTTP_CreatePrize_Postgres(t *testing.T) {
-	db := openTestDB(t)
-	withTx(t, db, func(tx *gorm.DB) {
-		// Clear existing prizes so we're under the 10000 budget
-		tx.Exec("DELETE FROM prize_pool")
-
-		authSvc := newAdminAuthSvc(tx)
-		tok := adminToken(t, authSvc)
-		srv := httptest.NewServer(buildRouter(tx, authSvc))
-		defer srv.Close()
-
-		payload := map[string]interface{}{
-			"name":                   "HTTP Test Prize",
-			"prize_type":             "airtime",
-			"base_value":             float64(5000),
-			"win_probability_weight": float64(50),
-			"color_scheme":           "#AABBCC",
-			"icon_name":              "phone",
-			"prize_code":             "HTTPTEST",
-			"variation_code":         "NG_HTTP",
-			"terms_and_conditions":   "HTTP test terms",
-			"sort_order":             float64(88),
-			"minimum_recharge":       float64(200000),
-		}
-
-		resp := do(t, srv, "POST", "/api/v1/admin/prizes", tok, payload)
-		if resp.StatusCode != http.StatusCreated {
-			var errBody map[string]string
-			json.NewDecoder(resp.Body).Decode(&errBody) //nolint:errcheck
-			_ = resp.Body.Close()
-			t.Fatalf("expected 201, got %d: %v", resp.StatusCode, errBody)
-		}
-
-		var created map[string]interface{}
-		decodeJSON(t, resp, &created)
-
-		if created["id"] == nil || created["id"] == "" {
-			t.Fatal("expected id in response")
-		}
-		if created["name"] != "HTTP Test Prize" {
-			t.Errorf("name: got %v", created["name"])
-		}
-		if created["icon_name"] != "phone" {
-			t.Errorf("icon_name: got %v", created["icon_name"])
-		}
-		if created["prize_code"] != "HTTPTEST" {
-			t.Errorf("prize_code: got %v", created["prize_code"])
-		}
-		if created["variation_code"] != "NG_HTTP" {
-			t.Errorf("variation_code: got %v", created["variation_code"])
-		}
-		if created["terms_and_conditions"] != "HTTP test terms" {
-			t.Errorf("terms: got %v", created["terms_and_conditions"])
-		}
-
-		// Confirm the row exists in the real Postgres table
-		var count int64
-		tx.Raw("SELECT COUNT(*) FROM prize_pool WHERE prize_code = 'HTTPTEST'").Scan(&count)
-		if count != 1 {
-			t.Errorf("expected 1 row with prize_code=HTTPTEST in DB, got %d", count)
-		}
-	})
-}
-
-// TestHTTP_CreatePrize_MissingName_Returns400 tests that missing name returns 400.
-func TestHTTP_CreatePrize_MissingName_Returns400(t *testing.T) {
-	db := openTestDB(t)
-	withTx(t, db, func(tx *gorm.DB) {
-		tx.Exec("DELETE FROM prize_pool")
-		authSvc := newAdminAuthSvc(tx)
-		tok := adminToken(t, authSvc)
-		srv := httptest.NewServer(buildRouter(tx, authSvc))
-		defer srv.Close()
-
-		resp := do(t, srv, "POST", "/api/v1/admin/prizes", tok, map[string]interface{}{
-			"prize_type":             "airtime",
-			"win_probability_weight": float64(50),
-		})
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d", resp.StatusCode)
-		}
-	})
-}
-
-// TestHTTP_CreatePrize_ExceedsBudget_Returns400 tests that exceeding the 100%
-// probability budget returns a 400 error from the real Postgres check.
-func TestHTTP_CreatePrize_ExceedsBudget_Returns400(t *testing.T) {
-	db := openTestDB(t)
-	withTx(t, db, func(tx *gorm.DB) {
-		// Seed 99.00% weight directly in the real table
-		tx.Exec(`INSERT INTO prize_pool (name, prize_type, win_probability_weight, base_value, is_active)
-			VALUES ('Seed', 'try_again', 99.00, 0, true)`)
-
-		authSvc := newAdminAuthSvc(tx)
-		tok := adminToken(t, authSvc)
-		srv := httptest.NewServer(buildRouter(tx, authSvc))
-		defer srv.Close()
-
-		resp := do(t, srv, "POST", "/api/v1/admin/prizes", tok, map[string]interface{}{
-			"name":                   "Overflow",
-			"prize_type":             "airtime",
-			"win_probability_weight": float64(2),
-		})
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Fatalf("expected 400 for budget overflow, got %d", resp.StatusCode)
-		}
-	})
-}
-
 // TestHTTP_GetPrize_Postgres tests GET /admin/prizes/{id} returns the correct prize.
 func TestHTTP_GetPrize_Postgres(t *testing.T) {
 	db := openTestDB(t)
@@ -747,97 +638,6 @@ func TestHTTP_GetPrize_NotFound_Returns404(t *testing.T) {
 	}
 }
 
-// TestHTTP_UpdatePrize_Postgres tests PUT /admin/prizes/{id} updates the real row.
-func TestHTTP_UpdatePrize_Postgres(t *testing.T) {
-	db := openTestDB(t)
-	withTx(t, db, func(tx *gorm.DB) {
-		tx.Exec("DELETE FROM prize_pool")
-		svc := newSvc(tx)
-		ctx := context.Background()
-
-		prize, err := svc.CreatePrize(ctx, map[string]interface{}{
-			"name":                   "Before Update",
-			"prize_type":             "airtime",
-			"win_probability_weight": float64(50),
-		})
-		if err != nil {
-			t.Fatalf("CreatePrize: %v", err)
-		}
-
-		authSvc := newAdminAuthSvc(tx)
-		tok := adminToken(t, authSvc)
-		srv := httptest.NewServer(buildRouter(tx, authSvc))
-		defer srv.Close()
-
-		resp := do(t, srv, "PUT", "/api/v1/admin/prizes/"+prize.ID.String(), tok, map[string]interface{}{
-			"name":       "After Update",
-			"icon_name":  "trophy",
-			"prize_code": "UPDATED",
-		})
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200, got %d", resp.StatusCode)
-		}
-		var body map[string]interface{}
-		decodeJSON(t, resp, &body)
-		if body["name"] != "After Update" {
-			t.Errorf("name: got %v", body["name"])
-		}
-		if body["icon_name"] != "trophy" {
-			t.Errorf("icon_name: got %v", body["icon_name"])
-		}
-		if body["prize_code"] != "UPDATED" {
-			t.Errorf("prize_code: got %v", body["prize_code"])
-		}
-
-		// Confirm in the real DB via direct SQL
-		var name, iconName string
-		tx.Raw("SELECT name, icon_name FROM prize_pool WHERE id = ?", prize.ID).Row().Scan(&name, &iconName) //nolint:errcheck
-		if name != "After Update" {
-			t.Errorf("DB name: got %q", name)
-		}
-		if iconName != "trophy" {
-			t.Errorf("DB icon_name: got %q", iconName)
-		}
-	})
-}
-
-// TestHTTP_DeletePrize_Postgres tests DELETE /admin/prizes/{id} soft-deletes the row.
-func TestHTTP_DeletePrize_Postgres(t *testing.T) {
-	db := openTestDB(t)
-	withTx(t, db, func(tx *gorm.DB) {
-		tx.Exec("DELETE FROM prize_pool")
-		svc := newSvc(tx)
-		ctx := context.Background()
-
-		prize, err := svc.CreatePrize(ctx, map[string]interface{}{
-			"name":                   "Delete Me",
-			"prize_type":             "try_again",
-			"win_probability_weight": float64(50),
-		})
-		if err != nil {
-			t.Fatalf("CreatePrize: %v", err)
-		}
-
-		authSvc := newAdminAuthSvc(tx)
-		tok := adminToken(t, authSvc)
-		srv := httptest.NewServer(buildRouter(tx, authSvc))
-		defer srv.Close()
-
-		resp := do(t, srv, "DELETE", "/api/v1/admin/prizes/"+prize.ID.String(), tok, nil)
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("expected 200, got %d", resp.StatusCode)
-		}
-		_ = resp.Body.Close()
-
-		// Verify is_active = false in the real Postgres row
-		var isActive bool
-		tx.Raw("SELECT is_active FROM prize_pool WHERE id = ?", prize.ID).Scan(&isActive)
-		if isActive {
-			t.Fatal("prize should be soft-deleted (is_active=false)")
-		}
-	})
-}
-
 // TestHTTP_GetPrizeSummary_Postgres tests GET /admin/prizes/summary returns
 // correct probability totals from the real Postgres table.
 func TestHTTP_GetPrizeSummary_Postgres(t *testing.T) {
@@ -883,68 +683,6 @@ func TestHTTP_GetPrizeSummary_Postgres(t *testing.T) {
 		pct, _ := body["percent_used"].(float64)
 		if pct != 50.0 {
 			t.Errorf("percent_used: got %.2f, want 50.00", pct)
-		}
-	})
-}
-
-// TestHTTP_ReorderPrizes_Postgres tests POST /admin/prizes/reorder updates
-// sort_order in the real Postgres table.
-func TestHTTP_ReorderPrizes_Postgres(t *testing.T) {
-	db := openTestDB(t)
-	withTx(t, db, func(tx *gorm.DB) {
-		tx.Exec("DELETE FROM prize_pool")
-
-		svc := newSvc(tx)
-		ctx := context.Background()
-
-		var ids []string
-		for _, name := range []string{"A", "B", "C"} {
-			p, err := svc.CreatePrize(ctx, map[string]interface{}{
-				"name":                   name,
-				"prize_type":             "try_again",
-				"win_probability_weight": float64(10),
-			})
-			if err != nil {
-				t.Fatalf("CreatePrize %s: %v", name, err)
-			}
-			ids = append(ids, p.ID.String())
-		}
-
-		authSvc := newAdminAuthSvc(tx)
-		tok := adminToken(t, authSvc)
-		srv := httptest.NewServer(buildRouter(tx, authSvc))
-		defer srv.Close()
-
-		// Reorder: C, A, B
-		resp := do(t, srv, "POST", "/api/v1/admin/prizes/reorder", tok, map[string]interface{}{
-			"ordered_ids": []string{ids[2], ids[0], ids[1]},
-		})
-		if resp.StatusCode != http.StatusOK {
-			var errBody map[string]interface{}
-			json.NewDecoder(resp.Body).Decode(&errBody) //nolint:errcheck
-			_ = resp.Body.Close()
-			t.Fatalf("expected 200, got %d: %v", resp.StatusCode, errBody)
-		}
-		_ = resp.Body.Close()
-
-		// Verify sort_order in the real DB
-		type row struct {
-			ID        string `gorm:"column:id"`
-			SortOrder int    `gorm:"column:sort_order"`
-		}
-		var rows []row
-		tx.Raw("SELECT id::text AS id, sort_order FROM prize_pool ORDER BY sort_order ASC").Scan(&rows)
-		if len(rows) != 3 {
-			t.Fatalf("expected 3 rows, got %d", len(rows))
-		}
-		if rows[0].ID != ids[2] {
-			t.Errorf("pos 0: expected C (%s), got %s", ids[2], rows[0].ID)
-		}
-		if rows[1].ID != ids[0] {
-			t.Errorf("pos 1: expected A (%s), got %s", ids[0], rows[1].ID)
-		}
-		if rows[2].ID != ids[1] {
-			t.Errorf("pos 2: expected B (%s), got %s", ids[1], rows[2].ID)
 		}
 	})
 }
@@ -1344,6 +1082,60 @@ func TestPublishPrizeConfiguration_InvalidDraftRollsBack_Postgres(t *testing.T) 
 			if math.Abs(wheel.Slots[i].Probability-want[i]) > 0.001 {
 				t.Fatalf("slot %d changed after rejected draft: got %.2f want %.2f", i, wheel.Slots[i].Probability, want[i])
 			}
+		}
+	})
+}
+
+// TestHTTP_LegacyPrizeMutations_AreRefused pins the prize-wheel contract: the
+// wheel is published atomically through PUT /api/v1/admin/prizes/config (see
+// TestPublishPrizeConfiguration_*), so the per-prize create/update/delete/
+// reorder endpoints must refuse with 409 and leave the table untouched — a
+// partial mutation could put a live wheel at anything but exactly 100%.
+func TestHTTP_LegacyPrizeMutations_AreRefused(t *testing.T) {
+	db := openTestDB(t)
+	withTx(t, db, func(tx *gorm.DB) {
+		tx.Exec("DELETE FROM prize_pool")
+		svc := newSvc(tx)
+		existing, err := svc.CreatePrize(context.Background(), map[string]interface{}{
+			"name": "Existing", "prize_type": "try_again", "win_probability_weight": float64(100),
+		})
+		if err != nil {
+			t.Fatalf("seed prize: %v", err)
+		}
+		authSvc := newAdminAuthSvc(tx)
+		tok := adminToken(t, authSvc)
+		srv := httptest.NewServer(buildRouter(tx, authSvc))
+		defer srv.Close()
+
+		calls := []struct {
+			name, method, path string
+			body               interface{}
+		}{
+			{"create", "POST", "/api/v1/admin/prizes", map[string]interface{}{"name": "New", "prize_type": "airtime", "win_probability_weight": float64(10)}},
+			{"update", "PUT", "/api/v1/admin/prizes/" + existing.ID.String(), map[string]interface{}{"name": "Renamed"}},
+			{"delete", "DELETE", "/api/v1/admin/prizes/" + existing.ID.String(), nil},
+			{"reorder", "POST", "/api/v1/admin/prizes/reorder", map[string]interface{}{"ordered_ids": []string{existing.ID.String()}}},
+		}
+		for _, c := range calls {
+			resp := do(t, srv, c.method, c.path, tok, c.body)
+			var body map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&body) //nolint:errcheck
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusConflict {
+				t.Fatalf("%s: got %d, want 409 (%v)", c.name, resp.StatusCode, body)
+			}
+			if msg, _ := body["error"].(string); !strings.Contains(msg, "/api/v1/admin/prizes/config") {
+				t.Fatalf("%s: refusal should point at the atomic endpoint, got %q", c.name, msg)
+			}
+		}
+
+		var count int64
+		var name string
+		var active bool
+		tx.Raw("SELECT count(*) FROM prize_pool").Scan(&count)
+		tx.Raw("SELECT name, is_active FROM prize_pool WHERE id = ?", existing.ID).Row().Scan(&name, &active) //nolint:errcheck
+		if count != 1 || name != "Existing" || !active {
+			t.Fatalf("refused mutations must leave the table untouched: count=%d name=%q active=%v", count, name, active)
 		}
 	})
 }

@@ -395,7 +395,7 @@ func TestUpdatePrize_NewFields(t *testing.T) {
 	db := setupPrizeDB(t)
 	svc := newPrizeSpinSvc(db)
 
-	id := seedPrize(db, "Data Bundle 1GB", "data", 400, true)
+	id := seedPrize(db, "Data Bundle 1GB", "data", 40, true)
 
 	updated, err := svc.UpdatePrize(context.Background(), id, map[string]interface{}{
 		"icon_name":            "data_bundle",

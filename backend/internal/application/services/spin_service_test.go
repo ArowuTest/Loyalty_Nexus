@@ -160,7 +160,7 @@ func setupSpinDB(t *testing.T) *gorm.DB {
 
 	// Seed a TRY_AGAIN prize (always safe — no fulfillment needed)
 	db.Exec(`INSERT INTO prize_pool (id, name, prize_type, base_value, win_probability_weight, is_active, is_no_win, no_win_message) VALUES (?,?,?,?,?,1,1,?)`,
-		uuid.New().String(), "Try Again", "try_again", 0.0, 10, "Better luck next time!")
+		uuid.New().String(), "Try Again", "try_again", 0.0, 100, "Better luck next time!")
 
 	// prize_fulfillment_config — required by SpinService.PlaySpin (GetByPrizeType lookup)
 	db.Exec(`CREATE TABLE IF NOT EXISTS prize_fulfillment_config (
