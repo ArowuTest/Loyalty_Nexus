@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -59,7 +60,8 @@ func (h *RechargeHandler) PaystackWebhook(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	mac := hmac.New(sha256.New, []byte(secret))
+	// Paystack signs with HMAC-SHA512 (NOT sha256) keyed by the secret key.
+	mac := hmac.New(sha512.New, []byte(secret))
 	mac.Write(body) //nolint:errcheck // hash.Hash.Write never returns an error
 	expected := hex.EncodeToString(mac.Sum(nil))
 	got := r.Header.Get("X-Paystack-Signature")

@@ -44,6 +44,12 @@ const config: Config = {
           DEFAULT: "#00D4FF",
           dark:    "#00B8E0",
         },
+        // Alias used across prizes/wars/studio as `bg-brand-gold`/`text-brand-gold`
+        // (85 usages). Without this token those classes emitted nothing — e.g. the
+        // /prizes Claim button rendered black-on-dark and looked unclickable.
+        brand: {
+          gold: "#F5A623",
+        },
       },
       fontFamily: {
         sans:    ["Inter", "system-ui", "sans-serif"],

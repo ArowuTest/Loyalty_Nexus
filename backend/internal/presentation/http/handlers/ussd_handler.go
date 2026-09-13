@@ -42,9 +42,17 @@ import (
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
 	"loyalty-nexus/internal/pkg/safe"
+	"loyalty-nexus/internal/presentation/http/middleware"
 
 	"github.com/google/uuid"
 )
+
+// ussdRateLimiter caps requests PER MSISDN (review finding S11). It is keyed by
+// phone, not IP, because every USSD request arrives from the shared telco-gateway
+// address — an IP-based limit would throttle the entire USSD channel. 20 requests
+// per minute is generous for an interactive menu session and caps session-spam
+// abuse.
+var ussdRateLimiter = middleware.NewRateLimiter(1*time.Minute, 20, 2*time.Minute)
 
 // USSDHandler handles all USSD gateway requests.
 type USSDHandler struct {
@@ -98,8 +106,13 @@ func (h *USSDHandler) SetKnowledgeService(ks *services.USSDKnowledgeService) {
 func verifyATSignature(r *http.Request, body []byte) bool {
 	secret := os.Getenv("AT_WEBHOOK_SECRET")
 	if secret == "" {
-		// Secret not configured — allow through (dev / sandbox mode).
-		// Set AT_WEBHOOK_SECRET in production to enforce signature verification.
+		// Fail closed in production: an unset secret must NOT mean "accept any
+		// caller", or anyone could drive USSD sessions for an arbitrary MSISDN.
+		if os.Getenv("ENVIRONMENT") == "production" || os.Getenv("GO_ENV") == "production" {
+			log.Printf("[USSD] SECURITY: AT_WEBHOOK_SECRET not set in production — rejecting request")
+			return false
+		}
+		// Non-production only: allow through for local/dev testing.
 		return true
 	}
 	sig := r.Header.Get("X-AT-Signature")
@@ -165,6 +178,16 @@ func (h *USSDHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		serviceCode = r.FormValue("serviceCode")
 	}
 	_ = serviceCode // used for routing config in future
+
+	// S11: per-MSISDN rate limit. Keyed by phone (not IP) so it caps one user's
+	// session spam without throttling the shared gateway. Returns a graceful USSD
+	// END so the handset shows a message rather than a protocol error.
+	if phone != "" && !ussdRateLimiter.Allow("ussd:"+phone) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "END Too many requests. Please try again in a moment.")
+		return
+	}
 
 	// REQ-6.5: Rollback any expired sessions with pending spins before processing.
 	// Use context.Background() so the goroutine is not cancelled when the HTTP

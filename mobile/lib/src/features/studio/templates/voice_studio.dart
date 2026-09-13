@@ -118,7 +118,9 @@ class _VoiceStudioTemplateState extends State<VoiceStudioTemplate> {
       String? audioUrl = _previewCache[voiceId];
       if (audioUrl == null) {
         // Fetch from backend TTS preview endpoint (no points charged)
-        const storage = FlutterSecureStorage();
+        const storage = FlutterSecureStorage(
+          aOptions: AndroidOptions(encryptedSharedPreferences: true),
+        );
         final token = await storage.read(key: 'nexus_token');
         final dio = Dio(BaseOptions(
           baseUrl: _kBaseUrl,

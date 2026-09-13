@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -43,7 +44,8 @@ type TextExtractor struct {
 	client *http.Client
 }
 
-// NewTextExtractor creates a TextExtractor with a sensible HTTP timeout.
+// NewTextExtractor creates a TextExtractor with a sensible HTTP timeout and an
+// SSRF-guarded transport (see guardedDialContext).
 func NewTextExtractor() *TextExtractor {
 	return &TextExtractor{
 		client: &http.Client{
@@ -54,8 +56,60 @@ func NewTextExtractor() *TextExtractor {
 				}
 				return nil
 			},
+			Transport: &http.Transport{
+				// SSRF guard: refuse to connect to non-public addresses. Applied at
+				// dial time (not URL-parse time) so it also covers redirects and
+				// defeats DNS-rebinding — it validates the IP actually dialled.
+				DialContext:           guardedDialContext,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ResponseHeaderTimeout: 15 * time.Second,
+				ForceAttemptHTTP2:     true,
+			},
 		},
 	}
+}
+
+// isDisallowedIP reports whether an IP must never be reached by the document
+// fetcher: loopback, private (RFC1918/ULA), link-local (incl. 169.254.169.254
+// cloud metadata), unspecified, and multicast.
+func isDisallowedIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast()
+}
+
+// guardedDialContext resolves the target host and refuses to connect if ANY
+// resolved address is non-public (fail closed), then dials a vetted IP directly.
+// TLS SNI/verification still use the original hostname from the URL.
+func guardedDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", host, err)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no addresses for %s", host)
+	}
+	for _, ipa := range ips {
+		if isDisallowedIP(ipa.IP) {
+			return nil, fmt.Errorf("blocked non-public address %s (SSRF guard)", ipa.IP)
+		}
+	}
+	var d net.Dialer
+	var firstErr error
+	for _, ipa := range ips {
+		conn, dErr := d.DialContext(ctx, network, net.JoinHostPort(ipa.IP.String(), port))
+		if dErr == nil {
+			return conn, nil
+		}
+		firstErr = dErr
+	}
+	return nil, firstErr
 }
 
 // ExtractFromURL fetches and extracts text from a URL.
@@ -68,6 +122,9 @@ func NewTextExtractor() *TextExtractor {
 func (e *TextExtractor) ExtractFromURL(ctx context.Context, rawURL string) (string, error) {
 	if rawURL == "" {
 		return "", fmt.Errorf("empty URL")
+	}
+	if u, perr := url.Parse(rawURL); perr != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", fmt.Errorf("unsupported or invalid URL scheme")
 	}
 
 	// Normalise Google Drive / Docs URLs first

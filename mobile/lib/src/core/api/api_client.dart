@@ -625,7 +625,12 @@ class PassportApi {
   /// The token is appended as a query param because iOS Wallet does not send
   /// custom headers when downloading a .pkpass file.
   Future<String> getApplePKPassURL() async {
-    const storage = FlutterSecureStorage();
+    // MUST match the write side (auth_provider): on Android, entries written
+    // with encryptedSharedPreferences are invisible to a default-options reader,
+    // which left the token unreadable → 401 on every call.
+    const storage = FlutterSecureStorage(
+      aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    );
     final token = await storage.read(key: 'nexus_token');
     final base = _baseUrl.replaceFirst('/api/v1', '');
     return token != null

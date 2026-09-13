@@ -93,5 +93,17 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- url_launcher: without this, canLaunchUrl() returns false for https
+             URLs on Android 11+ (API 30), so the Paystack payment page and
+             Google Wallet links silently never open. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <!-- speech_to_text: query the on-device recognition service so
+             SpeechToText.initialize() can find it on Android 11+. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
+        </intent>
     </queries>
 </manifest>

@@ -437,21 +437,34 @@ func main() {
 		// proceeds as guest otherwise.
 		optionalAuth := middleware.OptionalAuthMiddleware(authSvc)
 
+		// ─── Rate limiting for public endpoints (review finding S11) ──────────
+		// In-process, per-instance limiters keyed by client IP — deliberately no
+		// Redis/DB dependency on the auth + recharge hot path, so a datastore blip
+		// can never lock users out. OTP-verify ALSO has a per-PHONE brute-force
+		// lockout inside AuthService (the account-takeover defence). USSD is
+		// limited per-MSISDN in its own handler — a per-IP cap there would throttle
+		// the single shared telco-gateway address.
+		otpSendRL := middleware.NewRateLimiter(1*time.Hour, 30, 30*time.Minute)      // layered on the per-phone 3/10min send cap
+		otpVerifyRL := middleware.NewRateLimiter(10*time.Minute, 30, 10*time.Minute) // single-source flood cap
+		initiateRL := middleware.NewRateLimiter(10*time.Minute, 20, 10*time.Minute)  // recharge / Paystack / VTPass quota abuse
+		detectRL := middleware.NewRateLimiter(10*time.Minute, 60, 5*time.Minute)     // MSISDN→network oracle + VTPass quota burn
+		rlIP := middleware.IPKey
+
 		// ─── VTU Recharge (PUBLIC — no login required) ────────────
 		// Any visitor can recharge airtime/data. Points are awarded on success.
 		// Logged-in users attach their user_id so points map to their account.
 		// VTU routes always registered — handler is always non-nil
 		mux.HandleFunc("GET /api/v1/recharge/networks",                vtuH.GetNetworks)
 		mux.HandleFunc("GET /api/v1/recharge/networks/{code}/bundles", vtuH.GetBundles)
-			mux.HandleFunc("GET /api/v1/recharge/networks/detect",              vtuH.DetectNetwork)
+			mux.Handle("GET /api/v1/recharge/networks/detect", detectRL.Middleware(rlIP)(http.HandlerFunc(vtuH.DetectNetwork)))
 		mux.HandleFunc("GET /api/v1/recharge/status/{ref}",            vtuH.GetStatus)
 		mux.HandleFunc("GET /api/v1/recharge/callback",                vtuH.HandleCallback)
-		mux.Handle("POST /api/v1/recharge/initiate", optionalAuth(http.HandlerFunc(vtuH.Initiate)))
+		mux.Handle("POST /api/v1/recharge/initiate", initiateRL.Middleware(rlIP)(optionalAuth(http.HandlerFunc(vtuH.Initiate))))
 		mux.HandleFunc("POST /api/v1/recharge/vtu-webhook",            vtuH.PaystackWebhook)
 
 		// ─── Auth (public) ────────────────────────────────────────
-		mux.HandleFunc("POST /api/v1/auth/otp/send", authH.SendOTP)
-		mux.HandleFunc("POST /api/v1/auth/otp/verify", authH.VerifyOTP)
+		mux.Handle("POST /api/v1/auth/otp/send", otpSendRL.Middleware(rlIP)(http.HandlerFunc(authH.SendOTP)))
+		mux.Handle("POST /api/v1/auth/otp/verify", otpVerifyRL.Middleware(rlIP)(http.HandlerFunc(authH.VerifyOTP)))
 
 		// ─── Passport banner config (public — no auth required) ──
 		mux.HandleFunc("GET /api/v1/passport/banner-config", passportH.GetBannerConfig)

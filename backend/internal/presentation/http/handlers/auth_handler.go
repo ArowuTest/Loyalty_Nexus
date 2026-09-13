@@ -129,6 +129,8 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 		statusCode := http.StatusUnauthorized
 		if errors.Is(err, services.ErrOTPExpired) {
 			statusCode = http.StatusGone
+		} else if errors.Is(err, services.ErrTooManyAttempts) {
+			statusCode = http.StatusTooManyRequests
 		}
 		writeJSON(w, statusCode, map[string]string{"error": err.Error()})
 		return

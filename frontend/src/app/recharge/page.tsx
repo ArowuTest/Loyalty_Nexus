@@ -159,10 +159,16 @@ export default function RechargePage() {
         pending:     false,
       });
       // Auto-redirect to spin wheel after 800ms so the user sees the success
-      // banner briefly before being taken to the spin page.
+      // banner briefly before being taken to the spin page. ONLY for signed-in
+      // users — /spin is auth-gated, so pushing a guest there blanks the screen
+      // and loses their receipt. Guests get a sign-in CTA in the banner instead.
+      // Re-read auth live (getState) so a not-yet-hydrated store doesn't wrongly
+      // treat a signed-in user as a guest.
       if (eligible) {
         if (spinTimerRef.current) clearTimeout(spinTimerRef.current);
-        spinTimerRef.current = setTimeout(() => router.push("/spin"), 800);
+        spinTimerRef.current = setTimeout(() => {
+          if (useStore.getState().isAuthenticated) router.push("/spin");
+        }, 800);
       }
       return;
     }
@@ -200,10 +206,13 @@ export default function RechargePage() {
               reference,
               pending:     false,
             });
-            // Auto-redirect to spin wheel after 800ms
+            // Auto-redirect to spin wheel after 800ms — signed-in users only
+            // (/spin is auth-gated; a guest would be bounced and lose the receipt).
             if (eligible) {
               if (spinTimerRef.current) clearTimeout(spinTimerRef.current);
-              spinTimerRef.current = setTimeout(() => router.push("/spin"), 800);
+              spinTimerRef.current = setTimeout(() => {
+                if (useStore.getState().isAuthenticated) router.push("/spin");
+              }, 800);
             }
             return; // done
           }
@@ -438,18 +447,35 @@ export default function RechargePage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-[14px] font-black text-yellow-300">🎰 Free Spin Unlocked!</p>
-                      <p className="text-[12px] text-yellow-300/60 leading-snug">
-                        Your recharge earned a free spin. Spin now to win airtime, data, cash, or points!
-                      </p>
-                      <p className="text-[11px] text-yellow-400/50 mt-0.5">Redirecting to spin wheel…</p>
+                      {isAuthenticated ? (
+                        <>
+                          <p className="text-[12px] text-yellow-300/60 leading-snug">
+                            Your recharge earned a free spin. Spin now to win airtime, data, cash, or points!
+                          </p>
+                          <p className="text-[11px] text-yellow-400/50 mt-0.5">Redirecting to spin wheel…</p>
+                        </>
+                      ) : (
+                        <p className="text-[12px] text-yellow-300/60 leading-snug">
+                          Your recharge earned a free spin. Sign in or create a free account to claim it.
+                        </p>
+                      )}
                     </div>
                   </div>
-                  <Link
-                    href="/spin"
-                    className="mt-3 w-full h-11 rounded-xl font-bold text-[14px] bg-yellow-500 hover:bg-yellow-400 text-black flex items-center justify-center gap-2 transition-colors"
-                  >
-                    <Dices className="w-4 h-4" /> Spin Now →
-                  </Link>
+                  {isAuthenticated ? (
+                    <Link
+                      href="/spin"
+                      className="mt-3 w-full h-11 rounded-xl font-bold text-[14px] bg-yellow-500 hover:bg-yellow-400 text-black flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <Dices className="w-4 h-4" /> Spin Now →
+                    </Link>
+                  ) : (
+                    <button
+                      onClick={() => setAuthOpen(true)}
+                      className="mt-3 w-full h-11 rounded-xl font-bold text-[14px] bg-yellow-500 hover:bg-yellow-400 text-black flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <Dices className="w-4 h-4" /> Sign in to claim your spin →
+                    </button>
+                  )}
                 </motion.div>
               )}
             </motion.div>

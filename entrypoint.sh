@@ -1,8 +1,9 @@
 #!/bin/sh
 # entrypoint.sh — Runs database migrations then starts the API binary.
 # Migrations use DATABASE_URL (internal Render network — fast, no SSL needed).
-# Migration failures are logged but do NOT prevent the API from starting —
-# the app uses fallback SQL patterns to handle schema variance gracefully.
+# Migration failure ABORTS startup (exit non-zero) — a partial or unknown schema
+# must never serve traffic behind a green /health check. On a failed deploy Render
+# keeps the previous release live, which is the safe outcome.
 
 set -e
 
@@ -27,8 +28,11 @@ echo "[entrypoint] Running database migrations..."
 if /migrate fix-and-up; then
     echo "[entrypoint] Migrations complete."
 else
-    echo "[entrypoint] WARNING: migrations reported errors (exit $?) — starting API anyway."
-    echo "[entrypoint] The API uses runtime schema detection for schema variance."
+    rc=$?
+    echo "[entrypoint] FATAL: migrations failed (exit $rc) — refusing to start the API."
+    echo "[entrypoint] A partial/unknown schema must not serve traffic; aborting the deploy."
+    echo "[entrypoint] Render will keep the previous release live. Inspect the migration log above."
+    exit "$rc"
 fi
 
 echo "[entrypoint] Starting API..."

@@ -30,15 +30,17 @@ var (
 	ErrOTPInvalid         = errors.New("OTP code is incorrect")
 	ErrUserBanned         = errors.New("account is suspended")
 	ErrRateLimitExceeded  = errors.New("rate limit exceeded: please try again later")
+	ErrTooManyAttempts    = errors.New("too many incorrect attempts: request a new code and try again shortly")
 )
 
 type AuthService struct {
-	authRepo  repositories.AuthRepository
-	userRepo  repositories.UserRepository
-	notifySvc *NotificationService
-	cfg       *config.ConfigManager
-	jwtSecret []byte
-	aesKey    []byte
+	authRepo      repositories.AuthRepository
+	userRepo      repositories.UserRepository
+	notifySvc     *NotificationService
+	cfg           *config.ConfigManager
+	jwtSecret     []byte
+	aesKey        []byte
+	verifyLockout *otpLockout // per-phone OTP-verify brute-force lockout (S11)
 }
 
 func NewAuthService(
@@ -60,6 +62,9 @@ func NewAuthService(
 		cfg:       cfg,
 		jwtSecret: jwtSecret,
 		aesKey:    aesKey,
+		// 5 wrong codes within 10 min → locked for 15 min. Closes the OTP
+		// brute-force / account-takeover vector (S11); keyed by phone, not IP.
+		verifyLockout: newOTPLockout(5, 10*time.Minute, 15*time.Minute),
 	}
 }
 
@@ -146,6 +151,13 @@ func (s *AuthService) SendOTP(ctx context.Context, phone, purpose string) (strin
 // VerifyOTP checks the OTP and returns a JWT on success.
 // If the user does not exist, they are auto-registered (first-time flow).
 func (s *AuthService) VerifyOTP(ctx context.Context, phone, code, purpose string) (string, bool, error) {
+	// S11: refuse further guesses once this phone is locked out. Keyed by phone
+	// (not IP) so a distributed / proxy-rotating attacker can't out-run it with
+	// fresh source addresses.
+	if s.verifyLockout.Blocked(phone) {
+		return "", false, ErrTooManyAttempts
+	}
+
 	otp, err := s.authRepo.FindLatestPendingOTP(ctx, phone, purpose)
 	if err != nil {
 		return "", false, ErrOTPNotFound
@@ -158,9 +170,12 @@ func (s *AuthService) VerifyOTP(ctx context.Context, phone, code, purpose string
 	// Decrypt and compare
 	decrypted, err := s.decrypt(otp.Code)
 	if err != nil || decrypted != code {
+		s.verifyLockout.Fail(phone) // S11: count the wrong guess toward lockout
 		return "", false, ErrOTPInvalid
 	}
 
+	// Correct code — clear any accumulated failure/lock state for this phone.
+	s.verifyLockout.Reset(phone)
 	_ = s.authRepo.MarkOTPUsed(ctx, otp.ID)
 
 	// Auto-register if new user
