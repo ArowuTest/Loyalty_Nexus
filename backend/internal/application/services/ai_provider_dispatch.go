@@ -1,35 +1,30 @@
 package services
 
-// ai_provider_dispatch.go — DB-driven dynamic dispatch engine
+// ai_provider_dispatch.go — Admin-configured provider dispatch (AI Routing V2)
 //
-// Architecture:
+//	Admin UI → ai_provider_configs + ai_tool_stages + ai_tool_provider_bindings
+//	     ↓
+//	runToolStageChain / streamToolStageChain (ai_router_v2.go, ai_streaming.go)
+//	     ↓  ordered candidates, circuit + capacity + budget reserved per attempt
+//	callByTemplate(ctx, p, in)   ← routes provider.template → the matching adapter
 //
-//   Admin UI → ai_provider_configs (DB)
-//        ↓
-//   dbProviders(ctx, category)          ← sorted by priority ASC, is_active=true
-//        ↓
-//   runProviderChain(ctx, category, in) ← tries each DB provider in order
-//        ↓
-//   callByTemplate(ctx, p, in)          ← routes template → correct callXxx()
-//        ↓
-//   hardcodedFallbackChain(...)         ← original Go chains, used when DB is empty
-//
-// Backward compatibility guarantee:
-//   If DB is empty, unavailable, or returns no active providers for a category,
-//   every dispatch function falls straight through to its original hardcoded chain.
-//   Zero regressions possible.
+// There is deliberately no fallback outside the configured route: an empty or
+// exhausted route is ErrNoConfiguredAIRoute, an unknown template is an error,
+// and no adapter reads a provider key from the environment or hard-codes a
+// model. A tool that must always answer is configured with a last-resort
+// binding in the Admin UI, where it is visible and auditable.
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"io"
 	"net/http"
-	"os"
 	"strings"
 
 	"loyalty-nexus/internal/domain/entities"
+	"loyalty-nexus/internal/infrastructure/external"
 )
 
 // ── providerInput is the unified input bag passed to callByTemplate ───────────
@@ -39,26 +34,44 @@ type providerInput struct {
 	UserPrompt   string
 
 	// Media inputs
-	ImageURL  string
-	AudioURL  string
-	VideoURL  string
+	ImageURL           string
+	Images             []string // base64/data URLs for multimodal tool stages
+	ReferenceImageURLs []string
+	DocumentURL        string
+	AudioURL           string
+	VideoURL           string
 
 	// TTS / voice
-	Text    string
-	VoiceID string
+	Text        string
+	VoiceID     string
+	Speed       float64
+	AudioFormat string
+	Language    string
+
+	// Transcription
+	SpeakerLabels bool
+	OutputFormat  string
 
 	// Translation
 	TargetLang string
 
 	// Music
-	Prompt      string
+	Prompt       string
 	Instrumental bool
 	DurationSecs int
+	Style        string
+	Title        string
+	VocalGender  string
+	SecondaryURL *string
 
 	// Image / video generation controls — threaded through so DB-configured
 	// providers honour the same user settings as the hardcoded chains.
-	AspectRatio string
-	Seed        int64
+	AspectRatio   string
+	Seed          int64
+	Extend        bool
+	Resolution    string
+	GenerateAudio bool
+	Extra         map[string]interface{}
 }
 
 // ── callByTemplate routes a provider config to the matching callXxx() func ───
@@ -81,18 +94,35 @@ func (o *AIStudioOrchestrator) callByTemplate(
 
 	// ── Text / Chat ──────────────────────────────────────────────────────────
 	case entities.TemplatePollText:
-		// openai-compatible: covers Pollinations, Groq, DeepSeek, any OAI endpoint
+		// Generic chat-completions drivers do not receive arbitrary uploaded documents.
+		// A future provider can opt in with a dedicated template rather than silently ignoring the file.
+		if in.DocumentURL != "" {
+			return "", "", costMicros, fmt.Errorf("template %s does not support document input", p.Template)
+		}
 		baseURL := resolveBaseURLForProvider(p)
 		var payload map[string]interface{}
-		if in.ImageURL != "" {
-			// Multimodal message: attach image for vision tasks (image-analyser, ask-my-photo, code-pro)
-			userContent := []map[string]interface{}{
-				{"type": "text", "text": in.UserPrompt},
-				{"type": "image_url", "image_url": map[string]string{"url": in.ImageURL}},
+		if in.ImageURL != "" || len(in.Images) > 0 {
+			userContent := []map[string]interface{}{{"type": "text", "text": in.UserPrompt}}
+			if in.ImageURL != "" {
+				userContent = append(userContent, map[string]interface{}{
+					"type": "image_url", "image_url": map[string]string{"url": in.ImageURL},
+				})
+			}
+			for _, image := range in.Images {
+				if image == "" {
+					continue
+				}
+				if !strings.HasPrefix(image, "data:") && !strings.HasPrefix(image, "http://") && !strings.HasPrefix(image, "https://") {
+					image = "data:image/jpeg;base64," + image
+				}
+				userContent = append(userContent, map[string]interface{}{
+					"type": "image_url", "image_url": map[string]string{"url": image},
+				})
 			}
 			payload = map[string]interface{}{
 				"model": p.ModelID,
 				"messages": []map[string]interface{}{
+					{"role": "system", "content": in.SystemPrompt},
 					{"role": "user", "content": userContent},
 				},
 			}
@@ -105,11 +135,22 @@ func (o *AIStudioOrchestrator) callByTemplate(
 				},
 			}
 		}
+		if webSearch, _ := p.ExtraConfig["web_search"].(bool); webSearch {
+			if strings.Contains(strings.ToLower(baseURL), "openrouter.ai") {
+				payload["tools"] = []map[string]interface{}{{"type": "openrouter:web_search"}}
+			} else {
+				// Pollinations-compatible endpoints use the search flag.
+				payload["search"] = true
+			}
+		}
 		outputText, err = o.callOpenAICompatible(ctx, baseURL+"/v1/chat/completions", "Bearer "+key, payload)
 
 	case entities.TemplateGemini:
-		if in.ImageURL != "" {
-			// Vision task: include image URL in prompt for Gemini multimodal
+		if in.DocumentURL != "" {
+			outputText, err = o.callGeminiConfiguredDocument(ctx, p.ModelID, key, in.SystemPrompt, in.UserPrompt, in.DocumentURL)
+		} else if len(in.Images) > 0 {
+			outputText, err = o.callGeminiConfiguredMultimodal(ctx, p.ModelID, key, in.SystemPrompt, in.UserPrompt, in.Images)
+		} else if in.ImageURL != "" {
 			visionPrompt := in.UserPrompt
 			if visionPrompt == "" {
 				visionPrompt = "Describe this image in detail."
@@ -121,57 +162,175 @@ func (o *AIStudioOrchestrator) callByTemplate(
 		}
 
 	case entities.TemplateDeepSeek:
-		outputText, err = o.callDeepSeekWithKey(ctx, key, in.SystemPrompt, in.UserPrompt)
+		outputText, err = o.callDeepSeekWithKey(ctx, key, p.ModelID, in.SystemPrompt, in.UserPrompt)
+
+	case entities.TemplateTavilySearch:
+		outputText, err = o.callTavilySearch(ctx, key, in.UserPrompt)
 
 	// ── Image ────────────────────────────────────────────────────────────────
 	case entities.TemplateHFImage:
+		if in.ImageURL != "" || len(in.ReferenceImageURLs) > 0 {
+			err = fmt.Errorf("HF image driver does not support reference/edit input")
+			break
+		}
 		outputURL, err = o.callHFFluxSchnell(ctx, key, in.Prompt)
 
 	case entities.TemplatePollImage:
-		// Pass seed + aspect ratio so DB-configured providers don't silently
-		// drop the controls the tool form offers (parity with hardcoded chain).
-		outputURL, err = o.callPollinationsImageWithSeed(ctx, in.Prompt, in.Seed, in.AspectRatio)
+		if in.ImageURL != "" || len(in.ReferenceImageURLs) > 0 {
+			err = fmt.Errorf("Pollinations base image driver does not support reference/edit input")
+			break
+		}
+		outputURL, err = o.callPollinationsImageWithConfig(ctx, key, p.ModelID, in.Prompt, in.Seed, in.AspectRatio)
+
+	case entities.TemplatePollGPTImage:
+		if in.ImageURL != "" || len(in.ReferenceImageURLs) > 0 {
+			err = fmt.Errorf("Pollinations premium image driver does not support reference/edit input")
+			break
+		}
+		quality, _ := in.Extra["quality"].(string)
+		outputURL, err = o.callPollinationsGPTImageWithKey(ctx, key, in.Prompt, p.ModelID, in.AspectRatio, quality)
+
+	case entities.TemplatePollImageEdit:
+		if in.ImageURL == "" {
+			err = fmt.Errorf("Pollinations image-edit requires image_url")
+			break
+		}
+		outputURL, err = o.callPollinationsImageEditWithKey(ctx, key, p.ModelID, in.ImageURL, in.Prompt)
 
 	case entities.TemplateFALImage:
+		if in.ImageURL != "" || len(in.ReferenceImageURLs) > 0 {
+			err = fmt.Errorf("FAL base image driver does not support reference/edit input")
+			break
+		}
 		outputURL, err = o.callFALFlux(ctx, key, in.Prompt)
+
+	case entities.TemplateFALImageUltra:
+		imageURL := in.ImageURL
+		if imageURL == "" && len(in.ReferenceImageURLs) > 0 {
+			imageURL = in.ReferenceImageURLs[0]
+		}
+		numImages := 1
+		if n, ok := in.Extra["num_images"].(float64); ok && n >= 1 && n <= 4 {
+			numImages = int(n)
+		}
+		strength := 0.35
+		if s, ok := in.Extra["image_prompt_strength"].(float64); ok && s > 0 && s <= 1 {
+			strength = s
+		}
+		urls, callErr := o.callFALFluxUltraWithModel(ctx, key, p.ModelID, in.Prompt, imageURL, strength, numImages, in.AspectRatio)
+		if callErr != nil {
+			err = callErr
+		} else if len(urls) == 0 {
+			err = fmt.Errorf("FAL Ultra returned no images")
+		} else {
+			outputURL = urls[0]
+			costMicros = p.CostMicros * numImages
+		}
+
+	case entities.TemplateFALImageEdit:
+		if in.ImageURL == "" {
+			err = fmt.Errorf("FAL image-edit requires image_url")
+			break
+		}
+		outputURL, err = o.callFALImageEditWithModel(ctx, key, p.ModelID, in.ImageURL, in.Prompt)
+
+	case entities.TemplateGrokImage:
+		grok := external.NewGrokAdapter(key)
+		refs := append([]string(nil), in.ReferenceImageURLs...)
+		if in.ImageURL != "" {
+			refs = append([]string{in.ImageURL}, refs...)
+		}
+		if len(refs) > 0 {
+			outputURL, err = grok.ComposeImages(ctx, in.Prompt, refs, in.AspectRatio)
+		} else {
+			resolution := in.Resolution
+			if resolution == "" {
+				resolution, _ = p.ExtraConfig["resolution"].(string)
+			}
+			outputURL, err = grok.GenerateImage(ctx, in.Prompt, resolution)
+		}
 
 	// ── Video ────────────────────────────────────────────────────────────────
 	case entities.TemplateFALVideo:
+		if in.VideoURL != "" || in.Extend || len(in.ReferenceImageURLs) > 0 {
+			err = fmt.Errorf("FAL video driver does not support edit/extend/reference mode")
+			break
+		}
 		model := p.ModelID
 		if model == "" {
-			model = "fal-ai/ltx-video"
+			err = errModelIDRequired(p)
+			break
 		}
-		outputURL, err = o.callFALVideo(ctx, key, model, in.ImageURL, in.Prompt)
+		outputURL, err = o.callFALVideo(ctx, key, model, in.ImageURL, in.Prompt, promptEnvelope{
+			Duration: in.DurationSecs, AspectRatio: in.AspectRatio, Extra: in.Extra,
+		})
+
+	case entities.TemplateFALVideoMulti:
+		if in.VideoURL != "" || in.Extend || len(in.ReferenceImageURLs) < 2 {
+			err = fmt.Errorf("FAL multi-image video requires at least two reference images")
+			break
+		}
+		model := p.ModelID
+		if model == "" {
+			err = errModelIDRequired(p) // silently picking the paid Kling Pro model here is exactly the hidden fallback V2 forbids
+			break
+		}
+		outputURL, err = o.callFALMultiImageVideoConfigured(ctx, key, model, in.ReferenceImageURLs, in.Prompt, in.DurationSecs, in.AspectRatio, in.Extra)
+
+	case entities.TemplateGrokVideo:
+		grok := external.NewGrokAdapter(key)
+		duration := in.DurationSecs
+		if duration <= 0 {
+			duration = 6
+		}
+		resolution := in.Resolution
+		if resolution == "" {
+			resolution = "720p"
+		}
+		outputURL, err = grok.GenerateVideo(ctx, external.GrokVideoRequest{
+			Prompt: in.Prompt, ImageURL: in.ImageURL, VideoURL: in.VideoURL,
+			ReferenceImageURLs: in.ReferenceImageURLs, Duration: duration,
+			AspectRatio: in.AspectRatio, Resolution: resolution, Extend: in.Extend,
+		})
+		costMicros = 50000 * duration
 
 	// ── Avatar (talking-head) ──────────────────────────────────────────────────
 	case entities.TemplateFALAvatarText:
-		// Text-driven: model does its own TTS from the script (in.Prompt) + voice.
+		if in.Prompt == "" {
+			err = fmt.Errorf("text-driven avatar provider requires script")
+			break
+		}
 		outputURL, err = o.callFALAvatarText(ctx, key, p.ModelID, in.ImageURL, in.Prompt, in.VoiceID)
 
 	case entities.TemplateFALAvatarAudio:
-		// Audio-driven: resolve audio on demand (pre-uploaded or TTS the script),
-		// so no TTS is wasted when a text-driven provider was chosen instead.
-		audioURL := in.AudioURL
-		if audioURL == "" {
-			audioURL, err = o.resolveAvatarAudio(ctx, in.Prompt, in.VoiceID, "")
-			if err != nil {
-				break
-			}
+		if in.AudioURL == "" {
+			err = fmt.Errorf("audio-driven avatar provider requires audio_url")
+			break
 		}
-		outputURL, err = o.callFALAvatarAudio(ctx, key, p.ModelID, in.ImageURL, audioURL)
+		outputURL, err = o.callFALAvatarAudio(ctx, key, p.ModelID, in.ImageURL, in.AudioURL)
 
 	case entities.TemplateHeyGen:
+		if in.Prompt == "" {
+			err = fmt.Errorf("HeyGen avatar provider requires script")
+			break
+		}
 		outputURL, err = o.callHeyGen(ctx, key, in.ImageURL, in.Prompt, in.VoiceID)
 
 	case entities.TemplatePollVideo:
+		if in.VideoURL != "" || in.Extend || len(in.ReferenceImageURLs) > 0 {
+			err = fmt.Errorf("Pollinations video driver does not support edit/extend/reference mode")
+			break
+		}
 		model := p.ModelID
 		if model == "" {
-			// Default changed from seedance (PAID, 1.8 pollen/M) to wan-fast (FREE, 91.4% success)
-			// ltx-2 was also removed (OFF, 5.3% success)
-			model = "wan-fast"
+			err = errModelIDRequired(p)
+			break
 		}
-		// 300s (matches hardcoded chain) + aspect ratio pass-through
-		outputURL, err = o.callPollinationsVideoModel(ctx, model, in.ImageURL, in.Prompt, 300, in.AspectRatio)
+		dur := in.DurationSecs
+		if dur <= 0 {
+			dur = 5
+		}
+		outputURL, err = o.callPollinationsVideoModelWithKey(ctx, key, model, in.ImageURL, in.Prompt, 300, in.AspectRatio, fmt.Sprintf("%d", dur), fmt.Sprintf("%t", in.GenerateAudio))
 
 	// ── TTS ──────────────────────────────────────────────────────────────────
 	case entities.TemplateGoogleTTS:
@@ -195,13 +354,14 @@ func (o *AIStudioOrchestrator) callByTemplate(
 				voice = v
 			}
 		}
-		// mapToQwenVoice converts any OpenAI/ElevenLabs voice name to a working Qwen-TTS voice
-		// (ElevenLabs model is OFF on Pollinations as of May 2026)
-		outputURL, err = o.callPollinationsTTS(ctx, in.Text, voice)
+		outputURL, err = o.callPollinationsTTSFull(ctx, key, in.Text, voice, in.Speed, in.AudioFormat, in.Language)
 
 	// ── Transcription ────────────────────────────────────────────────────────
+	case entities.TemplateOpenAITranscribe:
+		outputText, err = o.callOpenAITranscribe(ctx, key, p.ModelID, in.AudioURL, in.Language)
+
 	case entities.TemplateAssemblyAI:
-		outputText, err = o.callAssemblyAI(ctx, key, in.AudioURL)
+		outputText, err = o.callAssemblyAIFull(ctx, key, in.AudioURL, in.Language, in.SpeakerLabels, in.OutputFormat)
 
 	case entities.TemplateGroqWhisper:
 		outputText, err = o.callGroqWhisper(ctx, key, in.AudioURL)
@@ -220,7 +380,29 @@ func (o *AIStudioOrchestrator) callByTemplate(
 		if v, ok := p.ExtraConfig["instrumental"].(bool); ok {
 			instrumental = v
 		}
-		outputURL, err = o.callPollinationsElevenMusic(ctx, in.Prompt, instrumental)
+		outputURL, err = o.callPollinationsElevenMusic(ctx, key, in.Prompt, instrumental)
+
+	case entities.TemplateSunoMusic:
+		style := in.Style
+		if style == "" {
+			style, _ = p.ExtraConfig["style"].(string)
+		}
+		title := in.Title
+		if title == "" {
+			title, _ = p.ExtraConfig["title"].(string)
+		}
+		var second string
+		outputURL, second, err = o.callSunoMusic(ctx, key, in.Prompt, style, title, in.VocalGender, in.Instrumental)
+		if err == nil && in.SecondaryURL != nil {
+			*in.SecondaryURL = second
+		}
+
+	case entities.TemplateHFMusicGen:
+		dur := in.DurationSecs
+		if dur <= 0 {
+			dur = 30
+		}
+		outputURL, err = o.callHFMusicGen(ctx, key, in.Prompt, dur)
 
 	case entities.TemplateMubert:
 		dur := in.DurationSecs
@@ -234,18 +416,15 @@ func (o *AIStudioOrchestrator) callByTemplate(
 
 	// ── Background removal ───────────────────────────────────────────────────
 	case entities.TemplateRembg:
-		svcURL := key // for rembg the "key" is the service URL (env REMBG_SERVICE_URL)
-		if svcURL == "" {
-			svcURL = os.Getenv("REMBG_SERVICE_URL")
+		if key == "" {
+			err = fmt.Errorf("rembg service URL not configured for provider")
+			break
 		}
-		outputURL, err = o.callRembgService(ctx, svcURL, in.ImageURL)
+		outputURL, err = o.callRembgService(ctx, key, in.ImageURL)
 
 	case entities.TemplateFALBGRemove:
-		model := p.ModelID
-		if model == "" {
-			model = "fal-ai/birefnet"
-		}
-		outputURL, err = o.callFALBgRemoverWithModel(ctx, key, model, in.ImageURL)
+		// Single fixed FAL endpoint; there is no model to choose.
+		outputURL, err = o.callFALBgRemover(ctx, key, in.ImageURL)
 
 	case entities.TemplateRemoveBG:
 		outputURL, err = o.callRemoveBg(ctx, key, in.ImageURL)
@@ -256,39 +435,13 @@ func (o *AIStudioOrchestrator) callByTemplate(
 	return
 }
 
-// ── runProviderChain executes the DB-configured chain for a category ──────────
-//
-// It iterates active providers (sorted by priority) and calls each via
-// callByTemplate. On success it returns immediately. On failure it logs and
-// continues. Returns (nil, ErrAllFailed) if every provider fails.
-//
-// in: unified input bag
-// onResult: optional hook called on success — use to set Provider/CostMicros
-func (o *AIStudioOrchestrator) runProviderChain(
-	ctx context.Context,
-	category string,
-	in providerInput,
-) (outputURL, outputText string, costMicros int, usedSlug string, err error) {
-
-	providers := o.dbProviders(ctx, category)
-	if len(providers) == 0 {
-		return "", "", 0, "", errNoDBProviders
-	}
-
-	for _, p := range providers {
-		url, text, cost, callErr := o.callByTemplate(ctx, p, in)
-		if callErr != nil {
-			log.Printf("[AIStudio][DB] %s/%s failed: %v — trying next", category, p.Slug, callErr)
-			continue
-		}
-		return url, text, cost, p.Slug, nil
-	}
-	return "", "", 0, "", fmt.Errorf("all DB-configured %s providers failed", category)
+// errModelIDRequired is the answer to an empty model_id on a template where the
+// model matters: a configuration error surfaced to the Admin, never a model
+// picked in code (that would be a hidden fallback — invisible, unaudited, and
+// on some templates a paid one).
+func errModelIDRequired(p entities.AIProviderConfig) error {
+	return fmt.Errorf("%s (%s): model_id not configured — set it on the provider", p.Slug, p.Template)
 }
-
-// errNoDBProviders is a sentinel indicating the DB has no providers for this
-// category — callers should run their hardcoded fallback chain instead.
-var errNoDBProviders = fmt.Errorf("no DB providers for category")
 
 // ── Key / URL resolution helpers ─────────────────────────────────────────────
 
@@ -312,26 +465,22 @@ func resolveBaseURLForProvider(p entities.AIProviderConfig) string {
 // ── Thin key-parametrised wrappers for callXxx functions that hard-code their
 // own env reads. These let callByTemplate pass the DB-resolved key explicitly.
 
-// callGeminiFlashWithModel calls Gemini with an explicit model and API key.
-// Unlike callGeminiFlash (which hardcodes gemini-2.5-flash + env key), this
-// honours the admin-configured model ID and DB-stored key so the provider
-// registry can actually switch Gemini variants without a code deploy.
+// callGeminiFlashWithModel calls Gemini with the admin-configured model ID and
+// the resolved key. An empty model_id is a configuration error, not an excuse
+// to pick a model in code: the same rule the streaming path enforces.
 func (o *AIStudioOrchestrator) callGeminiFlashWithModel(
 	ctx context.Context, model, apiKey, systemPrompt, userPrompt string,
 ) (string, error) {
 	if model == "" {
-		model = "gemini-2.5-flash"
+		return "", fmt.Errorf("gemini: model_id not configured for this provider")
 	}
 	if apiKey == "" {
-		apiKey = os.Getenv("GEMINI_API_KEY")
-	}
-	if apiKey == "" {
-		return "", fmt.Errorf("gemini: no API key configured (DB or GEMINI_API_KEY)")
+		return "", fmt.Errorf("gemini: provider API key not configured")
 	}
 
 	endpoint := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-		model, apiKey,
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
+		model,
 	)
 	payload := map[string]interface{}{
 		"system_instruction": map[string]interface{}{
@@ -345,13 +494,15 @@ func (o *AIStudioOrchestrator) callGeminiFlashWithModel(
 			"maxOutputTokens": 8192,
 		},
 	}
-	return o.callGeminiEndpoint(ctx, endpoint, payload)
+	return o.callGeminiEndpoint(ctx, endpoint, apiKey, payload)
 }
 
 // callGeminiEndpoint POSTs a generateContent payload to any Gemini model
-// endpoint and extracts the first candidate's text.
+// endpoint. The key travels in the x-goog-api-key header, never the query
+// string (URLs are logged by proxies and error text), and the response is
+// decoded structurally so blocks and content stops surface as refusals.
 func (o *AIStudioOrchestrator) callGeminiEndpoint(
-	ctx context.Context, endpoint string, payload map[string]interface{},
+	ctx context.Context, endpoint, apiKey string, payload map[string]interface{},
 ) (string, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -362,6 +513,7 @@ func (o *AIStudioOrchestrator) callGeminiEndpoint(
 		return "", fmt.Errorf("gemini request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -369,40 +521,25 @@ func (o *AIStudioOrchestrator) callGeminiEndpoint(
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var result struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-		Error *struct {
-			Message string `json:"message"`
-			Code    int    `json:"code"`
-		} `json:"error"`
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return "", fmt.Errorf("gemini read: %w", err)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("gemini decode: %w", err)
-	}
-	if result.Error != nil {
-		return "", fmt.Errorf("gemini API error %d: %s", result.Error.Code, result.Error.Message)
-	}
-	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("gemini: no content returned")
-	}
-	return result.Candidates[0].Content.Parts[0].Text, nil
+	return decodeGeminiGenerateContent(resp.StatusCode, raw)
 }
 
 // callDeepSeekWithKey calls DeepSeek with an explicit API key.
 func (o *AIStudioOrchestrator) callDeepSeekWithKey(
-	ctx context.Context, apiKey, systemPrompt, userPrompt string,
+	ctx context.Context, apiKey, model, systemPrompt, userPrompt string,
 ) (string, error) {
 	if apiKey == "" {
-		apiKey = os.Getenv("DEEPSEEK_API_KEY")
+		return "", fmt.Errorf("deepseek: provider API key not configured")
+	}
+	if model == "" {
+		return "", fmt.Errorf("deepseek: model_id not configured for this provider")
 	}
 	payload := map[string]interface{}{
-		"model": "deepseek-chat",
+		"model": model,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": userPrompt},
@@ -415,18 +552,35 @@ func (o *AIStudioOrchestrator) callDeepSeekWithKey(
 	)
 }
 
-// callFALBgRemoverWithModel calls FAL background removal with an explicit model slug.
-func (o *AIStudioOrchestrator) callFALBgRemoverWithModel(
-	ctx context.Context, falKey, model, imageURL string,
+func (o *AIStudioOrchestrator) callGeminiConfiguredMultimodal(
+	ctx context.Context, model, apiKey, systemPrompt, userPrompt string, images []string,
 ) (string, error) {
-	if model == "" {
-		model = "fal-ai/birefnet"
+	if model == "" || apiKey == "" {
+		return "", fmt.Errorf("Gemini model/key not configured")
 	}
-	// callFALBgRemover currently hardcodes birefnet — reuse it for that model,
-	// otherwise use the generic FAL image endpoint.
-	if model == "fal-ai/birefnet" || model == "birefnet" {
-		return o.callFALBgRemover(ctx, falKey, imageURL)
+	parts := []map[string]interface{}{{"text": userPrompt}}
+	for _, image := range images {
+		if image == "" {
+			continue
+		}
+		mimeType, data := "image/jpeg", image
+		if strings.HasPrefix(image, "data:") {
+			if semi := strings.Index(image, ";"); semi > 5 {
+				mimeType = image[5:semi]
+			}
+			if comma := strings.Index(image, ","); comma >= 0 {
+				data = image[comma+1:]
+			}
+		}
+		parts = append(parts, map[string]interface{}{
+			"inlineData": map[string]string{"mimeType": mimeType, "data": data},
+		})
 	}
-	// Generic FAL remove-bg via image endpoint
-	return o.callFALBgRemover(ctx, falKey, imageURL)
+	payload := map[string]interface{}{
+		"system_instruction": map[string]interface{}{"parts": []map[string]string{{"text": systemPrompt}}},
+		"contents":           []map[string]interface{}{{"parts": parts}},
+		"generationConfig":   map[string]interface{}{"maxOutputTokens": 65536, "temperature": 0.85},
+	}
+	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent", model)
+	return o.callGeminiEndpoint(ctx, endpoint, apiKey, payload)
 }

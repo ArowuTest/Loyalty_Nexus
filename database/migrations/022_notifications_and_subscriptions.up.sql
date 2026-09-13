@@ -67,11 +67,15 @@ ALTER TABLE users
     ADD COLUMN IF NOT EXISTS subscription_auto_renew   BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS fcm_token                 TEXT;   -- latest FCM token (convenience col)
 
--- subscription_status: extend allowed values to include GRACE
+-- subscription_status was historically introduced in migration 023, one step too late.
+-- Add it defensively here and validate case-insensitively so the later deprecation
+-- migration can safely use lowercase 'active'.
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(20) NOT NULL DEFAULT 'FREE';
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_subscription_status_check;
 ALTER TABLE users
     ADD CONSTRAINT users_subscription_status_check
-    CHECK (subscription_status IN ('FREE','ACTIVE','GRACE','SUSPENDED','BANNED'));
+    CHECK (UPPER(subscription_status) IN ('FREE','ACTIVE','GRACE','SUSPENDED','BANNED'));
 
 -- ---------------------------------------------------------------------------
 -- Subscription events audit log

@@ -126,25 +126,25 @@ ON CONFLICT (slug) DO UPDATE
 
 INSERT INTO network_configs (key, value, description, updated_at)
 VALUES
-    ('storage_backend',         '',
+    ('storage_backend',         '""',
      'Asset storage provider: "s3", "gcs", "local", or "" for auto-detect',     NOW()),
 
-    ('storage_cdn_base_url',    '',
+    ('storage_cdn_base_url',    '""',
      'CDN prefix returned in all asset URLs (e.g. https://cdn.loyalty-nexus.ai)', NOW()),
 
     -- AWS S3 / S3-compatible
-    ('aws_s3_bucket',           '',     'S3 bucket name (AWS / MinIO / Cloudflare R2)',     NOW()),
-    ('aws_region',              'us-east-1', 'AWS region (default: us-east-1)',            NOW()),
-    ('aws_s3_endpoint',         '',
+    ('aws_s3_bucket',           '""',     'S3 bucket name (AWS / MinIO / Cloudflare R2)',     NOW()),
+    ('aws_region',              '"us-east-1"', 'AWS region (default: us-east-1)',            NOW()),
+    ('aws_s3_endpoint',         '""',
      'Custom S3-compatible endpoint (leave blank for standard AWS)',              NOW()),
 
     -- Google Cloud Storage
-    ('gcs_bucket',              '',     'GCS bucket name',                                  NOW()),
+    ('gcs_bucket',              '""',     'GCS bucket name',                                  NOW()),
 
     -- Local filesystem (dev / CI only)
-    ('local_storage_base_path', '/tmp/nexus-assets',
+    ('local_storage_base_path', '"/tmp/nexus-assets"',
      'Absolute filesystem path for local asset storage (dev only)',              NOW()),
-    ('local_storage_base_url',  'http://localhost:8080/assets',
+    ('local_storage_base_url',  '"http://localhost:8080/assets"',
      'URL prefix served for local assets (dev only)',                            NOW())
 
 ON CONFLICT (key) DO NOTHING;
@@ -170,11 +170,11 @@ VALUES
      'Number of recent raw messages injected into the system prompt',                NOW()),
 
     -- LLM model overrides (operator can swap models without a deploy)
-    ('llm_groq_model',          'llama-4-scout-17b-16e-instruct',
+    ('llm_groq_model',          '"llama-4-scout-17b-16e-instruct"',
      'Groq model identifier',                                                         NOW()),
-    ('llm_gemini_model',        'gemini-2.0-flash-lite',
+    ('llm_gemini_model',        '"gemini-2.0-flash-lite"',
      'Gemini model identifier (free Flash-Lite)',                                    NOW()),
-    ('llm_deepseek_model',      'deepseek-chat',
+    ('llm_deepseek_model',      '"deepseek-chat"',
      'DeepSeek model identifier (paid overflow)',                                    NOW())
 
 ON CONFLICT (key) DO NOTHING;
@@ -185,20 +185,20 @@ INSERT INTO network_configs (key, value, description, updated_at)
 VALUES
     -- Image generation
     ('studio_hf_image_model',
-     'black-forest-labs/FLUX.1-schnell',
+     '"black-forest-labs/FLUX.1-schnell"',
      'HuggingFace model for AI photo (free tier)',                               NOW()),
 
     -- TTS
     ('studio_elevenlabs_voice_id',
-     '21m00Tcm4TlvDq8ikWAM',
+     '"21m00Tcm4TlvDq8ikWAM"',
      'Default ElevenLabs voice ID (Rachel)',                                      NOW()),
     ('studio_tts_primary_provider',
-     'google-cloud-tts',
+     '"google-cloud-tts"',
      'Primary TTS provider: google-cloud-tts | elevenlabs | huggingface-bark',   NOW()),
 
     -- Background removal
     ('studio_rembg_service_url',
-     '',
+     '""',
      'Self-hosted rembg microservice URL (e.g. http://rembg-service:5000)',       NOW()),
 
     -- Music
@@ -208,10 +208,10 @@ VALUES
 
     -- Video
     ('studio_fal_video_model_standard',
-     'fal-ai/ltx-video',
+     '"fal-ai/ltx-video"',
      'FAL.AI model for animate-photo (cheaper)',                                  NOW()),
     ('studio_fal_video_model_premium',
-     'fal-ai/kling-video/v1.5/standard',
+     '"fal-ai/kling-video/v1.5/standard"',
      'FAL.AI model for video-premium (Kling v1.5)',                               NOW()),
 
     -- Stale job recovery (also used by LifecycleWorker)
@@ -224,7 +224,7 @@ VALUES
 
     -- Transcription
     ('studio_transcription_primary',
-     'assemblyai',
+     '"assemblyai"',
      'Primary transcription provider: assemblyai | groq-whisper',               NOW())
 
 ON CONFLICT (key) DO NOTHING;

@@ -9,7 +9,7 @@
 -- ─── Seed ussd_sms_number ─────────────────────────────────────────────────────
 INSERT INTO network_configs (key, value, description, is_public, updated_by)
 VALUES
-    ('ussd_sms_number', '',
+    ('ussd_sms_number', '""',
      'SMS number displayed in the USSD Knowledge Tools sub-menu as an alternative entry point. '
      'Leave empty to hide the instruction line. Set to e.g. "08012345678" to show it.',
      false, 'system')

@@ -14,4 +14,9 @@ CREATE INDEX IF NOT EXISTS idx_admin_refresh_tokens_admin_id ON admin_refresh_to
 CREATE INDEX IF NOT EXISTS idx_admin_refresh_tokens_token_hash ON admin_refresh_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_admin_refresh_tokens_expires_at ON admin_refresh_tokens(expires_at);
 
-GRANT ALL ON admin_refresh_tokens TO nexus;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexus') THEN
+        GRANT ALL ON admin_refresh_tokens TO nexus;
+    END IF;
+END $$;

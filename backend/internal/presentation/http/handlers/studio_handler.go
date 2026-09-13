@@ -16,7 +16,6 @@ package handlers
 // repository + wallet + ledger).  This handler never calls gorm.DB directly.
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -38,8 +37,7 @@ import (
 type StudioHandler struct {
 	studioSvc    *services.StudioService
 	llmOrch      *external.LLMOrchestrator
-	gemini       *external.GeminiAdapter  // used by website builder for multimodal
-	deepseek     *external.DeepSeekAdapter // fallback when Gemini fails
+	aiStudio     *services.AIStudioOrchestrator
 	worker       *AsyncStudioWorker
 	cfg          *config.ConfigManager
 	assetStorage external.AssetStorage // optional: nil when STORAGE_BACKEND not set
@@ -54,10 +52,8 @@ func NewStudioHandler(
 	return &StudioHandler{studioSvc: ss, llmOrch: lo, worker: kb, cfg: cfg}
 }
 
-// SetGeminiAdapter injects the Gemini adapter for website builder multimodal calls.
-func (h *StudioHandler) SetGeminiAdapter(g *external.GeminiAdapter)   { h.gemini = g }
-func (h *StudioHandler) SetDeepSeekAdapter(d *external.DeepSeekAdapter) { h.deepseek = d }
-func (h *StudioHandler) SetAssetStorage(s external.AssetStorage) { h.assetStorage = s }
+func (h *StudioHandler) SetAIStudioOrchestrator(o *services.AIStudioOrchestrator) { h.aiStudio = o }
+func (h *StudioHandler) SetAssetStorage(s external.AssetStorage)                  { h.assetStorage = s }
 
 // ─── POST /api/v1/studio/upload ──────────────────────────────────────────────
 // Accepts a multipart form upload of an audio or image file (max 20 MB).
@@ -119,7 +115,7 @@ func (h *StudioHandler) UploadAsset(w http.ResponseWriter, r *http.Request) {
 		"audio/mpeg":      ".mp3",
 		"audio/wav":       ".wav",
 		"audio/mp4":       ".m4a",
-		"audio/x-m4a":    ".m4a",
+		"audio/x-m4a":     ".m4a",
 		"audio/ogg":       ".ogg",
 		"audio/webm":      ".webm",
 		"image/jpeg":      ".jpg",
@@ -241,17 +237,17 @@ type generateRequest struct {
 	// These are forwarded to the AI provider via the Prompt field after being
 	// serialised into a structured prefix or separate payload fields.
 	// Frontend sends only the fields relevant to the active ui_template.
-	AspectRatio     string                 `json:"aspect_ratio,omitempty"`      // image / video: "1:1", "16:9", "9:16"
-	Duration        int                    `json:"duration,omitempty"`          // music (seconds) or video (seconds)
-	VoiceID         string                 `json:"voice_id,omitempty"`          // narrate-pro: ElevenLabs voice id
-	Language        string                 `json:"language,omitempty"`          // TTS / transcribe language code
-	Vocals          *bool                  `json:"vocals,omitempty"`            // music: true = with vocals
-	Lyrics          string                 `json:"lyrics,omitempty"`            // music: user-supplied lyrics
-	StyleTags       []string               `json:"style_tags,omitempty"`        // image / video: style hints
-	NegativePrompt  string                 `json:"negative_prompt,omitempty"`   // image / video: what to avoid
-	ImageURL        string                 `json:"image_url,omitempty"`         // image-editor / video-animator: source image (pre-uploaded URL)
-	DocumentURL     string                 `json:"document_url,omitempty"`      // FEAT-01: knowledge tools — pre-uploaded PDF/TXT URL for Gemini multimodal analysis
-	ExtraParams     map[string]interface{} `json:"extra_params,omitempty"`      // catch-all for future template fields
+	AspectRatio    string                 `json:"aspect_ratio,omitempty"`    // image / video: "1:1", "16:9", "9:16"
+	Duration       int                    `json:"duration,omitempty"`        // music (seconds) or video (seconds)
+	VoiceID        string                 `json:"voice_id,omitempty"`        // narrate-pro: ElevenLabs voice id
+	Language       string                 `json:"language,omitempty"`        // TTS / transcribe language code
+	Vocals         *bool                  `json:"vocals,omitempty"`          // music: true = with vocals
+	Lyrics         string                 `json:"lyrics,omitempty"`          // music: user-supplied lyrics
+	StyleTags      []string               `json:"style_tags,omitempty"`      // image / video: style hints
+	NegativePrompt string                 `json:"negative_prompt,omitempty"` // image / video: what to avoid
+	ImageURL       string                 `json:"image_url,omitempty"`       // image-editor / video-animator: source image (pre-uploaded URL)
+	DocumentURL    string                 `json:"document_url,omitempty"`    // FEAT-01: knowledge tools — pre-uploaded PDF/TXT URL for Gemini multimodal analysis
+	ExtraParams    map[string]interface{} `json:"extra_params,omitempty"`    // catch-all for future template fields
 }
 
 func (h *StudioHandler) Generate(w http.ResponseWriter, r *http.Request) {
@@ -554,11 +550,8 @@ func (h *StudioHandler) handleGeneralChat(w http.ResponseWriter, r *http.Request
 //   - Calls GeminiAdapter.CompleteStream to get live token chunks
 //   - Pushes each chunk as an SSE event: data: {"text":"..."}
 
-
 //   - Sends a final event: data: {"done":true,"session_id":"...","provider":"GEMINI_LITE"}
 
-
-//
 // Falls back to a single-shot response (wrapped in SSE) if streaming fails.
 func (h *StudioHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
 	uid := r.Context().Value(middleware.ContextUserID).(string)
@@ -597,15 +590,11 @@ func (h *StudioHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build system prompt via orchestrator's exported helper
-	systemPrompt := h.llmOrch.BuildSystemPrompt(r.Context(), uid, sessionID, req.ToolSlug, attachedContext, attachedName)
-
-	// SSE headers — must be set before any write
+	// SSE headers — must be set before any write.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no") // disable nginx/Render proxy buffering for true streaming
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Accel-Buffering", "no")
 	flusher, canFlush := w.(http.Flusher)
 
 	writeSSE := func(payload []byte) {
@@ -615,56 +604,33 @@ func (h *StudioHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Stream from Gemini
-	var fullText string
-	var streamErr error
-	if h.gemini != nil {
-		fullText, streamErr = h.gemini.CompleteStream(r.Context(), systemPrompt, req.Message, func(chunk string) {
-			data, _ := json.Marshal(map[string]string{"text": chunk})
-			writeSSE(data)
-		})
-	} else {
-		streamErr = fmt.Errorf("gemini adapter not configured")
+	resp, err := h.llmOrch.ChatStream(r.Context(), external.LLMRequest{
+		UserID:          uid,
+		SessionID:       sessionID,
+		Prompt:          req.Message,
+		History:         req.History,
+		ToolSlug:        req.ToolSlug,
+		AttachedContext: attachedContext,
+		AttachedName:    attachedName,
+	}, func(chunk string) {
+		data, _ := json.Marshal(map[string]string{"text": chunk})
+		writeSSE(data)
+	})
+	if err != nil {
+		errData, _ := json.Marshal(map[string]string{"error": "Nexus Chat temporarily unavailable"})
+		writeSSE(errData)
+		return
 	}
 
-	// If streaming failed, fall back to non-streaming Chat and wrap in SSE
-	if streamErr != nil {
-		log.Printf("[SSE] stream failed, falling back to sync: %v", streamErr)
-		resp, err := h.llmOrch.Chat(r.Context(), external.LLMRequest{
-			UserID:          uid,
-			SessionID:       sessionID,
-			Prompt:          req.Message,
-			History:         req.History,
-			ToolSlug:        req.ToolSlug,
-			AttachedContext: attachedContext,
-			AttachedName:    attachedName,
-		})
-		if err != nil {
-			errData, _ := json.Marshal(map[string]string{"error": "Nexus Chat temporarily unavailable"})
-			writeSSE(errData)
-			return
-		}
-		// Send full text as a single chunk
-		chunkData, _ := json.Marshal(map[string]string{"text": resp.Text})
-		writeSSE(chunkData)
-		fullText = resp.Text
+	resolvedSession := resp.SessionID
+	if resolvedSession == "" {
+		resolvedSession = sessionID
 	}
-
-	// Persist the exchange to chat history
-	go func() {
-		persistCtx := context.Background()
-		_ = h.llmOrch.PersistChat(persistCtx, uid, sessionID, req.ToolSlug, req.Message, fullText)
-	}()
-
-	// Increment daily chat counter
-	msgCount := h.llmOrch.IncrDailyChatCount(r.Context(), uid)
-
-	// Send final done event
 	doneData, _ := json.Marshal(map[string]interface{}{
 		"done":          true,
-		"session_id":    sessionID,
-		"provider":      "GEMINI_LITE",
-		"message_count": msgCount,
+		"session_id":    resolvedSession,
+		"provider":      resp.Provider,
+		"message_count": h.llmOrch.GetDailyChatCount(r.Context(), uid),
 	})
 	writeSSE(doneData)
 }
@@ -673,6 +639,7 @@ func (h *StudioHandler) ChatStream(w http.ResponseWriter, r *http.Request) {
 func timeNowUnix() int64 {
 	return time.Now().UnixNano() / 1e6 // milliseconds
 }
+
 // ─── GET /api/v1/studio/chat/history ──────────────────────────────────────────────
 // Returns the active session ID and all messages for the given mode (?mode=general|search|code).
 // Used by the frontend to restore chat history on page load (BUG-05 fix).
@@ -793,17 +760,18 @@ func (h *StudioHandler) GetSessionUsage(w http.ResponseWriter, r *http.Request) 
 // never parse with string splitting.
 //
 // Envelope fields:
-//   prompt        string  — human-readable text prompt
-//   image_url     string  — source image URL (ImageEditor, VideoAnimator, VisionAsk)
-//   voice_id      string  — TTS voice name (VoiceStudio / narrate-pro)
-//   language      string  — BCP-47 code (Transcribe, Translate, TTS)
-//   aspect_ratio  string  — "16:9", "9:16", "1:1" etc.
-//   duration      int     — seconds
-//   vocals        bool    — music with/without vocals
-//   lyrics        string  — user-supplied lyrics
-//   style_tags    []str   — style hint array
-//   negative_prompt string
-//   extra         object  — catch-all for future template fields (speed, bpm, etc.)
+//
+//	prompt        string  — human-readable text prompt
+//	image_url     string  — source image URL (ImageEditor, VideoAnimator, VisionAsk)
+//	voice_id      string  — TTS voice name (VoiceStudio / narrate-pro)
+//	language      string  — BCP-47 code (Transcribe, Translate, TTS)
+//	aspect_ratio  string  — "16:9", "9:16", "1:1" etc.
+//	duration      int     — seconds
+//	vocals        bool    — music with/without vocals
+//	lyrics        string  — user-supplied lyrics
+//	style_tags    []str   — style hint array
+//	negative_prompt string
+//	extra         object  — catch-all for future template fields (speed, bpm, etc.)
 func buildEnrichedPrompt(req generateRequest) string {
 	payload := map[string]interface{}{
 		"prompt": req.Prompt,
@@ -907,12 +875,12 @@ func (h *StudioHandler) StreamGenerationStatus(w http.ResponseWriter, r *http.Re
 			}
 
 			payload := map[string]interface{}{
-				"type":        "status",
-				"status":      gen.Status,
-				"output_url":  gen.OutputURL,
+				"type":         "status",
+				"status":       gen.Status,
+				"output_url":   gen.OutputURL,
 				"output_url_2": gen.OutputURL2,
-				"output_text": gen.OutputText,
-				"updated_at":  gen.UpdatedAt,
+				"output_text":  gen.OutputText,
+				"updated_at":   gen.UpdatedAt,
 			}
 			b, _ := json.Marshal(payload)
 			sendEvent(string(b))
@@ -964,4 +932,3 @@ func (h *StudioHandler) GetPromptHistory(w http.ResponseWriter, r *http.Request)
 		"count":   len(items),
 	})
 }
-

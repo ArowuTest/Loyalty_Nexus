@@ -1,6 +1,10 @@
 -- 010_regional_wars_admin.sql
 -- Purpose: Admin views for managing Regional Wars.
 
+-- The audit view joins users by state, but users.state was historically added later
+-- in migration 019. Create it defensively here so clean installs can reach the view.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS state TEXT;
+
 -- 1. View: Regional Performance Audit
 CREATE OR REPLACE VIEW view_regional_audit AS
 SELECT 

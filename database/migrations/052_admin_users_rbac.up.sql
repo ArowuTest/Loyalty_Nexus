@@ -20,6 +20,16 @@ CREATE TABLE IF NOT EXISTS admin_users (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- admin_users may already exist from migration 019 with username-based identity.
+-- Evolve that table in place; migration 063 later performs the final canonical
+-- email/role normalisation across both historical schema paths.
+ALTER TABLE admin_users
+  ADD COLUMN IF NOT EXISTS email         TEXT,
+  ADD COLUMN IF NOT EXISTS full_name     TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
 CREATE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users(email);
 
 -- Seed a default super_admin (password will be set via ADMIN_SEED_PASSWORD env var at startup,

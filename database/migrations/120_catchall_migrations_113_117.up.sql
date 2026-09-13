@@ -67,7 +67,7 @@ EXCEPTION WHEN undefined_table THEN
 END $$;
 
 UPDATE network_configs
-SET    value      = '-- UNUSED: spin limits set in spin_tiers, not here --',
+SET    value      = '"-- UNUSED: spin limits set in spin_tiers, not here --"',
        updated_at = NOW()
 WHERE  key IN ('spin_max_per_day', 'spin_max_per_user_per_day');
 
@@ -171,6 +171,30 @@ WHERE  id IN (
   ) d
   WHERE  rn > 1
 );
+
+-- If the later coded Loyalty Nexus wheel seed exists, retire only the known
+-- original phase-8 uncoded seed rows before probability repair.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM prize_pool
+    WHERE prize_code = 'NONE' AND LOWER(prize_type) = 'try_again'
+  ) THEN
+    UPDATE prize_pool
+    SET is_active = FALSE,
+        updated_at = NOW()
+    WHERE is_active = TRUE
+      AND COALESCE(prize_code, '') = ''
+      AND (
+        (LOWER(prize_type) = 'try_again' AND base_value = 0)
+        OR (LOWER(prize_type) = 'pulse_points' AND base_value IN (5, 10)
+            AND name IN ('+5 Pulse Points', '+10 Pulse Points'))
+        OR (LOWER(prize_type) = 'data_bundle' AND base_value IN (10, 25)
+            AND name IN ('10MB Data', '25MB Data'))
+        OR (LOWER(prize_type) = 'airtime' AND base_value IN (50, 100, 200))
+      );
+  END IF;
+END $$;
 
 -- Normalise weights and ensure they sum to exactly 100.00
 DO $$

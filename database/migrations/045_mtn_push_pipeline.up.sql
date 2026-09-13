@@ -45,6 +45,6 @@ CREATE INDEX IF NOT EXISTS idx_mtn_push_events_created_at ON mtn_push_events(cre
 -- ── 3. Network config keys for the MTN push pipeline ─────────────────────────
 INSERT INTO network_configs (key, value, description) VALUES
     ('draw_entries_per_point',   '1',    'Draw entries created per Pulse Point earned from a recharge (1:1 mirrors RechargeMax)'),
-    ('mtn_push_hmac_secret',     '',     'HMAC-SHA256 secret for MTN push webhook signature verification (set via env MTN_PUSH_SECRET)'),
+    ('mtn_push_hmac_secret',     '""', 'HMAC-SHA256 secret for MTN push webhook signature verification (set via env MTN_PUSH_SECRET)'),
     ('mtn_push_min_amount_naira','50',   'Minimum recharge amount in naira for MTN push to qualify for points/draw/spin')
 ON CONFLICT (key) DO NOTHING;

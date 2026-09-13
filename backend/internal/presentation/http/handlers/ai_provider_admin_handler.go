@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 
 	"loyalty-nexus/internal/domain/entities"
 	"loyalty-nexus/internal/infrastructure/persistence"
+	"loyalty-nexus/internal/presentation/http/middleware"
 )
 
 // AIProviderAdminHandler handles CRUD + test for ai_provider_configs.
@@ -30,6 +33,54 @@ type AIProviderAdminHandler struct {
 
 func NewAIProviderAdminHandler(repo *persistence.AIProviderRepository) *AIProviderAdminHandler {
 	return &AIProviderAdminHandler{repo: repo}
+}
+
+// requireProviderAdmin mirrors requireRoutingAdmin: provider credentials are the
+// most sensitive surface in AI Routing V2, so every mutation and the live Test
+// endpoint are super_admin-only. Before this, any admin role (finance/ops/content)
+// could rewrite a provider's base_url and Test it — exfiltrating the decrypted
+// key (review B1). Read endpoints stay open to any admin: they never serialize
+// key material (APIKeyEnc is json:"-").
+func requireProviderAdmin(w http.ResponseWriter, r *http.Request) bool {
+	return middleware.RequireRole(w, r, entities.RoleSuperAdmin)
+}
+
+// providerBaseURL extracts extra_config.base_url ("" when unset).
+func providerBaseURL(cfg entities.ProviderExtraConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	if u, ok := cfg["base_url"].(string); ok {
+		return strings.TrimSpace(u)
+	}
+	return ""
+}
+
+// validateProviderBaseURL accepts only an https:// URL with a host. The stored
+// API key is sent as a Bearer token to this host on every live request AND on
+// Test, so a plain-http, loopback, or cloud-metadata endpoint would leak it (B1).
+func validateProviderBaseURL(u string) error {
+	if u == "" {
+		return nil
+	}
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("extra_config.base_url must be an https:// URL with a host")
+	}
+	return nil
+}
+
+// storedKeyStillBound decides whether a stored credential survives an
+// extra_config change (review B1). The key is sent to base_url on every live
+// request and on Test, so it is bound to the endpoint it was entered for: when
+// base_url moves without a fresh api_key in the same call, the stored key is
+// dropped rather than silently re-pointed at the new host — otherwise an admin
+// could redirect an existing key to a URL they control and harvest it.
+func storedKeyStillBound(oldCfg, newCfg entities.ProviderExtraConfig, newAPIKey *string) bool {
+	if providerBaseURL(newCfg) == providerBaseURL(oldCfg) {
+		return true
+	}
+	return newAPIKey != nil && *newAPIKey != ""
 }
 
 // ── GET /api/v1/admin/ai-providers ───────────────────────────────────────────
@@ -85,21 +136,24 @@ func (h *AIProviderAdminHandler) GetProviderMeta(w http.ResponseWriter, r *http.
 
 // ── POST /api/v1/admin/ai-providers ──────────────────────────────────────────
 func (h *AIProviderAdminHandler) CreateProvider(w http.ResponseWriter, r *http.Request) {
+	if !requireProviderAdmin(w, r) {
+		return
+	}
 	var body struct {
-		Name        string                         `json:"name"`
-		Slug        string                         `json:"slug"`
-		Category    string                         `json:"category"`
-		Template    string                         `json:"template"`
-		EnvKey      string                         `json:"env_key"`
-		APIKey      string                         `json:"api_key"` // raw — we encrypt before storing
-		ModelID     string                         `json:"model_id"`
-		ExtraConfig entities.ProviderExtraConfig   `json:"extra_config"`
-		Priority    int                            `json:"priority"`
-		IsPrimary   bool                           `json:"is_primary"`
-		IsActive    bool                           `json:"is_active"`
-		CostMicros  int                            `json:"cost_micros"`
-		PulsePts    int                            `json:"pulse_pts"`
-		Notes       string                         `json:"notes"`
+		Name        string                       `json:"name"`
+		Slug        string                       `json:"slug"`
+		Category    string                       `json:"category"`
+		Template    string                       `json:"template"`
+		EnvKey      string                       `json:"env_key"`
+		APIKey      string                       `json:"api_key"` // raw — we encrypt before storing
+		ModelID     string                       `json:"model_id"`
+		ExtraConfig entities.ProviderExtraConfig `json:"extra_config"`
+		Priority    int                          `json:"priority"`
+		IsPrimary   bool                         `json:"is_primary"`
+		IsActive    bool                         `json:"is_active"`
+		CostMicros  int                          `json:"cost_micros"`
+		PulsePts    int                          `json:"pulse_pts"`
+		Notes       string                       `json:"notes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid JSON body", http.StatusBadRequest)
@@ -115,6 +169,10 @@ func (h *AIProviderAdminHandler) CreateProvider(w http.ResponseWriter, r *http.R
 	}
 	if !isValidTemplate(body.Template) {
 		jsonError(w, "unknown template: "+body.Template, http.StatusBadRequest)
+		return
+	}
+	if err := validateProviderBaseURL(providerBaseURL(body.ExtraConfig)); err != nil {
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -176,6 +234,9 @@ func (h *AIProviderAdminHandler) CreateProvider(w http.ResponseWriter, r *http.R
 
 // ── PUT /api/v1/admin/ai-providers/{id} ──────────────────────────────────────
 func (h *AIProviderAdminHandler) UpdateProvider(w http.ResponseWriter, r *http.Request) {
+	if !requireProviderAdmin(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 	if id == "" {
 		jsonError(w, "id required", http.StatusBadRequest)
@@ -189,43 +250,77 @@ func (h *AIProviderAdminHandler) UpdateProvider(w http.ResponseWriter, r *http.R
 	}
 
 	var body struct {
-		Name        *string                        `json:"name"`
-		Category    *string                        `json:"category"`
-		Template    *string                        `json:"template"`
-		EnvKey      *string                        `json:"env_key"`
-		APIKey      *string                        `json:"api_key"` // raw — encrypted before storing
-		ModelID     *string                        `json:"model_id"`
-		ExtraConfig entities.ProviderExtraConfig   `json:"extra_config"`
-		Priority    *int                           `json:"priority"`
-		IsPrimary   *bool                          `json:"is_primary"`
-		IsActive    *bool                          `json:"is_active"`
-		CostMicros  *int                           `json:"cost_micros"`
-		PulsePts    *int                           `json:"pulse_pts"`
-		Notes       *string                        `json:"notes"`
+		Name        *string                      `json:"name"`
+		Category    *string                      `json:"category"`
+		Template    *string                      `json:"template"`
+		EnvKey      *string                      `json:"env_key"`
+		APIKey      *string                      `json:"api_key"` // raw — encrypted before storing
+		ModelID     *string                      `json:"model_id"`
+		ExtraConfig entities.ProviderExtraConfig `json:"extra_config"`
+		Priority    *int                         `json:"priority"`
+		IsPrimary   *bool                        `json:"is_primary"`
+		IsActive    *bool                        `json:"is_active"`
+		CostMicros  *int                         `json:"cost_micros"`
+		PulsePts    *int                         `json:"pulse_pts"`
+		Notes       *string                      `json:"notes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
 
-	if body.Name != nil        { p.Name = *body.Name }
-	if body.Category != nil    {
-		if !isValidCategory(*body.Category) { jsonError(w, "unknown category", http.StatusBadRequest); return }
+	if body.Name != nil {
+		p.Name = *body.Name
+	}
+	if body.Category != nil {
+		if !isValidCategory(*body.Category) {
+			jsonError(w, "unknown category", http.StatusBadRequest)
+			return
+		}
 		p.Category = *body.Category
 	}
-	if body.Template != nil    {
-		if !isValidTemplate(*body.Template) { jsonError(w, "unknown template", http.StatusBadRequest); return }
+	if body.Template != nil {
+		if !isValidTemplate(*body.Template) {
+			jsonError(w, "unknown template", http.StatusBadRequest)
+			return
+		}
 		p.Template = *body.Template
 	}
-	if body.EnvKey != nil      { p.EnvKey = *body.EnvKey }
-	if body.ModelID != nil     { p.ModelID = *body.ModelID }
-	if body.ExtraConfig != nil { p.ExtraConfig = body.ExtraConfig }
-	if body.Priority != nil    { p.Priority = *body.Priority }
-	if body.IsPrimary != nil   { p.IsPrimary = *body.IsPrimary }
-	if body.IsActive != nil    { p.IsActive = *body.IsActive }
-	if body.CostMicros != nil  { p.CostMicros = *body.CostMicros }
-	if body.PulsePts != nil    { p.PulsePts = *body.PulsePts }
-	if body.Notes != nil       { p.Notes = *body.Notes }
+	if body.EnvKey != nil {
+		p.EnvKey = *body.EnvKey
+	}
+	if body.ModelID != nil {
+		p.ModelID = *body.ModelID
+	}
+	if body.ExtraConfig != nil {
+		if err := validateProviderBaseURL(providerBaseURL(body.ExtraConfig)); err != nil {
+			jsonError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if p.APIKeyEnc != "" && !storedKeyStillBound(p.ExtraConfig, body.ExtraConfig, body.APIKey) {
+			p.APIKeyEnc = ""
+			log.Printf("[AIProviderAdmin] base_url changed for %s without a new api_key — stored key cleared; re-supply the key for the new endpoint", p.Slug)
+		}
+		p.ExtraConfig = body.ExtraConfig
+	}
+	if body.Priority != nil {
+		p.Priority = *body.Priority
+	}
+	if body.IsPrimary != nil {
+		p.IsPrimary = *body.IsPrimary
+	}
+	if body.IsActive != nil {
+		p.IsActive = *body.IsActive
+	}
+	if body.CostMicros != nil {
+		p.CostMicros = *body.CostMicros
+	}
+	if body.PulsePts != nil {
+		p.PulsePts = *body.PulsePts
+	}
+	if body.Notes != nil {
+		p.Notes = *body.Notes
+	}
 
 	// Re-encrypt API key if a new one was provided
 	if body.APIKey != nil && *body.APIKey != "" {
@@ -241,11 +336,17 @@ func (h *AIProviderAdminHandler) UpdateProvider(w http.ResponseWriter, r *http.R
 		jsonError(w, "update failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Reflect credential presence so the UI can see when a base_url change
+	// cleared the key and prompt for it.
+	p.HasKey = p.APIKeyEnc != "" || p.EnvKey != ""
 	jsonOK(w, p)
 }
 
 // ── DELETE /api/v1/admin/ai-providers/{id} ───────────────────────────────────
 func (h *AIProviderAdminHandler) DeleteProvider(w http.ResponseWriter, r *http.Request) {
+	if !requireProviderAdmin(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 	if id == "" {
 		jsonError(w, "id required", http.StatusBadRequest)
@@ -260,6 +361,9 @@ func (h *AIProviderAdminHandler) DeleteProvider(w http.ResponseWriter, r *http.R
 
 // ── POST /api/v1/admin/ai-providers/{id}/activate ────────────────────────────
 func (h *AIProviderAdminHandler) ActivateProvider(w http.ResponseWriter, r *http.Request) {
+	if !requireProviderAdmin(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 	if err := h.repo.SetActive(r.Context(), id, true); err != nil {
 		jsonError(w, "activate failed: "+err.Error(), http.StatusInternalServerError)
@@ -270,6 +374,9 @@ func (h *AIProviderAdminHandler) ActivateProvider(w http.ResponseWriter, r *http
 
 // ── POST /api/v1/admin/ai-providers/{id}/deactivate ──────────────────────────
 func (h *AIProviderAdminHandler) DeactivateProvider(w http.ResponseWriter, r *http.Request) {
+	if !requireProviderAdmin(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 	if err := h.repo.SetActive(r.Context(), id, false); err != nil {
 		jsonError(w, "deactivate failed: "+err.Error(), http.StatusInternalServerError)
@@ -281,6 +388,9 @@ func (h *AIProviderAdminHandler) DeactivateProvider(w http.ResponseWriter, r *ht
 // ── POST /api/v1/admin/ai-providers/{id}/test ────────────────────────────────
 // Performs a minimal live ping against the provider to verify credentials.
 func (h *AIProviderAdminHandler) TestProvider(w http.ResponseWriter, r *http.Request) {
+	if !requireProviderAdmin(w, r) {
+		return
+	}
 	id := r.PathValue("id")
 	p, err := h.repo.GetByID(r.Context(), id)
 	if err != nil {
@@ -300,8 +410,8 @@ func (h *AIProviderAdminHandler) TestProvider(w http.ResponseWriter, r *http.Req
 		status = "failed"
 	}
 	jsonOK(w, map[string]interface{}{
-		"status":        status,
-		"message":       msg,
+		"status":         status,
+		"message":        msg,
 		"last_tested_at": time.Now().UTC(),
 	})
 }
@@ -310,14 +420,18 @@ func (h *AIProviderAdminHandler) TestProvider(w http.ResponseWriter, r *http.Req
 
 func isValidCategory(c string) bool {
 	for _, v := range entities.ValidCategories {
-		if v == c { return true }
+		if v == c {
+			return true
+		}
 	}
 	return false
 }
 
 func isValidTemplate(t string) bool {
 	for _, v := range entities.ValidTemplates {
-		if v == t { return true }
+		if v == t {
+			return true
+		}
 	}
 	return false
 }

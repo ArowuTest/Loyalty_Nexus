@@ -17,7 +17,6 @@ const NAV = [
   { group: "Rewards Engine", items: [
     { href: "/points-config",   label: "💎 Points Engine" },
     { href: "/spin-config",          label: "🎡 Spin Wheel" },
-    { href: "/prizes",               label: "🏆 Prize Pool" },
     { href: "/fulfillment-config",   label: "⚙️ Fulfillment Mode" },
     { href: "/spin-claims",          label: "💰 Spin Claims" },
     { href: "/draws",           label: "🎟 Draws" },
@@ -29,6 +28,7 @@ const NAV = [
   ]},
   { group: "Content & AI", items: [
     { href: "/studio-tools",   label: "🧠 Studio Tools" },
+    { href: "/ai-routing",     label: "🧭 AI Routing" },
     { href: "/ai-providers",   label: "🔌 AI Providers" },
     { href: "/ai-health",      label: "⚡ AI Provider Health" },
     { href: "/generations",    label: "🎨 AI Generations" },

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"log"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -116,46 +115,32 @@ func (h *StudioHandler) BuildWebsite(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Call Gemini asynchronously (website generation can take 30-90s for rich HTML)
+	// Generate asynchronously through Router V2. Provider/model selection, failover,
+	// capacity and cost policy are all Admin-configured for website-builder/main.
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
-
-		var htmlOutput string
-		var genErr error
-
-		if h.gemini != nil && len(images) > 0 {
-			htmlOutput, genErr = h.gemini.CompleteWithImages(ctx, systemPrompt, userPrompt, images)
-		} else if h.gemini != nil {
-			htmlOutput, genErr = h.gemini.Complete(ctx, systemPrompt, userPrompt)
-		} else {
-			genErr = fmt.Errorf("gemini adapter not configured")
+		if h.aiStudio == nil {
+			_ = h.studioSvc.FailGeneration(ctx, gen.ID, "AI routing is not configured")
+			return
 		}
 
-		// Fallback to DeepSeek if Gemini fails
-		if genErr != nil && h.deepseek != nil {
-			log.Printf("[website-builder] Gemini failed (%v), falling back to DeepSeek", genErr)
-			htmlOutput, genErr = h.deepseek.Complete(ctx, systemPrompt, userPrompt)
-		}
-
+		htmlOutput, provider, costMicros, genErr := h.aiStudio.GenerateWebsite(ctx, systemPrompt, userPrompt, images)
 		if genErr != nil {
 			_ = h.studioSvc.FailGeneration(ctx, gen.ID, genErr.Error())
 			return
 		}
 
-		// Strip any markdown code blocks if Gemini wrapped the HTML
 		htmlOutput = stripMarkdownCodeBlock(htmlOutput)
-
-		// Inject "Built with Nexus" badge just before </body>
 		badge := `<div style="position:fixed;bottom:12px;left:12px;z-index:9998;background:rgba(0,0,0,0.6);color:#fff;font-size:10px;padding:4px 8px;border-radius:20px;font-family:sans-serif;backdrop-filter:blur(4px);">⚡ Built with <a href="https://loyalty-nexus.vercel.app" style="color:#F5A623;text-decoration:none;">Nexus</a></div>`
 		htmlOutput = strings.Replace(htmlOutput, "</body>", badge+"</body>", 1)
 
 		_ = h.studioSvc.CompleteGeneration(ctx, gen.ID,
-			"", // no output_url (HTML is self-contained)
-			"", // no output_url_2
+			"",
+			"",
 			htmlOutput,
-			"gemini/website-builder",
-			0,
+			provider,
+			costMicros,
 			0,
 		)
 	}()

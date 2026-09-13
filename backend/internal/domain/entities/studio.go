@@ -45,17 +45,19 @@ const (
 )
 
 type StudioTool struct {
-	ID           uuid.UUID    `json:"id"           gorm:"column:id;primaryKey"`
-	Name         string       `json:"name"         gorm:"column:name"`
-	Slug         string       `json:"slug"         gorm:"column:slug;uniqueIndex"`
-	Description  string       `json:"description"  gorm:"column:description"`
-	Category     ToolCategory `json:"category"     gorm:"column:category"`
-	PointCost    int64        `json:"point_cost"   gorm:"column:point_cost"`
-	Provider     string       `json:"-"            gorm:"column:provider;default:''"`
-	ProviderTool string       `json:"-"            gorm:"column:provider_tool;default:''"`
-	IsActive     bool         `json:"is_active"    gorm:"column:is_active;default:true"`
-	ComingSoon   bool         `json:"coming_soon"  gorm:"column:coming_soon;default:false"`
-	Icon         string       `json:"icon"         gorm:"column:icon;default:''"`
+	ID               uuid.UUID    `json:"id"           gorm:"column:id;primaryKey"`
+	Name             string       `json:"name"         gorm:"column:name"`
+	Slug             string       `json:"slug"         gorm:"column:slug;uniqueIndex"`
+	Description      string       `json:"description"  gorm:"column:description"`
+	Category         ToolCategory `json:"category"     gorm:"column:category"`
+	PointCost        int64        `json:"point_cost"   gorm:"column:point_cost"`
+	Provider         string       `json:"-"            gorm:"column:provider;default:''"`
+	ProviderTool     string       `json:"-"                 gorm:"column:provider_tool;default:''"`
+	ExecutionProfile string       `json:"execution_profile" gorm:"column:execution_profile;default:''"`
+	IsInternal       bool         `json:"is_internal"       gorm:"column:is_internal;default:false"`
+	IsActive         bool         `json:"is_active"         gorm:"column:is_active;default:true"`
+	ComingSoon       bool         `json:"coming_soon"  gorm:"column:coming_soon;default:false"`
+	Icon             string       `json:"icon"         gorm:"column:icon;default:''"`
 	SortOrder        int          `json:"sort_order"         gorm:"column:sort_order;default:0"`
 	EntryPointCost   int64        `json:"entry_point_cost"   gorm:"column:entry_point_cost;default:0"`
 	RefundWindowMins int          `json:"refund_window_mins"  gorm:"column:refund_window_mins;default:5"`
@@ -64,8 +66,8 @@ type StudioTool struct {
 	// UITemplate tells the frontend which input form to render (e.g. "music-composer", "image-creator").
 	// UIConfig   carries the full parameter set for that template as a JSON bag.
 	// Both are populated by migration 032 and can be updated via the admin panel.
-	UITemplate string   `json:"ui_template" gorm:"column:ui_template;default:'knowledge-doc'"`
-	UIConfig   UIConfig `json:"ui_config"   gorm:"column:ui_config;serializer:json;type:jsonb"`
+	UITemplate string    `json:"ui_template" gorm:"column:ui_template;default:'knowledge-doc'"`
+	UIConfig   UIConfig  `json:"ui_config"   gorm:"column:ui_config;serializer:json;type:jsonb"`
 	CreatedAt  time.Time `json:"created_at"  gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt  time.Time `json:"updated_at"  gorm:"column:updated_at;autoUpdateTime"`
 }
@@ -73,27 +75,27 @@ type StudioTool struct {
 func (StudioTool) TableName() string { return "studio_tools" }
 
 type AIGeneration struct {
-	ID             uuid.UUID `json:"id"            gorm:"column:id;primaryKey"`
-	UserID         uuid.UUID `json:"user_id"       gorm:"column:user_id;index"`
-	ToolID         uuid.UUID `json:"tool_id"       gorm:"column:tool_id"`
-	ToolSlug       string    `json:"tool_slug"     gorm:"column:tool_slug;default:''"`
-	Prompt         string    `json:"prompt"        gorm:"column:prompt"`
-	Status         string    `json:"status"        gorm:"column:status"` // pending | processing | completed | failed
-	VanitySlug     string    `json:"vanity_slug,omitempty" db:"slug" gorm:"column:slug;default:null"` // e.g. "techvault-solutions"
-	OutputURL      string    `json:"output_url,omitempty"     gorm:"column:output_url;default:''"` 
-	OutputURL2     string    `json:"output_url_2,omitempty"   gorm:"column:output_url_2;default:''"` 
-	OutputText     string    `json:"output_text,omitempty"    gorm:"column:output_text;default:''"` 
-	ErrorMessage   string    `json:"error_message,omitempty" gorm:"column:error_message;default:''"`
-	Provider       string    `json:"provider,omitempty"      gorm:"column:provider;default:''"`
-	CostMicros     int       `json:"cost_micros"   gorm:"column:cost_micros;default:0"`
-	DurationMs     int       `json:"duration_ms"   gorm:"column:duration_ms;default:0"`
+	ID             uuid.UUID  `json:"id"            gorm:"column:id;primaryKey"`
+	UserID         uuid.UUID  `json:"user_id"       gorm:"column:user_id;index"`
+	ToolID         uuid.UUID  `json:"tool_id"       gorm:"column:tool_id"`
+	ToolSlug       string     `json:"tool_slug"     gorm:"column:tool_slug;default:''"`
+	Prompt         string     `json:"prompt"        gorm:"column:prompt"`
+	Status         string     `json:"status"        gorm:"column:status"`                              // pending | processing | completed | failed
+	VanitySlug     string     `json:"vanity_slug,omitempty" db:"slug" gorm:"column:slug;default:null"` // e.g. "techvault-solutions"
+	OutputURL      string     `json:"output_url,omitempty"     gorm:"column:output_url;default:''"`
+	OutputURL2     string     `json:"output_url_2,omitempty"   gorm:"column:output_url_2;default:''"`
+	OutputText     string     `json:"output_text,omitempty"    gorm:"column:output_text;default:''"`
+	ErrorMessage   string     `json:"error_message,omitempty" gorm:"column:error_message;default:''"`
+	Provider       string     `json:"provider,omitempty"      gorm:"column:provider;default:''"`
+	CostMicros     int        `json:"cost_micros"   gorm:"column:cost_micros;default:0"`
+	DurationMs     int        `json:"duration_ms"   gorm:"column:duration_ms;default:0"`
 	PointsDeducted int64      `json:"points_deducted" gorm:"column:points_deducted"`
-	DisputedAt    *time.Time `json:"disputed_at,omitempty"  gorm:"column:disputed_at"`
-	RefundGranted bool       `json:"refund_granted"         gorm:"column:refund_granted;default:false"`
-	RefundPts     int64      `json:"refund_pts"             gorm:"column:refund_pts;default:0"`
-	CreatedAt     time.Time  `json:"created_at"    gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt     time.Time  `json:"updated_at"    gorm:"column:updated_at;autoUpdateTime"`
-	ExpiresAt     time.Time  `json:"expires_at"    gorm:"column:expires_at"`
+	DisputedAt     *time.Time `json:"disputed_at,omitempty"  gorm:"column:disputed_at"`
+	RefundGranted  bool       `json:"refund_granted"         gorm:"column:refund_granted;default:false"`
+	RefundPts      int64      `json:"refund_pts"             gorm:"column:refund_pts;default:0"`
+	CreatedAt      time.Time  `json:"created_at"    gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt      time.Time  `json:"updated_at"    gorm:"column:updated_at;autoUpdateTime"`
+	ExpiresAt      time.Time  `json:"expires_at"    gorm:"column:expires_at"`
 }
 
 func (AIGeneration) TableName() string { return "ai_generations" }

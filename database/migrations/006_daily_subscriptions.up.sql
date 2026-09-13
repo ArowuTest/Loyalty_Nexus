@@ -27,6 +27,6 @@ CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user ON user_subscriptions(use
 CREATE INDEX IF NOT EXISTS idx_user_subscriptions_billing ON user_subscriptions(next_billing_at);
 
 -- 3. Seed Default N20 Plan
-INSERT INTO subscription_plans (name, daily_cost_kobo, entries_per_day) VALUES
-('Daily Draw Pass', 2000, 1)
-ON CONFLICT (name) DO NOTHING;
+INSERT INTO subscription_plans (name, daily_cost_kobo, entries_per_day)
+SELECT 'Daily Draw Pass', 2000, 1
+WHERE NOT EXISTS (SELECT 1 FROM subscription_plans WHERE name = 'Daily Draw Pass');

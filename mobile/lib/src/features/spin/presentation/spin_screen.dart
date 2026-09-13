@@ -14,18 +14,24 @@ import '../../../core/widgets/nexus_gamification.dart';
 // ── Providers ─────────────────────────────────────────────────────────────────
 
 final _wheelConfigProvider = FutureProvider.autoDispose<List<WheelSegment>>((ref) async {
-  try {
-    final res = await ref.read(spinApiProvider).getWheelConfig();
-    final raw = (res['prizes'] ?? res['segments'] ?? []) as List;
-    final segs = raw
-        .where((p) => (p as Map)['is_active'] != false)
-        .map((p) => WheelSegment.fromMap(p as Map))
-        .toList();
-    if (segs.length >= 2) return segs;
-    return _fallbackSegments;
-  } catch (_) {
-    return _fallbackSegments;
+  final res = await ref.read(spinApiProvider).getWheelConfig();
+  final raw = (res['slots'] ?? res['prizes'] ?? res['segments'] ?? const []) as List;
+  final segs = raw
+      .where((p) => (p as Map)['is_active'] != false)
+      .map((p) => WheelSegment.fromMap(p as Map))
+      .toList();
+
+  if (segs.isEmpty) {
+    throw StateError('No active wheel prizes are configured.');
   }
+  final totalCents = segs.fold<int>(
+    0,
+    (sum, segment) => sum + (segment.probability * 100).round(),
+  );
+  if (totalCents != 10000 || segs.any((segment) => segment.probability <= 0)) {
+    throw StateError('Published wheel probabilities must total exactly 100%.');
+  }
+  return segs;
 });
 
 final _walletProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
@@ -41,45 +47,72 @@ final _spinHistoryProvider = FutureProvider.autoDispose<List<SpinHistoryItem>>((
   return (res as List).map((e) => SpinHistoryItem.fromMap(e as Map)).toList();
 });
 
-// ── Fallback segments (mirroring webapp FALLBACK_SEGMENTS) ────────────────────
-const _fallbackSegments = [
-  WheelSegment(label: '₦500 Airtime',  prizeType: 'airtime',       baseValue: 50000,  color: Color(0xFF10b981)),
-  WheelSegment(label: 'Try Again',     prizeType: 'try_again',      baseValue: 0,      color: Color(0xFF4b5563)),
-  WheelSegment(label: '100 Points',    prizeType: 'pulse_points',   baseValue: 100,    color: Color(0xFF5f72f9)),
-  WheelSegment(label: '₦1k Data',      prizeType: 'data_bundle',    baseValue: 100000, color: Color(0xFF06b6d4)),
-  WheelSegment(label: '50 Points',     prizeType: 'pulse_points',   baseValue: 50,     color: Color(0xFFa78bfa)),
-  WheelSegment(label: '₦2k Cash',      prizeType: 'momo_cash',      baseValue: 200000, color: Color(0xFFf59e0b)),
-  WheelSegment(label: 'Try Again',     prizeType: 'try_again',      baseValue: 0,      color: Color(0xFF374151)),
-  WheelSegment(label: '₦5k Cash',      prizeType: 'momo_cash',      baseValue: 500000, color: Color(0xFFf43f5e)),
-];
-
 // ── Data models ───────────────────────────────────────────────────────────────
 
 @immutable
 class WheelSegment {
+  final String prizeId;
   final String label;
   final String prizeType;
   final int baseValue;
+  final double probability;
   final Color color;
   const WheelSegment({
+    required this.prizeId,
     required this.label,
     required this.prizeType,
     required this.baseValue,
+    required this.probability,
     required this.color,
   });
   factory WheelSegment.fromMap(Map m) => WheelSegment(
-    label:     m['name'] ?? m['label'] ?? m['prize_name'] ?? 'Prize',
-    prizeType: ((m['prize_type'] ?? m['type'] ?? 'try_again') as String).toLowerCase(),
-    baseValue: (m['base_value'] ?? m['prize_value'] ?? m['value'] ?? 0) as int,
-    color:     (m['prize_type'] ?? '') == 'try_again'
-        ? const Color(0xFF374151)
-        : _hexColor(m['color_hex'] ?? m['color'] ?? '#5f72f9'),
+    prizeId:     (m['prize_id'] ?? m['id'] ?? '').toString(),
+    label:       (m['name'] ?? m['label'] ?? m['prize_name'] ?? 'Prize').toString(),
+    prizeType:   (m['prize_type'] ?? m['type'] ?? 'try_again').toString().toLowerCase(),
+    baseValue:   ((m['base_value'] ?? m['prize_value'] ?? m['value'] ?? 0) as num).toInt(),
+    probability: ((m['probability'] ?? m['win_probability_weight'] ?? 0) as num).toDouble(),
+    color:       _hexColor((m['color'] ?? m['color_hex'] ?? '#5f72f9').toString()),
   );
 }
 
 Color _hexColor(String hex) {
-  final h = hex.replaceAll('#', '');
-  return Color(int.parse('FF$h', radix: 16));
+  try {
+    final h = hex.replaceAll('#', '');
+    final normalized = h.length == 6 ? 'FF$h' : h;
+    return Color(int.parse(normalized, radix: 16));
+  } catch (_) {
+    return const Color(0xFF5f72f9);
+  }
+}
+
+double _segmentStartRadians(List<WheelSegment> segments, int index) {
+  var start = 0.0;
+  for (var i = 0; i < index && i < segments.length; i++) {
+    start += segments[i].probability / 100 * 2 * math.pi;
+  }
+  return start;
+}
+
+double _segmentSweepRadians(WheelSegment segment) =>
+    segment.probability / 100 * 2 * math.pi;
+
+double _segmentCenterRadians(List<WheelSegment> segments, int index) {
+  if (index < 0 || index >= segments.length) return 0;
+  return _segmentStartRadians(segments, index) +
+      _segmentSweepRadians(segments[index]) / 2;
+}
+
+int _segmentIndexForAngle(List<WheelSegment> segments, double angle) {
+  if (segments.isEmpty) return -1;
+  final twoPi = 2 * math.pi;
+  var normalized = angle % twoPi;
+  if (normalized < 0) normalized += twoPi;
+  var cursor = 0.0;
+  for (var i = 0; i < segments.length; i++) {
+    cursor += _segmentSweepRadians(segments[i]);
+    if (normalized < cursor) return i;
+  }
+  return segments.length - 1;
 }
 
 class SpinHistoryItem {
@@ -138,6 +171,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
   bool _showResult    = false;
   int  _pointerTicks  = 0;        // increments each segment crossing
   int  _lastSegmentIndex = -1;    // tracks which segment the pointer is on
+  List<WheelSegment>? _spinSnapshot; // exact server wheel used for current outcome
 
   @override
   void initState() {
@@ -168,10 +202,13 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
 
   // ── Compute target angle from server slot_index ─────────────────────────
   double _targetRotation(List<WheelSegment> segs, int slotIndex) {
-    final segAngle = 2 * math.pi / segs.length;
-    final target   = slotIndex * segAngle + segAngle / 2;
-    final extra    = (6 + math.Random().nextDouble() * 2) * 2 * math.pi;
-    return extra + (2 * math.pi - target);
+    final target = _segmentCenterRadians(segs, slotIndex);
+    final sweep = slotIndex >= 0 && slotIndex < segs.length
+        ? _segmentSweepRadians(segs[slotIndex])
+        : 0.0;
+    final nudge = (math.Random().nextDouble() - 0.5) * (sweep * 0.25);
+    final extra = (6 + math.Random().nextDouble() * 2) * 2 * math.pi;
+    return extra + (2 * math.pi - target) + nudge;
   }
 
   // ── Segment tick tracking (for WheelPointerTick haptics) ──────────────────
@@ -180,12 +217,11 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
     if (!_spinning) return;
     // Estimate which segment pointer is on and tick if crossed
     final segsAsync = ref.read(_wheelConfigProvider);
-    final segs = segsAsync.valueOrNull;
+    final segs = _spinSnapshot ?? segsAsync.valueOrNull;
     if (segs == null || segs.isEmpty) return;
-    final segAngle = 2 * math.pi / segs.length;
     final currentDisplay = _currentAngle * _wheelAnim.value;
-    final idx = (currentDisplay / segAngle).floor() % segs.length;
-    if (idx != _lastSegmentIndex) {
+    final idx = _segmentIndexForAngle(segs, currentDisplay);
+    if (idx >= 0 && idx != _lastSegmentIndex) {
       _lastSegmentIndex = idx;
       _pointerTicks++;
     }
@@ -211,8 +247,39 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
     try {
       final res = await ref.read(spinApiProvider).play();
       _outcome = Map<String, dynamic>.from(res);
-      final slotIdx = (res['slot_index'] ?? 0) as int;
-      final delta = _targetRotation(segs, slotIdx);
+
+      final wheel = res['wheel'];
+      final rawSnapshot = wheel is Map
+          ? (wheel['slots'] as List? ?? const [])
+          : const [];
+      final snapshot = rawSnapshot
+          .map((p) => WheelSegment.fromMap(p as Map))
+          .toList();
+      final totalCents = snapshot.fold<int>(
+        0,
+        (sum, segment) => sum + (segment.probability * 100).round(),
+      );
+      if (snapshot.isEmpty ||
+          totalCents != 10000 ||
+          snapshot.any((segment) => segment.probability <= 0)) {
+        throw StateError('Spin returned an invalid wheel snapshot.');
+      }
+
+      final prizeId = (res['prize_id'] ?? '').toString();
+      final matchedIdx = prizeId.isEmpty
+          ? -1
+          : snapshot.indexWhere((segment) => segment.prizeId == prizeId);
+      final slotIdx = matchedIdx >= 0
+          ? matchedIdx
+          : ((res['slot_index'] ?? 0) as num).toInt();
+      if (slotIdx < 0 || slotIdx >= snapshot.length) {
+        throw StateError('Spin result does not match the wheel snapshot.');
+      }
+
+      setState(() {
+        _spinSnapshot = snapshot;
+      });
+      final delta = _targetRotation(snapshot, slotIdx);
       _currentAngle += delta;
       _pointerTicks     = 0;
       _lastSegmentIndex = -1;
@@ -263,10 +330,17 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
     ref.invalidate(_walletProvider);
     ref.invalidate(_spinHistoryProvider);
     ref.invalidate(_eligibilityProvider);
+    ref.invalidate(_wheelConfigProvider);
   }
 
   void _handleReset() {
-    setState(() { _spun = false; _outcome = null; _showResult = false; });
+    setState(() {
+      _spun = false;
+      _outcome = null;
+      _showResult = false;
+      _spinSnapshot = null;
+    });
+    ref.invalidate(_wheelConfigProvider);
   }
 
   void _showSnack(String msg, {bool isError = false}) {
@@ -306,11 +380,15 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
         error:   (_, __) => _buildErrorState(),
         data: (segs) {
           final credits = walletAsync.valueOrNull?['spin_credits'] as int? ?? 0;
+          final displaySegs = _spinSnapshot ?? segs;
           return RefreshIndicator(
             color: NexusColors.primary,
             onRefresh: () async {
+              setState(() => _spinSnapshot = null);
+              ref.invalidate(_wheelConfigProvider);
               ref.invalidate(_walletProvider);
               ref.invalidate(_spinHistoryProvider);
+              ref.invalidate(_eligibilityProvider);
             },
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -345,7 +423,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
 
                     // Wheel
                     _WheelWidget(
-                      segments: segs,
+                      segments: displaySegs,
                       angle: _currentAngle,
                       animValue: _wheelAnim.value,
                       baseAngle: _currentAngle,
@@ -365,7 +443,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
                     if (!_spun && !_anticipating) ...[
                       const SizedBox(height: 4),
                       _SpinButton(
-                        onTap:        () => _handleSpin(segs, credits),
+                        onTap:        () => _handleSpin(displaySegs, credits),
                         spinning:     _spinning || _anticipating,
                         credits:      credits,
                       ),
@@ -376,7 +454,7 @@ class _SpinScreenState extends ConsumerState<SpinScreen>
                 const SizedBox(height: 20),
 
                 // Prizes key
-                _PrizesKey(segments: segs),
+                _PrizesKey(segments: displaySegs),
 
                 const SizedBox(height: 20),
 
@@ -574,13 +652,13 @@ class _WheelPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2;
     final cy = size.height / 2;
-    final r  = size.width / 2;
-    final n  = segments.length;
-    final sweep = 2 * math.pi / n;
+    final r = size.width / 2;
+    var cursor = -math.pi / 2;
 
-    for (int i = 0; i < n; i++) {
-      final start = -math.pi / 2 + i * sweep;
-      final seg = segments[i];
+    for (final seg in segments) {
+      final sweep = _segmentSweepRadians(seg);
+      final start = cursor;
+      cursor += sweep;
 
       // Sector fill
       final paint = Paint()
@@ -588,8 +666,12 @@ class _WheelPainter extends CustomPainter {
         ..style = PaintingStyle.fill;
       final path = Path()
         ..moveTo(cx, cy)
-        ..arcTo(Rect.fromCircle(center: Offset(cx, cy), radius: r - 2),
-          start, sweep, false)
+        ..arcTo(
+          Rect.fromCircle(center: Offset(cx, cy), radius: r - 2),
+          start,
+          sweep,
+          false,
+        )
         ..close();
       canvas.drawPath(path, paint);
 
@@ -599,7 +681,10 @@ class _WheelPainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.2);
 
-      // Label
+      // Very small probability slices remain visible but use the prize key below
+      // instead of forcing unreadable text into the sector.
+      if (sweep < 0.12) continue;
+
       canvas.save();
       canvas.translate(cx, cy);
       canvas.rotate(start + sweep / 2);

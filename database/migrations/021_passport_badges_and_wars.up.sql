@@ -97,9 +97,9 @@ SET lifetime_points = COALESCE(
     (SELECT lifetime_points FROM wallets w WHERE w.user_id = u.id LIMIT 1), 0)
 WHERE lifetime_points = 0;
 
--- Seed a default monthly draw
-INSERT INTO draws (id, name, status, winner_count, prize_type, prize_value_kobo)
-VALUES (gen_random_uuid(), 'Monthly Grand Draw', 'ACTIVE', 3, 'MOMO_CASH', 5000000)
-ON CONFLICT DO NOTHING;
+-- Seed a default monthly draw using the draw-engine schema that exists at v21.
+INSERT INTO draws (id, draw_code, name, type, status, prize_pool_total, start_time, end_time)
+SELECT gen_random_uuid(), 'DRAW-MONTHLY-GRAND', 'Monthly Grand Draw', 'MONTHLY', 'ACTIVE', 5000000, NOW(), NOW() + INTERVAL '30 days'
+WHERE NOT EXISTS (SELECT 1 FROM draws WHERE draw_code = 'DRAW-MONTHLY-GRAND');
 
 -- COMMIT;  -- removed: managed by golang-migrate

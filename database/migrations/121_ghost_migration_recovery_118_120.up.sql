@@ -7,57 +7,106 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- From migration 118
 -- ─────────────────────────────────────────────────────────────────────────────
--- Migration 118: Consolidate duplicate "Try Again" spin prize entries
--- The auditor found 3 separate "Try Again" entries combining ~48% no-win rate.
--- We keep 1 entry with the combined weight and delete the rest.
-
+-- Idempotent recovery of known historical wheel seed overlap. Admin remains the
+-- runtime authority; no fixed catalogue or no-win percentage is imposed.
 DO $$
 DECLARE
-  keep_id   UUID;
-  total_wt  NUMERIC;
+  keep_id       UUID;
+  total_try     NUMERIC(18,6);
+  active_total  NUMERIC(18,6);
+  rounded_total NUMERIC(18,2);
+  residual      NUMERIC(18,2);
+  residual_id   UUID;
 BEGIN
-  -- Sum all try-again weights
-  SELECT COALESCE(SUM(win_probability_weight), 0)
-  INTO   total_wt
-  FROM   prize_pool
-  WHERE  LOWER(prize_type) = 'try_again' AND is_active = true;
+  UPDATE prize_pool
+  SET is_active = FALSE,
+      updated_at = NOW()
+  WHERE is_active = TRUE
+    AND COALESCE(prize_code, '') = ''
+    AND (
+      (LOWER(prize_type) = 'pulse_points' AND base_value IN (5, 10)
+       AND name IN ('+5 Pulse Points', '+10 Pulse Points'))
+      OR (LOWER(prize_type) = 'data_bundle' AND base_value IN (10, 25)
+          AND name IN ('10MB Data', '25MB Data'))
+      OR (LOWER(prize_type) = 'airtime' AND base_value IN (50, 100, 200)
+          AND name IN ('₦0.50 Airtime', '₦1 Airtime', '₦2 Airtime'))
+    );
 
-  -- Pick the one to keep (lowest created_at)
   SELECT id INTO keep_id
-  FROM   prize_pool
-  WHERE  LOWER(prize_type) = 'try_again' AND is_active = true
-  ORDER  BY created_at ASC
-  LIMIT  1;
+  FROM prize_pool
+  WHERE LOWER(prize_type) = 'try_again'
+    AND is_active = TRUE
+  ORDER BY CASE WHEN prize_code = 'NONE' THEN 0 ELSE 1 END,
+           sort_order ASC,
+           id ASC
+  LIMIT 1;
 
   IF keep_id IS NOT NULL THEN
-    -- Update the keeper with the combined weight (cap at 30.00 = 3000 basis points to avoid dominating the pool)
-    UPDATE prize_pool
-    SET    win_probability_weight = LEAST(total_wt, 30.00),
-           name = 'Try Again',
-           updated_at = NOW()
-    WHERE  id = keep_id;
+    SELECT COALESCE(SUM(win_probability_weight), 0)
+    INTO total_try
+    FROM prize_pool
+    WHERE LOWER(prize_type) = 'try_again'
+      AND is_active = TRUE;
 
-    -- Deactivate all other try-again entries
     UPDATE prize_pool
-    SET    is_active = false,
-           updated_at = NOW()
-    WHERE  LOWER(prize_type) = 'try_again'
-      AND  is_active = true
-      AND  id <> keep_id;
+    SET win_probability_weight = total_try,
+        is_no_win = TRUE,
+        updated_at = NOW()
+    WHERE id = keep_id;
+
+    UPDATE prize_pool
+    SET is_active = FALSE,
+        updated_at = NOW()
+    WHERE LOWER(prize_type) = 'try_again'
+      AND is_active = TRUE
+      AND id <> keep_id;
   END IF;
 
-  -- Re-normalise remaining active prize weights to sum to 100.00 percent
-  WITH active AS (
-    SELECT id, win_probability_weight,
-           SUM(win_probability_weight) OVER () AS total
-    FROM   prize_pool
-    WHERE  is_active = true
-  )
-  UPDATE prize_pool pp
-  SET    win_probability_weight = ROUND((a.win_probability_weight::NUMERIC / a.total) * 100, 2),
-         updated_at = NOW()
-  FROM   active a
-  WHERE  pp.id = a.id;
+  SELECT COALESCE(SUM(win_probability_weight), 0)
+  INTO active_total
+  FROM prize_pool
+  WHERE is_active = TRUE;
+
+  IF active_total <= 0 THEN
+    RAISE EXCEPTION 'Migration 121 recovery failed: no positive active prize probability remains';
+  END IF;
+
+  UPDATE prize_pool
+  SET win_probability_weight = ROUND((win_probability_weight / active_total) * 100.00, 2),
+      updated_at = NOW()
+  WHERE is_active = TRUE;
+
+  SELECT ROUND(COALESCE(SUM(win_probability_weight), 0), 2)
+  INTO rounded_total
+  FROM prize_pool
+  WHERE is_active = TRUE;
+
+  residual := ROUND(100.00 - rounded_total, 2);
+  IF residual <> 0 THEN
+    SELECT id INTO residual_id
+    FROM prize_pool
+    WHERE is_active = TRUE
+    ORDER BY win_probability_weight DESC, id ASC
+    LIMIT 1;
+
+    UPDATE prize_pool
+    SET win_probability_weight = ROUND(win_probability_weight + residual, 2),
+        updated_at = NOW()
+    WHERE id = residual_id;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM (
+      SELECT ROUND(COALESCE(SUM(win_probability_weight), 0), 2) AS total,
+             COUNT(*) FILTER (WHERE win_probability_weight <= 0) AS non_positive
+      FROM prize_pool
+      WHERE is_active = TRUE
+    ) s
+    WHERE s.total <> 100.00 OR s.non_positive > 0
+  ) THEN
+    RAISE EXCEPTION 'Migration 121 recovery failed: active prize probabilities are not a valid 100%% wheel';
+  END IF;
 END $$;
 
 
@@ -155,7 +204,7 @@ EXCEPTION WHEN undefined_table THEN
 END $$;
 
 UPDATE network_configs
-SET    value      = '-- UNUSED: spin limits set in spin_tiers, not here --',
+SET    value      = '"-- UNUSED: spin limits set in spin_tiers, not here --"',
        updated_at = NOW()
 WHERE  key IN ('spin_max_per_day', 'spin_max_per_user_per_day');
 
@@ -260,12 +309,39 @@ WHERE  id IN (
   WHERE  rn > 1
 );
 
--- Normalise weights and ensure they sum to exactly 100.00
+-- If the later coded Loyalty Nexus wheel seed exists, retire only the known
+-- original phase-8 uncoded seed rows before probability repair.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM prize_pool
+    WHERE prize_code = 'NONE' AND LOWER(prize_type) = 'try_again'
+  ) THEN
+    UPDATE prize_pool
+    SET is_active = FALSE,
+        updated_at = NOW()
+    WHERE is_active = TRUE
+      AND COALESCE(prize_code, '') = ''
+      AND (
+        (LOWER(prize_type) = 'try_again' AND base_value = 0)
+        OR (LOWER(prize_type) = 'pulse_points' AND base_value IN (5, 10)
+            AND name IN ('+5 Pulse Points', '+10 Pulse Points'))
+        OR (LOWER(prize_type) = 'data_bundle' AND base_value IN (10, 25)
+            AND name IN ('10MB Data', '25MB Data'))
+        OR (LOWER(prize_type) = 'airtime' AND base_value IN (50, 100, 200))
+      );
+  END IF;
+END $$;
+
+-- Historical recovery only: if the active pool is already a valid 100.00%
+-- Admin-authored wheel, leave it untouched. Otherwise preserve relative weights
+-- while repairing legacy basis-point/overlapping-seed data to exactly 100.00%.
 DO $$
 DECLARE
-  current_sum NUMERIC(10,2);
+  current_sum NUMERIC(18,6);
+  rounded_sum NUMERIC(18,2);
   target_id   UUID;
-  adjustment  NUMERIC(10,2);
+  residual    NUMERIC(18,2);
 BEGIN
   UPDATE prize_pool
   SET    win_probability_weight = ROUND(win_probability_weight / 100.0, 2)
@@ -277,18 +353,53 @@ BEGIN
   FROM   prize_pool
   WHERE  is_active = TRUE;
 
-  IF current_sum <> 100.00 THEN
-    SELECT id INTO target_id
+  IF current_sum > 0 AND ROUND(current_sum, 2) <> 100.00 THEN
+    UPDATE prize_pool
+    SET    win_probability_weight =
+             ROUND((win_probability_weight / current_sum) * 100.0, 2)
+    WHERE  is_active = TRUE;
+
+    SELECT ROUND(COALESCE(SUM(win_probability_weight), 0), 2)
+    INTO   rounded_sum
     FROM   prize_pool
-    WHERE  is_active = TRUE
-    ORDER BY CASE WHEN LOWER(prize_type) = 'try_again' THEN 0 ELSE 1 END,
-             win_probability_weight DESC,
-             id ASC
+    WHERE  is_active = TRUE;
+
+    residual := ROUND(100.00 - rounded_sum, 2);
+    IF residual <> 0 THEN
+      SELECT id INTO target_id
+      FROM prize_pool
+      WHERE is_active = TRUE
+      ORDER BY win_probability_weight DESC, id ASC
+      LIMIT 1;
+
+      UPDATE prize_pool
+      SET win_probability_weight = ROUND(win_probability_weight + residual, 2)
+      WHERE id = target_id;
+    END IF;
+  ELSIF current_sum = 0 THEN
+    SELECT id INTO target_id
+    FROM prize_pool
+    WHERE is_active = TRUE
+    ORDER BY sort_order ASC, id ASC
     LIMIT 1;
 
-    adjustment := ROUND(100.00 - current_sum, 2);
-    UPDATE prize_pool
-    SET    win_probability_weight = ROUND(win_probability_weight + adjustment, 2)
-    WHERE  id = target_id;
+    IF target_id IS NOT NULL THEN
+      UPDATE prize_pool
+      SET win_probability_weight = 100.00
+      WHERE id = target_id;
+    END IF;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM (
+      SELECT COUNT(*) AS active_count,
+             ROUND(COALESCE(SUM(win_probability_weight), 0), 2) AS total
+      FROM prize_pool
+      WHERE is_active = TRUE
+    ) s
+    WHERE s.active_count = 0 OR s.total <> 100.00
+  ) THEN
+    RAISE EXCEPTION 'Migration 121 recovery failed: active prize probability pool is not exactly 100.00%%';
   END IF;
 END $$;

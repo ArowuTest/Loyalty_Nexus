@@ -63,7 +63,7 @@ ON CONFLICT (key) DO NOTHING;
 INSERT INTO network_configs (key, value, description, updated_at)
 VALUES
     -- The USSD short code (displayed in SMS nudges and on the wallet pass).
-    ('ussd_short_code', '*384#',
+    ('ussd_short_code', '"*384#"',
      'The USSD short code for Loyalty Nexus. Displayed in SMS nudges and wallet pass back fields.',
      NOW()),
 

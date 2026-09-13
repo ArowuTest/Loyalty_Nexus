@@ -458,8 +458,32 @@ CREATE TABLE IF NOT EXISTS admin_users (
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS email         TEXT UNIQUE;
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS full_name     TEXT NOT NULL DEFAULT '';
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
--- Ensure role column accepts the full set (it may be an ENUM or TEXT)
-ALTER TABLE admin_users ALTER COLUMN role TYPE TEXT;
+-- Normalize legacy admin identity shape before any email-based upsert.
+ALTER TABLE admin_users DROP CONSTRAINT IF EXISTS admin_users_role_check;
+ALTER TABLE admin_users ALTER COLUMN role TYPE TEXT USING role::TEXT;
+ALTER TABLE admin_users ALTER COLUMN role SET DEFAULT 'super_admin';
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='admin_users' AND column_name='username' AND is_nullable='NO'
+    ) THEN
+        ALTER TABLE admin_users ALTER COLUMN username DROP NOT NULL;
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid='admin_users'::regclass
+          AND conname='admin_users_email_key'
+    ) THEN
+        ALTER TABLE admin_users ADD CONSTRAINT admin_users_email_key UNIQUE (email);
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_admin_users_email_60 ON admin_users(email);
 
 -- ─────────────────────────────────────────────────────────────────────────────

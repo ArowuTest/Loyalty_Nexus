@@ -158,6 +158,9 @@ class AdminAPI {
   updateConfig(key: string, value: string) { return this.req("PUT", `/admin/config/${encodeURIComponent(key)}`, { value }); }
   getPrizePool()   { return this.req<{ prizes: Prize[] }>("GET", "/admin/prize-pool"); }
   getPrizeSummary() { return this.req<PrizeSummary>("GET", "/admin/prizes/summary"); }
+  publishPrizeConfiguration(prizes: Prize[]) {
+    return this.req<{ status: string; prizes: Prize[]; summary: PrizeSummary }>("PUT", "/admin/prizes/config", { prizes });
+  }
   updatePrize(id: string, payload: Partial<Prize>) { return this.req<Prize>("PUT", `/admin/prizes/${id}`, payload); }
   createPrize(payload: Omit<Prize,"id">) { return this.req<Prize>("POST", "/admin/prizes", payload); }
   deletePrize(id: string) { return this.req<void>("DELETE", `/admin/prizes/${id}`); }
@@ -234,6 +237,14 @@ class AdminAPI {
   activateAIProvider(id: string)   { return this.req<{ status: string }>("POST", `/admin/ai-providers/${id}/activate`,   {}); }
   deactivateAIProvider(id: string) { return this.req<{ status: string }>("POST", `/admin/ai-providers/${id}/deactivate`, {}); }
   testAIProvider(id: string)       { return this.req<AIProviderTestResult>("POST", `/admin/ai-providers/${id}/test`,      {}); }
+
+  // ── AI Routing V2 (tool/stage/provider control plane) ────────────────────
+  getAIToolRoute(slug: string) { return this.req<AIToolRouteResponse>("GET", `/admin/ai-routing/tools/${slug}`); }
+  validateAIToolRoute(slug: string) { return this.req<{ tool_slug: string; valid: boolean }>("POST", `/admin/ai-routing/tools/${slug}/validate`, {}); }
+  updateAIStage(id: string, data: Partial<AIToolStage>) { return this.req<AIToolStage>("PUT", `/admin/ai-routing/stages/${id}`, data); }
+  createAIStageBinding(stageId: string, data: AIStageBindingPayload) { return this.req<AIStageBinding>("POST", `/admin/ai-routing/stages/${stageId}/bindings`, data); }
+  updateAIStageBinding(id: string, data: Partial<AIStageBindingPayload>) { return this.req<AIStageBinding>("PUT", `/admin/ai-routing/bindings/${id}`, data); }
+  deleteAIStageBinding(id: string) { return this.req<{ status: string }>("DELETE", `/admin/ai-routing/bindings/${id}`); }
 
   // ─── MTN Push CSV Upload ──────────────────────────────────────────────────
   async uploadMTNPushCSV(file: File, note?: string): Promise<CSVUploadResult> {
@@ -405,7 +416,7 @@ export interface Prize {
 export interface StudioTool {
   id: string; name: string; slug?: string; category: string; provider: string;
   point_cost: number; is_active: boolean; description?: string; icon?: string;
-  provider_tool?: string; sort_order?: number; generated_today?: number; success_rate?: number;
+  provider_tool?: string; execution_profile?: string; sort_order?: number; generated_today?: number; success_rate?: number;
   entry_point_cost: number;    // min wallet balance to open the tool (0 = no gate)
   refund_window_mins: number;  // minutes user can dispute after generation (0 = no refunds)
   refund_pct: number;          // % of pts returned on approved dispute (0-100)
@@ -474,18 +485,19 @@ export interface ClaimStatistics {
 }
 
 export interface PrizeSummaryItem {
-  prize_id: string;
+  id: string;
   name: string;
   prize_type: string;
   weight: number;
   percent: number;
 }
 export interface PrizeSummary {
-  items: PrizeSummaryItem[];
+  prizes: PrizeSummaryItem[];
   total_weight: number;
   remaining_budget: number;
   percent_used: number;
   is_valid: boolean;
+  active_count: number;
 }
 
 export interface FulfillmentConfig {
@@ -753,6 +765,63 @@ export interface AIProviderTestResult {
   status: "ok" | "failed";
   message: string;
   last_tested_at: string;
+}
+
+export interface AIToolStage {
+  id: string;
+  tool_id: string;
+  stage_key: string;
+  capability: string;
+  routing_policy: "FREE_FIRST" | "BALANCED" | "QUALITY_FIRST" | "FREE_ONLY" | "PREMIUM_ONLY";
+  queue_class: "REALTIME" | "INTERACTIVE" | "ASYNC" | "HEAVY_ASYNC" | "BACKGROUND";
+  max_queue_seconds: number;
+  paid_hourly_budget_micros: number;
+  paid_daily_budget_micros: number;
+  is_required: boolean;
+  is_active: boolean;
+  sort_order: number;
+}
+
+export interface AIStageBinding {
+  id: string;
+  stage_id: string;
+  provider_id: string;
+  priority: number;
+  is_active: boolean;
+  cost_tier: "FREE" | "LOW_COST" | "PREMIUM";
+  max_concurrent: number;
+  requests_per_minute: number;
+  timeout_ms: number;
+  max_retries: number;
+  allow_paid_fallback: boolean;
+  circuit_failure_threshold: number;
+  circuit_open_seconds: number;
+  config_version: number;
+  notes: string;
+}
+
+export interface AIStageBindingPayload {
+  provider_id?: string;
+  priority?: number;
+  is_active?: boolean;
+  cost_tier?: "FREE" | "LOW_COST" | "PREMIUM";
+  max_concurrent?: number;
+  requests_per_minute?: number;
+  timeout_ms?: number;
+  max_retries?: number;
+  allow_paid_fallback?: boolean;
+  circuit_failure_threshold?: number;
+  circuit_open_seconds?: number;
+  request_config?: Record<string, unknown>;
+  notes?: string;
+}
+
+export interface AIToolRouteResponse {
+  tool_slug: string;
+  stages: Array<{
+    stage: AIToolStage;
+    candidates: Array<{ binding: AIStageBinding; provider: AIProviderConfig }>;
+  }>;
 }
 
 // ─── Bonus Pulse Point Awards types ─────────────────────────────────────────────

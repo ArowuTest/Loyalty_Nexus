@@ -3,13 +3,15 @@ import { useState, useEffect, useCallback } from "react";
 import AdminShell from "@/components/layout/AdminShell";
 import adminAPI, { Prize, PrizeSummary } from "@/lib/api";
 
-const PRIZE_TYPES = ["try_again", "pulse_points", "airtime", "data_bundle", "momo_cash"];
+const PRIZE_TYPES = ["try_again", "pulse_points", "airtime", "data_bundle", "momo_cash", "physical", "goods"];
 const PRIZE_TYPE_LABELS: Record<string, string> = {
   try_again:    "No Win",
   pulse_points: "Pulse Points",
   airtime:      "Airtime",
   data_bundle:  "Data Bundle",
   momo_cash:    "Cash Prize",
+  physical:     "Physical Prize",
+  goods:        "Goods / Merchandise",
 };
 
 const EMPTY_FORM: Omit<Prize, "id"> = {
@@ -18,7 +20,7 @@ const EMPTY_FORM: Omit<Prize, "id"> = {
   base_value: 0,
   win_probability_weight: 0,
   daily_inventory_cap: -1,
-  is_active: true,
+  is_active: false,
   is_no_win: false,
   no_win_message: "",
   color_scheme: "",
@@ -72,7 +74,7 @@ export default function PrizesPage() {
 
   const handleSave = async () => {
     if (!form.name.trim()) { setError("Prize name is required"); return; }
-    if (form.win_probability_weight <= 0) { setError("Probability weight must be > 0"); return; }
+    if (form.is_active && form.win_probability_weight <= 0) { setError("An active prize must have a probability greater than 0"); return; }
     setSubmitting(true);
     setError(null);
     try {

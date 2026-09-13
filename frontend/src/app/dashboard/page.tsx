@@ -7,6 +7,7 @@ import AppShell from "@/components/layout/AppShell";
 import { useStore } from "@/store/useStore";
 import api from "@/lib/api";
 import { cn, formatPoints, TIER_THRESHOLDS } from "@/lib/utils";
+import { buildWheelGradient, buildWheelSlices, ClientWheelSegment, isValidWheelPercentages, mapWheelSlots, wheelLandingDegrees } from "@/lib/wheel";
 import toast, { Toaster } from "react-hot-toast";
 import {
   Zap, Wand2, Trophy, ChevronRight, Flame,
@@ -172,13 +173,13 @@ function PrizeClaimModal({ item, onClose, onSuccess }: { item: ClaimableItem | n
 
 
 // ─── Wheel types ──────────────────────────────────────────────────────────────
-interface Segment {
-  label: string; prize_type: string; base_value: number;
-  probability: number; color: string; is_active: boolean;
-}
+type Segment = ClientWheelSegment;
 interface SpinOutcome {
   spin_result?: { id: string; prize_type: string; prize_value: number; slot_index: number; fulfillment_status: string; claim_status?: string };
-  prize_label: string; slot_index: number;
+  prize_id: string;
+  prize_label: string;
+  slot_index: number;
+  wheel?: { slots?: Record<string, unknown>[]; required_credits?: number };
 }
 interface SpinHistoryItem {
   id: string; prize_type: string; prize_value: number;
@@ -197,17 +198,6 @@ interface DrawWinItem {
   is_runner_up: boolean;
   won_at: string;
 }
-
-const FALLBACK_SEGMENTS: Segment[] = [
-  { label: "₦5,000",   prize_type: "momo_cash",    base_value: 500000, probability: 2,  color: "#F5A623", is_active: true },
-  { label: "₦500",     prize_type: "momo_cash",    base_value: 50000,  probability: 8,  color: "#10b981", is_active: true },
-  { label: "5GB Data", prize_type: "data_bundle",  base_value: 500,    probability: 10, color: "#06b6d4", is_active: true },
-  { label: "₦1,000",   prize_type: "momo_cash",    base_value: 100000, probability: 5,  color: "#8B5CF6", is_active: true },
-  { label: "2× Spin",  prize_type: "spin_credit",  base_value: 2,      probability: 10, color: "#F59E0B", is_active: true },
-  { label: "500 pts",  prize_type: "pulse_points", base_value: 500,    probability: 20, color: "#5f72f9", is_active: true },
-  { label: "₦100 Air", prize_type: "airtime",      base_value: 10000,  probability: 20, color: "#EC4899", is_active: true },
-  { label: "1,000 pts",prize_type: "pulse_points", base_value: 1000,   probability: 25, color: "#14b8a6", is_active: true },
-];
 
 function fireConfetti() {
   if (typeof window === "undefined") return;
@@ -357,7 +347,8 @@ function PassportBanner({ points, streak }: { points: number; streak: number }) 
 
 // ─── Spin Wheel Widget ────────────────────────────────────────────────────────
 function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
-  const [segments, setSegments]     = useState<Segment[]>(FALLBACK_SEGMENTS);
+  const [segments, setSegments]     = useState<Segment[]>([]);
+  const [wheelError, setWheelError] = useState<string | null>(null);
   const [rotation, setRotation]     = useState(0);
   const [spinning, setSpinning]     = useState(false);
   const [spun, setSpun]             = useState(false);
@@ -372,20 +363,27 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
       .then((res: unknown) => {
         const r = res as Record<string, unknown>;
         const raw = ((r?.slots ?? r?.prizes ?? r?.segments ?? []) as Record<string, unknown>[]);
-        const mapped = raw.filter(p => p.is_active !== false).map(p => ({
-          label:       String(p.name ?? p.label ?? p.prize_name ?? "Prize"),
-          prize_type:  String((p.prize_type ?? p.type ?? "try_again")).toLowerCase(),
-          base_value:  Number(p.base_value ?? p.prize_value ?? p.value ?? 0),
-          probability: Number(p.probability ?? 0),
-          color:       String(p.prize_type === "try_again" ? "#374151" : (p.color_hex ?? p.color ?? "#5f72f9")),
-          is_active:   true,
-        }));
-        if (mapped.length >= 2) setSegments(mapped);
+        const mapped = mapWheelSlots(raw);
+        if (mapped.length === 0) {
+          setSegments([]);
+          setWheelError("No active wheel prizes are configured.");
+          return;
+        }
+        if (!isValidWheelPercentages(mapped)) {
+          setSegments([]);
+          setWheelError("Wheel probabilities must total exactly 100%.");
+          return;
+        }
+        setSegments(mapped);
+        setWheelError(null);
       })
-      .catch(() => {});
+      .catch(() => {
+        setSegments([]);
+        setWheelError("Wheel configuration is unavailable.");
+      });
   }, []);
 
-  const segAngle = 360 / segments.length;
+  const ranges = buildWheelSlices(segments);
 
   const handleSpin = useCallback(async () => {
     if (spinning || spun || spinCredits < 1) return;
@@ -393,10 +391,24 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
     setShowResult(false);
     try {
       const res = await api.playSpin() as SpinOutcome;
-      const targetIdx   = res.slot_index ?? 0;
-      const targetAngle = targetIdx * segAngle + segAngle / 2;
-      const extraSpins  = 6 + Math.random() * 2;
-      const finalRot    = extraSpins * 360 + (360 - targetAngle);
+      const snapshot = mapWheelSlots((res.wheel?.slots ?? []) as Record<string, unknown>[]);
+      if (!isValidWheelPercentages(snapshot)) {
+        throw new Error("Spin returned an invalid wheel snapshot");
+      }
+      const prizeIdx = res.prize_id
+        ? snapshot.findIndex((segment) => segment.prize_id === res.prize_id)
+        : -1;
+      const targetIdx = prizeIdx >= 0 ? prizeIdx : (res.slot_index ?? 0);
+      const targetRange = buildWheelSlices(snapshot)[targetIdx];
+      if (!targetRange) {
+        throw new Error("Wheel result does not match the wheel snapshot used for this spin");
+      }
+      setSegments(snapshot);
+      setWheelError(null);
+      const { landing, sweep } = wheelLandingDegrees(snapshot, targetIdx, 90);
+      const nudge = (Math.random() - 0.5) * (sweep * 0.25);
+      const extraSpins = 6 + Math.random() * 2;
+      const finalRot = extraSpins * 360 + landing + nudge;
       setRotation(prev => prev + finalRot);
       setTimeout(() => {
         setSpinning(false);
@@ -415,7 +427,7 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
       setSpinning(false);
       toast.error(e instanceof Error ? e.message : "Spin failed");
     }
-  }, [spinning, spun, spinCredits, segAngle, mutateWallet]);
+  }, [spinning, spun, spinCredits, mutateWallet]);
 
   const isWin = outcome?.spin_result?.prize_type !== "try_again";
 
@@ -467,12 +479,14 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
                 style={{
                   transform: `rotate(${rotation}deg)`,
                   transition: spinning ? "transform 4.5s cubic-bezier(0.17,0.67,0.12,0.99)" : "none",
-                  background: `conic-gradient(${segments.map((s, i) => `${s.color} ${i * segAngle}deg ${(i + 1) * segAngle}deg`).join(", ")})`,
+                  background: segments.length > 0
+                    ? buildWheelGradient(segments)
+                    : "rgba(255,255,255,0.04)",
                   boxShadow: "0 0 0 4px rgba(245,166,35,0.2), 0 8px 32px rgba(0,0,0,0.5)",
                 }}
               >
                 {segments.map((seg, idx) => {
-                  const angle = idx * segAngle + segAngle / 2;
+                  const angle = ranges[idx]?.center ?? 0;
                   const rad   = ((angle - 90) * Math.PI) / 180;
                   const r     = 75;
                   return (
@@ -493,7 +507,7 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
               <div className="absolute inset-0 flex items-center justify-center">
                 <motion.button
                   onClick={handleSpin}
-                  disabled={spinning || spun || spinCredits < 1}
+                  disabled={spinning || spun || spinCredits < 1 || segments.length === 0}
                   className="w-14 h-14 rounded-full font-black text-xs z-10 flex items-center justify-center disabled:opacity-40"
                   style={{
                     background: "linear-gradient(135deg, var(--gold), #F59E0B)",
@@ -512,7 +526,7 @@ function SpinWheelWidget({ spinCredits }: { spinCredits: number }) {
             {!spun ? (
               <motion.button
                 onClick={handleSpin}
-                disabled={spinning || spinCredits < 1}
+                disabled={spinning || spinCredits < 1 || segments.length === 0}
                 className="btn-gold rounded-xl h-10 px-6 text-[13px] font-black inline-flex items-center gap-2 disabled:opacity-40"
                 whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
               >

@@ -21,11 +21,17 @@ CREATE INDEX IF NOT EXISTS idx_ussd_sessions_pending_spin
     WHERE pending_spin_id IS NOT NULL;
 
 -- ─── 2. Seed missing USSD config keys ────────────────────────────────────────
+-- These metadata columns were historically introduced later in migration 060.
+-- Add them before the first migration that writes them.
+ALTER TABLE network_configs
+    ADD COLUMN IF NOT EXISTS is_public  BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS updated_by TEXT NOT NULL DEFAULT 'system';
+
 INSERT INTO network_configs (key, value, description, is_public, updated_by)
 VALUES
     -- Canonical shortcode key used by USSDHandler (reads "ussd_shortcode").
     -- Migration 037 seeded "ussd_short_code" — this adds the canonical form.
-    ('ussd_shortcode', '*384#',
+    ('ussd_shortcode', '"*384#"',
      'The USSD shortcode for Loyalty Nexus. Displayed in USSD menus and SMS nudges.',
      true, 'system'),
 
@@ -37,7 +43,7 @@ VALUES
 
     -- App base URL used to build short URLs in Knowledge Tool SMS delivery.
     -- Admins must update this to the production domain before go-live.
-    ('app_base_url', 'https://loyalty-nexus.app',
+    ('app_base_url', '"https://loyalty-nexus.app"',
      'Base URL of the Loyalty Nexus web app. Used to build short URLs in SMS messages.',
      true, 'system')
 

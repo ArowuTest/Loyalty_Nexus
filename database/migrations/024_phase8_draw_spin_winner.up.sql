@@ -66,6 +66,16 @@ CREATE TABLE IF NOT EXISTS prize_pool (
     updated_at              TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Earlier migrations use narrower prize_type checks. Widen to the final canonical set
+-- before seeding the phase-8 catalogue so clean installs do not reject valid rows.
+ALTER TABLE prize_pool DROP CONSTRAINT IF EXISTS prize_pool_prize_type_check;
+ALTER TABLE prize_pool
+    ADD CONSTRAINT prize_pool_prize_type_check
+    CHECK (prize_type IN (
+        'try_again', 'airtime', 'data', 'data_bundle',
+        'momo_cash', 'bonus_points', 'pulse_points', 'studio_credits'
+    ));
+
 -- Seed default 12-slot prize table from spec Appendix A
 -- Only insert if table is empty (idempotent)
 INSERT INTO prize_pool (name, prize_type, base_value, is_active, win_probability_weight)

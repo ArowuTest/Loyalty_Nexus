@@ -31,16 +31,45 @@ WHERE  id IN (
   WHERE rn > 1
 );
 
+-- Fresh-install history could contain both the original phase-8 uncoded
+-- wheel seed and the later Loyalty Nexus coded wheel seed. When the coded
+-- wheel is present, retire only those known legacy seed rows before validating
+-- probabilities. This is catalogue cleanup, not a permanent wheel definition:
+-- Admin remains authoritative after migration.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM prize_pool
+    WHERE prize_code = 'NONE' AND LOWER(prize_type) = 'try_again'
+  ) THEN
+    UPDATE prize_pool
+    SET is_active = FALSE,
+        updated_at = NOW()
+    WHERE is_active = TRUE
+      AND COALESCE(prize_code, '') = ''
+      AND (
+        (LOWER(prize_type) = 'try_again' AND base_value = 0)
+        OR (LOWER(prize_type) = 'pulse_points' AND base_value IN (5, 10)
+            AND name IN ('+5 Pulse Points', '+10 Pulse Points'))
+        OR (LOWER(prize_type) = 'data_bundle' AND base_value IN (10, 25)
+            AND name IN ('10MB Data', '25MB Data'))
+        OR (LOWER(prize_type) = 'airtime' AND base_value IN (50, 100, 200))
+      );
+  END IF;
+END $$;
+
 -- BUG-017: normalise active prize weights to sum to exactly 100.00.
 -- Existing weights are stored on win_probability_weight in basis points style numbers
 -- (e.g. 4050 = 40.50%). Convert active rows to percentage values and adjust one
 -- "try again" slot so the final total is exactly 100.00.
 DO $$
 DECLARE
-  current_sum NUMERIC(10,2);
-  target_id UUID;
-  adjustment NUMERIC(10,2);
+  current_sum NUMERIC(18,6);
+  rounded_sum NUMERIC(18,2);
+  target_id   UUID;
+  residual    NUMERIC(18,2);
 BEGIN
+  -- Convert obvious basis-point values first.
   UPDATE prize_pool
   SET    win_probability_weight = ROUND(win_probability_weight / 100.0, 2)
   WHERE  is_active = TRUE
@@ -51,20 +80,41 @@ BEGIN
   FROM   prize_pool
   WHERE  is_active = TRUE;
 
-  IF current_sum <> 100.00 THEN
-    SELECT id
-    INTO   target_id
+  IF current_sum > 0 AND current_sum <> 100.00 THEN
+    -- Preserve relative probabilities while bringing the active pool to 100%.
+    UPDATE prize_pool
+    SET    win_probability_weight =
+             ROUND((win_probability_weight / current_sum) * 100.0, 2)
+    WHERE  is_active = TRUE;
+
+    SELECT COALESCE(SUM(win_probability_weight), 0)
+    INTO   rounded_sum
     FROM   prize_pool
-    WHERE  is_active = TRUE
-    ORDER BY CASE WHEN LOWER(prize_type) = 'try_again' THEN 0 ELSE 1 END,
-             win_probability_weight DESC,
-             id ASC
+    WHERE  is_active = TRUE;
+
+    residual := ROUND(100.00 - rounded_sum, 2);
+
+    IF residual <> 0 THEN
+      SELECT id INTO target_id
+      FROM prize_pool
+      WHERE is_active = TRUE
+      ORDER BY win_probability_weight DESC, id ASC
+      LIMIT 1;
+
+      UPDATE prize_pool
+      SET win_probability_weight = ROUND(win_probability_weight + residual, 2)
+      WHERE id = target_id;
+    END IF;
+  ELSIF current_sum = 0 THEN
+    -- Defensive recovery for a pathological all-zero active pool.
+    SELECT id INTO target_id
+    FROM prize_pool
+    WHERE is_active = TRUE
+    ORDER BY id ASC
     LIMIT 1;
 
-    adjustment := ROUND(100.00 - current_sum, 2);
-
-    UPDATE prize_pool
-    SET    win_probability_weight = ROUND(win_probability_weight + adjustment, 2)
-    WHERE  id = target_id;
+    IF target_id IS NOT NULL THEN
+      UPDATE prize_pool SET win_probability_weight = 100.00 WHERE id = target_id;
+    END IF;
   END IF;
 END $$;

@@ -33,10 +33,12 @@ CREATE INDEX IF NOT EXISTS idx_users_points_expire
     ON users (points_expire_at)
     WHERE points_expire_at IS NOT NULL;
 
--- referred_by: referral chain lookups
-CREATE INDEX IF NOT EXISTS idx_users_referred_by
-    ON users (referred_by)
-    WHERE referred_by IS NOT NULL;
+-- referred_by existed in an older referral schema and may be absent on current DBs.
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='referred_by') THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users (referred_by) WHERE referred_by IS NOT NULL';
+    END IF;
+END $$;
 
 -- last_recharge_at: ARPU / churn analysis queries
 CREATE INDEX IF NOT EXISTS idx_users_last_recharge_at
@@ -250,15 +252,17 @@ CREATE INDEX IF NOT EXISTS idx_fraud_events_resolved_created
 CREATE INDEX IF NOT EXISTS idx_mtn_push_events_msisdn_status
     ON mtn_push_events (msisdn, status);
 
--- ─── LEDGER_ENTRIES ───────────────────────────────────────────────────────────
--- user_id + created_at: wallet ledger history
-CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_created
-    ON ledger_entries (user_id, created_at DESC);
-
--- ─── SUBSCRIPTION_EVENTS ──────────────────────────────────────────────────────
--- user_id + created_at: GetSubscriptionHistory
-CREATE INDEX IF NOT EXISTS idx_subscription_events_user_created
-    ON subscription_events (user_id, created_at DESC);
+-- ─── LEGACY OPTIONAL TABLES ───────────────────────────────────────────────────
+-- Some historical schemas had ledger_entries/subscription_events; current clean
+-- installs may not. Index them only when the table and required columns exist.
+DO $$ BEGIN
+    IF to_regclass('public.ledger_entries') IS NOT NULL THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_ledger_entries_user_created ON ledger_entries (user_id, created_at DESC)';
+    END IF;
+    IF to_regclass('public.subscription_events') IS NOT NULL THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_subscription_events_user_created ON subscription_events (user_id, created_at DESC)';
+    END IF;
+END $$;
 
 -- ─── ADMIN_USERS ──────────────────────────────────────────────────────────────
 -- email (login): already has index but ensure uniqueness enforced
@@ -267,9 +271,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_email_unique
     WHERE email IS NOT NULL;
 
 -- ─── PRIZE_FULFILLMENT_LOGS ───────────────────────────────────────────────────
--- spin_result_id + created_at: retry audit trail
-CREATE INDEX IF NOT EXISTS idx_pfl_spin_result_created
-    ON prize_fulfillment_logs (spin_result_id, created_at DESC);
+-- Optional legacy audit table; index only when present.
+DO $$ BEGIN
+    IF to_regclass('public.prize_fulfillment_logs') IS NOT NULL THEN
+        EXECUTE 'CREATE INDEX IF NOT EXISTS idx_pfl_spin_result_created ON prize_fulfillment_logs (spin_result_id, created_at DESC)';
+    END IF;
+END $$;
 
 -- ─── WAR_SECONDARY_DRAWS ──────────────────────────────────────────────────────
 -- war_id + state: GetSecondaryDraws
@@ -285,7 +292,7 @@ CREATE INDEX IF NOT EXISTS idx_ai_provider_cat_active_prio
 -- ─── PULSE_POINT_AWARDS ───────────────────────────────────────────────────────
 -- user_id + awarded_at: GetBonusPulseAwards pagination
 CREATE INDEX IF NOT EXISTS idx_ppa_user_awarded
-    ON pulse_point_awards (user_id, awarded_at DESC);
+    ON pulse_point_awards (user_id, created_at DESC);
 
 -- ─── DRAW_SCHEDULES ───────────────────────────────────────────────────────────
 -- is_active + draw_day_of_week: scheduler worker tick

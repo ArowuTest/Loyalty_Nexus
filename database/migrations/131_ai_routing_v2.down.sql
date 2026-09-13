@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS ai_model_recommendations;
+DROP TABLE IF EXISTS ai_routing_change_log;
+DROP TABLE IF EXISTS ai_model_scores;
+DROP TABLE IF EXISTS ai_model_catalog;
+DROP TABLE IF EXISTS ai_generation_attempts;
+DROP TABLE IF EXISTS ai_tool_provider_bindings;
+DROP TABLE IF EXISTS ai_tool_stages;
+DELETE FROM studio_tools WHERE slug IN ('__ai-model-scout','__ai-memory-summarizer');
+ALTER TABLE studio_tools DROP COLUMN IF EXISTS is_internal;
+ALTER TABLE studio_tools DROP COLUMN IF EXISTS execution_profile;
