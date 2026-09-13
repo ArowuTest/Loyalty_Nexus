@@ -2,14 +2,24 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"loyalty-nexus/internal/domain/entities"
 )
+
+// ErrAttemptNotFinalizable is returned when a finalize targets an attempt that is
+// not in STARTED — it was never persisted, or it is already terminal. Surfacing
+// it (instead of a silent 0-row update) is what lets the router log a lost
+// ledger write rather than leave a phantom STARTED row (review M1/M2).
+var ErrAttemptNotFinalizable = errors.New("ai attempt not finalizable: not found or already terminal")
 
 type AIRoutingRepository struct{ db *gorm.DB }
 
@@ -132,8 +142,41 @@ func (r *AIRoutingRepository) RecordAttempt(ctx context.Context, attempt *entiti
 	return r.db.WithContext(ctx).Create(attempt).Error
 }
 
+// UpdateAttempt finalizes a STARTED attempt. The ledger is append-only — a
+// terminal attempt is never rewritten (migration 133 also enforces this with a
+// DB trigger) — so the guard is expressed in the WHERE clause, and a 0-row
+// result is reported as ErrAttemptNotFinalizable rather than swallowed.
 func (r *AIRoutingRepository) UpdateAttempt(ctx context.Context, id uuid.UUID, fields map[string]interface{}) error {
-	return r.db.WithContext(ctx).Table("ai_generation_attempts").Where("id = ?", id).Updates(fields).Error
+	res := r.db.WithContext(ctx).Table("ai_generation_attempts").
+		Where("id = ? AND outcome = 'STARTED'", id).Updates(fields)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrAttemptNotFinalizable
+	}
+	return nil
+}
+
+// ReconcileStrandedAttempts closes ledger rows stuck in STARTED for longer than
+// olderThan (a process crash mid-call, or a finalize lost beyond the ledger
+// timeout). They are marked FAILED/STRANDED so the ledger is terminal and cost
+// attribution stops under-counting. STARTED → terminal is the one transition
+// the append-only trigger (migration 133) permits, so terminal rows are never
+// touched. Returns the number of rows closed.
+func (r *AIRoutingRepository) ReconcileStrandedAttempts(ctx context.Context, olderThan time.Duration) (int64, error) {
+	res := r.db.WithContext(ctx).Exec(`
+		UPDATE ai_generation_attempts
+		SET outcome = 'FAILED',
+		    error_class = 'STRANDED',
+		    error_message = 'attempt never finalized - reconciled by lifecycle worker',
+		    completed_at = NOW()
+		WHERE outcome = 'STARTED'
+		  AND started_at < ?`, time.Now().Add(-olderThan))
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
 }
 
 func (r *AIRoutingRepository) ListStagesForTool(ctx context.Context, toolSlug string) ([]entities.AIToolStage, error) {
@@ -169,12 +212,34 @@ func (r *AIRoutingRepository) UpdateStage(ctx context.Context, id uuid.UUID, fie
 	return r.db.WithContext(ctx).Table("ai_tool_stages").Where("id = ?", id).Updates(fields).Error
 }
 
+// RecordRoutingChange appends an Admin config change to ai_routing_change_log.
+// before/after are JSON-serialized here and cast to jsonb explicitly, so the
+// row never depends on how the driver happens to encode an arbitrary Go value,
+// and a nil state — a failed post-update re-read, or any caller passing nil for
+// the side a create/delete does not have — lands as JSON null rather than SQL
+// NULL, which the NOT NULL columns rejected. Every caller discards the returned
+// error, so a rejected write used to vanish without trace (review M3); a failed
+// audit write is therefore logged HERE, where it cannot be ignored.
 func (r *AIRoutingRepository) RecordRoutingChange(ctx context.Context, entityType string, entityID uuid.UUID, action string, beforeState, afterState interface{}, changedBy string) error {
+	before, err := json.Marshal(beforeState)
+	if err != nil {
+		return fmt.Errorf("routing change-log: marshal before_state: %w", err)
+	}
+	after, err := json.Marshal(afterState)
+	if err != nil {
+		return fmt.Errorf("routing change-log: marshal after_state: %w", err)
+	}
 	row := map[string]interface{}{
 		"id": uuid.New(), "entity_type": entityType, "entity_id": entityID, "action": action,
-		"before_state": beforeState, "after_state": afterState, "changed_by": changedBy,
+		"before_state": gorm.Expr("?::jsonb", string(before)),
+		"after_state":  gorm.Expr("?::jsonb", string(after)),
+		"changed_by":   changedBy,
 	}
-	return r.db.WithContext(ctx).Table("ai_routing_change_log").Create(row).Error
+	if err := r.db.WithContext(ctx).Table("ai_routing_change_log").Create(row).Error; err != nil {
+		log.Printf("[AIRouting] AUDIT WRITE FAILED entity=%s id=%s action=%s by=%s: %v", entityType, entityID, action, changedBy, err)
+		return err
+	}
+	return nil
 }
 func (r *AIRoutingRepository) GetStage(ctx context.Context, id uuid.UUID) (*entities.AIToolStage, error) {
 	var row entities.AIToolStage

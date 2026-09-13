@@ -104,7 +104,7 @@ func (o *AIStudioOrchestrator) runToolStageStreamChain(
 			ProviderSlug: c.Provider.Slug, ModelID: c.Provider.ModelID,
 			Outcome: "STARTED", StartedAt: started,
 		}
-		_ = o.routingDB.RecordAttempt(ctx, attempt)
+		o.ledgerRecord(ctx, "stream-start", attempt)
 
 		provider := c.Provider
 		provider.ExtraConfig = mergeProviderRequestConfig(c.Provider.ExtraConfig, c.Binding.RequestConfig)
@@ -131,7 +131,7 @@ func (o *AIStudioOrchestrator) runToolStageStreamChain(
 		if callErr == nil {
 			o.capacity.CircuitSuccess(ctx, c.Binding)
 			o.capacity.SettlePaidBudget(ctx, budgetRes, int64(provider.CostMicros), true)
-			_ = o.routingDB.UpdateAttempt(ctx, attempt.ID, map[string]interface{}{
+			o.ledgerFinalize(ctx, attempt, map[string]interface{}{
 				"outcome": "SUCCEEDED", "duration_ms": duration,
 				"cost_micros": provider.CostMicros, "completed_at": completed,
 			})
@@ -153,7 +153,7 @@ func (o *AIStudioOrchestrator) runToolStageStreamChain(
 		if len(msg) > 500 {
 			msg = msg[:500]
 		}
-		_ = o.routingDB.UpdateAttempt(ctx, attempt.ID, map[string]interface{}{
+		o.ledgerFinalize(ctx, attempt, map[string]interface{}{
 			"outcome": "FAILED", "error_class": class, "error_message": msg,
 			"duration_ms": duration, "completed_at": completed,
 		})

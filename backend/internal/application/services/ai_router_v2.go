@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -162,6 +163,39 @@ func estimateRouteCostMicros(c entities.AIRouteCandidate, in providerInput) int6
 	return estimate
 }
 
+// ledgerCtx derives a context for attempt-ledger writes that survives the
+// caller's cancellation — a client that disconnects mid-generation must not
+// erase the record that a provider was called and charged — but stays bounded
+// so a hung database cannot stall the request path (review M1).
+func ledgerCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+}
+
+// ledgerRecord inserts an attempt row. Failures are logged, never swallowed: a
+// generation must still be served, but a lost ledger row is an audit and
+// cost-attribution gap that operators need to see.
+func (o *AIStudioOrchestrator) ledgerRecord(ctx context.Context, what string, attempt *entities.AIGenerationAttempt) {
+	lctx, cancel := ledgerCtx(ctx)
+	defer cancel()
+	if err := o.routingDB.RecordAttempt(lctx, attempt); err != nil {
+		log.Printf("[AIRouting] LEDGER WRITE FAILED (%s) attempt=%s provider=%s stage=%s outcome=%s: %v",
+			what, attempt.ID, attempt.ProviderSlug, attempt.StageKey, attempt.Outcome, err)
+	}
+}
+
+// ledgerFinalize moves a STARTED attempt to its terminal outcome. The repo
+// reports ErrAttemptNotFinalizable when the row was never persisted or is
+// already terminal — the phantom-STARTED case the review flagged — so it is
+// logged rather than silently producing a 0-row update.
+func (o *AIStudioOrchestrator) ledgerFinalize(ctx context.Context, attempt *entities.AIGenerationAttempt, fields map[string]interface{}) {
+	lctx, cancel := ledgerCtx(ctx)
+	defer cancel()
+	if err := o.routingDB.UpdateAttempt(lctx, attempt.ID, fields); err != nil {
+		log.Printf("[AIRouting] LEDGER FINALIZE FAILED attempt=%s provider=%s stage=%s outcome=%v: %v",
+			attempt.ID, attempt.ProviderSlug, attempt.StageKey, fields["outcome"], err)
+	}
+}
+
 func (o *AIStudioOrchestrator) recordRoutingSkip(
 	ctx context.Context,
 	generationID *uuid.UUID,
@@ -170,7 +204,7 @@ func (o *AIStudioOrchestrator) recordRoutingSkip(
 	outcome, class, message string,
 ) {
 	now := time.Now()
-	_ = o.routingDB.RecordAttempt(ctx, &entities.AIGenerationAttempt{
+	o.ledgerRecord(ctx, "skip", &entities.AIGenerationAttempt{
 		GenerationID: generationID, ToolID: &c.Stage.ToolID, StageID: &c.Stage.ID,
 		BindingID: &c.Binding.ID, ProviderID: &c.Provider.ID, StageKey: c.Stage.StageKey,
 		AttemptNo: attemptNo, ProviderSlug: c.Provider.Slug, ModelID: c.Provider.ModelID,
@@ -244,7 +278,7 @@ func (o *AIStudioOrchestrator) runToolStageChain(ctx context.Context, generation
 			AttemptNo: attemptNo, ProviderSlug: c.Provider.Slug, ModelID: c.Provider.ModelID,
 			Outcome: "STARTED", StartedAt: started,
 		}
-		_ = o.routingDB.RecordAttempt(ctx, attempt)
+		o.ledgerRecord(ctx, "start", attempt)
 
 		timeout := time.Duration(c.Binding.TimeoutMS) * time.Millisecond
 		if timeout <= 0 {
@@ -262,7 +296,7 @@ func (o *AIStudioOrchestrator) runToolStageChain(ctx context.Context, generation
 		if callErr == nil {
 			o.capacity.CircuitSuccess(ctx, c.Binding)
 			o.capacity.SettlePaidBudget(ctx, budgetRes, int64(cost), true)
-			_ = o.routingDB.UpdateAttempt(ctx, attempt.ID, map[string]interface{}{
+			o.ledgerFinalize(ctx, attempt, map[string]interface{}{
 				"outcome": "SUCCEEDED", "duration_ms": duration, "cost_micros": cost, "completed_at": completed,
 			})
 			return url, text, cost, c.Provider.Slug, nil
@@ -279,7 +313,7 @@ func (o *AIStudioOrchestrator) runToolStageChain(ctx context.Context, generation
 		if len(msg) > 500 {
 			msg = msg[:500]
 		}
-		_ = o.routingDB.UpdateAttempt(ctx, attempt.ID, map[string]interface{}{
+		o.ledgerFinalize(ctx, attempt, map[string]interface{}{
 			"outcome": "FAILED", "error_class": class, "error_message": msg,
 			"duration_ms": duration, "completed_at": completed,
 		})

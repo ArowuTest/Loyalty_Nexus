@@ -8,6 +8,7 @@ import (
 
 	"loyalty-nexus/internal/domain/repositories"
 	"loyalty-nexus/internal/infrastructure/config"
+	"loyalty-nexus/internal/infrastructure/persistence"
 	"loyalty-nexus/internal/pkg/safe"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -36,6 +37,7 @@ type LifecycleWorker struct {
 	studioSvc   *StudioService
 	notifySvc   *NotificationService
 	cfg         *config.ConfigManager
+	aiRouting   *persistence.AIRoutingRepository
 }
 
 func NewLifecycleWorker(
@@ -69,6 +71,7 @@ func NewLifecycleWorker(
 		studioSvc:  ss,
 		notifySvc:  ns,
 		cfg:        cfg,
+		aiRouting:  persistence.NewAIRoutingRepository(db),
 	}
 }
 
@@ -91,6 +94,7 @@ func (w *LifecycleWorker) Run(ctx context.Context) {
 	go w.runEvery(ctx, 24*time.Hour,   "chat-retention",        w.chatRetentionCleanup)
 	go w.runEvery(ctx, 1*time.Hour,    "stale-draw-expiry",     w.expireStaleDaws)
 	go w.runEvery(ctx, 6*time.Hour,    "stale-wars-expiry",     w.expireStaleWars)
+	go w.runEvery(ctx, 10*time.Minute, "ai-attempt-reconcile",  w.aiAttemptReconcile)
 
 	<-ctx.Done()
 	log.Println("[WORKER] Lifecycle worker stopped")
@@ -440,5 +444,22 @@ func (w *LifecycleWorker) chatRetentionCleanup(ctx context.Context) {
 	if result.RowsAffected > 0 {
 		log.Printf("[WORKER] chat-retention: deleted %d raw messages older than %d days from summarised sessions",
 			result.RowsAffected, retentionDays)
+	}
+}
+
+// aiAttemptReconcile closes AI attempt-ledger rows stranded in STARTED (review
+// M1). The router finalizes every attempt it starts, but a finalize can still be
+// lost (process crash mid-call, DB blip beyond the ledger timeout), which would
+// otherwise leave a row that looks in-flight forever and under-counts cost. The
+// grace window sits comfortably past the longest binding timeout (default 120s),
+// so a genuinely in-flight attempt is never closed under it.
+func (w *LifecycleWorker) aiAttemptReconcile(ctx context.Context) {
+	closed, err := w.aiRouting.ReconcileStrandedAttempts(ctx, 15*time.Minute)
+	if err != nil {
+		log.Printf("[WORKER] ai-attempt-reconcile failed: %v", err)
+		return
+	}
+	if closed > 0 {
+		log.Printf("[WORKER] ai-attempt-reconcile: closed %d stranded STARTED attempts", closed)
 	}
 }
